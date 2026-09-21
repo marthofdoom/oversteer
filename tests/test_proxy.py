@@ -255,3 +255,14 @@ def test_auto_invert_from_rest_position():
     finally:
         proxy.stop()
         ui.close()
+
+
+def test_load_specs_from_candidate_dir(tmp_path):
+    """The GUI hands the installer a '.candidate-*' directory; its specs must load."""
+    from oversteer.proxy.manager import load_specs
+    cand = tmp_path / '.candidate-abc'
+    cand.mkdir()
+    (cand / 'x.json').write_text('{"id":"x","identity":{"name":"X"},"sources":{"s":{"match":{"vendor":"1234","product":"5678"}}},'
+                                 '"capabilities":{"abs":{"ABS_Z":{"min":0,"max":255}}},"mappings":[{"from":"ABS_THROTTLE","to":"ABS_Z"}],"enabled":true}')
+    specs, errors = load_specs([str(cand)])
+    assert not errors and 'x' in specs and specs['x'].enabled

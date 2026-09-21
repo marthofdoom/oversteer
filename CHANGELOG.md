@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.4 — 2026-09-21
+
+### Fixed
+- 'Combine into one device' installed nothing: the installer skipped the
+  very candidate directory it was given (0.10.3 regression).
+
 ## 0.10.3 — 2026-09-21
 
 ### Fixed
