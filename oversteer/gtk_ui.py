@@ -403,6 +403,32 @@ class GtkUi:
             self.ff_rumble_level.set_sensitive(True)
             self.ff_rumble_level.set_value(int(level))
 
+    def set_equipment(self, rows):
+        """rows: (include, kind, name, usb_id, status, sys_path)"""
+        self.equipment_store.clear()
+        for row in rows:
+            self.equipment_store.append(list(row))
+
+    def get_included_equipment(self):
+        return [row[5] for row in self.equipment_store if row[0]]
+
+    def toggle_equipment(self, path):
+        self.equipment_store[path][0] = not self.equipment_store[path][0]
+
+    def set_combine(self, enabled, status='', generic=None):
+        self.updating_combine = True
+        try:
+            self.combine_switch.set_sensitive(enabled is not None)
+            self.combine_switch.set_active(bool(enabled))
+            if generic is not None:
+                self.combine_generic.set_active(bool(generic))
+        finally:
+            self.updating_combine = False
+        self.combine_status.set_text(status)
+
+    def get_combine_generic(self):
+        return self.combine_generic.get_active()
+
     def set_ffb_leds(self, value):
         if value is None:
             self.ffbmeter_leds.set_sensitive(False)
@@ -644,6 +670,7 @@ class GtkUi:
     def _set_builder_objects(self):
         self._available = {}
         self.updating_invert_pedals = False
+        self.updating_combine = False
         self.window = self.builder.get_object('main_window')
         self.about_window = self.builder.get_object('about_window')
         self.preferences_window = self.builder.get_object('preferences_window')
@@ -663,6 +690,11 @@ class GtkUi:
         self.emulation_mode_combobox = self.builder.get_object('emulation_mode')
         self.change_emulation_mode_button = self.builder.get_object('change_emulation_mode')
         self.wheel_range = self.builder.get_object('wheel_range')
+        self.equipment_store = self.builder.get_object('equipment_store')
+        self.equipment_view = self.builder.get_object('equipment_view')
+        self.combine_switch = self.builder.get_object('combine_switch')
+        self.combine_status = self.builder.get_object('combine_status')
+        self.combine_generic = self.builder.get_object('combine_generic')
         self.wheel_range_setup = self.builder.get_object('wheel_range_setup')
         self.wheel_sensitivity = self.builder.get_object('wheel_sensitivity')
         self.combine_none = self.builder.get_object('combine_none')

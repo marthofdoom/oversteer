@@ -63,6 +63,14 @@ class Application:
         parser.add_argument('-p', '--profile', help=_("load settings from a profile"))
         parser.add_argument('-g', '--gui', action='store_true', help=_("start the GUI"))
         parser.add_argument('--debug', action='store_true', help=_("enable debug output"))
+        parser.add_argument('--proxy-list', action='store_true', help=_("list proxy devices and their state"))
+        parser.add_argument('--proxy-run', metavar='ID', action='append',
+                help=_("run a proxy in the foreground (for testing; repeatable)"))
+        parser.add_argument('--proxy-daemon', action='store_true',
+                help=_("run all enabled proxies until stopped (used by oversteer-proxy.service)"))
+        parser.add_argument('--proxy-install', action='store_true',
+                help=_("install the proxy service, hide rules and enabled proxies (asks for the administrator password)"))
+        parser.add_argument('--proxy-remove', action='store_true', help=_("remove the proxy service and hide rules"))
         parser.add_argument('--version', action='store_true', help=_("show version"))
 
         args = parser.parse_args(argv[1:])
@@ -76,6 +84,9 @@ class Application:
             argc -= 1
         else:
             logging.disable(level=logging.INFO)
+
+        if args.proxy_list or args.proxy_run or args.proxy_daemon or args.proxy_install or args.proxy_remove:
+            exit(self.run_proxy_command(args, argv))
 
         self.device_manager = DeviceManager()
         self.device_manager.start()
@@ -167,4 +178,62 @@ class Application:
         model.flush_device()
         if args.command:
             subprocess.Popen(args.command, shell=True)
+
+    def run_proxy_command(self, args, argv):
+        import signal
+        import time
+        from oversteer.proxy.manager import ProxyManager, STATUS_FILE, BUILTIN_DIR, SYSTEM_DIR, user_dir
+
+        if args.proxy_install:
+            from oversteer.proxy import install
+            exec_start = '{} {} --proxy-daemon'.format(sys.executable, os.path.realpath(argv[0]))
+            return install.install(exec_start)
+        if args.proxy_remove:
+            from oversteer.proxy import install
+            return install.remove()
+
+        if args.proxy_list:
+            manager = ProxyManager()
+            manager.load()
+            running = {p['id']: p for p in (ProxyManager.read_status() or {}).get('proxies', [])}
+            for spec in manager.specs.values():
+                state = running.get(spec.id, {}).get('state', 'not running')
+                where = 'built-in' if spec.builtin else spec.path
+                print("{:<28} {:<9} {:<12} {}".format(spec.id, 'enabled' if spec.enabled else 'disabled', state, spec.name))
+                print("    {}".format(where))
+                for key, src in spec.sources.items():
+                    node = running.get(spec.id, {}).get('sources', {}).get(key)
+                    print("    source {:<10} {:04x}:{:04x} {}".format(key, src.vendor or 0, src.product or 0, node or ''))
+            for path, err in manager.errors:
+                print("error in {}: {}".format(path, err))
+            return 0
+
+        if args.proxy_daemon:
+            manager = ProxyManager(dirs=[BUILTIN_DIR, SYSTEM_DIR], status_file=STATUS_FILE)
+            manager.start()
+        else:
+            manager = ProxyManager()
+            manager.load()
+            missing = [i for i in args.proxy_run if i not in manager.specs]
+            if missing:
+                print(_("Unknown proxy: {}").format(', '.join(missing)))
+                return 1
+            manager.start(only=args.proxy_run)
+
+        stop = {'now': False}
+
+        def handler(signum, frame):
+            stop['now'] = True
+        signal.signal(signal.SIGTERM, handler)
+        signal.signal(signal.SIGINT, handler)
+        last = None
+        while not stop['now']:
+            time.sleep(0.5)
+            if not args.proxy_daemon:
+                desc = manager.describe()
+                if desc != last:
+                    print(desc, flush=True)
+                    last = desc
+        manager.stop()
+        return 0
 

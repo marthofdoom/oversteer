@@ -1,0 +1,24 @@
+{
+  "id": "annx-fanatec-handbrake",
+  "name": "ANNX handbrake as Fanatec ClubSport Handbrake",
+  "description": "Presents a FigoTech ANNX USB handbrake as a Fanatec ClubSport Handbrake, which games recognise out of the box. The ANNX reports an inverted throttle axis; here it becomes a normal 0..65535 Z axis.",
+  "enabled": false,
+  "identity": {
+    "name": "Fanatec ClubSport Handbrake",
+    "vendor": "0eb7",
+    "product": "00e5",
+    "version": "0001",
+    "bustype": "usb",
+    "phys": "usb-fanatec-virt/input0"
+  },
+  "sources": {
+    "hb": {"match": {"vendor": "8086", "product": "0a01"}, "grab": true, "hide": true}
+  },
+  "capabilities": {
+    "keys": ["BTN_TRIGGER"],
+    "abs": {"ABS_Z": {"min": 0, "max": 65535, "fuzz": 16, "flat": 4096}}
+  },
+  "mappings": [
+    {"source": "hb", "from": "ABS_THROTTLE", "to": "ABS_Z", "invert": true}
+  ]
+}
