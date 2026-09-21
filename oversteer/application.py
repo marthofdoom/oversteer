@@ -52,6 +52,7 @@ class Application:
         parser.add_argument('--spring-level', type=int, help=_("set the spring level [0-100]"))
         parser.add_argument('--damper-level', type=int, help=_("set the damper level [0-100]"))
         parser.add_argument('--friction-level', type=int, help=_("set the friction level [0-100]"))
+        parser.add_argument('--rumble-level', type=int, help=_("set the rumble vibration level [0-100]"))
         parser.add_argument('--ffb-leds', action='store_true', default=None, help=_("enable FFBmeter leds"))
         parser.add_argument('--no-ffb-leds', dest='ffb_leds', action='store_false', default=None, help=_("disable FFBmeter leds"))
         parser.add_argument('--center-wheel', action='store_true', default=None, help=_("center wheel"))
@@ -150,6 +151,8 @@ class Application:
             model.set_damper_level(args.damper_level)
         if args.friction_level is not None:
             model.set_friction_level(args.friction_level)
+        if args.rumble_level is not None:
+            model.set_rumble_level(args.rumble_level)
         if args.ffb_leds is not None:
             model.set_ffb_leds(1 if args.ffb_leds else 0)
         if args.center_wheel is not None:

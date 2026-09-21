@@ -23,6 +23,12 @@
     <property name="step-increment">1</property>
     <property name="page-increment">10</property>
   </object>
+  <object class="GtkAdjustment" id="rumble_level_adjustment">
+    <property name="upper">100</property>
+    <property name="value">50</property>
+    <property name="step-increment">1</property>
+    <property name="page-increment">10</property>
+  </object>
   <object class="GtkPopoverMenu" id="main_menu">
     <property name="name">main_menu</property>
     <property name="can-focus">False</property>
@@ -2337,6 +2343,54 @@
                                 <property name="round-digits">0</property>
                                 <property name="digits">0</property>
                                 <signal name="value-changed" handler="on_ff_friction_level_value_changed" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">1</property>
+                              </packing>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBoxRow">
+                        <property name="height-request">70</property>
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="activatable">False</property>
+                        <property name="selectable">False</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="tooltip-text" translatable="yes">Strength of the vibration used to emulate gamepad rumble on the wheel. 0 disables it.</property>
+                            <property name="valign">center</property>
+                            <property name="spacing">64</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="halign">start</property>
+                                <property name="label" translatable="yes">Rumble vibration</property>
+                              </object>
+                              <packing>
+                                <property name="expand">True</property>
+                                <property name="fill">True</property>
+                                <property name="position">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkScale" id="ff_rumble_level">
+                                <property name="width-request">600</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="valign">center</property>
+                                <property name="adjustment">rumble_level_adjustment</property>
+                                <property name="round-digits">0</property>
+                                <property name="digits">0</property>
+                                <signal name="value-changed" handler="on_ff_rumble_level_value_changed" swapped="no"/>
                               </object>
                               <packing>
                                 <property name="expand">False</property>

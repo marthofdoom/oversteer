@@ -364,6 +364,22 @@ class Device:
             file.write(level)
         return True
 
+    def get_rumble_level(self):
+        path = self.checked_device_file("rumble_level")
+        if not path:
+            return None
+        with open(path, "r") as file:
+            return int(file.read().strip())
+
+    def set_rumble_level(self, level):
+        path = self.checked_device_file("rumble_level")
+        if not path:
+            return False
+        logging.debug("Setting rumble level: %s", level)
+        with open(path, "w") as file:
+            file.write(str(int(level)))
+        return True
+
     def get_ffb_leds(self):
         path = self.checked_device_file("ffb_leds")
         if not path:

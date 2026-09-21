@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Rumble vibration slider (`--rumble-level`) for new-lg4ff's rumble emulation; udev rule grants `rumble_level`.
+
 ## 0.9.0 — 2026-09-20
 
 Logitech G29 Windows-parity features. Requires new-lg4ff 0.6.0 for the new

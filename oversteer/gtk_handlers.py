@@ -148,6 +148,9 @@ class GtkHandlers:
         self.model.set_app_gain(state)
         return False
 
+    def on_ff_rumble_level_value_changed(self, widget):
+        self.model.set_rumble_level(widget.get_value())
+
     def on_ffbmeter_leds_clicked(self, widget):
         self.model.set_ffb_leds(widget.get_active())
 
