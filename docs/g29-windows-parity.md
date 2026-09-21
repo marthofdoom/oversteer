@@ -67,3 +67,12 @@ Where a feature is implemented: **driver** = new-lg4ff sysfs/kernel, **app** = O
    allow-game-to-adjust, FFB on/off, pedal curves/invert, button assignments, per-game auto profiles.
 2. **Driver parity** — inertia, dynamic slots, gain > 100 %, PS4 mode.
 3. **Proxy devices** — combined virtual wheel, handbrake identity (FH6 Device-1 fix).
+
+## Beyond Windows (planned)
+
+| Feature | Notes |
+|---|---|
+| FFB normalisation | Learn each game's FFB signature from cheap driver counters (`ffb_stats`), derive a per-game gain/level correction so every game feels consistent; in-memory aggregation, tiny per-game summary on disk |
+| Wheel LEDs from telemetry | shift lights without SimHub |
+| Gain > 100 % with clipping meter | |
+| Combined virtual wheel (wheel + shifter + handbrake as one device) | proxy framework |
