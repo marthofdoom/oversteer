@@ -4,8 +4,10 @@ Enumeration goes through udev/sysfs only (no device node is opened), so it
 works for devices the hide rules have made root-only.
 """
 
+import ctypes
 import os
 import pyudev
+import re
 from evdev import ecodes
 
 from .spec import ProxySpec, code_name
@@ -122,10 +124,10 @@ class Equipment:
     def _classify(self):
         if not self.usb and self.bustype != ecodes.BUS_BLUETOOTH:
             return KIND_VIRTUAL
-        if self.keyboard:
-            return KIND_OTHER            # a keyboard's media/system keys, not a controller
         if self.usb_id in _KNOWN_WHEELS:
             return KIND_WHEEL
+        if self.keyboard:
+            return KIND_OTHER            # a keyboard's media/system keys, not a controller
         pad_buttons = {ecodes.BTN_SOUTH, ecodes.BTN_EAST, ecodes.BTN_NORTH, ecodes.BTN_WEST}
         if pad_buttons & set(self.keys) or (ecodes.ABS_RX in self.abs and ecodes.ABS_RY in self.abs and len(self.buttons) >= 8):
             return KIND_GAMEPAD
@@ -174,7 +176,7 @@ def _bits(device, name):
         return []
     words = value.split()
     codes = []
-    bits_per_word = 64 if os.uname().machine.endswith('64') else 32
+    bits_per_word = ctypes.sizeof(ctypes.c_ulong) * 8     # the kernel's BITS_PER_LONG, as udev's input_id assumes
     for i, word in enumerate(reversed(words)):
         value = int(word, 16)
         base = i * bits_per_word
@@ -254,8 +256,14 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
     # "Oversteer Combined Wheel" — needed for Forza Horizon 6 under Proton,
     # where a recognised wheel switched to a custom profile loses force
     # feedback but a generic device keeps it.
-    sources = {'wheel': {'match': {'vendor': '{:04x}'.format(wheel.vendor), 'product': '{:04x}'.format(wheel.product)},
-                         'grab': True, 'hide': True, 'required': True}}
+    def match(dev):
+        # vendor/product plus the exact name: a base with several interfaces
+        # (keyboard + joystick) must resolve to the controller node
+        return {'vendor': '{:04x}'.format(dev.vendor), 'product': '{:04x}'.format(dev.product),
+                'name': '^' + re.escape(dev.name) + '$'}
+
+    notes = []
+    sources = {'wheel': {'match': match(wheel), 'grab': True, 'hide': True, 'required': True}}
     mappings = []
     extra_keys = []
     extra_abs = {}
@@ -275,14 +283,15 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
             return strict_spares.pop(0) if strict_spares else None
         while next_key in used_keys or next_key in extra_keys:
             next_key += 1
+        if next_key > ecodes.KEY_MAX:
+            return None
         code = next_key
         next_key += 1
         return code
 
     for index, dev in enumerate(others):
         key = '{}{}'.format(dev.kind, index + 1)
-        sources[key] = {'match': {'vendor': '{:04x}'.format(dev.vendor), 'product': '{:04x}'.format(dev.product)},
-                        'grab': True, 'hide': True, 'required': False}
+        sources[key] = {'match': match(dev), 'grab': True, 'hide': True, 'required': False}
         parts.append(dev.name)
         buttons = dev.buttons
         if dev.kind == KIND_SHIFTER and gear_codes:
@@ -303,7 +312,8 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
                 else:
                     target = next_free_key()
                     if target is None:
-                        continue                 # strict: no button left for this gear
+                        notes.append("{}: no button left for gear {}".format(dev.name, i + 1))
+                        continue
                     if target not in used_keys:
                         extra_keys.append(target)
                 mappings.append({'source': key, 'from': code, 'to': target})
@@ -313,12 +323,14 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
             for code in buttons:
                 target = next_free_key()
                 if target is None:
+                    notes.append("{}: no button left for {}".format(dev.name, code_name(ecodes.EV_KEY, code)))
                     continue
                 if target not in used_keys:
                     extra_keys.append(target)
                 mappings.append({'source': key, 'from': code, 'to': target})
         for code in ([] if strict or dev.kind in (KIND_SHIFTER, KIND_BUTTONBOX) else dev.axes):
             if not spare_axes:
+                notes.append("{}: no axis left for {}".format(dev.name, code_name(ecodes.EV_ABS, code)))
                 break
             target = spare_axes.pop(0)
             extra_abs[target] = {'min': 0, 'max': 65535, 'fuzz': 16, 'flat': 4096}
@@ -330,7 +342,8 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
     data = {
         'id': spec_id,
         'name': name or "{} + {}".format(wheel.name, ", ".join(parts)) if parts else wheel.name,
-        'description': "Generated by Oversteer from the plugged-in equipment. Edit and save to keep changes.",
+        'description': "Generated by Oversteer from the plugged-in equipment. Edit and save to keep changes."
+                       + ("".join("\nNote: " + n for n in notes)),
         'enabled': True,
         'identity': dict(GENERIC_IDENTITY) if identity == 'generic' else
                     {'name': wheel.name, 'vendor': '{:04x}'.format(wheel.vendor), 'product': '{:04x}'.format(wheel.product),
@@ -340,7 +353,7 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
         'sources': sources,
         'capabilities': {'keys': [code_name(ecodes.EV_KEY, k) for k in extra_keys],
                          'abs': {code_name(ecodes.EV_ABS, a): info for a, info in extra_abs.items()}},
-        'mappings': [dict(m, **{'from': _as_name(m['from'], ecodes.EV_KEY if isinstance(m['from'], int) and m['from'] >= ecodes.BTN_MISC else ecodes.EV_ABS)})
+        'mappings': [dict(m, **_from_fields(m['from'], ecodes.EV_KEY if isinstance(m['from'], int) and m['from'] >= ecodes.BTN_MISC else ecodes.EV_ABS))
                      for m in mappings],
     }
     if data['ff'] is None:
@@ -349,8 +362,11 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
     return ProxySpec.from_dict(data)
 
 
-def _as_name(code, etype):
+def _from_fields(code, etype):
+    """'from' (and 'from_type' for codes without a name) for a mapping."""
     if isinstance(code, str):
-        return code
+        return {'from': code}
     name = code_name(etype, code)
-    return name if not name.isdigit() else str(code)
+    if name.isdigit():
+        return {'from': str(code), 'from_type': 'ABS' if etype == ecodes.EV_ABS else 'KEY'}
+    return {'from': name}

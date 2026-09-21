@@ -40,22 +40,56 @@ class SpecError(ValueError):
 def _hex(value, what):
     if value is None:
         return None
-    if isinstance(value, int):
-        return value
     try:
-        return int(str(value), 16)
-    except ValueError:
+        number = value if isinstance(value, int) else int(str(value), 16)
+    except (ValueError, TypeError):
         raise SpecError("{}: not a hex number: {!r}".format(what, value))
+    if not 0 <= number <= 0xffff:
+        raise SpecError("{}: out of range: {!r}".format(what, value))
+    return number
+
+
+_TEXT_RE = re.compile(r'^[\x20-\x7e]{1,200}$')
+
+
+def _text(value, what, allow_empty=False):
+    """Printable ASCII only: these strings end up in udev rules, unit files
+    and device names."""
+    if value is None or (value == '' and allow_empty):
+        return value
+    if not isinstance(value, str) or not _TEXT_RE.match(value):
+        raise SpecError("{}: must be printable text without control characters (1-200 chars)".format(what))
+    return value
+
+
+def _pattern(value, what):
+    if value is None:
+        return None
+    _text(value, what)
+    try:
+        re.compile(value)
+    except re.error as e:
+        raise SpecError("{}: bad pattern {!r}: {}".format(what, value, e))
+    return value
 
 
 def code_from_name(name, ev_type=None):
-    """Resolve "ABS_Z" / "BTN_TRIGGER" / 300 / "0x12c" to (ev_type, code).
+    """Resolve "ABS_Z" / "BTN_TRIGGER" / 300 / "0x12c" / "ABS:11" to (ev_type, code).
 
     Numbers are for codes without an evdev name (the G29 shifter's gears
-    1-3 are 300-302); they take the type given, or KEY."""
-    if isinstance(name, str) and re.match(r'^(0x[0-9a-fA-F]+|[0-9]+)$', name):
-        name = int(name, 0)
+    1-3 are 300-302); they take the type given, a "KEY:"/"ABS:" prefix, or KEY."""
+    if isinstance(name, str):
+        m = re.match(r'^(KEY|ABS):(0x[0-9a-fA-F]+|[0-9]+)$', name)
+        if m:
+            ev_type = ecodes.EV_KEY if m.group(1) == 'KEY' else ecodes.EV_ABS
+            name = int(m.group(2), 0)
+        elif re.match(r'^(0x[0-9a-fA-F]+|[0-9]+)$', name):
+            name = int(name, 0)
+    if isinstance(name, bool) or not isinstance(name, (int, str)):
+        raise SpecError("bad event code: {!r}".format(name))
     if isinstance(name, int):
+        if not 0 <= name <= ecodes.KEY_MAX:
+            raise SpecError("event code out of range: {}".format(name))
         return (ev_type if ev_type is not None else ecodes.EV_KEY), name
     prefix = str(name).split('_', 1)[0]
     if prefix == 'ABS':
@@ -97,6 +131,8 @@ class Identity:
     def from_dict(cls, data):
         if 'name' not in data:
             raise SpecError("identity.name is required")
+        _text(data['name'], 'identity.name')
+        _text(data.get('phys'), 'identity.phys')
         bustype = data.get('bustype', 'usb')
         if isinstance(bustype, str):
             if bustype not in BUSTYPES:
@@ -135,25 +171,25 @@ class SourceSpec:
 
     @classmethod
     def from_dict(cls, key, data):
+        if not ID_RE.match(str(key)):
+            raise SpecError("source key {!r}: lowercase letters, digits, '.', '_' or '-'".format(key))
+        if not isinstance(data, dict):
+            raise SpecError("source {!r} must be an object".format(key))
         match = data.get('match', {})
-        if not match:
+        if not isinstance(match, dict) or not match:
             raise SpecError("source {!r} needs a 'match' block".format(key))
         source = cls(
             key=key,
             vendor=_hex(match.get('vendor'), 'source.match.vendor'),
             product=_hex(match.get('product'), 'source.match.product'),
-            name=match.get('name'),
-            phys=match.get('phys'),
+            name=_pattern(match.get('name'), 'source.match.name'),
+            phys=_pattern(match.get('phys'), 'source.match.phys'),
             grab=bool(data.get('grab', True)),
             hide=bool(data.get('hide', True)),
             required=bool(data.get('required', True)),
         )
-        for pattern in (source.name, source.phys):
-            if pattern is not None:
-                try:
-                    re.compile(pattern)
-                except re.error as e:
-                    raise SpecError("source {!r}: bad pattern {!r}: {}".format(key, pattern, e))
+        if source.vendor is None and source.product is None and not source.name and not source.phys:
+            raise SpecError("source {!r}: match needs a vendor/product, name or phys".format(key))
         return source
 
     def to_dict(self):
@@ -169,8 +205,14 @@ class SourceSpec:
         return {'match': match, 'grab': self.grab, 'hide': self.hide, 'required': self.required}
 
     def matches(self, device):
-        """device: evdev.InputDevice"""
+        """device: evdev.InputDevice. Virtual devices (other proxies) and
+        keyboards never match: a source must be a controller."""
         info = device.info
+        if (device.phys or '').startswith('py-evdev-uinput') and self.phys is None:
+            return False               # another proxy's virtual device, unless asked for by phys
+        caps = device.capabilities()
+        if ecodes.EV_ABS not in caps and not any(c >= ecodes.BTN_MISC for c in caps.get(ecodes.EV_KEY, [])):
+            return False
         if self.vendor is not None and info.vendor != self.vendor:
             return False
         if self.product is not None and info.product != self.product:
@@ -194,10 +236,10 @@ class AbsSpec:
     def from_dict(cls, data):
         try:
             spec = cls(**{k: int(v) for k, v in data.items()})
-        except TypeError as e:
+        except (TypeError, ValueError, AttributeError) as e:
             raise SpecError("bad abs info: {}".format(e))
-        if spec.max <= spec.min:
-            raise SpecError("abs max must be greater than min")
+        if spec.max <= spec.min or not (-0x80000000 <= spec.min and spec.max <= 0x7fffffff):
+            raise SpecError("abs range must be increasing 32-bit values")
         return spec
 
     def to_dict(self):
@@ -243,16 +285,27 @@ class Mapping:
             source = next(iter(sources))
         elif source not in sources:
             raise SpecError("mapping {!r}: unknown source {!r}".format(data['from'], source))
-        from_type, from_code = code_from_name(data['from'])
+        from_type, from_code = code_from_name(data['from'], {'ABS': ecodes.EV_ABS, 'KEY': ecodes.EV_KEY}.get(data.get('from_type')))
         to_type, to_code = code_from_name(data['to'], from_type if isinstance(data['to'], (int, str)) and
                                           re.match(r'^(0x[0-9a-fA-F]+|[0-9]+)$', str(data['to'])) else None)
         if from_type not in (ecodes.EV_ABS, ecodes.EV_KEY) or to_type not in (ecodes.EV_ABS, ecodes.EV_KEY):
             raise SpecError("mapping {!r}: only ABS and KEY events can be mapped".format(data['from']))
         when = data.get('when')
         if from_type == ecodes.EV_ABS and to_type == ecodes.EV_KEY:
-            if not when or not any(k in when for k in ('gt', 'lt')):
+            if not isinstance(when, dict) or not any(k in when for k in ('gt', 'lt')):
                 raise SpecError("mapping {!r}: ABS -> KEY needs 'when': {{\"gt\"|\"lt\": value}}".format(data['from']))
-        deadzone = float(data.get('deadzone', 0))
+            try:
+                when = {k: float(v) for k, v in when.items() if k in ('gt', 'lt')}
+            except (TypeError, ValueError):
+                raise SpecError("mapping {!r}: 'when' values must be numbers".format(data['from']))
+            if not all(0 <= v <= 1 for v in when.values()):
+                raise SpecError("mapping {!r}: 'when' thresholds are fractions 0..1".format(data['from']))
+        else:
+            when = None
+        try:
+            deadzone = float(data.get('deadzone', 0))
+        except (TypeError, ValueError):
+            raise SpecError("mapping {!r}: deadzone must be a number".format(data['from']))
         if not 0 <= deadzone < 1:
             raise SpecError("mapping {!r}: deadzone must be within [0, 1)".format(data['from']))
         invert = data.get('invert', False)
@@ -296,13 +349,27 @@ class ProxySpec:
 
     @classmethod
     def from_dict(cls, data, builtin=False, path=None):
+        try:
+            return cls._from_dict(data, builtin, path)
+        except SpecError:
+            raise
+        except (TypeError, ValueError, AttributeError, KeyError) as e:
+            raise SpecError("malformed spec: {}".format(e))
+
+    @classmethod
+    def _from_dict(cls, data, builtin, path):
         if not isinstance(data, dict):
             raise SpecError("spec must be a JSON object")
         pid = data.get('id')
-        if not pid or not ID_RE.match(pid):
+        if not isinstance(pid, str) or not ID_RE.match(pid) or len(pid) > 64:
             raise SpecError("id must be lowercase letters, digits, '.', '_' or '-'")
-        if 'identity' not in data:
+        if not isinstance(data.get('identity'), dict):
             raise SpecError("identity is required")
+        _text(data.get('name', pid), 'name')
+        if 'description' in data and not isinstance(data['description'], str):
+            raise SpecError("description must be text")
+        if not isinstance(data.get('sources', {}), dict):
+            raise SpecError("sources must be an object")
         sources = {key: SourceSpec.from_dict(key, value) for key, value in data.get('sources', {}).items()}
         if not sources:
             raise SpecError("at least one source is required")
@@ -336,7 +403,7 @@ class ProxySpec:
             abs=abs_specs,
             passthrough=passthrough,
             ff_source=ff_source,
-            description=data.get('description', ''),
+            description=re.sub(r'[^\x20-\x7e\n]', '?', data.get('description', ''))[:2000],
             enabled=bool(data.get('enabled', False)),
             builtin=builtin,
             path=path,

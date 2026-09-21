@@ -1,7 +1,8 @@
 """Functional tests for the proxy devices, using uinput-made fake sources.
 
-Needs /dev/uinput access (the same as running Oversteer's proxies). Run with
-`python3 -m pytest tests/`.
+Needs /dev/uinput access and permission to read the input nodes it creates
+(as a normal user that means the udev uaccess ACL, which is the case on a
+desktop session). Run with `python3 -m pytest tests/`.
 """
 
 import os
@@ -55,7 +56,7 @@ def read_events(dev, timeout=1.0):
 @pytest.fixture
 def fake_handbrake():
     caps = {e.EV_ABS: [(e.ABS_THROTTLE, AbsInfo(0, 0, 65535, 255, 4095, 0))], e.EV_KEY: [e.BTN_TRIGGER]}
-    ui = UInput(caps, name='Fake ANNX', vendor=FAKE_VENDOR, product=FAKE_PRODUCT, version=1)
+    ui = UInput(caps, name='Fake ANNX', vendor=FAKE_VENDOR, product=FAKE_PRODUCT, version=1, phys='usb-fake/input0')
     time.sleep(0.2)
     yield ui
     ui.close()
@@ -112,10 +113,12 @@ def test_source_hotplug():
     try:
         wait_state(proxy, ProxyState.WAITING)
         caps = {e.EV_ABS: [(e.ABS_THROTTLE, AbsInfo(0, 0, 65535, 0, 0, 0))]}
-        ui = UInput(caps, name='Late ANNX', vendor=FAKE_VENDOR, product=FAKE_PRODUCT, version=1)
-        proxy.poke()
-        wait_state(proxy, ProxyState.RUNNING)
-        ui.close()
+        ui = UInput(caps, name='Late ANNX', vendor=FAKE_VENDOR, product=FAKE_PRODUCT, version=1, phys='usb-fake/input1')
+        try:
+            proxy.poke()
+            wait_state(proxy, ProxyState.RUNNING)
+        finally:
+            ui.close()
         # the source vanished: the virtual device stays, state degrades
         t0 = time.time()
         while proxy.state != ProxyState.DEGRADED and time.time() - t0 < 3:
@@ -131,7 +134,7 @@ def test_ff_passthrough():
     wheel = UInput({e.EV_ABS: [(e.ABS_X, AbsInfo(32768, 0, 65535, 0, 0, 0))],
                     e.EV_KEY: [e.BTN_TRIGGER],
                     e.EV_FF: [e.FF_CONSTANT, e.FF_SPRING, e.FF_GAIN]},
-                   name='Fake Wheel', vendor=FAKE_VENDOR, product=0x9999, version=1, max_effects=8)
+                   name='Fake Wheel', vendor=FAKE_VENDOR, product=0x9999, version=1, max_effects=8, phys='usb-fake/input2')
     time.sleep(0.2)
     spec = ProxySpec.from_dict({
         'id': 'test-ff', 'name': 'ff',
@@ -154,7 +157,10 @@ def test_ff_passthrough():
 
         def service_wheel():
             while not stop['now']:
-                r, _, _ = select.select([wheel.fd], [], [], 0.05)
+                try:
+                    r, _, _ = select.select([wheel.fd], [], [], 0.05)
+                except (OSError, ValueError):
+                    return
                 if not r:
                     continue
                 for ev in wheel.read():
@@ -192,10 +198,11 @@ def test_ff_passthrough():
 def test_key_state_seeded_and_released_on_detach():
     """A shifter already in gear shows the gear on attach; unplugging it releases the gear."""
     caps = {e.EV_KEY: [e.BTN_TRIGGER, e.BTN_THUMB]}
-    ui = UInput(caps, name='Fake Shifter', vendor=FAKE_VENDOR, product=0x7777, version=1)
+    ui = UInput(caps, name='Fake Shifter', vendor=FAKE_VENDOR, product=0x7777, version=1, phys='usb-fake/input3')
     time.sleep(0.2)
     ui.write(e.EV_KEY, e.BTN_THUMB, 1)     # in 2nd gear before the proxy exists
     ui.syn()
+    closed = {'ui': False}
     spec = ProxySpec.from_dict({
         'id': 'test-gear', 'name': 'gear',
         'identity': {'name': 'Proxied Shifter'},
@@ -209,19 +216,21 @@ def test_key_state_seeded_and_released_on_detach():
         virt = find_by_name('Proxied Shifter')
         time.sleep(0.2)
         assert 301 in virt.active_keys()           # seeded from the source
-        ui.close()                                 # shifter unplugged while in gear
+        ui.close(); closed['ui'] = True            # shifter unplugged while in gear
         t0 = time.time()
         while 301 in virt.active_keys() and time.time() - t0 < 3:
             time.sleep(0.05)
         assert 301 not in virt.active_keys()       # neutral
     finally:
         proxy.stop()
+        if not closed['ui']:
+            ui.close()
 
 
 def test_auto_invert_from_rest_position():
     """'auto' inverts an axis that rests high (so games see it released) and leaves one resting low alone."""
     caps = {e.EV_ABS: [(e.ABS_THROTTLE, AbsInfo(65535, 0, 65535, 0, 0, 0)), (e.ABS_RUDDER, AbsInfo(0, 0, 65535, 0, 0, 0))]}
-    ui = UInput(caps, name='Fake Levers', vendor=FAKE_VENDOR, product=0x5555, version=1)
+    ui = UInput(caps, name='Fake Levers', vendor=FAKE_VENDOR, product=0x5555, version=1, phys='usb-fake/input4')
     time.sleep(0.2)
     spec = ProxySpec.from_dict({
         'id': 'test-auto', 'name': 'auto',

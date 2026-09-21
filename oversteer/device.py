@@ -455,10 +455,28 @@ class Device:
     def get_last_axis_value(self, axis):
         return self.last_axis_value[axis]
 
+    def _proxied_node(self):
+        """The virtual device standing in for this wheel while a proxy
+        holds it (the real node is root-only then), or None."""
+        try:
+            from .proxy.manager import ProxyManager
+            status = ProxyManager.read_status() or {}
+        except Exception:
+            return None
+        for proxy in status.get('proxies', []):
+            if self.dev_name in proxy.get('sources', {}).values() and proxy.get('devnode'):
+                return proxy['devnode']
+        return None
+
     def get_input_device(self):
         if self.input_device is None or self.input_device.fd == -1:
             if os.access(self.dev_name, os.R_OK):
                 self.input_device = InputDevice(self.dev_name)
+            else:
+                node = self._proxied_node()
+                if node and os.access(node, os.R_OK):
+                    logging.debug("reading %s through its proxy %s", self.dev_name, node)
+                    self.input_device = InputDevice(node)
         return self.input_device
 
     def get_capabilities(self):

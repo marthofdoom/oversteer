@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 — 2026-09-20
 
 ### Added
 - **Devices tab**: every racing device on the computer, classified (wheel,

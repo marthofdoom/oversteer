@@ -62,6 +62,8 @@ class Gui:
         self.performance_chart = None
         self.combined_chart = None
         self.button_setup_step = False
+        self.equipment = []
+        self.combine_busy = False
         self.button_config = [-1] * 9
         self.button_config[0] = [-1]
         self.pressed_button_count = 0
@@ -204,13 +206,22 @@ class Gui:
                 state = _("visible to games")
             rows.append((include, eq.kind, eq.name, eq.usb_id, state, eq.sys_path))
         self.ui.set_equipment(rows)
-        enabled = bool(spec is not None and spec.enabled)
+        from .proxy.manager import SYSTEM_DIR
+        installed = None
+        try:
+            from .proxy.spec import ProxySpec
+            installed = ProxySpec.load(os.path.join(SYSTEM_DIR, self.COMBINED_ID + '.json'))
+        except Exception:
+            pass
+        enabled = bool(installed is not None and installed.enabled)
         if running:
             text = _("Combined device {}: {}").format(running.get('devnode') or '', running.get('state'))
         elif enabled:
-            text = _("Combined device enabled, service not running")
+            text = _("Combined device installed, service not running")
         else:
             text = _("Off")
+        if installed is not None:
+            spec = installed
         from .proxy.equipment import GENERIC_IDENTITY
         generic = spec is not None and spec.identity.vendor == int(GENERIC_IDENTITY['vendor'], 16)
         self.ui.set_combine(enabled, text, generic=generic)
@@ -221,10 +232,17 @@ class Gui:
             self.set_combine(True)
 
     def set_combine(self, state):
+        """Build the combined-device spec from the ticked equipment and
+        install (or disable) it through pkexec. The privileged step runs
+        off the GTK thread; the user's spec is only saved once it succeeded."""
         from .proxy.equipment import build_combined_spec, KIND_WHEEL
-        import glob
         from .proxy import install
         from .proxy.manager import user_dir
+        from .proxy.spec import ProxySpec, SpecError
+        import glob
+        import tempfile
+        if self.combine_busy:
+            return
         included = set(self.ui.get_included_equipment())
         selected = [eq for eq in self.equipment if eq.sys_path in included]
         path = self._combined_spec_path()
@@ -242,27 +260,56 @@ class Gui:
                 self.ui.error_dialog(_("Could not build the combined device."), str(e))
                 self.refresh_equipment()
                 return
-            os.makedirs(user_dir(), 0o700, exist_ok=True)
-            for old in glob.glob(os.path.join(user_dir(), self.COMBINED_ID + '-*.json')):
-                os.remove(old)
-            for spec in specs:
-                spec.save(os.path.join(user_dir(), spec.id + '.json'))
         else:
-            from .proxy.spec import ProxySpec, SpecError
+            specs = []
             for old in [path] + glob.glob(os.path.join(user_dir(), self.COMBINED_ID + '-*.json')):
                 if os.path.exists(old):
                     try:
                         spec = ProxySpec.load(old)
                         spec.enabled = False
-                        spec.save(old)
+                        specs.append(spec)
                     except SpecError:
-                        os.remove(old)
-        exec_start = '{} {} --proxy-daemon'.format(sys.executable, os.path.realpath(sys.argv[0]))
-        code = install.install(exec_start)
-        if code != 0:
+                        pass
+        # Candidate directory: what the installer sees; copied to the user
+        # config only when the install went through.
+        candidate = tempfile.mkdtemp(prefix='oversteer-proxies-')
+        for spec in specs:
+            spec.save(os.path.join(candidate, spec.id + '.json'))
+        daemon_argv = [sys.executable, os.path.realpath(sys.argv[0]), '--proxy-daemon']
+        allow_unsafe = bool(getattr(self.app, 'args', None) and getattr(self.app.args, 'unsafe_dev_tree', False))
+        self.combine_busy = True
+        self.ui.set_combine_busy(True)
+
+        def work():
+            try:
+                code = install.install(daemon_argv, spec_dirs=[candidate], allow_unsafe=allow_unsafe)
+            except Exception as e:
+                logging.exception("proxy install")
+                code = -1
+            self.ui.safe_call(self._combine_done, code, candidate, specs)
+
+        Thread(target=work, daemon=True).start()
+
+    def _combine_done(self, code, candidate, specs):
+        from .proxy.manager import user_dir
+        import glob
+        import shutil
+        self.combine_busy = False
+        self.ui.set_combine_busy(False)
+        if code == 0:
+            os.makedirs(user_dir(), 0o700, exist_ok=True)
+            for old in [self._combined_spec_path()] + glob.glob(os.path.join(user_dir(), self.COMBINED_ID + '-*.json')):
+                if os.path.exists(old):
+                    os.remove(old)
+            for spec in specs:
+                spec.save(os.path.join(user_dir(), spec.id + '.json'))
+        elif code == 3:
+            self.ui.error_dialog(_("The proxy service can't run Oversteer from this location."),
+                    _("Root would be executing files you can edit. Install Oversteer system-wide, or start it with --unsafe-dev-tree for development."))
+        elif code not in (126, 127):     # 126/127: the user cancelled pkexec, or it is missing
             self.ui.error_dialog(_("Installing the combined device failed."),
                     _("The administrator password is needed to hide the real devices from games and run the proxy service."))
-        time.sleep(1.0)
+        shutil.rmtree(candidate, ignore_errors=True)
         self.refresh_equipment()
 
     def populate_devices(self):

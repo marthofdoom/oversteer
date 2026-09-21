@@ -426,6 +426,13 @@ class GtkUi:
             self.updating_combine = False
         self.combine_status.set_text(status)
 
+    def set_combine_busy(self, busy):
+        self.combine_switch.set_sensitive(not busy)
+        self.combine_generic.set_sensitive(not busy)
+        self.equipment_view.set_sensitive(not busy)
+        if busy:
+            self.combine_status.set_text(_("Installing…"))
+
     def get_combine_generic(self):
         return self.combine_generic.get_active()
 

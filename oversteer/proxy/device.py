@@ -97,6 +97,8 @@ class ProxyDevice:
         self._ff_cache = {}               # virtual id -> bytes of the uploaded effect
         self._key_state = {}              # (source key, to_code) -> pressed, for ABS -> KEY
         self._auto_invert = {}            # (source key, from_code) -> bool, for 'auto' inversion
+        self._pressed_by = {}             # source key -> set of virtual key codes it holds down
+        self._ff_state = {}               # FF_GAIN / FF_AUTOCENTER last values, replayed on reconnect
         self._rules = {}                  # (source key, from_type, from_code) -> [Mapping]
         for m in spec.mappings:
             self._rules.setdefault((m.source, m.from_type, m.from_code), []).append(m)
@@ -121,6 +123,12 @@ class ProxyDevice:
         if self._thread is not None:
             self._thread.join(timeout)
             self._thread = None
+        for fd in (self._wake_r, self._wake_w):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self._wake_r = self._wake_w = -1
 
     def is_running(self):
         return self._thread is not None and self._thread.is_alive()
@@ -155,6 +163,8 @@ class ProxyDevice:
     # --- internals --------------------------------------------------------
 
     def _wake(self):
+        if self._wake_w < 0:
+            return
         try:
             os.write(self._wake_w, b'x')
         except OSError:
@@ -211,22 +221,24 @@ class ProxyDevice:
         found = False
         own = self.devnode
         for path in list_devices():
-            if path == own:
-                continue
             with self._lock:
+                attached = {src.path for src in self.sources.values()}
                 wanted = [s for key, s in self.spec.sources.items() if key not in self.sources]
             if not wanted:
                 break
+            if path == own or path in attached:
+                continue
             try:
                 device = InputDevice(path)
-            except (OSError, PermissionError):
+                spec = next((s for s in wanted if s.matches(device)), None)
+                if spec is None:
+                    device.close()
+                    continue
+                self._attach(spec, device)
+                found = True
+            except OSError as e:          # unplugged between open and use
+                logging.debug("proxy %s: %s: %s", self.spec.id, path, e)
                 continue
-            spec = next((s for s in wanted if s.matches(device)), None)
-            if spec is None:
-                device.close()
-                continue
-            self._attach(spec, device)
-            found = True
         return found
 
     def _attach(self, spec, device):
@@ -242,7 +254,14 @@ class ProxyDevice:
                 continue
             info = source.absinfo.get(code)
             if info is not None and any(r.invert == 'auto' for r in rules):
-                self._auto_invert[(key, code)] = info.value > (info.min + info.max) // 2
+                # Only a clear rest position decides; a centred axis stays as is
+                span = info.max - info.min
+                if span > 0 and info.value >= info.min + span * 3 // 4:
+                    self._auto_invert[(key, code)] = True
+                elif span > 0 and info.value <= info.min + span // 4:
+                    self._auto_invert[(key, code)] = False
+                else:
+                    self._auto_invert.setdefault((key, code), False)
         logging.info("proxy %s: attached %s = %s (%s)", self.spec.id, spec.key, device.name, device.path)
         if self.ui is not None:
             self._sync_axes(source)
@@ -341,7 +360,7 @@ class ProxyDevice:
                 for rule in rules:
                     wrote |= self._apply(rule, source, _FakeEvent(ecodes.EV_KEY, code, 1))
             elif self.spec.passthrough == key:
-                self._write(ecodes.EV_KEY, code, 1)
+                self._write(ecodes.EV_KEY, code, 1, key)
                 wrote = True
         if wrote:
             self.ui.syn()
@@ -352,17 +371,16 @@ class ProxyDevice:
         if self.ui is None:
             return
         wrote = False
+        for code in sorted(self._pressed_by.get(key, ())):
+            self._write(ecodes.EV_KEY, code, 0)
+            wrote = True
+        self._pressed_by[key] = set()
         for (src, etype, code), rules in self._rules.items():
-            if src != key or etype != ecodes.EV_KEY:
+            if src != key or etype != ecodes.EV_ABS:
                 continue
             for rule in rules:
-                if rule.to_type == ecodes.EV_KEY and self.last_values.get((ecodes.EV_KEY, rule.to_code)):
-                    self._write(ecodes.EV_KEY, rule.to_code, 0)
-                    wrote = True
-        if self.spec.passthrough == key:
-            for (etype, code), value in list(self.last_values.items()):
-                if etype == ecodes.EV_KEY and value:
-                    self._write(ecodes.EV_KEY, code, 0)
+                if rule.to_type == ecodes.EV_ABS and rule.to_code in self.spec.abs:
+                    self._write(ecodes.EV_ABS, rule.to_code, self.spec.abs[rule.to_code].min)
                     wrote = True
         for state_key in [k for k in self._key_state if k[0] == key]:
             self._key_state[state_key] = False
@@ -430,15 +448,21 @@ class ProxyDevice:
                 for rule in rules:
                     wrote |= self._apply(rule, source, event)
             elif passthrough and event.type not in _NEVER_COPY:
-                self._write(event.type, event.code, event.value)
+                self._write(event.type, event.code, event.value, key)
                 wrote = True
         if wrote:
             self.ui.syn()
 
-    def _write(self, etype, code, value):
+    def _write(self, etype, code, value, source_key=None):
         self.ui.write(etype, code, value)
         self.last_values[(etype, code)] = value
         self.events_out += 1
+        if etype == ecodes.EV_KEY and source_key is not None:
+            held = self._pressed_by.setdefault(source_key, set())
+            if value:
+                held.add(code)
+            else:
+                held.discard(code)
 
     def _normalise(self, rule, source, value):
         info = source.absinfo.get(rule.from_code)
@@ -475,17 +499,20 @@ class ProxyDevice:
             value = event.value
             if rule.invert is True and value in (0, 1):
                 value = 1 - value
-            self._write(ecodes.EV_KEY, rule.to_code, value)
+            self._write(ecodes.EV_KEY, rule.to_code, value, rule.source)
             return True
         if rule.from_type == ecodes.EV_ABS and rule.to_type == ecodes.EV_KEY:
             norm = self._normalise(rule, source, event.value)
-            pressed = ('gt' in rule.when and norm > float(rule.when['gt'])) or \
-                      ('lt' in rule.when and norm < float(rule.when['lt']))
             state_key = (rule.source, rule.to_code)
-            if self._key_state.get(state_key, False) == pressed:
+            was = self._key_state.get(state_key, False)
+            # Hysteresis: release a few percent past the press threshold
+            margin = 0.05 if was else 0.0
+            pressed = ('gt' in rule.when and norm > rule.when['gt'] - margin) or \
+                      ('lt' in rule.when and norm < rule.when['lt'] + margin)
+            if was == pressed:
                 return False
             self._key_state[state_key] = pressed
-            self._write(ecodes.EV_KEY, rule.to_code, 1 if pressed else 0)
+            self._write(ecodes.EV_KEY, rule.to_code, 1 if pressed else 0, rule.source)
             return True
         if rule.from_type == ecodes.EV_KEY and rule.to_type == ecodes.EV_ABS:
             if event.value == 2:      # key repeat
@@ -511,13 +538,18 @@ class ProxyDevice:
         except OSError:
             return
         for event in events:
-            if event.type == ecodes.EV_UINPUT:
-                if event.code == ecodes.UI_FF_UPLOAD:
-                    self._ff_upload(event.value)
-                elif event.code == ecodes.UI_FF_ERASE:
-                    self._ff_erase(event.value)
-            elif event.type == ecodes.EV_FF:
-                self._ff_play(event.code, event.value)
+            try:
+                if event.type == ecodes.EV_UINPUT:
+                    if event.code == ecodes.UI_FF_UPLOAD:
+                        self._ff_upload(event.value)
+                    elif event.code == ecodes.UI_FF_ERASE:
+                        self._ff_erase(event.value)
+                elif event.type == ecodes.EV_FF:
+                    self._ff_play(event.code, event.value)
+            except OSError as e:
+                # A stale request (the game went away, the kernel timed the
+                # request out) must not take the virtual device down.
+                logging.warning("proxy %s: force feedback request failed: %s", self.spec.id, e)
 
     def _ff_upload(self, request_id):
         upload = uinput_ff.begin_upload(self.ui.fd, request_id)
@@ -562,6 +594,7 @@ class ProxyDevice:
         if device is None:
             return
         if code in (ecodes.FF_GAIN, ecodes.FF_AUTOCENTER):
+            self._ff_state[code] = value
             real = code
         else:
             real = self.ff_effects.get(code)
@@ -573,7 +606,13 @@ class ProxyDevice:
             logging.warning("proxy %s: effect play failed: %s", self.spec.id, e)
 
     def _restore_effects(self, source):
-        """Re-upload effects a game had loaded before the wheel went away."""
+        """Re-upload effects a game had loaded before the wheel went away,
+        and the last gain / autocenter it set."""
+        for code, value in self._ff_state.items():
+            try:
+                source.device.write(ecodes.EV_FF, code, value)
+            except OSError as e:
+                logging.warning("proxy %s: could not restore %s: %s", self.spec.id, code_name(ecodes.EV_FF, code), e)
         for virtual_id, data in list(self._ff_cache.items()):
             effect = ff.Effect.from_buffer_copy(data)
             effect.id = -1
