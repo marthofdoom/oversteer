@@ -23,6 +23,13 @@
   `~/.config/oversteer/proxies/`.
 - Rumble vibration slider (`--rumble-level`) for new-lg4ff's rumble emulation; udev rule grants `rumble_level`.
 
+### Security
+- The proxy service runs as root, so the installer refuses to start it
+  from a user-writable location (install Oversteer system-wide; developers
+  can pass `--unsafe-dev-tree`). The unit is sandboxed (NoNewPrivileges,
+  ProtectSystem=strict, only input devices and /dev/uinput allowed), files
+  it writes are root-owned 0644, udev rule text is sanitised.
+
 ## 0.9.0 — 2026-09-20
 
 Logitech G29 Windows-parity features. Requires new-lg4ff 0.6.0 for the new

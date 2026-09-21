@@ -43,6 +43,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.10.0" date="2026-09-20">
+      <description>
+        <ul>
+          <li>Devices tab: combine wheel, shifter and handbrake into one device (proxy service), with force feedback</li>
+          <li>Generic identity option for games that lose force feedback on custom profiles (Forza Horizon 6)</li>
+          <li>Rumble vibration slider (new-lg4ff 0.7.0)</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-09-20">
       <description>
         <ul>
