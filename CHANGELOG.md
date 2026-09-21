@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- **Devices tab**: every racing device on the computer, classified (wheel,
+  shifter, pedals, handbrake, gamepad), and a single *Combine into one
+  device* switch. Combining builds one virtual copy of the wheel carrying
+  the ticked devices (shifter gears on the G29's own gear buttons,
+  handbrake on a spare axis, force feedback passed through), hides the
+  real devices from games and runs it as the `oversteer-proxy` system
+  service. Fixes games that only talk to one device (Forza Horizon's
+  "Device 1" force feedback).
+- Proxy devices under the hood: `--proxy-list`, `--proxy-run`,
+  `--proxy-daemon`, `--proxy-install`, `--proxy-remove`; JSON specs in
+  `~/.config/oversteer/proxies/`.
 - Rumble vibration slider (`--rumble-level`) for new-lg4ff's rumble emulation; udev rule grants `rumble_level`.
 
 ## 0.9.0 — 2026-09-20

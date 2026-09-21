@@ -147,6 +147,104 @@ class Gui:
             else:
                 break
 
+    # --- Devices tab: equipment list and the combined virtual wheel ---
+
+    COMBINED_ID = 'combined-wheel'
+
+    def _combined_spec_path(self):
+        from .proxy.manager import user_dir
+        return os.path.join(user_dir(), self.COMBINED_ID + '.json')
+
+    def _load_combined_spec(self):
+        from .proxy.spec import ProxySpec, SpecError
+        path = self._combined_spec_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            return ProxySpec.load(path)
+        except SpecError as e:
+            logging.warning("combined spec: %s", e)
+            return None
+
+    def refresh_equipment(self):
+        from .proxy.equipment import list_equipment, COMBINE_DEFAULT, KIND_WHEEL
+        from .proxy.manager import ProxyManager
+        spec = self._load_combined_spec()
+        wanted = None
+        if spec is not None:
+            wanted = {(src.vendor, src.product) for src in spec.sources.values()}
+        status = ProxyManager.read_status() or {}
+        running = next((p for p in status.get('proxies', []) if p['id'] == self.COMBINED_ID), None)
+        attached = set()
+        if running:
+            attached = {node for node in running.get('sources', {}).values() if node}
+        rows = []
+        self.equipment = list_equipment()
+        wheel_seen = False
+        for eq in self.equipment:
+            if wanted is not None:
+                include = (eq.vendor, eq.product) in wanted
+            else:
+                include = eq.kind in COMBINE_DEFAULT and (eq.kind != KIND_WHEEL or not wheel_seen)
+            if eq.kind == KIND_WHEEL and include:
+                wheel_seen = True
+            if eq.node in attached:
+                state = _("in combined device")
+            elif not eq.readable:
+                state = _("hidden from games")
+            else:
+                state = _("visible to games")
+            rows.append((include, eq.kind, eq.name, eq.usb_id, state, eq.sys_path))
+        self.ui.set_equipment(rows)
+        enabled = bool(spec is not None and spec.enabled)
+        if running:
+            text = _("Combined device {}: {}").format(running.get('devnode') or '', running.get('state'))
+        elif enabled:
+            text = _("Combined device enabled, service not running")
+        else:
+            text = _("Off")
+        self.ui.set_combine(enabled, text)
+
+    def equipment_changed(self):
+        spec = self._load_combined_spec()
+        if spec is not None and spec.enabled:
+            self.set_combine(True)
+
+    def set_combine(self, state):
+        from .proxy.equipment import build_combined_spec, KIND_WHEEL
+        from .proxy import install
+        from .proxy.manager import user_dir
+        included = set(self.ui.get_included_equipment())
+        selected = [eq for eq in self.equipment if eq.sys_path in included]
+        path = self._combined_spec_path()
+        if state:
+            wheel = next((eq for eq in selected if eq.kind == KIND_WHEEL), None)
+            if wheel is None:
+                self.ui.error_dialog(_("Tick a wheel to build the combined device around."))
+                self.refresh_equipment()
+                return
+            others = [eq for eq in selected if eq is not wheel]
+            try:
+                spec = build_combined_spec(wheel, others, spec_id=self.COMBINED_ID)
+            except Exception as e:
+                self.ui.error_dialog(_("Could not build the combined device."), str(e))
+                self.refresh_equipment()
+                return
+            os.makedirs(user_dir(), 0o700, exist_ok=True)
+            spec.save(path)
+        else:
+            spec = self._load_combined_spec()
+            if spec is not None:
+                spec.enabled = False
+                spec.save(path)
+        exec_start = '{} {} --proxy-daemon'.format(sys.executable, os.path.realpath(sys.argv[0]))
+        code = install.install(exec_start)
+        if code != 0:
+            self.ui.error_dialog(_("Installing the combined device failed."),
+                    _("The administrator password is needed to hide the real devices from games and run the proxy service."))
+        time.sleep(1.0)
+        self.refresh_equipment()
+
     def populate_devices(self):
         logging.debug("populate_devices")
         if self.device_manager.is_changed():
@@ -164,6 +262,10 @@ class Gui:
         self.ui.set_profiles(profiles)
 
     def populate_window(self):
+        try:
+            self.refresh_equipment()
+        except Exception as e:
+            logging.warning("equipment: %s", e)
         self.populate_devices()
         self.populate_profiles()
 

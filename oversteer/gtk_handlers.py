@@ -151,6 +151,18 @@ class GtkHandlers:
     def on_ff_rumble_level_value_changed(self, widget):
         self.model.set_rumble_level(widget.get_value())
 
+    def on_equipment_include_toggled(self, renderer, path):
+        self.ui.toggle_equipment(path)
+        self.controller.equipment_changed()
+
+    def on_combine_switch_state_set(self, widget, state):
+        if not self.ui.updating_combine:
+            self.controller.set_combine(state)
+        return False
+
+    def on_equipment_refresh_clicked(self, widget):
+        self.controller.refresh_equipment()
+
     def on_ffbmeter_leds_clicked(self, widget):
         self.model.set_ffb_leds(widget.get_active())
 
