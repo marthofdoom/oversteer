@@ -66,6 +66,7 @@ class Gui:
         self.combined_chart = None
         self.button_setup_step = False
         self.equipment = []
+        self.telemetry = None
         self.combine_busy = False
         self.button_config = [-1] * 9
         self.button_config[0] = [-1]
@@ -361,6 +362,9 @@ class Gui:
         self.populate_profiles()
 
     def change_device(self, device_id):
+        if self.telemetry is not None:
+            self.telemetry.stop()
+            self.telemetry = None
         self.device = self.device_manager.get_device(device_id)
 
         if self.device is None or not self.device.is_ready():
@@ -384,12 +388,55 @@ class Gui:
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
         self.update_driver_status()
+        self.apply_rev_leds()
 
         if self.model.get_profile():
             self.ui.set_profile(self.model.get_profile())
         else:
             self.model.flush_device()
             self.model.flush_ui()
+
+    def apply_rev_leds(self):
+        """Start or stop the telemetry listener to match the model."""
+        from .telemetry import Telemetry
+        if self.telemetry is not None:
+            self.telemetry.stop()
+            self.telemetry = None
+        if self.device is None or not self.model.get_rev_leds():
+            self.ui.set_rev_leds_status('')
+            return
+        leds = self.device.rev_leds()
+        if not leds.available():
+            self.ui.set_rev_leds_status(_("no LEDs"))
+            return
+        self.model.set_ffb_leds(False)        # the meter and the rev lights can't share the LEDs
+
+        def status(source):
+            text = _("telemetry from {}").format(source) if source else _("waiting for telemetry")
+            self.ui.safe_call(self.ui.set_rev_leds_status, text)
+        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status)
+        if self.telemetry.start():
+            self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
+        else:
+            self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
+            self.telemetry = None
+
+    def test_rev_leds(self):
+        if self.device is None:
+            return
+        leds = self.device.rev_leds()
+        if not leds.available():
+            self.ui.info_dialog(_("This wheel has no rev LEDs, or they are not accessible."))
+            return
+        was_meter = self.model.get_ffb_leds()
+        if was_meter:
+            self.device.set_ffb_leds(0)
+
+        def run():
+            leds.test()
+            if was_meter:
+                self.device.set_ffb_leds(1)
+        Thread(target=run, daemon=True).start()
 
     def try_effect(self, kind):
         if self.device is None:

@@ -181,6 +181,17 @@ class GtkHandlers:
     def on_ffb_reset_clicked(self, widget):
         self.controller.reset_ffb_defaults()
 
+    def on_rev_leds_state_set(self, widget, state):
+        self.model.set_rev_leds(state)
+        return False
+
+    def on_rev_leds_port_value_changed(self, widget):
+        if not self.ui.updating_rev_leds:
+            self.model.set_rev_leds_port(widget.get_value_as_int())
+
+    def on_rev_leds_test_clicked(self, widget):
+        self.controller.test_rev_leds()
+
     def on_ffbmeter_leds_clicked(self, widget):
         self.model.set_ffb_leds(widget.get_active())
 

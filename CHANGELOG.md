@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- **Rev lights from game telemetry**: the wheel's rev LEDs fill with engine
+  RPM and flash at the limiter, fed by the game's UDP telemetry (Forza
+  "Data Out", BeamNG / LFS OutGauge, DiRT Rally 2.0 / DiRT 4 extradata 3).
+  Tools tab: switch, UDP port, Test LEDs. Takes the LEDs away from the FFB
+  meter while active; LEDs go out 2 s after telemetry stops.
 - "Try" buttons next to every force feedback control: play that effect on
   the wheel for two seconds to feel what it does.
 - Rotation range presets (270/360/540/720/900) under the range slider.

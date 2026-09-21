@@ -453,6 +453,14 @@ class Device:
                 return False
         return True
 
+    def has_rev_leds(self):
+        from .telemetry import RevLeds
+        return RevLeds(self.dev_path).available() if self.dev_path else False
+
+    def rev_leds(self):
+        from .telemetry import RevLeds
+        return RevLeds(self.dev_path)
+
     def driver_info(self):
         """(driver name, version, has new-lg4ff features) for the status line."""
         name = None
