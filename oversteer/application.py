@@ -71,8 +71,6 @@ class Application:
         parser.add_argument('--proxy-install', action='store_true',
                 help=_("install the proxy service, hide rules and enabled proxies (asks for the administrator password)"))
         parser.add_argument('--proxy-remove', action='store_true', help=_("remove the proxy service and hide rules"))
-        parser.add_argument('--unsafe-dev-tree', action='store_true',
-                help=_("development only: let the root proxy service run Oversteer from a user-writable source tree"))
         parser.add_argument('--version', action='store_true', help=_("show version"))
 
         args = parser.parse_args(argv[1:])
@@ -181,11 +179,6 @@ class Application:
         if args.command:
             subprocess.Popen(args.command, shell=True)
 
-    @staticmethod
-    def daemon_argv(argv):
-        """How the system service starts the proxy daemon."""
-        return [sys.executable, os.path.realpath(argv[0]), '--proxy-daemon']
-
     def run_proxy_command(self, args, argv):
         import signal
         import time
@@ -193,7 +186,7 @@ class Application:
 
         if args.proxy_install:
             from oversteer.proxy import install
-            return install.install(self.daemon_argv(argv), allow_unsafe=args.unsafe_dev_tree)
+            return install.install()
         if args.proxy_remove:
             from oversteer.proxy import install
             return install.remove()

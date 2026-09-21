@@ -24,11 +24,13 @@
 - Rumble vibration slider (`--rumble-level`) for new-lg4ff's rumble emulation; udev rule grants `rumble_level`.
 
 ### Security
-- The proxy service runs as root, so the installer refuses to start it
-  from a user-writable location (install Oversteer system-wide; developers
-  can pass `--unsafe-dev-tree`). The unit is sandboxed (NoNewPrivileges,
-  ProtectSystem=strict, only input devices and /dev/uinput allowed), files
-  it writes are root-owned 0644, udev rule text is sanitised.
+- The proxy service runs as root from a root-owned copy of the daemon in
+  /usr/local/lib/oversteer-proxy — never from files the user can edit,
+  whether Oversteer runs from a source tree, a system install or a Flatpak.
+  The unit is sandboxed (NoNewPrivileges, ProtectSystem=strict, only input
+  devices and /dev/uinput allowed), files it writes are root-owned 0644,
+  udev rule text is sanitised. Inside Flatpak the install goes through
+  flatpak-spawn to the host.
 
 ## 0.9.0 — 2026-09-20
 

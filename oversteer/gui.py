@@ -275,14 +275,12 @@ class Gui:
         candidate = tempfile.mkdtemp(prefix='oversteer-proxies-')
         for spec in specs:
             spec.save(os.path.join(candidate, spec.id + '.json'))
-        daemon_argv = [sys.executable, os.path.realpath(sys.argv[0]), '--proxy-daemon']
-        allow_unsafe = bool(getattr(self.app, 'args', None) and getattr(self.app.args, 'unsafe_dev_tree', False))
         self.combine_busy = True
         self.ui.set_combine_busy(True)
 
         def work():
             try:
-                code = install.install(daemon_argv, spec_dirs=[candidate], allow_unsafe=allow_unsafe)
+                code = install.install(spec_dirs=[candidate])
             except Exception as e:
                 logging.exception("proxy install")
                 code = -1
@@ -303,9 +301,8 @@ class Gui:
                     os.remove(old)
             for spec in specs:
                 spec.save(os.path.join(user_dir(), spec.id + '.json'))
-        elif code == 3:
-            self.ui.error_dialog(_("The proxy service can't run Oversteer from this location."),
-                    _("Root would be executing files you can edit. Install Oversteer system-wide, or start it with --unsafe-dev-tree for development."))
+        elif code == 4:
+            self.ui.error_dialog(_("The proxy service needs python3-evdev and python3-pyudev installed for the system Python."))
         elif code not in (126, 127):     # 126/127: the user cancelled pkexec, or it is missing
             self.ui.error_dialog(_("Installing the combined device failed."),
                     _("The administrator password is needed to hide the real devices from games and run the proxy service."))
