@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.2 — 2026-09-21
+
+### Fixed
+- Flatpak: the Devices tab reads the installed proxy state through
+  `host-etc` and a status heartbeat (Flatpak reserves /etc and hides the
+  host's /proc).
+
 ## 0.10.1 — 2026-09-21
 
 ### Changed

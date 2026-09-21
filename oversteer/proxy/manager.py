@@ -26,6 +26,20 @@ from .spec import ProxySpec, SpecError
 BUILTIN_DIR = os.path.join(os.path.dirname(__file__), 'profiles')
 SYSTEM_DIR = '/etc/oversteer/proxies'
 STATUS_FILE = '/run/oversteer/proxies.json'
+STATUS_HEARTBEAT = 60          # the daemon rewrites its status at least this often (seconds)
+STATUS_STALE = 3 * STATUS_HEARTBEAT
+
+
+def in_flatpak():
+    return os.path.exists('/.flatpak-info')
+
+
+def system_dir_readable():
+    """Where to read the installed system specs from. Flatpak reserves /etc,
+    so inside the sandbox the host's /etc is at /run/host/etc (host-etc)."""
+    if in_flatpak():
+        return os.path.join('/run/host', SYSTEM_DIR.lstrip('/'))
+    return SYSTEM_DIR
 # Two files: the uaccess tag must go before 73-seat-late.rules applies the
 # ACL, and the mode/group must come after every other rule that grants
 # access (Oversteer's own 99-* wheel rules, distro joystick rules).
@@ -92,7 +106,7 @@ def hide_rules(specs, assignment='MODE="0600", GROUP="root"'):
 class ProxyManager:
 
     def __init__(self, dirs=None, status_file=None):
-        self.dirs = dirs if dirs is not None else [BUILTIN_DIR, SYSTEM_DIR, user_dir()]
+        self.dirs = dirs if dirs is not None else [BUILTIN_DIR, system_dir_readable(), user_dir()]
         self.status_file = status_file
         self.specs = {}
         self.errors = []
@@ -187,6 +201,7 @@ class ProxyManager:
             proxies = list(self.proxies.values())
         return {
             'pid': os.getpid(),
+            'time': time.time(),
             'proxies': [p.status() for p in proxies],
             'errors': [{'path': p, 'error': e} for p, e in self.errors],
         }
@@ -215,8 +230,13 @@ class ProxyManager:
                 status = json.load(f)
         except (OSError, ValueError):
             return None
+        # Liveness: the daemon's pid on the host (not visible from a Flatpak
+        # sandbox, so also a heartbeat the daemon refreshes).
         pid = status.get('pid')
-        if pid and not os.path.exists('/proc/{}'.format(pid)):
+        if pid and not in_flatpak() and not os.path.exists('/proc/{}'.format(pid)):
+            return None
+        written = status.get('time')
+        if written and time.time() - written > STATUS_STALE:
             return None
         return status
 

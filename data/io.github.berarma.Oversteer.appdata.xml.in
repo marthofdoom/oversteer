@@ -43,6 +43,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.10.2" date="2026-09-21">
+      <description><ul><li>Flatpak: Devices tab reads the proxy state correctly from the sandbox</li></ul></description>
+    </release>
     <release version="0.10.1" date="2026-09-21">
       <description>
         <ul>

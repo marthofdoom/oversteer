@@ -20,7 +20,7 @@ finish-args:
   - --device=all
   # Devices tab: state of the proxy service and its installed specs
   - --filesystem=/run/oversteer:ro
-  - --filesystem=/etc/oversteer:ro
+  - --filesystem=host-etc
   # Devices tab: install the proxy service on the host (flatpak-spawn --host + pkexec)
   - --talk-name=org.freedesktop.Flatpak
 cleanup:
@@ -60,4 +60,4 @@ modules:
     sources:
       - type: git
         url: https://github.com/marthofdoom/oversteer.git
-        tag: v0.10.1
+        tag: v0.10.2

@@ -206,11 +206,11 @@ class Gui:
                 state = _("visible to games")
             rows.append((include, eq.kind, eq.name, eq.usb_id, state, eq.sys_path))
         self.ui.set_equipment(rows)
-        from .proxy.manager import SYSTEM_DIR
+        from .proxy.manager import system_dir_readable
         installed = None
         try:
             from .proxy.spec import ProxySpec
-            installed = ProxySpec.load(os.path.join(SYSTEM_DIR, self.COMBINED_ID + '.json'))
+            installed = ProxySpec.load(os.path.join(system_dir_readable(), self.COMBINED_ID + '.json'))
         except Exception:
             pass
         enabled = bool(installed is not None and installed.enabled)

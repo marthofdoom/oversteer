@@ -24,8 +24,13 @@ def main():
         stop['now'] = True
     signal.signal(signal.SIGTERM, handler)
     signal.signal(signal.SIGINT, handler)
+    from .manager import STATUS_HEARTBEAT
+    last = time.time()
     while not stop['now']:
         time.sleep(0.5)
+        if time.time() - last >= STATUS_HEARTBEAT:
+            manager.write_status()
+            last = time.time()
     manager.stop()
     return 0
 
