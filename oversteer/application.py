@@ -31,6 +31,10 @@ class Application:
         parser.add_argument('--range', type=int, help=_("set the rotation range [40-900]"))
         parser.add_argument('--sensitivity', type=int, help=_("set the steering sensitivity [0-100, 50 = linear]"))
         parser.add_argument('--combine-pedals', type=int, dest='combine_pedals', help=_("combine pedals [0-2]"))
+        parser.add_argument('--invert-pedals', type=int, dest='invert_pedals',
+                help=_("invert pedals, bit mask: 1 clutch, 2 accelerator, 4 brakes, 7 all"))
+        parser.add_argument('--ffb', dest='ffb_enabled', action='store_true', default=None, help=_("enable force feedback"))
+        parser.add_argument('--no-ffb', dest='ffb_enabled', action='store_false', default=None, help=_("disable force feedback"))
         parser.add_argument('--autocenter', type=int, help=_("set the autocenter strength [0-100]"))
         parser.add_argument('--ff-gain', type=int, help=_("set the FF gain [0-100]"))
         parser.add_argument('--autocenter-persistent', dest='autocenter_persistent', action='store_true', default=None,
@@ -122,6 +126,10 @@ class Application:
             model.set_sensitivity(args.sensitivity)
         if args.combine_pedals is not None:
             model.set_combine_pedals(args.combine_pedals)
+        if args.invert_pedals is not None:
+            model.set_invert_pedals(args.invert_pedals)
+        if args.ffb_enabled is not None:
+            model.set_ffb_enabled(args.ffb_enabled)
         if args.autocenter is not None:
             model.set_autocenter(args.autocenter)
         if args.ff_gain is not None:

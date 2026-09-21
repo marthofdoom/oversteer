@@ -208,6 +208,22 @@ class Device:
     def set_app_gain(self, value):
         return self._set_flag("app_gain", value)
 
+    def get_invert_pedals(self):
+        path = self.checked_device_file("invert_pedals")
+        if not path:
+            return None
+        with open(path, "r") as file:
+            return int(file.read().strip())
+
+    def set_invert_pedals(self, mask):
+        path = self.checked_device_file("invert_pedals")
+        if not path:
+            return False
+        logging.debug("Setting invert_pedals: %s", mask)
+        with open(path, "w") as file:
+            file.write(str(int(mask)))
+        return True
+
     def get_combine_pedals(self):
         path = self.checked_device_file("combine_pedals")
         if not path:

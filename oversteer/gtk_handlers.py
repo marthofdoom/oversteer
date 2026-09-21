@@ -98,6 +98,13 @@ class GtkHandlers:
     def on_combine_clutch_clicked(self, widget):
         self.model.set_combine_pedals(2)
 
+    def on_invert_pedals_clicked(self, widget):
+        self.model.set_invert_pedals(self.ui.get_invert_pedals())
+
+    def on_ffb_enabled_state_set(self, widget, state):
+        self.model.set_ffb_enabled(state)
+        return False
+
     def on_ff_gain_value_changed(self, widget):
         ff_gain = int(widget.get_value())
         self.model.set_ff_gain(ff_gain)
