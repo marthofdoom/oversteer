@@ -10,7 +10,11 @@
   handbrake on a spare axis, force feedback passed through), hides the
   real devices from games and runs it as the `oversteer-proxy` system
   service. Fixes games that only talk to one device (Forza Horizon's
-  "Device 1" force feedback).
+  "Device 1" force feedback). The combined device presents as a generic
+  "Oversteer Combined Wheel": verified in Forza Horizon 6 under Proton with
+  a custom wheel profile, full force feedback, T500 RS shifter on the
+  G29's gear buttons and an analog handbrake. Start the game after the
+  device exists.
 - Proxy devices under the hood: `--proxy-list`, `--proxy-run`,
   `--proxy-daemon`, `--proxy-install`, `--proxy-remove`; JSON specs in
   `~/.config/oversteer/proxies/`.
