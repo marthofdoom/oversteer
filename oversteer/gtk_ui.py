@@ -360,7 +360,7 @@ class GtkUi:
         # Grey the strength controls while off; when on, only re-enable the
         # ones the device actually has (their own setters record that).
         enabled = bool(value)
-        for widget in (self.ff_gain, self.ff_spring_level, self.ff_damper_level, self.ff_friction_level, self.app_gain, self.inertia_mode):
+        for widget in (self.ff_gain, self.ff_spring_level, self.ff_damper_level, self.ff_friction_level, self.ff_rumble_level, self.app_gain, self.inertia_mode):
             widget.set_sensitive(enabled and self._available.get(widget, False))
 
     def set_ff_gain(self, ff_gain):
@@ -394,6 +394,14 @@ class GtkUi:
         else:
             self.ff_friction_level.set_sensitive(True)
             self.ff_friction_level.set_value(int(level))
+
+    def set_rumble_level(self, level):
+        self._available[self.ff_rumble_level] = level is not None
+        if level is None:
+            self.ff_rumble_level.set_sensitive(False)
+        else:
+            self.ff_rumble_level.set_sensitive(True)
+            self.ff_rumble_level.set_value(int(level))
 
     def set_ffb_leds(self, value):
         if value is None:
@@ -672,6 +680,7 @@ class GtkUi:
         self.ff_spring_level = self.builder.get_object('ff_spring_level')
         self.ff_damper_level = self.builder.get_object('ff_damper_level')
         self.ff_friction_level = self.builder.get_object('ff_friction_level')
+        self.ff_rumble_level = self.builder.get_object('ff_rumble_level')
         self.ffbmeter_leds = self.builder.get_object('ffbmeter_leds')
         self.ffbmeter_overlay = self.builder.get_object('ffbmeter_overlay')
         self.wheel_range_overlay_never = self.builder.get_object('wheel_range_overlay_never')
@@ -782,6 +791,8 @@ class GtkUi:
         self.ff_friction_level.add_mark(60, Gtk.PositionType.BOTTOM, '60')
         self.ff_friction_level.add_mark(80, Gtk.PositionType.BOTTOM, '80')
         self.ff_friction_level.add_mark(100, Gtk.PositionType.BOTTOM, '100')
+        for v in (20, 40, 60, 80, 100):
+            self.ff_rumble_level.add_mark(v, Gtk.PositionType.BOTTOM, str(v))
 
     def _set_range_markers(self, max_range):
         self.wheel_range.clear_marks()

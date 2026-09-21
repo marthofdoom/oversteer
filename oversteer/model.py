@@ -21,6 +21,7 @@ class Model:
         'spring_level': None,
         'damper_level': None,
         'friction_level': None,
+        'rumble_level': None,
         'ffb_leds': None,
         'ffb_overlay': None,
         'range_overlay': None,
@@ -44,6 +45,7 @@ class Model:
         'spring_level': 'integer',
         'damper_level': 'integer',
         'friction_level': 'integer',
+        'rumble_level': 'integer',
         'ffb_leds': 'integer',
         'ffb_overlay': 'boolean',
         'range_overlay': 'string',
@@ -97,6 +99,7 @@ class Model:
             'spring_level': self.device.get_spring_level(),
             'damper_level': self.device.get_damper_level(),
             'friction_level': self.device.get_friction_level(),
+            'rumble_level': self.device.get_rumble_level(),
             'ffb_leds': self.device.get_ffb_leds(),
             'ffb_overlay': False if self.device.get_peak_ffb_level() is not None else None,
             'range_overlay': 'never' if self.device.get_peak_ffb_level() is not None else None,
@@ -300,6 +303,14 @@ class Model:
     def get_friction_level(self):
         return self.data['friction_level']
 
+    def set_rumble_level(self, value):
+        value = int(value)
+        if self.set_if_changed('rumble_level', value):
+            self.device.set_rumble_level(value)
+
+    def get_rumble_level(self):
+        return self.data['rumble_level']
+
     def set_ffb_leds(self, value):
         value = bool(value)
         if self.set_if_changed('ffb_leds', value):
@@ -370,6 +381,8 @@ class Model:
             self.device.set_damper_level(self.data['damper_level'])
         if self.data['friction_level'] is not None:
             self.device.set_friction_level(self.data['friction_level'])
+        if self.data['rumble_level'] is not None:
+            self.device.set_rumble_level(self.data['rumble_level'])
         if self.data['ffb_leds'] is not None:
             self.device.set_ffb_leds(self.data['ffb_leds'])
 
@@ -390,6 +403,7 @@ class Model:
         self.ui.set_spring_level(data['spring_level'])
         self.ui.set_damper_level(data['damper_level'])
         self.ui.set_friction_level(data['friction_level'])
+        self.ui.set_rumble_level(data['rumble_level'])
         self.ui.set_ffb_leds(data['ffb_leds'])
         self.ui.set_ffb_overlay(data['ffb_overlay'])
         self.ui.set_range_overlay(data['range_overlay'])
