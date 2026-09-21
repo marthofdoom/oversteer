@@ -307,6 +307,7 @@ class GtkUi:
             self.autocenter.set_value(int(autocenter))
 
     def _set_switch(self, switch, value):
+        self._available[switch] = value is not None
         if value is None:
             switch.set_sensitive(False)
             return
@@ -333,9 +334,14 @@ class GtkUi:
             for b in buttons:
                 b.set_sensitive(False)
             return
-        for b, bit in zip(buttons, (self.INVERT_CLUTCH, self.INVERT_ACCELERATOR, self.INVERT_BRAKES)):
-            b.set_sensitive(True)
-            b.set_active(bool(mask & bit))
+        # set_active emits 'clicked'; don't write partial masks to the device
+        self.updating_invert_pedals = True
+        try:
+            for b, bit in zip(buttons, (self.INVERT_CLUTCH, self.INVERT_ACCELERATOR, self.INVERT_BRAKES)):
+                b.set_sensitive(True)
+                b.set_active(bool(mask & bit))
+        finally:
+            self.updating_invert_pedals = False
 
     def get_invert_pedals(self):
         mask = 0
@@ -349,11 +355,16 @@ class GtkUi:
 
     def set_ffb_enabled(self, value):
         self._set_switch(self.ffb_enabled, value)
+        if value is None:
+            return
+        # Grey the strength controls while off; when on, only re-enable the
+        # ones the device actually has (their own setters record that).
         enabled = bool(value)
         for widget in (self.ff_gain, self.ff_spring_level, self.ff_damper_level, self.ff_friction_level, self.app_gain, self.inertia_mode):
-            widget.set_sensitive(enabled and (value is not None))
+            widget.set_sensitive(enabled and self._available.get(widget, False))
 
     def set_ff_gain(self, ff_gain):
+        self._available[self.ff_gain] = ff_gain is not None
         if ff_gain is None:
             self.ff_gain.set_sensitive(False)
         else:
@@ -361,6 +372,7 @@ class GtkUi:
             self.ff_gain.set_value(int(ff_gain))
 
     def set_spring_level(self, level):
+        self._available[self.ff_spring_level] = level is not None
         if level is None:
             self.ff_spring_level.set_sensitive(False)
         else:
@@ -368,6 +380,7 @@ class GtkUi:
             self.ff_spring_level.set_value(int(level))
 
     def set_damper_level(self, level):
+        self._available[self.ff_damper_level] = level is not None
         if level is None:
             self.ff_damper_level.set_sensitive(False)
         else:
@@ -375,6 +388,7 @@ class GtkUi:
             self.ff_damper_level.set_value(int(level))
 
     def set_friction_level(self, level):
+        self._available[self.ff_friction_level] = level is not None
         if level is None:
             self.ff_friction_level.set_sensitive(False)
         else:
@@ -620,6 +634,8 @@ class GtkUi:
         self.overlay_window.set_visual(visual)
 
     def _set_builder_objects(self):
+        self._available = {}
+        self.updating_invert_pedals = False
         self.window = self.builder.get_object('main_window')
         self.about_window = self.builder.get_object('about_window')
         self.preferences_window = self.builder.get_object('preferences_window')

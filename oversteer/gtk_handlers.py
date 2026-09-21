@@ -99,6 +99,8 @@ class GtkHandlers:
         self.model.set_combine_pedals(2)
 
     def on_invert_pedals_clicked(self, widget):
+        if self.ui.updating_invert_pedals:
+            return
         self.model.set_invert_pedals(self.ui.get_invert_pedals())
 
     def on_ffb_enabled_state_set(self, widget, state):

@@ -35,8 +35,10 @@ class Application:
                 help=_("invert pedals, bit mask: 1 clutch, 2 accelerator, 4 brakes, 7 all"))
         parser.add_argument('--ffb', dest='ffb_enabled', action='store_true', default=None, help=_("enable force feedback"))
         parser.add_argument('--no-ffb', dest='ffb_enabled', action='store_false', default=None, help=_("disable force feedback"))
-        parser.add_argument('--inertia-mode', dest='inertia_mode', type=int,
-                help=_("inertia effects: 0 as damper (Windows), 1 true inertia"))
+        parser.add_argument('--inertia-mode', dest='inertia_mode', action='store_true', default=None,
+                help=_("render inertia effects from wheel acceleration"))
+        parser.add_argument('--no-inertia-mode', dest='inertia_mode', action='store_false', default=None,
+                help=_("play inertia effects as a damper (like Windows)"))
         parser.add_argument('--autocenter', type=int, help=_("set the autocenter strength [0-100]"))
         parser.add_argument('--ff-gain', type=int, help=_("set the FF gain [0-150, above 100 clips]"))
         parser.add_argument('--autocenter-persistent', dest='autocenter_persistent', action='store_true', default=None,

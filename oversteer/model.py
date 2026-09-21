@@ -135,6 +135,10 @@ class Model:
             elif self.types[key] == 'tuple':
                 data[key] = tuple(map(int, value.split(',')))
 
+        # Profiles from before the force feedback switch existed
+        if data['ffb_enabled'] is None and data['ff_gain'] is not None:
+            data['ffb_enabled'] = True
+
         self.data = data
         self.save_reference_values()
         self.profile = profile_file
@@ -210,6 +214,9 @@ class Model:
 
     def set_ffb_enabled(self, value):
         value = bool(value)
+        if self.data['ff_gain'] is None:
+            # Device without a gain control: nothing to switch
+            return
         if self.set_if_changed('ffb_enabled', value):
             self.device.set_ff_gain(self.data['ff_gain'] if value else 0)
             if self.ui is not None:
@@ -351,7 +358,7 @@ class Model:
             self.device.set_app_gain(self.data['app_gain'])
         if self.data['inertia_mode'] is not None:
             self.device.set_inertia_mode(self.data['inertia_mode'])
-        if self.data['ffb_enabled'] is False:
+        if self.data['ffb_enabled'] is False and self.data['ff_gain'] is not None:
             self.device.set_ff_gain(0)
         elif self.data['ff_gain'] is not None:
             self.device.set_ff_gain(self.data['ff_gain'])

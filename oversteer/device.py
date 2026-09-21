@@ -289,10 +289,15 @@ class Device:
         gain = int(data.strip())
         return int(round((int(gain) * 100) / 65535))
 
+    def get_max_ff_gain(self):
+        if self.checked_device_file("gain") and self.checked_device_file("app_gain"):
+            return 150
+        return 100
+
     def set_ff_gain(self, gain):
         path = self.checked_device_file("gain")
-        # new-lg4ff accepts up to 150 %; other paths clamp at 100 %
-        gain = min(int(gain), 150 if path else 100)
+        # Only new-lg4ff >= 0.6 (which also has app_gain) accepts up to 150 %
+        gain = min(int(gain), self.get_max_ff_gain())
         gain = str(int(gain / 100.0 * 65535))
         logging.debug("Setting FF gain: %s", gain)
         if path:
@@ -426,6 +431,9 @@ class Device:
             return False
         if not self.check_file_permissions('peak_ffb_level'):
             return False
+        for name in ('sensitivity', 'invert_pedals', 'app_gain', 'autocenter_persistent', 'inertia_mode'):
+            if not self.check_file_permissions(name):
+                return False
         return True
 
     def get_last_axis_value(self, axis):
