@@ -9,10 +9,12 @@ def forza(rpm, max_rpm=8000.0, race_on=1, size=324):
     return bytes(data)
 
 
-def outgauge(rpm, shift=False):
+def outgauge(rpm, shift=False, eng_temp=89.73):
     data = bytearray(96)
+    data[4:8] = b'XRG\0'
     struct.pack_into('<f', data, 16, rpm)
-    struct.pack_into('<II', data, 20, 0, 1 if shift else 0)
+    struct.pack_into('<ff', data, 20, 0.5, eng_temp)          # Turbo, EngTemp
+    struct.pack_into('<II', data, 40, 0, 1 if shift else 0)   # DashLights, ShowLights
     return bytes(data)
 
 
@@ -27,8 +29,13 @@ def test_decode_formats():
     assert decode(forza(4000)) == (4000.0, 8000.0, None)
     assert decode(forza(4000, size=232))[0] == 4000.0
     assert decode(forza(4000, race_on=0))[0] == 0.0          # menus: no revs
-    assert decode(outgauge(3000)) == (3000.0, None, False)
+    assert decode(forza(4000, size=331))[0] == 4000.0         # Forza Motorsport (2023)
+    assert decode(outgauge(3000)) == (3000.0, None, False)    # odd EngTemp mantissa is not a shift light
     assert decode(outgauge(7000, shift=True))[2] is True
+    assert decode(forza(float('inf'))) is None
+    assert decode(forza(4000, max_rpm=float('nan'))) is None
+    assert decode(outgauge(1e9)) is None
+    assert decode(codemasters(5000, float('inf'))) is None
     rpm, mx, _ = decode(codemasters(5000, 7500))
     assert abs(rpm - 5000) < 1e-3 and abs(mx - 7500) < 1e-3
     assert decode(b'\x00' * 50) is None

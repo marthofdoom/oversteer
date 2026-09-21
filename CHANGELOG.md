@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 — 2026-09-21
 
 ### Added
 - **Rev lights from game telemetry**: the wheel's rev LEDs fill with engine
   RPM and flash at the limiter, fed by the game's UDP telemetry (Forza
-  "Data Out", BeamNG / LFS OutGauge, DiRT Rally 2.0 / DiRT 4 extradata 3).
+  Horizon / Motorsport "Data Out", BeamNG / LFS OutGauge, DiRT Rally 2.0 /
+  DiRT 4 extradata 3).
   Tools tab: switch, UDP port, Test LEDs. Takes the LEDs away from the FFB
   meter while active; LEDs go out 2 s after telemetry stops.
 - "Try" buttons next to every force feedback control: play that effect on
@@ -23,6 +24,21 @@
 - The main window is resizable; sliders grow with it.
 - Force feedback tooltips explain what each force does to the wheel and
   what games use it for.
+- Driver status reads the version of the module actually bound to the
+  wheel, and recognises new-lg4ff before its udev permissions are applied.
+- Flatpak: the sandbox shares the network namespace so telemetry can reach
+  the rev lights.
+
+### Fixed (from the pre-release review)
+- Loading a profile now starts or stops the rev lights as saved in it.
+- The Devices tab's periodic refresh no longer discards the equipment ticks
+  or interrupts an install in progress, and the Update button no longer
+  stacks refresh timers.
+- Start service runs pkexec off the GTK thread; cancelling it is not an error.
+- Turning the FFB meter on turns the rev lights off (and vice versa) in both
+  the UI and the profile.
+- Try buttons are greyed while force feedback is off and report an effect
+  that could not be played.
 
 ## 0.10.4 — 2026-09-21
 

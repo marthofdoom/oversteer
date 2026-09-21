@@ -193,6 +193,9 @@ class GtkHandlers:
         self.controller.test_rev_leds()
 
     def on_ffbmeter_leds_clicked(self, widget):
+        if widget.get_active() and self.model.get_rev_leds():
+            self.ui.set_rev_leds(False, None)    # the meter and the rev lights can't share the LEDs
+            self.model.set_rev_leds(False)
         self.model.set_ffb_leds(widget.get_active())
 
     def on_ffbmeter_overlay_clicked(self, widget):

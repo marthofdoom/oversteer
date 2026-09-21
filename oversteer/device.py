@@ -468,22 +468,24 @@ class Device:
             name = os.path.basename(os.readlink(os.path.join(self.dev_path, 'driver')))
         except OSError:
             pass
+        # Both drivers register as "logitech"; the module link on the driver
+        # tells which one is bound, and its version file which build it is.
         version = None
-        for candidate in ('/sys/module/hid_logitech_new/version', '/sys/module/hid_logitech/version'):
-            try:
-                with open(candidate) as f:
-                    version = f.read().strip()
-                    break
-            except OSError:
-                continue
-        new_lg4ff = self.checked_device_file('sensitivity') is not False and os.path.exists(self.device_file('sensitivity'))
+        try:
+            module = os.path.basename(os.readlink(os.path.join(self.dev_path, 'driver', 'module')))
+            with open(os.path.join('/sys/module', module, 'version')) as f:
+                version = f.read().strip()
+        except OSError:
+            pass
+        new_lg4ff = os.path.exists(self.device_file('sensitivity'))
         return name, version, new_lg4ff
 
-    def play_demo(self, kind, level=100, seconds=2.0):
+    def play_demo(self, kind, level=100, seconds=2.0, on_error=None):
         """Play one effect type on the wheel for a moment so the user can feel
         it: 'constant' (a steady push), 'spring', 'damper', 'friction',
         'inertia', 'rumble'. Runs in a thread; returns False if the device
-        has no force feedback."""
+        has no force feedback. `on_error(exception)` is called from the
+        thread if the effect could not be uploaded or played."""
         dev = self.get_input_device()
         if dev is None or ecodes.EV_FF not in dev.capabilities():
             return False
@@ -512,6 +514,8 @@ class Device:
                 dev.erase_effect(effect_id)
             except OSError as e:
                 logging.warning("demo effect %s: %s", kind, e)
+                if on_error is not None:
+                    on_error(e)
         threading.Thread(target=run, daemon=True).start()
         return True
 

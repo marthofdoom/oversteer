@@ -67,7 +67,9 @@ class Gui:
         self.button_setup_step = False
         self.equipment = []
         self.telemetry = None
+        self.telemetry_generation = 0
         self.combine_busy = False
+        self.combine_timer = None
         self.button_config = [-1] * 9
         self.button_config[0] = [-1]
         self.pressed_button_count = 0
@@ -193,10 +195,15 @@ class Gui:
             if p['id'] == self.COMBINED_ID or p['id'].startswith(self.COMBINED_ID + '-'):
                 attached |= {node for node in p.get('sources', {}).values() if node}
         rows = []
+        # Keep the user's ticks when the same devices are still there; a
+        # periodic refresh must not undo what they were about to combine.
+        previous = self.ui.get_equipment_includes()
         self.equipment = list_equipment()
         wheel_seen = False
         for eq in self.equipment:
-            if wanted is not None:
+            if eq.sys_path in previous:
+                include = previous[eq.sys_path]
+            elif wanted is not None:
                 include = (eq.vendor, eq.product) in wanted
             else:
                 include = eq.kind in COMBINE_DEFAULT and (eq.kind != KIND_WHEEL or not wheel_seen)
@@ -235,6 +242,8 @@ class Gui:
     def refresh_combine_status(self):
         """Periodic refresh so the Devices tab reflects the service without
         a manual Refresh."""
+        if self.combine_busy:
+            return True
         try:
             self.refresh_equipment()
         except Exception as e:
@@ -242,13 +251,34 @@ class Gui:
         return True
 
     def start_proxy_service(self):
+        """Start oversteer-proxy.service through pkexec, off the GTK thread."""
         from .proxy import install
-        code = install.start_service()
-        if code != 0:
-            self.ui.error_dialog(_("Could not start oversteer-proxy.service."),
-                    _("Check its log: journalctl -u oversteer-proxy"))
-        time.sleep(1.0)
-        self.refresh_equipment()
+        if self.combine_busy:
+            return
+        self.combine_busy = True
+        self.ui.set_combine_busy(True, _("Starting…"))
+
+        def work():
+            try:
+                code = install.start_service()
+            except Exception:
+                logging.exception("proxy start")
+                code = -1
+            self.ui.safe_call(done, code)
+
+        def done(code):
+            self.combine_busy = False
+            self.ui.set_combine_busy(False)
+            if code not in (0, 126, 127):     # 126/127: pkexec cancelled or missing
+                self.ui.error_dialog(_("Could not start oversteer-proxy.service."),
+                        _("Check its log: journalctl -u oversteer-proxy"))
+            GLib.timeout_add(1000, self.refresh_combine_status_once)
+
+        Thread(target=work, daemon=True).start()
+
+    def refresh_combine_status_once(self):
+        self.refresh_combine_status()
+        return False
 
     def equipment_changed(self):
         spec = self._load_combined_spec()
@@ -357,7 +387,8 @@ class Gui:
             self.refresh_equipment()
         except Exception as e:
             logging.warning("equipment: %s", e)
-        GLib.timeout_add_seconds(5, self.refresh_combine_status)
+        if self.combine_timer is None:
+            self.combine_timer = GLib.timeout_add_seconds(5, self.refresh_combine_status)
         self.populate_devices()
         self.populate_profiles()
 
@@ -402,6 +433,7 @@ class Gui:
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
+        self.telemetry_generation += 1
         if self.device is None or not self.model.get_rev_leds():
             self.ui.set_rev_leds_status('')
             return
@@ -410,10 +442,17 @@ class Gui:
             self.ui.set_rev_leds_status(_("no LEDs"))
             return
         self.model.set_ffb_leds(False)        # the meter and the rev lights can't share the LEDs
+        self.ui.set_ffb_leds(False)
+        self.telemetry_generation += 1
+        generation = self.telemetry_generation
 
         def status(source):
             text = _("telemetry from {}").format(source) if source else _("waiting for telemetry")
-            self.ui.safe_call(self.ui.set_rev_leds_status, text)
+
+            def show():
+                if self.telemetry is not None and generation == self.telemetry_generation:
+                    self.ui.set_rev_leds_status(text)
+            self.ui.safe_call(show)
         self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status)
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
@@ -441,7 +480,13 @@ class Gui:
     def try_effect(self, kind):
         if self.device is None:
             return
-        if not self.device.play_demo(kind):
+        if not self.model.get_ffb_enabled():
+            self.ui.info_dialog(_("Force feedback is switched off for this device."))
+            return
+
+        def failed(error):
+            self.ui.safe_call(self.ui.info_dialog, _("Could not play the effect."), str(error))
+        if not self.device.play_demo(kind, on_error=failed):
             self.ui.info_dialog(_("This device has no force feedback."))
 
     def reset_ffb_defaults(self):
@@ -486,6 +531,7 @@ class Gui:
         self.model.load(profile_file)
         self.model.flush_device()
         self.model.flush_ui()
+        self.apply_rev_leds()
 
     def save_profile(self, profile_name, check_exists = False):
         if self.device is None:

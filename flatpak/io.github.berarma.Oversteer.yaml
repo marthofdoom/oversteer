@@ -18,6 +18,8 @@ finish-args:
   # Access the steering wheel parameters
   - --filesystem=/sys/devices
   - --device=all
+  # Rev lights: game telemetry arrives over UDP
+  - --share=network
   # Devices tab: state of the proxy service and its installed specs
   - --filesystem=/run/oversteer:ro
   - --filesystem=host-etc
@@ -60,4 +62,4 @@ modules:
     sources:
       - type: git
         url: https://github.com/marthofdoom/oversteer.git
-        tag: v0.10.4
+        tag: v0.11.0

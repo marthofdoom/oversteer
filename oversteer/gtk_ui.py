@@ -362,6 +362,8 @@ class GtkUi:
         enabled = bool(value)
         for widget in (self.ff_gain, self.ff_spring_level, self.ff_damper_level, self.ff_friction_level, self.ff_rumble_level, self.app_gain, self.inertia_mode):
             widget.set_sensitive(enabled and self._available.get(widget, False))
+        for widget in self.try_buttons:
+            widget.set_sensitive(enabled)
 
     def set_ff_gain(self, ff_gain):
         self._available[self.ff_gain] = ff_gain is not None
@@ -415,6 +417,10 @@ class GtkUi:
     def get_included_equipment(self):
         return [row[5] for row in self.equipment_store if row[0]]
 
+    def get_equipment_includes(self):
+        """{sys_path: include} as currently shown."""
+        return {row[5]: bool(row[0]) for row in self.equipment_store}
+
     def toggle_equipment(self, path):
         self.equipment_store[path][0] = not self.equipment_store[path][0]
 
@@ -427,19 +433,19 @@ class GtkUi:
                 self.combine_generic.set_active(bool(generic))
         finally:
             self.updating_combine = False
-        self.updating_rev_leds = False
         self.combine_status.set_text(status)
         self.combine_status.set_tooltip_text(status)
 
     def set_combine_start_visible(self, visible):
         self.combine_start.set_visible(visible)
 
-    def set_combine_busy(self, busy):
+    def set_combine_busy(self, busy, text=None):
         self.combine_switch.set_sensitive(not busy)
         self.combine_generic.set_sensitive(not busy)
+        self.combine_start.set_sensitive(not busy)
         self.equipment_view.set_sensitive(not busy)
         if busy:
-            self.combine_status.set_text(_("Installing…"))
+            self.combine_status.set_text(text or _("Installing…"))
 
     def get_combine_generic(self):
         return self.combine_generic.get_active()
@@ -700,6 +706,7 @@ class GtkUi:
         self._available = {}
         self.updating_invert_pedals = False
         self.updating_combine = False
+        self.updating_rev_leds = False
         self.window = self.builder.get_object('main_window')
         self.about_window = self.builder.get_object('about_window')
         self.preferences_window = self.builder.get_object('preferences_window')
@@ -720,6 +727,7 @@ class GtkUi:
         self.emulation_mode_combobox = self.builder.get_object('emulation_mode')
         self.change_emulation_mode_button = self.builder.get_object('change_emulation_mode')
         self.wheel_range = self.builder.get_object('wheel_range')
+        self.try_buttons = [self.builder.get_object('try_' + kind) for kind in ('constant', 'spring', 'damper', 'friction', 'rumble')]
         self.equipment_store = self.builder.get_object('equipment_store')
         self.equipment_view = self.builder.get_object('equipment_view')
         self.combine_switch = self.builder.get_object('combine_switch')
