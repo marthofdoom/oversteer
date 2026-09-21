@@ -202,6 +202,12 @@ class Device:
     def set_autocenter_persistent(self, value):
         return self._set_flag("autocenter_persistent", value)
 
+    def get_inertia_mode(self):
+        return self._get_flag("inertia_mode")
+
+    def set_inertia_mode(self, value):
+        return self._set_flag("inertia_mode", value)
+
     def get_app_gain(self):
         return self._get_flag("app_gain")
 
@@ -284,11 +290,11 @@ class Device:
         return int(round((int(gain) * 100) / 65535))
 
     def set_ff_gain(self, gain):
-        if gain > 100:
-            gain = 100
+        path = self.checked_device_file("gain")
+        # new-lg4ff accepts up to 150 %; other paths clamp at 100 %
+        gain = min(int(gain), 150 if path else 100)
         gain = str(int(gain / 100.0 * 65535))
         logging.debug("Setting FF gain: %s", gain)
-        path = self.checked_device_file("gain")
         if path:
             with open(path, "w") as file:
                 file.write(gain)

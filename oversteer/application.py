@@ -35,8 +35,10 @@ class Application:
                 help=_("invert pedals, bit mask: 1 clutch, 2 accelerator, 4 brakes, 7 all"))
         parser.add_argument('--ffb', dest='ffb_enabled', action='store_true', default=None, help=_("enable force feedback"))
         parser.add_argument('--no-ffb', dest='ffb_enabled', action='store_false', default=None, help=_("disable force feedback"))
+        parser.add_argument('--inertia-mode', dest='inertia_mode', type=int,
+                help=_("inertia effects: 0 as damper (Windows), 1 true inertia"))
         parser.add_argument('--autocenter', type=int, help=_("set the autocenter strength [0-100]"))
-        parser.add_argument('--ff-gain', type=int, help=_("set the FF gain [0-100]"))
+        parser.add_argument('--ff-gain', type=int, help=_("set the FF gain [0-150, above 100 clips]"))
         parser.add_argument('--autocenter-persistent', dest='autocenter_persistent', action='store_true', default=None,
                 help=_("keep the centering spring on in games"))
         parser.add_argument('--no-autocenter-persistent', dest='autocenter_persistent', action='store_false', default=None,
@@ -138,6 +140,8 @@ class Application:
             model.set_autocenter_persistent(args.autocenter_persistent)
         if args.app_gain is not None:
             model.set_app_gain(args.app_gain)
+        if args.inertia_mode is not None:
+            model.set_inertia_mode(args.inertia_mode)
         if args.spring_level is not None:
             model.set_spring_level(args.spring_level)
         if args.damper_level is not None:

@@ -13,7 +13,7 @@
     <property name="page-increment">10</property>
   </object>
   <object class="GtkAdjustment" id="ff_gain_adjustment">
-    <property name="upper">100</property>
+    <property name="upper">150</property>
     <property name="value">100</property>
     <property name="step-increment">1</property>
     <property name="page-increment">10</property>
@@ -2114,7 +2114,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Global strength for all force feedback effects.</property>
+                            <property name="tooltip-text" translatable="yes">Global strength for all force feedback effects. Above 100% the wheel will clip strong effects; watch the FFBmeter.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2138,8 +2138,11 @@
                                 <property name="valign">center</property>
                                 <property name="adjustment">ff_gain_adjustment</property>
                                 <property name="fill-level">100</property>
+                                <property name="show-fill-level">True</property>
+                                <property name="restrict-to-fill-level">False</property>
                                 <property name="round-digits">0</property>
                                 <property name="digits">0</property>
+                                <signal name="format-value" handler="format_ff_gain_value" swapped="no"/>
                                 <signal name="value-changed" handler="on_ff_gain_value_changed" swapped="no"/>
                               </object>
                               <packing>
@@ -2338,6 +2341,51 @@
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">True</property>
+                                <property name="position">1</property>
+                              </packing>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBoxRow">
+                        <property name="height-request">70</property>
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="activatable">False</property>
+                        <property name="selectable">False</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="tooltip-text" translatable="yes">Render inertia effects from the measured wheel acceleration. When off they are played as a damper, like the Windows driver does.</property>
+                            <property name="valign">center</property>
+                            <property name="spacing">64</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="halign">start</property>
+                                <property name="label" translatable="yes">True inertia effects</property>
+                              </object>
+                              <packing>
+                                <property name="expand">True</property>
+                                <property name="fill">True</property>
+                                <property name="position">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkSwitch" id="inertia_mode">
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="halign">end</property>
+                                <property name="valign">center</property>
+                                <signal name="state-set" handler="on_inertia_mode_state_set" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">False</property>
                                 <property name="position">1</property>
                               </packing>
                             </child>

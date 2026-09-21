@@ -319,6 +319,9 @@ class GtkUi:
     def set_app_gain(self, value):
         self._set_switch(self.app_gain, value)
 
+    def set_inertia_mode(self, value):
+        self._set_switch(self.inertia_mode, value)
+
     # invert_pedals bit mask as the driver defines it, by evdev axis
     INVERT_CLUTCH = 1        # ABS_Y
     INVERT_ACCELERATOR = 2   # ABS_Z
@@ -347,7 +350,7 @@ class GtkUi:
     def set_ffb_enabled(self, value):
         self._set_switch(self.ffb_enabled, value)
         enabled = bool(value)
-        for widget in (self.ff_gain, self.ff_spring_level, self.ff_damper_level, self.ff_friction_level, self.app_gain):
+        for widget in (self.ff_gain, self.ff_spring_level, self.ff_damper_level, self.ff_friction_level, self.app_gain, self.inertia_mode):
             widget.set_sensitive(enabled and (value is not None))
 
     def set_ff_gain(self, ff_gain):
@@ -644,6 +647,7 @@ class GtkUi:
         self.autocenter = self.builder.get_object('autocenter')
         self.autocenter_persistent = self.builder.get_object('autocenter_persistent')
         self.app_gain = self.builder.get_object('app_gain')
+        self.inertia_mode = self.builder.get_object('inertia_mode')
         self.ff_gain = self.builder.get_object('ff_gain')
         self.ffb_enabled = self.builder.get_object('ffb_enabled')
         self.invert_clutch = self.builder.get_object('invert_clutch')
@@ -745,6 +749,8 @@ class GtkUi:
         self.ff_gain.add_mark(60, Gtk.PositionType.BOTTOM, '60')
         self.ff_gain.add_mark(80, Gtk.PositionType.BOTTOM, '80')
         self.ff_gain.add_mark(100, Gtk.PositionType.BOTTOM, '100')
+        self.ff_gain.add_mark(125, Gtk.PositionType.BOTTOM, '125')
+        self.ff_gain.add_mark(150, Gtk.PositionType.BOTTOM, '150')
         self.ff_spring_level.add_mark(20, Gtk.PositionType.BOTTOM, '20')
         self.ff_spring_level.add_mark(40, Gtk.PositionType.BOTTOM, '40')
         self.ff_spring_level.add_mark(60, Gtk.PositionType.BOTTOM, '60')

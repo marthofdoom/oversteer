@@ -14,6 +14,7 @@ class Model:
         'autocenter': None,
         'autocenter_persistent': None,
         'app_gain': None,
+        'inertia_mode': None,
         'combine_pedals': None,
         'invert_pedals': None,
         'ffb_enabled': None,
@@ -36,6 +37,7 @@ class Model:
         'autocenter': 'integer',
         'autocenter_persistent': 'boolean',
         'app_gain': 'boolean',
+        'inertia_mode': 'boolean',
         'combine_pedals': 'integer',
         'invert_pedals': 'integer',
         'ffb_enabled': 'boolean',
@@ -88,6 +90,7 @@ class Model:
             'autocenter': self.device.get_autocenter(),
             'autocenter_persistent': self.device.get_autocenter_persistent(),
             'app_gain': self.device.get_app_gain(),
+            'inertia_mode': self.device.get_inertia_mode(),
             'combine_pedals': self.device.get_combine_pedals(),
             'invert_pedals': self.device.get_invert_pedals(),
             'ffb_enabled': True if self.device.get_ff_gain() is not None else None,
@@ -250,6 +253,14 @@ class Model:
     def get_app_gain(self):
         return self.data['app_gain']
 
+    def set_inertia_mode(self, value):
+        value = bool(value)
+        if self.set_if_changed('inertia_mode', value):
+            self.device.set_inertia_mode(value)
+
+    def get_inertia_mode(self):
+        return self.data['inertia_mode']
+
     def set_combine_pedals(self, value):
         value = int(value)
         if self.set_if_changed('combine_pedals', value):
@@ -338,6 +349,8 @@ class Model:
             self.device.set_autocenter_persistent(self.data['autocenter_persistent'])
         if self.data['app_gain'] is not None:
             self.device.set_app_gain(self.data['app_gain'])
+        if self.data['inertia_mode'] is not None:
+            self.device.set_inertia_mode(self.data['inertia_mode'])
         if self.data['ffb_enabled'] is False:
             self.device.set_ff_gain(0)
         elif self.data['ff_gain'] is not None:
@@ -364,6 +377,7 @@ class Model:
         self.ui.set_autocenter(data['autocenter'])
         self.ui.set_autocenter_persistent(data['autocenter_persistent'])
         self.ui.set_app_gain(data['app_gain'])
+        self.ui.set_inertia_mode(data['inertia_mode'])
         self.ui.set_combine_pedals(data['combine_pedals'])
         self.ui.set_invert_pedals(data['invert_pedals'])
         self.ui.set_spring_level(data['spring_level'])

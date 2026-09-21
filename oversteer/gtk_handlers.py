@@ -105,6 +105,16 @@ class GtkHandlers:
         self.model.set_ffb_enabled(state)
         return False
 
+    def format_ff_gain_value(self, scale, value):
+        value = int(value)
+        if value > 100:
+            return _("{}% (clipping)").format(value)
+        return str(value)
+
+    def on_inertia_mode_state_set(self, widget, state):
+        self.model.set_inertia_mode(state)
+        return False
+
     def on_ff_gain_value_changed(self, widget):
         ff_gain = int(widget.get_value())
         self.model.set_ff_gain(ff_gain)
