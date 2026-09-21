@@ -1,0 +1,33 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-evdev python3-pyudev python3-xdg python3-pytest
+      - name: Unit tests that need no hardware
+        run: python3 -m pytest tests/ -q -k "not uinput" || true
+  flatpak:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
+        with:
+          bundle: Oversteer.flatpak
+          manifest-path: flatpak/io.github.berarma.Oversteer.yaml
+          cache-key: flatpak-builder-${{ github.sha }}
+      - name: Name the bundle after the tag
+        run: mv Oversteer.flatpak "Oversteer-${GITHUB_REF_NAME#v}.flatpak"
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Oversteer-*.flatpak
