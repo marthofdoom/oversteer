@@ -96,6 +96,7 @@ class ProxyDevice:
         self.ff_effects = {}              # virtual id -> real id
         self._ff_cache = {}               # virtual id -> bytes of the uploaded effect
         self._key_state = {}              # (source key, to_code) -> pressed, for ABS -> KEY
+        self._auto_invert = {}            # (source key, from_code) -> bool, for 'auto' inversion
         self._rules = {}                  # (source key, from_type, from_code) -> [Mapping]
         for m in spec.mappings:
             self._rules.setdefault((m.source, m.from_type, m.from_code), []).append(m)
@@ -234,6 +235,14 @@ class ProxyDevice:
             source.grab()
         with self._lock:
             self.sources[spec.key] = source
+        # 'auto' inversion: an axis parked in its upper half at attach time is
+        # inverted so games see it released, not pulled.
+        for (key, etype, code), rules in self._rules.items():
+            if key != spec.key or etype != ecodes.EV_ABS:
+                continue
+            info = source.absinfo.get(code)
+            if info is not None and any(r.invert == 'auto' for r in rules):
+                self._auto_invert[(key, code)] = info.value > (info.min + info.max) // 2
         logging.info("proxy %s: attached %s = %s (%s)", self.spec.id, spec.key, device.name, device.path)
         if self.ui is not None:
             self._sync_axes(source)
@@ -437,7 +446,8 @@ class ProxyDevice:
             return 0.0
         norm = (value - info.min) / (info.max - info.min)
         norm = min(1.0, max(0.0, norm))
-        if rule.invert:
+        invert = rule.invert if rule.invert != 'auto' else self._auto_invert.get((rule.source, rule.from_code), False)
+        if invert:
             norm = 1.0 - norm
         if rule.deadzone:
             # Deadzone around the centre of travel, keeping full range at the ends.
@@ -463,7 +473,7 @@ class ProxyDevice:
             return True
         if rule.from_type == ecodes.EV_KEY and rule.to_type == ecodes.EV_KEY:
             value = event.value
-            if rule.invert and value in (0, 1):
+            if rule.invert is True and value in (0, 1):
                 value = 1 - value
             self._write(ecodes.EV_KEY, rule.to_code, value)
             return True
@@ -481,7 +491,7 @@ class ProxyDevice:
             if event.value == 2:      # key repeat
                 return False
             target = self.spec.abs[rule.to_code]
-            pressed = bool(event.value) != rule.invert
+            pressed = bool(event.value) != (rule.invert is True)
             self._write(ecodes.EV_ABS, rule.to_code, target.max if pressed else target.min)
             return True
         return False
@@ -586,7 +596,7 @@ class ProxyDevice:
         for m in self.spec.mappings:
             lines.append("  map {}.{} -> {}{}".format(m.source, code_name(m.from_type, m.from_code),
                                                      code_name(m.to_type, m.to_code),
-                                                     ' (inverted)' if m.invert else ''))
+                                                     ' (inverted)' if m.invert is True else (' (auto invert)' if m.invert == 'auto' else '')))
         if self.spec.ff_source:
             lines.append("  force feedback -> {} ({} effect(s) loaded)".format(self.spec.ff_source, len(self.ff_effects)))
         return "\n".join(lines)

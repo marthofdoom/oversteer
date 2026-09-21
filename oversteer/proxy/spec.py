@@ -227,7 +227,7 @@ class Mapping:
     from_code: int = 0
     to_type: int = 0
     to_code: int = 0
-    invert: bool = False
+    invert: object = False      # True / False / 'auto' (invert when the axis rests in its upper half)
     raw: bool = False
     deadzone: float = 0.0
     when: dict = None
@@ -255,15 +255,20 @@ class Mapping:
         deadzone = float(data.get('deadzone', 0))
         if not 0 <= deadzone < 1:
             raise SpecError("mapping {!r}: deadzone must be within [0, 1)".format(data['from']))
+        invert = data.get('invert', False)
+        if invert != 'auto':
+            invert = bool(invert)
+        elif from_type != ecodes.EV_ABS:
+            raise SpecError("mapping {!r}: 'auto' inversion is for axes".format(data['from']))
         return cls(source=source, from_type=from_type, from_code=from_code, to_type=to_type,
-                   to_code=to_code, invert=bool(data.get('invert', False)),
+                   to_code=to_code, invert=invert,
                    raw=bool(data.get('raw', False)), deadzone=deadzone, when=when)
 
     def to_dict(self):
         data = {'source': self.source, 'from': code_name(self.from_type, self.from_code),
                 'to': code_name(self.to_type, self.to_code)}
         if self.invert:
-            data['invert'] = True
+            data['invert'] = self.invert
         if self.raw:
             data['raw'] = True
         if self.deadzone:

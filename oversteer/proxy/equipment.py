@@ -34,9 +34,13 @@ KNOWN_SHIFTERS = {
     '046d:c26f': (6, 6),    # Logitech Driving Force Shifter (standalone, G923/G PRO)
 }
 
-# Axes a combined wheel hands out to extra devices, in order
-SPARE_AXES = [ecodes.ABS_RY, ecodes.ABS_RX, ecodes.ABS_THROTTLE, ecodes.ABS_RUDDER,
-              ecodes.ABS_WHEEL, ecodes.ABS_GAS, ecodes.ABS_BRAKE, ecodes.ABS_MISC]
+# Axes a combined wheel hands out to extra devices, in order. Only codes
+# above ABS_RZ: SDL/Proton number DirectInput axes by evdev code order, so
+# an extra axis must sort after the wheel's own X/Y/Z/RZ or it shifts the
+# game's pedal bindings (ABS_RX/RY would land between Z and RZ).
+SPARE_AXES = [ecodes.ABS_THROTTLE, ecodes.ABS_RUDDER, ecodes.ABS_WHEEL, ecodes.ABS_GAS,
+              ecodes.ABS_BRAKE, ecodes.ABS_HAT3X, ecodes.ABS_HAT3Y, ecodes.ABS_PRESSURE,
+              ecodes.ABS_DISTANCE, ecodes.ABS_TILT_X, ecodes.ABS_TILT_Y, ecodes.ABS_MISC]
 
 _KNOWN_WHEELS = {v for k, v in vars(wid).items() if k.isupper() and isinstance(v, str)}
 
@@ -58,8 +62,27 @@ class Equipment:
         self.abs = _bits(parent, 'capabilities/abs')
         self.ff = bool(_bits(parent, 'capabilities/ff'))
         self.readable = bool(self.node) and os.access(self.node, os.R_OK)
+        self.rest_high = self._axes_resting_high()
         self.keyboard = udevice.get('ID_INPUT_KEYBOARD') == '1' or udevice.get('ID_INPUT_KEY') == '1'
         self.kind = self._classify()
+
+    def _axes_resting_high(self):
+        """Axes whose current (resting) value is in the upper half, so a
+        game sees them as 'pulled' unless inverted. Needs a readable node;
+        hidden devices are read by the daemon at attach time instead."""
+        high = set()
+        if not self.readable:
+            return high
+        try:
+            from evdev import InputDevice
+            dev = InputDevice(self.node)
+            for code, info in dev.capabilities(absinfo=True).get(ecodes.EV_ABS, []):
+                if info.max > info.min and info.value > (info.min + info.max) // 2:
+                    high.add(code)
+            dev.close()
+        except OSError:
+            pass
+        return high
 
     @property
     def usb_id(self):
@@ -241,8 +264,10 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None):
                 break
             target = spare_axes.pop(0)
             extra_abs[target] = {'min': 0, 'max': 65535, 'fuzz': 16, 'flat': 4096}
+            # Rest at the low end: games treat an axis parked at max as engaged.
+            # The daemon decides at attach time (the node may be hidden from us).
             mappings.append({'source': key, 'from': code, 'to': code_name(ecodes.EV_ABS, target),
-                             'invert': dev.kind == KIND_HANDBRAKE})
+                             'invert': 'auto'})
 
     data = {
         'id': spec_id,

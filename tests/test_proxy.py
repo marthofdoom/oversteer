@@ -216,3 +216,33 @@ def test_key_state_seeded_and_released_on_detach():
         assert 301 not in virt.active_keys()       # neutral
     finally:
         proxy.stop()
+
+
+def test_auto_invert_from_rest_position():
+    """'auto' inverts an axis that rests high (so games see it released) and leaves one resting low alone."""
+    caps = {e.EV_ABS: [(e.ABS_THROTTLE, AbsInfo(65535, 0, 65535, 0, 0, 0)), (e.ABS_RUDDER, AbsInfo(0, 0, 65535, 0, 0, 0))]}
+    ui = UInput(caps, name='Fake Levers', vendor=FAKE_VENDOR, product=0x5555, version=1)
+    time.sleep(0.2)
+    spec = ProxySpec.from_dict({
+        'id': 'test-auto', 'name': 'auto',
+        'identity': {'name': 'Proxied Levers'},
+        'sources': {'lv': {'match': {'vendor': '1234', 'product': '5555'}}},
+        'capabilities': {'abs': {'ABS_GAS': {'min': 0, 'max': 65535}, 'ABS_BRAKE': {'min': 0, 'max': 65535}}},
+        'mappings': [{'from': 'ABS_THROTTLE', 'to': 'ABS_GAS', 'invert': 'auto'},
+                     {'from': 'ABS_RUDDER', 'to': 'ABS_BRAKE', 'invert': 'auto'}],
+    })
+    proxy = ProxyDevice(spec)
+    proxy.start()
+    try:
+        wait_state(proxy, ProxyState.RUNNING)
+        virt = find_by_name('Proxied Levers')
+        time.sleep(0.2)
+        assert virt.absinfo(e.ABS_GAS).value == 0        # rested high -> inverted -> released
+        assert virt.absinfo(e.ABS_BRAKE).value == 0      # rested low -> untouched
+        ui.write(e.EV_ABS, e.ABS_THROTTLE, 0); ui.write(e.EV_ABS, e.ABS_RUDDER, 65535); ui.syn()
+        events = read_events(virt)
+        assert (e.EV_ABS, e.ABS_GAS, 65535) in events
+        assert (e.EV_ABS, e.ABS_BRAKE, 65535) in events
+    finally:
+        proxy.stop()
+        ui.close()
