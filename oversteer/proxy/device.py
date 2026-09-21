@@ -249,6 +249,7 @@ class ProxyDevice:
             return
         logging.info("proxy %s: lost %s (%s) %s", self.spec.id, key, source.path, reason)
         source.close()
+        self._release_keys_from(key)
         if key == self.spec.ff_source:
             # Effect ids on the real device are gone; keep the cache so they
             # can be re-uploaded when it comes back.
@@ -307,8 +308,9 @@ class ProxyDevice:
             self._sync_axes(source)
 
     def _sync_axes(self, source):
-        """Push the source's current axis positions through the mappings so
-        the virtual device starts coherent (e.g. a pedal already pressed)."""
+        """Push the source's current axis positions and pressed keys through
+        the mappings so the virtual device starts coherent (a pedal already
+        pressed, a shifter already in gear)."""
         wrote = False
         key = source.spec.key
         for code, info in source.absinfo.items():
@@ -320,6 +322,41 @@ class ProxyDevice:
             elif self.spec.passthrough == key:
                 self._write(ecodes.EV_ABS, code, info.value)
                 wrote = True
+        try:
+            pressed = set(source.device.active_keys())
+        except OSError:
+            pressed = set()
+        for code in pressed:
+            rules = self._rules.get((key, ecodes.EV_KEY, code))
+            if rules:
+                for rule in rules:
+                    wrote |= self._apply(rule, source, _FakeEvent(ecodes.EV_KEY, code, 1))
+            elif self.spec.passthrough == key:
+                self._write(ecodes.EV_KEY, code, 1)
+                wrote = True
+        if wrote:
+            self.ui.syn()
+
+    def _release_keys_from(self, key):
+        """A source went away: release every virtual key it could have been
+        holding (a shifter unplugged in gear must not leave the gear engaged)."""
+        if self.ui is None:
+            return
+        wrote = False
+        for (src, etype, code), rules in self._rules.items():
+            if src != key or etype != ecodes.EV_KEY:
+                continue
+            for rule in rules:
+                if rule.to_type == ecodes.EV_KEY and self.last_values.get((ecodes.EV_KEY, rule.to_code)):
+                    self._write(ecodes.EV_KEY, rule.to_code, 0)
+                    wrote = True
+        if self.spec.passthrough == key:
+            for (etype, code), value in list(self.last_values.items()):
+                if etype == ecodes.EV_KEY and value:
+                    self._write(ecodes.EV_KEY, code, 0)
+                    wrote = True
+        for state_key in [k for k in self._key_state if k[0] == key]:
+            self._key_state[state_key] = False
         if wrote:
             self.ui.syn()
 

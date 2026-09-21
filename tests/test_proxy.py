@@ -187,3 +187,32 @@ def test_ff_passthrough():
     finally:
         proxy.stop()
         wheel.close()
+
+
+def test_key_state_seeded_and_released_on_detach():
+    """A shifter already in gear shows the gear on attach; unplugging it releases the gear."""
+    caps = {e.EV_KEY: [e.BTN_TRIGGER, e.BTN_THUMB]}
+    ui = UInput(caps, name='Fake Shifter', vendor=FAKE_VENDOR, product=0x7777, version=1)
+    time.sleep(0.2)
+    ui.write(e.EV_KEY, e.BTN_THUMB, 1)     # in 2nd gear before the proxy exists
+    ui.syn()
+    spec = ProxySpec.from_dict({
+        'id': 'test-gear', 'name': 'gear',
+        'identity': {'name': 'Proxied Shifter'},
+        'sources': {'sh': {'match': {'vendor': '1234', 'product': '7777'}}},
+        'mappings': [{'from': 'BTN_TRIGGER', 'to': '300'}, {'from': 'BTN_THUMB', 'to': '301'}],
+    })
+    proxy = ProxyDevice(spec)
+    proxy.start()
+    try:
+        wait_state(proxy, ProxyState.RUNNING)
+        virt = find_by_name('Proxied Shifter')
+        time.sleep(0.2)
+        assert 301 in virt.active_keys()           # seeded from the source
+        ui.close()                                 # shifter unplugged while in gear
+        t0 = time.time()
+        while 301 in virt.active_keys() and time.time() - t0 < 3:
+            time.sleep(0.05)
+        assert 301 not in virt.active_keys()       # neutral
+    finally:
+        proxy.stop()
