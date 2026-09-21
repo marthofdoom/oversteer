@@ -43,6 +43,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.10.1" date="2026-09-21">
+      <description>
+        <ul>
+          <li>Proxy service runs from a root-owned daemon copy; works from the Flatpak</li>
+          <li>Flatpak manifest and release bundle</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-09-20">
       <description>
         <ul>

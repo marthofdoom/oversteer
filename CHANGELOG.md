@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.1 — 2026-09-21
+
+### Changed
+- The proxy service runs from a root-owned copy of the daemon in
+  `/usr/local/lib/oversteer-proxy` installed by the Devices tab, so it works
+  the same from a source tree, a system install or the Flatpak (the host
+  needs `python3-evdev`, `python3-pyudev` and polkit). `--unsafe-dev-tree`
+  is gone.
+
+### Added
+- Flatpak: `flatpak/io.github.berarma.Oversteer.yaml` (derived from the
+  Flathub manifest) and `scripts/build-flatpak.sh`; a single-file bundle is
+  attached to each release.
+
 ## 0.10.0 — 2026-09-20
 
 ### Added
