@@ -12,16 +12,16 @@ Where a feature is implemented: **driver** = new-lg4ff sysfs/kernel, **app** = O
 | Feature | G HUB | LGS | Oversteer + new-lg4ff | Where | Notes |
 |---|---|---|---|---|---|
 | Operating range 40–900° | ✅ | ✅ | ✅ `range` | driver | |
-| Steering sensitivity curve (0–100, 50 = linear) | ✅ | ✅ | ❌ | driver | apply in `lg4ff_adjust_input_event` on ABS_X; expose `sensitivity` sysfs |
+| Steering sensitivity curve (0–100, 50 = linear) | ✅ | ✅ | ✅ `sensitivity` | driver | verified on G29; re-emits axis on change |
 | Centering spring on/off + strength | ✅ | ✅ | ✅ `autocenter` 0–100 | driver | 0 = off |
-| Persistent centering spring (survives game `FF_AUTOCENTER 0`) | – | ✅ (registry `PersistentCenteringSpring`) | ❌ | driver | sysfs store and app share `set_autocenter`; add `autocenter_persistent` |
+| Persistent centering spring (survives game `FF_AUTOCENTER 0`) | – | ✅ (registry `PersistentCenteringSpring`) | ✅ `autocenter_persistent` | driver | verified on G29 |
 | Overall effects strength | – (dropped) | ✅ 0–100 | ✅ `gain` (master) | driver | |
 | Overall effects strength > 100% | – | ✅ up to 150 in older LGS | ❌ | driver | issue new-lg4ff#29 |
 | Spring effect strength | – | ✅ | ✅ `spring_level` | driver | |
 | Damper effect strength | – | ✅ | ✅ `damper_level` | driver | |
 | Friction effect strength | – | – | ➕ `friction_level` | driver | |
-| Enable/disable force feedback | – | ✅ | ⚠️ gain 0 | app | add explicit toggle |
-| Allow game to adjust settings (app `FF_GAIN` honoured) | – | ✅ | ❌ always honoured | driver | add `app_gain` toggle: ignore app gain when off |
+| Enable/disable force feedback | – | ✅ | ✅ `ffb_enabled` | app | switch zeroes gain, keeps settings |
+| Allow game to adjust settings (app `FF_GAIN` honoured) | – | ✅ | ✅ `app_gain` | driver | verified on G29 |
 | Wheel LEDs as FFB clipping meter | – | – | ➕ `ffb_leds` | driver | |
 | Wheel LEDs driven by game telemetry | SDK only | SDK only | ❌ | app | LED class exists; needs telemetry source (SimHub-like) |
 | Change range from wheel buttons | – | – | ➕ `use_buttons` | app | |
@@ -47,7 +47,7 @@ Where a feature is implemented: **driver** = new-lg4ff sysfs/kernel, **app** = O
 |---|---|---|---|---|
 | Combine pedals (brake + accelerator on one axis) | ✅ | ✅ | ✅ `combine_pedals` (also clutch+accel) ➕ | driver |
 | Pedal sensitivity / response curve | ✅ | ✅ | ❌ | driver or app |
-| Invert pedal axes | – | – | ❌ (PR new-lg4ff#120) | driver |
+| Invert pedal axes | – | – | ✅ `invert_pedals` bit mask per axis ➕ | driver |
 | Pedal deadzone / range of motion | – | – | ❌ (oversteer#273) | app |
 
 ## Software / workflow
@@ -63,8 +63,8 @@ Where a feature is implemented: **driver** = new-lg4ff sysfs/kernel, **app** = O
 
 ## Order of work
 
-1. **G HUB parity (app-visible features)** — sensitivity, persistent centering spring,
-   allow-game-to-adjust, FFB on/off, pedal curves/invert, button assignments, per-game auto profiles.
+1. **G HUB parity (app-visible features)** — ~~sensitivity, persistent centering spring,
+   allow-game-to-adjust, FFB on/off, pedal invert~~ (done 2026-09-20), pedal curves, button assignments, per-game auto profiles.
 2. **Driver parity** — inertia, dynamic slots, gain > 100 %, PS4 mode.
 3. **Proxy devices** — combined virtual wheel, handbrake identity (FH6 Device-1 fix).
 

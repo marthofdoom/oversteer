@@ -162,6 +162,74 @@ class Device:
             file.write(wrange)
         return True
 
+    def get_sensitivity(self):
+        path = self.checked_device_file("sensitivity")
+        if not path:
+            return None
+        with open(path, "r") as file:
+            data = file.read()
+        return int(data.strip())
+
+    def set_sensitivity(self, sensitivity):
+        path = self.checked_device_file("sensitivity")
+        if not path:
+            return False
+        sensitivity = str(int(sensitivity))
+        logging.debug("Setting sensitivity: %s", sensitivity)
+        with open(path, "w") as file:
+            file.write(sensitivity)
+        return True
+
+    def _get_flag(self, filename):
+        path = self.checked_device_file(filename)
+        if not path:
+            return None
+        with open(path, "r") as file:
+            return int(file.read().strip()) != 0
+
+    def _set_flag(self, filename, value):
+        path = self.checked_device_file(filename)
+        if not path:
+            return False
+        logging.debug("Setting %s: %s", filename, value)
+        with open(path, "w") as file:
+            file.write("1" if value else "0")
+        return True
+
+    def get_autocenter_persistent(self):
+        return self._get_flag("autocenter_persistent")
+
+    def set_autocenter_persistent(self, value):
+        return self._set_flag("autocenter_persistent", value)
+
+    def get_inertia_mode(self):
+        return self._get_flag("inertia_mode")
+
+    def set_inertia_mode(self, value):
+        return self._set_flag("inertia_mode", value)
+
+    def get_app_gain(self):
+        return self._get_flag("app_gain")
+
+    def set_app_gain(self, value):
+        return self._set_flag("app_gain", value)
+
+    def get_invert_pedals(self):
+        path = self.checked_device_file("invert_pedals")
+        if not path:
+            return None
+        with open(path, "r") as file:
+            return int(file.read().strip())
+
+    def set_invert_pedals(self, mask):
+        path = self.checked_device_file("invert_pedals")
+        if not path:
+            return False
+        logging.debug("Setting invert_pedals: %s", mask)
+        with open(path, "w") as file:
+            file.write(str(int(mask)))
+        return True
+
     def get_combine_pedals(self):
         path = self.checked_device_file("combine_pedals")
         if not path:
@@ -222,11 +290,11 @@ class Device:
         return int(round((int(gain) * 100) / 65535))
 
     def set_ff_gain(self, gain):
-        if gain > 100:
-            gain = 100
+        path = self.checked_device_file("gain")
+        # new-lg4ff accepts up to 150 %; other paths clamp at 100 %
+        gain = min(int(gain), 150 if path else 100)
         gain = str(int(gain / 100.0 * 65535))
         logging.debug("Setting FF gain: %s", gain)
-        path = self.checked_device_file("gain")
         if path:
             with open(path, "w") as file:
                 file.write(gain)
