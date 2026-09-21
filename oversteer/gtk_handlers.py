@@ -121,6 +121,14 @@ class GtkHandlers:
     def on_ff_friction_level_value_changed(self, widget):
         self.model.set_friction_level(widget.get_value())
 
+    def on_autocenter_persistent_state_set(self, widget, state):
+        self.model.set_autocenter_persistent(state)
+        return False
+
+    def on_app_gain_state_set(self, widget, state):
+        self.model.set_app_gain(state)
+        return False
+
     def on_ffbmeter_leds_clicked(self, widget):
         self.model.set_ffb_leds(widget.get_active())
 

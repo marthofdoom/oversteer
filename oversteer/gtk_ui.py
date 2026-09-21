@@ -306,6 +306,19 @@ class GtkUi:
             self.autocenter.set_sensitive(True)
             self.autocenter.set_value(int(autocenter))
 
+    def _set_switch(self, switch, value):
+        if value is None:
+            switch.set_sensitive(False)
+            return
+        switch.set_sensitive(True)
+        switch.set_active(bool(value))
+
+    def set_autocenter_persistent(self, value):
+        self._set_switch(self.autocenter_persistent, value)
+
+    def set_app_gain(self, value):
+        self._set_switch(self.app_gain, value)
+
     def set_ff_gain(self, ff_gain):
         if ff_gain is None:
             self.ff_gain.set_sensitive(False)
@@ -598,6 +611,8 @@ class GtkUi:
         self.combine_brakes = self.builder.get_object('combine_brakes')
         self.combine_clutch = self.builder.get_object('combine_clutch')
         self.autocenter = self.builder.get_object('autocenter')
+        self.autocenter_persistent = self.builder.get_object('autocenter_persistent')
+        self.app_gain = self.builder.get_object('app_gain')
         self.ff_gain = self.builder.get_object('ff_gain')
         self.ff_spring_level = self.builder.get_object('ff_spring_level')
         self.ff_damper_level = self.builder.get_object('ff_damper_level')

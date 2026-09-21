@@ -12,6 +12,8 @@ class Model:
         'sensitivity': None,
         'ff_gain': None,
         'autocenter': None,
+        'autocenter_persistent': None,
+        'app_gain': None,
         'combine_pedals': None,
         'spring_level': None,
         'damper_level': None,
@@ -30,6 +32,8 @@ class Model:
         'sensitivity': 'integer',
         'ff_gain': 'integer',
         'autocenter': 'integer',
+        'autocenter_persistent': 'boolean',
+        'app_gain': 'boolean',
         'combine_pedals': 'integer',
         'spring_level': 'integer',
         'damper_level': 'integer',
@@ -78,6 +82,8 @@ class Model:
             'sensitivity': self.device.get_sensitivity(),
             'ff_gain': self.device.get_ff_gain(),
             'autocenter': self.device.get_autocenter(),
+            'autocenter_persistent': self.device.get_autocenter_persistent(),
+            'app_gain': self.device.get_app_gain(),
             'combine_pedals': self.device.get_combine_pedals(),
             'spring_level': self.device.get_spring_level(),
             'damper_level': self.device.get_damper_level(),
@@ -204,6 +210,22 @@ class Model:
     def get_autocenter(self):
         return self.data['autocenter']
 
+    def set_autocenter_persistent(self, value):
+        value = bool(value)
+        if self.set_if_changed('autocenter_persistent', value):
+            self.device.set_autocenter_persistent(value)
+
+    def get_autocenter_persistent(self):
+        return self.data['autocenter_persistent']
+
+    def set_app_gain(self, value):
+        value = bool(value)
+        if self.set_if_changed('app_gain', value):
+            self.device.set_app_gain(value)
+
+    def get_app_gain(self):
+        return self.data['app_gain']
+
     def set_combine_pedals(self, value):
         value = int(value)
         if self.set_if_changed('combine_pedals', value):
@@ -288,6 +310,10 @@ class Model:
             self.device.center_wheel()
         if self.data['autocenter'] is not None:
             self.device.set_autocenter(self.data['autocenter'])
+        if self.data['autocenter_persistent'] is not None:
+            self.device.set_autocenter_persistent(self.data['autocenter_persistent'])
+        if self.data['app_gain'] is not None:
+            self.device.set_app_gain(self.data['app_gain'])
         if self.data['ff_gain'] is not None:
             self.device.set_ff_gain(self.data['ff_gain'])
         if self.data['spring_level'] is not None:
@@ -308,6 +334,8 @@ class Model:
         self.ui.set_sensitivity(data['sensitivity'])
         self.ui.set_ff_gain(data['ff_gain'])
         self.ui.set_autocenter(data['autocenter'])
+        self.ui.set_autocenter_persistent(data['autocenter_persistent'])
+        self.ui.set_app_gain(data['app_gain'])
         self.ui.set_combine_pedals(data['combine_pedals'])
         self.ui.set_spring_level(data['spring_level'])
         self.ui.set_damper_level(data['damper_level'])

@@ -33,6 +33,14 @@ class Application:
         parser.add_argument('--combine-pedals', type=int, dest='combine_pedals', help=_("combine pedals [0-2]"))
         parser.add_argument('--autocenter', type=int, help=_("set the autocenter strength [0-100]"))
         parser.add_argument('--ff-gain', type=int, help=_("set the FF gain [0-100]"))
+        parser.add_argument('--autocenter-persistent', dest='autocenter_persistent', action='store_true', default=None,
+                help=_("keep the centering spring on in games"))
+        parser.add_argument('--no-autocenter-persistent', dest='autocenter_persistent', action='store_false', default=None,
+                help=_("let games turn the centering spring off"))
+        parser.add_argument('--app-gain', dest='app_gain', action='store_true', default=None,
+                help=_("let games adjust the FF gain"))
+        parser.add_argument('--no-app-gain', dest='app_gain', action='store_false', default=None,
+                help=_("ignore FF gain changes from games"))
         parser.add_argument('--spring-level', type=int, help=_("set the spring level [0-100]"))
         parser.add_argument('--damper-level', type=int, help=_("set the damper level [0-100]"))
         parser.add_argument('--friction-level', type=int, help=_("set the friction level [0-100]"))
@@ -118,6 +126,10 @@ class Application:
             model.set_autocenter(args.autocenter)
         if args.ff_gain is not None:
             model.set_ff_gain(args.ff_gain)
+        if args.autocenter_persistent is not None:
+            model.set_autocenter_persistent(args.autocenter_persistent)
+        if args.app_gain is not None:
+            model.set_app_gain(args.app_gain)
         if args.spring_level is not None:
             model.set_spring_level(args.spring_level)
         if args.damper_level is not None:

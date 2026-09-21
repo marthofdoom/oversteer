@@ -180,6 +180,34 @@ class Device:
             file.write(sensitivity)
         return True
 
+    def _get_flag(self, filename):
+        path = self.checked_device_file(filename)
+        if not path:
+            return None
+        with open(path, "r") as file:
+            return int(file.read().strip()) != 0
+
+    def _set_flag(self, filename, value):
+        path = self.checked_device_file(filename)
+        if not path:
+            return False
+        logging.debug("Setting %s: %s", filename, value)
+        with open(path, "w") as file:
+            file.write("1" if value else "0")
+        return True
+
+    def get_autocenter_persistent(self):
+        return self._get_flag("autocenter_persistent")
+
+    def set_autocenter_persistent(self, value):
+        return self._set_flag("autocenter_persistent", value)
+
+    def get_app_gain(self):
+        return self._get_flag("app_gain")
+
+    def set_app_gain(self, value):
+        return self._set_flag("app_gain", value)
+
     def get_combine_pedals(self):
         path = self.checked_device_file("combine_pedals")
         if not path:
