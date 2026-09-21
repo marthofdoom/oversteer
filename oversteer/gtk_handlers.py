@@ -164,6 +164,9 @@ class GtkHandlers:
         if not self.ui.updating_combine:
             self.controller.equipment_changed()
 
+    def on_combine_start_clicked(self, widget):
+        self.controller.start_proxy_service()
+
     def on_equipment_refresh_clicked(self, widget):
         self.controller.refresh_equipment()
 

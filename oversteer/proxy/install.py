@@ -234,6 +234,15 @@ def install(spec_dirs=None):
     return 0
 
 
+def start_service():
+    """Start (and enable) the proxy service; via pkexec when not root."""
+    if not _root():
+        return _elevated(['start'])
+    _run(['systemctl', 'enable', '--now', 'oversteer-proxy.service'])
+    _run(['systemctl', 'restart', 'oversteer-proxy.service'])
+    return 0
+
+
 def remove():
     """Remove the service, the hide rules, the system specs and the daemon copy."""
     if not _root():
@@ -257,5 +266,7 @@ if __name__ == '__main__':
         sys.exit(install(sys.argv[3:]))
     if len(sys.argv) >= 2 and sys.argv[1] == 'remove':
         sys.exit(remove())
-    print("usage: python3 -m oversteer.proxy.install install --specs <dir...> | remove", file=sys.stderr)
+    if len(sys.argv) >= 2 and sys.argv[1] == 'start':
+        sys.exit(start_service())
+    print("usage: python3 -m oversteer.proxy.install install --specs <dir...> | start | remove", file=sys.stderr)
     sys.exit(2)

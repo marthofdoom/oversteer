@@ -428,6 +428,10 @@ class GtkUi:
         finally:
             self.updating_combine = False
         self.combine_status.set_text(status)
+        self.combine_status.set_tooltip_text(status)
+
+    def set_combine_start_visible(self, visible):
+        self.combine_start.set_visible(visible)
 
     def set_combine_busy(self, busy):
         self.combine_switch.set_sensitive(not busy)
@@ -706,6 +710,7 @@ class GtkUi:
         self.combine_switch = self.builder.get_object('combine_switch')
         self.combine_status = self.builder.get_object('combine_status')
         self.combine_generic = self.builder.get_object('combine_generic')
+        self.combine_start = self.builder.get_object('combine_start')
         self.wheel_range_setup = self.builder.get_object('wheel_range_setup')
         self.wheel_sensitivity = self.builder.get_object('wheel_sensitivity')
         self.combine_none = self.builder.get_object('combine_none')

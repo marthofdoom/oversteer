@@ -4188,6 +4188,22 @@ Be careful when running the tests and follow the instructions as closely as poss
                       </packing>
                     </child>
                     <child>
+                      <object class="GtkButton" id="combine_start">
+                        <property name="label" translatable="yes">Start service</property>
+                        <property name="visible">False</property>
+                        <property name="no-show-all">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">True</property>
+                        <property name="tooltip-text" translatable="yes">Start oversteer-proxy.service (asks for the administrator password). If it stops again, see: journalctl -u oversteer-proxy</property>
+                        <signal name="clicked" handler="on_combine_start_clicked" swapped="no"/>
+                      </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">True</property>
+                        <property name="position">4</property>
+                      </packing>
+                    </child>
+                    <child>
                       <object class="GtkButton" id="equipment_refresh">
                         <property name="label" translatable="yes">Refresh</property>
                         <property name="visible">True</property>
@@ -4198,7 +4214,7 @@ Be careful when running the tests and follow the instructions as closely as poss
                       <packing>
                         <property name="expand">False</property>
                         <property name="fill">True</property>
-                        <property name="position">4</property>
+                        <property name="position">5</property>
                       </packing>
                     </child>
                   </object>
