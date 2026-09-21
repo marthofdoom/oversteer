@@ -29,6 +29,7 @@ class Application:
         parser.add_argument('--list', action='store_true', help=_("list connected devices"))
         parser.add_argument('--mode', help=_("set the compatibility mode"))
         parser.add_argument('--range', type=int, help=_("set the rotation range [40-900]"))
+        parser.add_argument('--sensitivity', type=int, help=_("set the steering sensitivity [0-100, 50 = linear]"))
         parser.add_argument('--combine-pedals', type=int, dest='combine_pedals', help=_("combine pedals [0-2]"))
         parser.add_argument('--autocenter', type=int, help=_("set the autocenter strength [0-100]"))
         parser.add_argument('--ff-gain', type=int, help=_("set the FF gain [0-100]"))
@@ -109,6 +110,8 @@ class Application:
             model.set_mode(args.mode)
         if args.range is not None:
             model.set_range(args.range)
+        if args.sensitivity is not None:
+            model.set_sensitivity(args.sensitivity)
         if args.combine_pedals is not None:
             model.set_combine_pedals(args.combine_pedals)
         if args.autocenter is not None:

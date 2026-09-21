@@ -162,6 +162,24 @@ class Device:
             file.write(wrange)
         return True
 
+    def get_sensitivity(self):
+        path = self.checked_device_file("sensitivity")
+        if not path:
+            return None
+        with open(path, "r") as file:
+            data = file.read()
+        return int(data.strip())
+
+    def set_sensitivity(self, sensitivity):
+        path = self.checked_device_file("sensitivity")
+        if not path:
+            return False
+        sensitivity = str(int(sensitivity))
+        logging.debug("Setting sensitivity: %s", sensitivity)
+        with open(path, "w") as file:
+            file.write(sensitivity)
+        return True
+
     def get_combine_pedals(self):
         path = self.checked_device_file("combine_pedals")
         if not path:

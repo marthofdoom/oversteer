@@ -278,6 +278,13 @@ class GtkUi:
         wrange = str(round(wrange * 10))
         self.overlay_wheel_range.set_label(wrange)
 
+    def set_sensitivity(self, sensitivity):
+        if sensitivity is None:
+            self.wheel_sensitivity.set_sensitive(False)
+            return
+        self.wheel_sensitivity.set_sensitive(True)
+        self.wheel_sensitivity.set_value(int(sensitivity))
+
     def set_combine_pedals(self, combine_pedals):
         if combine_pedals is None:
             self.combine_brakes.set_sensitive(False)
@@ -586,6 +593,7 @@ class GtkUi:
         self.change_emulation_mode_button = self.builder.get_object('change_emulation_mode')
         self.wheel_range = self.builder.get_object('wheel_range')
         self.wheel_range_setup = self.builder.get_object('wheel_range_setup')
+        self.wheel_sensitivity = self.builder.get_object('wheel_sensitivity')
         self.combine_none = self.builder.get_object('combine_none')
         self.combine_brakes = self.builder.get_object('combine_brakes')
         self.combine_clutch = self.builder.get_object('combine_clutch')

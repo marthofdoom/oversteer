@@ -9,6 +9,7 @@ class Model:
     defaults = {
         'mode': None,
         'range': None,
+        'sensitivity': None,
         'ff_gain': None,
         'autocenter': None,
         'combine_pedals': None,
@@ -26,6 +27,7 @@ class Model:
     types = {
         'mode': 'string',
         'range': 'integer',
+        'sensitivity': 'integer',
         'ff_gain': 'integer',
         'autocenter': 'integer',
         'combine_pedals': 'integer',
@@ -73,6 +75,7 @@ class Model:
         return {
             'mode': self.device.get_mode(),
             'range': self.device.get_range(),
+            'sensitivity': self.device.get_sensitivity(),
             'ff_gain': self.device.get_ff_gain(),
             'autocenter': self.device.get_autocenter(),
             'combine_pedals': self.device.get_combine_pedals(),
@@ -177,6 +180,14 @@ class Model:
     def get_range(self):
         return self.data['range']
 
+    def set_sensitivity(self, value):
+        value = int(value)
+        if self.set_if_changed('sensitivity', value):
+            self.device.set_sensitivity(value)
+
+    def get_sensitivity(self):
+        return self.data['sensitivity']
+
     def set_ff_gain(self, value):
         value = int(value)
         if self.set_if_changed('ff_gain', value):
@@ -269,6 +280,8 @@ class Model:
             self.device.set_mode(self.data['mode'])
         if self.data['range'] is not None:
             self.device.set_range(self.data['range'])
+        if self.data['sensitivity'] is not None:
+            self.device.set_sensitivity(self.data['sensitivity'])
         if self.data['combine_pedals'] is not None:
             self.device.set_combine_pedals(self.data['combine_pedals'])
         if self.data['center_wheel']:
@@ -292,6 +305,7 @@ class Model:
             data = self.data
         self.ui.set_mode(data['mode'])
         self.ui.set_range(data['range'])
+        self.ui.set_sensitivity(data['sensitivity'])
         self.ui.set_ff_gain(data['ff_gain'])
         self.ui.set_autocenter(data['autocenter'])
         self.ui.set_combine_pedals(data['combine_pedals'])

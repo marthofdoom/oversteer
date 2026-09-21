@@ -66,6 +66,15 @@ class GtkHandlers:
         self.model.set_range(wrange)
         self.ui.overlay_wheel_range.set_label(str(wrange))
 
+    def on_wheel_sensitivity_value_changed(self, widget):
+        self.model.set_sensitivity(widget.get_value())
+
+    def format_wheel_sensitivity_value(self, scale, value):
+        value = int(value)
+        if value == 50:
+            return _("{} (linear)").format(value)
+        return str(value)
+
     def on_overlay_decrange_clicked(self, widget):
         adjustment = self.ui.wheel_range.get_adjustment()
         step = adjustment.get_step_increment()
