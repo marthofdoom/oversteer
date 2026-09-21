@@ -23,7 +23,7 @@ Wants=systemd-udev-settle.service
 
 [Service]
 Type=simple
-ExecStart={exec_start}
+{environment}ExecStart={exec_start}
 Restart=on-failure
 RestartSec=3s
 StandardOutput=journal
@@ -77,15 +77,28 @@ def _reapply_permissions(specs):
         print("note: could not re-apply permissions to plugged devices: {}".format(e), file=sys.stderr)
 
 
+def _environment_lines():
+    """Environment the daemon needs when Oversteer runs from a meson build
+    directory instead of an installed copy."""
+    lines = []
+    for var in ('MESON_BUILD_ROOT', 'MESON_SOURCE_ROOT'):
+        if os.environ.get(var):
+            lines.append('Environment={}={}\n'.format(var, os.environ[var]))
+    return ''.join(lines)
+
+
 def install(exec_start, spec_dirs=None):
     """Install the hide rules, the system specs and the service. Runs via
     pkexec when not root. Returns the process return code."""
     if not _root():
-        cmd = ['pkexec', sys.executable, '-m', 'oversteer.proxy.install', 'install', exec_start]
+        cmd = ['pkexec', 'env']
+        for var in ('MESON_BUILD_ROOT', 'MESON_SOURCE_ROOT'):
+            if os.environ.get(var):
+                cmd.append('{}={}'.format(var, os.environ[var]))
+        cmd += [sys.executable, '-m', 'oversteer.proxy.install', 'install', exec_start]
         cmd += spec_dirs or [user_dir()]
-        env = dict(os.environ)
-        env['PYTHONPATH'] = os.pathsep.join(p for p in [os.path.dirname(os.path.dirname(os.path.dirname(__file__))), env.get('PYTHONPATH', '')] if p)
-        return subprocess.call(cmd, env=env)
+        cmd.insert(2, 'PYTHONPATH=' + os.pathsep.join(p for p in [os.path.dirname(os.path.dirname(os.path.dirname(__file__))), os.environ.get('PYTHONPATH', '')] if p))
+        return subprocess.call(cmd)
 
     dirs = [BUILTIN_DIR] + list(spec_dirs or [])
     specs, errors = load_specs(dirs)
@@ -106,7 +119,7 @@ def install(exec_start, spec_dirs=None):
         os.remove(HIDE_RULES_FILE)
 
     with open(UNIT_FILE, 'w') as f:
-        f.write(UNIT_TEMPLATE.format(exec_start=exec_start))
+        f.write(UNIT_TEMPLATE.format(exec_start=exec_start, environment=_environment_lines()))
     _run(['systemctl', 'daemon-reload'])
     if any(s.enabled for s in specs.values()):
         _run(['systemctl', 'enable', '--now', 'oversteer-proxy.service'])
@@ -121,9 +134,8 @@ def install(exec_start, spec_dirs=None):
 def remove():
     """Remove the service, the hide rules and the system specs."""
     if not _root():
-        env = dict(os.environ)
-        env['PYTHONPATH'] = os.pathsep.join(p for p in [os.path.dirname(os.path.dirname(os.path.dirname(__file__))), env.get('PYTHONPATH', '')] if p)
-        return subprocess.call(['pkexec', sys.executable, '-m', 'oversteer.proxy.install', 'remove'], env=env)
+        pythonpath = os.pathsep.join(p for p in [os.path.dirname(os.path.dirname(os.path.dirname(__file__))), os.environ.get('PYTHONPATH', '')] if p)
+        return subprocess.call(['pkexec', 'env', 'PYTHONPATH=' + pythonpath, sys.executable, '-m', 'oversteer.proxy.install', 'remove'])
     _run(['systemctl', 'disable', '--now', 'oversteer-proxy.service'])
     for path in (UNIT_FILE, HIDE_RULES_FILE):
         if os.path.exists(path):

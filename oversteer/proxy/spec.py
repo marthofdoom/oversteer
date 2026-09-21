@@ -49,11 +49,14 @@ def _hex(value, what):
 
 
 def code_from_name(name, ev_type=None):
-    """Resolve "ABS_Z" / "BTN_TRIGGER" / 3 to (ev_type, code)."""
+    """Resolve "ABS_Z" / "BTN_TRIGGER" / 300 / "0x12c" to (ev_type, code).
+
+    Numbers are for codes without an evdev name (the G29 shifter's gears
+    1-3 are 300-302); they take the type given, or KEY."""
+    if isinstance(name, str) and re.match(r'^(0x[0-9a-fA-F]+|[0-9]+)$', name):
+        name = int(name, 0)
     if isinstance(name, int):
-        if ev_type is None:
-            raise SpecError("numeric code {} needs an explicit type".format(name))
-        return ev_type, name
+        return (ev_type if ev_type is not None else ecodes.EV_KEY), name
     prefix = str(name).split('_', 1)[0]
     if prefix == 'ABS':
         table, etype = ecodes.ecodes, ecodes.EV_ABS
@@ -241,7 +244,8 @@ class Mapping:
         elif source not in sources:
             raise SpecError("mapping {!r}: unknown source {!r}".format(data['from'], source))
         from_type, from_code = code_from_name(data['from'])
-        to_type, to_code = code_from_name(data['to'])
+        to_type, to_code = code_from_name(data['to'], from_type if isinstance(data['to'], (int, str)) and
+                                          re.match(r'^(0x[0-9a-fA-F]+|[0-9]+)$', str(data['to'])) else None)
         if from_type not in (ecodes.EV_ABS, ecodes.EV_KEY) or to_type not in (ecodes.EV_ABS, ecodes.EV_KEY):
             raise SpecError("mapping {!r}: only ABS and KEY events can be mapped".format(data['from']))
         when = data.get('when')

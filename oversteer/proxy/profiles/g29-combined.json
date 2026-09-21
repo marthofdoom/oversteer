@@ -1,7 +1,7 @@
 {
   "id": "g29-combined",
   "name": "G29 + Thrustmaster shifter + ANNX handbrake as one wheel",
-  "description": "One virtual Logitech G29 carrying the wheel (with force feedback passed through), a Thrustmaster T500 RS shifter on the G29's own shifter buttons (gears 1-6 = buttons 13-18, reverse = 19, like a Driving Force Shifter) and an ANNX handbrake on an extra axis (ABS_RY). Fixes games that only talk force feedback to the first device they find (Forza Horizon).",
+  "description": "One virtual Logitech G29 carrying the wheel (with force feedback passed through), a Thrustmaster T500 RS shifter (7 gears + R) on the G29's own shifter buttons (gears 1-6 = buttons 13-18, evdev codes 300-303/704/705; reverse = 19, code 706; exactly like a Driving Force Shifter on a real G29) plus gear 7 on an extra button 26 and an ANNX handbrake on an extra axis (ABS_RY). Fixes games that only talk force feedback to the first device they find (Forza Horizon).",
   "enabled": false,
   "identity": {
     "name": "Logitech G29 Driving Force Racing Wheel",
@@ -18,17 +18,18 @@
     "handbrake": {"match": {"vendor": "8086", "product": "0a01"}, "grab": true, "hide": true, "required": false}
   },
   "capabilities": {
-    "keys": [],
+    "keys": ["BTN_TRIGGER_HAPPY10"],
     "abs": {"ABS_RY": {"min": 0, "max": 65535, "fuzz": 16, "flat": 4096}}
   },
   "mappings": [
-    {"source": "shifter", "from": "BTN_TRIGGER", "to": "BTN_BASE3"},
-    {"source": "shifter", "from": "BTN_THUMB",   "to": "BTN_BASE4"},
-    {"source": "shifter", "from": "BTN_THUMB2",  "to": "BTN_BASE5"},
-    {"source": "shifter", "from": "BTN_TOP",     "to": "BTN_BASE6"},
+    {"source": "shifter", "from": "BTN_TRIGGER", "to": "300", "comment": "gear 1 = G29 button 13"},
+    {"source": "shifter", "from": "BTN_THUMB",   "to": "301"},
+    {"source": "shifter", "from": "BTN_THUMB2",  "to": "302"},
+    {"source": "shifter", "from": "BTN_TOP",     "to": "BTN_DEAD", "comment": "gear 4 = 303"},
     {"source": "shifter", "from": "BTN_TOP2",    "to": "BTN_TRIGGER_HAPPY1"},
     {"source": "shifter", "from": "BTN_PINKIE",  "to": "BTN_TRIGGER_HAPPY2"},
-    {"source": "shifter", "from": "BTN_BASE",    "to": "BTN_TRIGGER_HAPPY3"},
+    {"source": "shifter", "from": "BTN_BASE",    "to": "BTN_TRIGGER_HAPPY10", "comment": "gear 7: no G29 equivalent, extra button 26"},
+    {"source": "shifter", "from": "BTN_BASE2",   "to": "BTN_TRIGGER_HAPPY3", "comment": "reverse = button 19"},
     {"source": "handbrake", "from": "ABS_THROTTLE", "to": "ABS_RY", "invert": true}
   ]
 }

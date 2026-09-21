@@ -186,7 +186,7 @@ class Application:
 
         if args.proxy_install:
             from oversteer.proxy import install
-            exec_start = os.path.realpath(argv[0]) + ' --proxy-daemon'
+            exec_start = '{} {} --proxy-daemon'.format(sys.executable, os.path.realpath(argv[0]))
             return install.install(exec_start)
         if args.proxy_remove:
             from oversteer.proxy import install
