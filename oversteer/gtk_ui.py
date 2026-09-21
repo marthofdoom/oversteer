@@ -403,6 +403,9 @@ class GtkUi:
             self.ff_rumble_level.set_sensitive(True)
             self.ff_rumble_level.set_value(int(level))
 
+    def set_driver_status(self, text):
+        self.driver_status.set_markup(text)
+
     def set_equipment(self, rows):
         """rows: (include, kind, name, usb_id, status, sys_path)"""
         self.equipment_store.clear()
@@ -690,6 +693,7 @@ class GtkUi:
         self.check_permissions = self.builder.get_object('check_permissions')
 
         self.device_combobox = self.builder.get_object('device')
+        self.driver_status = self.builder.get_object('driver_status')
         self.profile_combobox = self.builder.get_object('profile')
         self.new_profile_name_entry = self.builder.get_object('new_profile_name')
         self.save_profile_button = self.builder.get_object('save_profile')

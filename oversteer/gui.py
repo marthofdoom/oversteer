@@ -14,6 +14,9 @@ import sys
 from threading import Thread
 import time
 from xdg.BaseDirectory import save_config_path
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import GLib
 from .gtk_ui import GtkUi
 from .model import Model
 from .test import Test
@@ -359,12 +362,49 @@ class Gui:
 
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
+        self.update_driver_status()
 
         if self.model.get_profile():
             self.ui.set_profile(self.model.get_profile())
         else:
             self.model.flush_device()
             self.model.flush_ui()
+
+    def try_effect(self, kind):
+        if self.device is None:
+            return
+        if not self.device.play_demo(kind):
+            self.ui.info_dialog(_("This device has no force feedback."))
+
+    def reset_ffb_defaults(self):
+        m = self.model
+        for setter, value in ((m.set_ffb_enabled, True), (m.set_ff_gain, 100), (m.set_app_gain, True),
+                              (m.set_spring_level, 30), (m.set_damper_level, 30), (m.set_friction_level, 30),
+                              (m.set_rumble_level, 50), (m.set_inertia_mode, False),
+                              (m.set_autocenter, 0), (m.set_autocenter_persistent, False)):
+            try:
+                setter(value)
+            except Exception as e:
+                logging.debug("reset: %s", e)
+        m.flush_ui()
+
+    def update_driver_status(self):
+        if self.device is None:
+            self.ui.set_driver_status('')
+            return
+        name, version, new_lg4ff = self.device.driver_info()
+        if name is None:
+            text = ''
+        elif new_lg4ff:
+            text = _("Driver: new-lg4ff {}").format(version or '')
+        elif name == 'logitech':
+            text = _("Driver: in-kernel hid-logitech — install the new-lg4ff fork for sensitivity, rumble, friction and the other Logitech features")
+        else:
+            text = _("Driver: {} {}").format(name, version or '')
+        proxied = self.device._proxied_node()
+        if proxied:
+            text += _("  ·  combined device active ({})").format(proxied)
+        self.ui.set_driver_status('<small>{}</small>'.format(GLib.markup_escape_text(text)))
 
     def load_profile(self, profile_name):
         if profile_name is None or profile_name == '':

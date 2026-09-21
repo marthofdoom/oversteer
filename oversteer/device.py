@@ -1,4 +1,5 @@
-from evdev import ecodes, InputDevice
+from evdev import ecodes, InputDevice, ff
+import threading
 import grp
 import logging
 import os
@@ -450,6 +451,60 @@ class Device:
         for name in ('sensitivity', 'invert_pedals', 'app_gain', 'autocenter_persistent', 'inertia_mode'):
             if not self.check_file_permissions(name):
                 return False
+        return True
+
+    def driver_info(self):
+        """(driver name, version, has new-lg4ff features) for the status line."""
+        name = None
+        try:
+            name = os.path.basename(os.readlink(os.path.join(self.dev_path, 'driver')))
+        except OSError:
+            pass
+        version = None
+        for candidate in ('/sys/module/hid_logitech_new/version', '/sys/module/hid_logitech/version'):
+            try:
+                with open(candidate) as f:
+                    version = f.read().strip()
+                    break
+            except OSError:
+                continue
+        new_lg4ff = self.checked_device_file('sensitivity') is not False and os.path.exists(self.device_file('sensitivity'))
+        return name, version, new_lg4ff
+
+    def play_demo(self, kind, level=100, seconds=2.0):
+        """Play one effect type on the wheel for a moment so the user can feel
+        it: 'constant' (a steady push), 'spring', 'damper', 'friction',
+        'inertia', 'rumble'. Runs in a thread; returns False if the device
+        has no force feedback."""
+        dev = self.get_input_device()
+        if dev is None or ecodes.EV_FF not in dev.capabilities():
+            return False
+        strength = max(0, min(100, int(level)))
+        ms = int(seconds * 1000)
+        if kind == 'constant':
+            effect = ff.Effect(ecodes.FF_CONSTANT, -1, 0x4000, ff.Trigger(0, 0), ff.Replay(ms, 0),
+                               ff.EffectType(ff_constant_effect=ff.Constant(level=int(0x7fff * strength / 100 * 0.35))))
+        elif kind == 'rumble':
+            effect = ff.Effect(ecodes.FF_RUMBLE, -1, 0, ff.Trigger(0, 0), ff.Replay(ms, 0),
+                               ff.EffectType(ff_rumble_effect=ff.Rumble(strong_magnitude=0xffff, weak_magnitude=0x8000)))
+        else:
+            types = {'spring': ecodes.FF_SPRING, 'damper': ecodes.FF_DAMPER, 'friction': ecodes.FF_FRICTION, 'inertia': ecodes.FF_INERTIA}
+            if kind not in types:
+                return False
+            cond = ff.Condition(right_saturation=0xffff, left_saturation=0xffff, right_coeff=0x7fff, left_coeff=0x7fff,
+                                deadband=0, center=0)
+            effect = ff.Effect(types[kind], -1, 0x4000, ff.Trigger(0, 0), ff.Replay(ms, 0),
+                               ff.EffectType(ff_condition_effect=(cond, cond)))
+
+        def run():
+            try:
+                effect_id = dev.upload_effect(effect)
+                dev.write(ecodes.EV_FF, effect_id, 1)
+                time.sleep(seconds + 0.2)
+                dev.erase_effect(effect_id)
+            except OSError as e:
+                logging.warning("demo effect %s: %s", kind, e)
+        threading.Thread(target=run, daemon=True).start()
         return True
 
     def get_last_axis_value(self, axis):

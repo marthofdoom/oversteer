@@ -167,6 +167,17 @@ class GtkHandlers:
     def on_equipment_refresh_clicked(self, widget):
         self.controller.refresh_equipment()
 
+    def on_try_effect_clicked(self, widget):
+        kind = Gtk.Buildable.get_name(widget).replace('try_', '')
+        self.controller.try_effect(kind)
+
+    def on_range_preset_clicked(self, widget):
+        degrees = int(Gtk.Buildable.get_name(widget).replace('range_preset_', ''))
+        self.ui.wheel_range.set_value(degrees / 10)
+
+    def on_ffb_reset_clicked(self, widget):
+        self.controller.reset_ffb_defaults()
+
     def on_ffbmeter_leds_clicked(self, widget):
         self.model.set_ffb_leds(widget.get_active())
 
