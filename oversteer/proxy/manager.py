@@ -23,7 +23,11 @@ from .spec import ProxySpec, SpecError
 BUILTIN_DIR = os.path.join(os.path.dirname(__file__), 'profiles')
 SYSTEM_DIR = '/etc/oversteer/proxies'
 STATUS_FILE = '/run/oversteer/proxies.json'
-HIDE_RULES_FILE = '/etc/udev/rules.d/90-oversteer-proxy-hide.rules'
+# Two files: the uaccess tag must go before 73-seat-late.rules applies the
+# ACL, and the mode/group must come after every other rule that grants
+# access (Oversteer's own 99-* wheel rules, distro joystick rules).
+HIDE_TAG_RULES_FILE = '/etc/udev/rules.d/71-oversteer-proxy-hide.rules'
+HIDE_RULES_FILE = '/etc/udev/rules.d/99-zz-oversteer-proxy-hide.rules'
 
 
 def user_dir():
@@ -50,7 +54,20 @@ def load_specs(dirs):
     return specs, errors
 
 
-def hide_rules(specs):
+def hidden_sources(specs):
+    """(vendor, product, label) for every hidden source of an enabled spec."""
+    seen = {}
+    for spec in sorted(specs.values(), key=lambda s: s.id):
+        if not spec.enabled:
+            continue
+        for source in spec.sources.values():
+            if not source.hide or source.vendor is None or source.product is None:
+                continue
+            seen.setdefault((source.vendor, source.product), '{} ({})'.format(spec.name, source.key))
+    return [(v, p, label) for (v, p), label in seen.items()]
+
+
+def hide_rules(specs, assignment='MODE="0600", GROUP="root"'):
     """udev rules making every hidden source root-only, so games can't open
     the real device and only see the proxy. Returns the rules file text."""
     lines = [
@@ -58,21 +75,10 @@ def hide_rules(specs):
         "# from games; the proxy daemon (root) re-presents them as virtual devices.",
         "",
     ]
-    seen = set()
-    for spec in sorted(specs.values(), key=lambda s: s.id):
-        if not spec.enabled:
-            continue
-        for source in spec.sources.values():
-            if not source.hide or source.vendor is None or source.product is None:
-                continue
-            key = (source.vendor, source.product)
-            if key in seen:
-                continue
-            seen.add(key)
-            lines.append('# {} ({})'.format(spec.name, source.key))
-            lines.append('SUBSYSTEM=="input", KERNEL=="event*|js*", ATTRS{{idVendor}}=="{:04x}", '
-                         'ATTRS{{idProduct}}=="{:04x}", MODE="0600", GROUP="root", TAG-="uaccess"'
-                         .format(source.vendor, source.product))
+    for vendor, product, label in hidden_sources(specs):
+        lines.append('# ' + label)
+        lines.append('SUBSYSTEM=="input", KERNEL=="event*|js*", ATTRS{{idVendor}}=="{:04x}", '
+                     'ATTRS{{idProduct}}=="{:04x}", {}'.format(vendor, product, assignment))
     lines.append("")
     return "\n".join(lines)
 

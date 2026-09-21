@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 
-from .manager import HIDE_RULES_FILE, SYSTEM_DIR, BUILTIN_DIR, load_specs, hide_rules, user_dir
+from .manager import HIDE_RULES_FILE, HIDE_TAG_RULES_FILE, SYSTEM_DIR, BUILTIN_DIR, load_specs, hide_rules, user_dir
 
 UNIT_FILE = '/etc/systemd/system/oversteer-proxy.service'
 UNIT_TEMPLATE = """[Unit]
@@ -51,6 +51,7 @@ def _reapply_permissions(specs):
     """Apply the new rules to devices that are already plugged in."""
     _run(['udevadm', 'control', '--reload-rules'])
     _run(['udevadm', 'trigger', '--subsystem-match=input', '--action=change'])
+    _run(['udevadm', 'settle', '--timeout=5'])
     # logind's uaccess ACLs are not removed by a re-trigger; drop them by hand.
     try:
         import pyudev
@@ -112,11 +113,15 @@ def install(exec_start, spec_dirs=None):
         spec.save(os.path.join(SYSTEM_DIR, spec.id + '.json'))
 
     rules = _rules_for(specs)
-    if rules:
-        with open(HIDE_RULES_FILE, 'w') as f:
-            f.write(rules)
-    elif os.path.exists(HIDE_RULES_FILE):
-        os.remove(HIDE_RULES_FILE)
+    for path, text in ((HIDE_RULES_FILE, rules), (HIDE_TAG_RULES_FILE, hide_rules(specs, 'TAG-="uaccess"') if rules else None)):
+        if text:
+            with open(path, 'w') as f:
+                f.write(text)
+        elif os.path.exists(path):
+            os.remove(path)
+    for stale in ('/etc/udev/rules.d/90-oversteer-proxy-hide.rules',):
+        if os.path.exists(stale):
+            os.remove(stale)
 
     with open(UNIT_FILE, 'w') as f:
         f.write(UNIT_TEMPLATE.format(exec_start=exec_start, environment=_environment_lines()))
@@ -137,7 +142,7 @@ def remove():
         pythonpath = os.pathsep.join(p for p in [os.path.dirname(os.path.dirname(os.path.dirname(__file__))), os.environ.get('PYTHONPATH', '')] if p)
         return subprocess.call(['pkexec', 'env', 'PYTHONPATH=' + pythonpath, sys.executable, '-m', 'oversteer.proxy.install', 'remove'])
     _run(['systemctl', 'disable', '--now', 'oversteer-proxy.service'])
-    for path in (UNIT_FILE, HIDE_RULES_FILE):
+    for path in (UNIT_FILE, HIDE_RULES_FILE, HIDE_TAG_RULES_FILE, '/etc/udev/rules.d/90-oversteer-proxy-hide.rules'):
         if os.path.exists(path):
             os.remove(path)
     shutil.rmtree(SYSTEM_DIR, ignore_errors=True)
