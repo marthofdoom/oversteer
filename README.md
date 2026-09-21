@@ -22,6 +22,17 @@ as they are requested.
 
 __Use at your own risk. Suggestions, bugs and pull requests welcome.__
 
+## Install (this fork)
+
+- **Flatpak** (any distro): download `Oversteer-<version>.flatpak` from the
+  [releases](https://github.com/marthofdoom/oversteer/releases) and run
+  `flatpak install Oversteer-<version>.flatpak`. The Devices tab's combined
+  device needs, on the host, `python3-evdev`, `python3-pyudev` and polkit;
+  the app installs the service itself (asks for the administrator password).
+- **From source**: `meson setup build -Dprefix=/usr/local && sudo ninja -C build install`.
+- Pair with the [new-lg4ff fork](https://github.com/marthofdoom/new-lg4ff)
+  (`.deb` on its releases page) for the Logitech features.
+
 ## Supported devices
 
 _Oversteer_ maintains a list of known wheel devices. If your wheel isn't

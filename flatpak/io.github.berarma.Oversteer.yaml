@@ -1,0 +1,63 @@
+# Flatpak manifest for the marthofdoom fork. Derived from the Flathub manifest
+# (github.com/flathub/io.github.berarma.Oversteer); build with
+#   flatpak run org.flatpak.Builder --user --install-deps-from=flathub --force-clean build-dir flatpak/io.github.berarma.Oversteer.yaml
+app-id: io.github.berarma.Oversteer
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: oversteer
+finish-args:
+  # Wayland support
+  - --socket=wayland
+  # X11 fallback support
+  - --socket=fallback-x11
+  - --share=ipc
+  - --filesystem=/run/udev
+  # Access RPM leds
+  - --filesystem=/sys/class/leds
+  # Access the steering wheel parameters
+  - --filesystem=/sys/devices
+  - --device=all
+  # Devices tab: state of the proxy service and its installed specs
+  - --filesystem=/run/oversteer:ro
+  - --filesystem=/etc/oversteer:ro
+  # Devices tab: install the proxy service on the host (flatpak-spawn --host + pkexec)
+  - --talk-name=org.freedesktop.Flatpak
+cleanup:
+  - '/app/lib/cmake'
+  - '/include'
+  - '/lib/pkgconfig'
+  - '/man'
+  - '/share/cmake'
+  - '/share/doc'
+  - '/share/man'
+  - '/share/vala'
+  - '*.la'
+  - '*.a'
+modules:
+  - shared-modules/lzo/lzo.json
+  - shared-modules/libcanberra/libcanberra.json
+  - name: openblas
+    no-autogen: true
+    make-args:
+      - DYNAMIC_ARCH=1
+      - FC=gfortran
+      - NO_CBLAS=1
+      - NO_LAPACKE=1
+      - USE_OPENMP=0
+    make-install-args:
+      - PREFIX=/app
+    sources:
+      - type: git
+        url: https://github.com/OpenMathLib/OpenBLAS.git
+        tag: v0.3.33
+        commit: 62bcfb0dc9f1cfa685fc04135c50e2780c303137
+  - python-dependencies.yaml
+  - name: oversteer
+    buildsystem: meson
+    config-opts:
+      - -Dudev_rules_dir=/etc/udev/rules.d
+    sources:
+      - type: git
+        url: https://github.com/marthofdoom/oversteer.git
+        tag: v0.10.1
