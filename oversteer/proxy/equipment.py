@@ -242,20 +242,18 @@ def build_combined_specs(wheel, others, spec_id='combined-wheel'):
     return specs
 
 
-def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, strict=False, identity='auto'):
+def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, strict=False, identity='wheel'):
     """A ProxySpec presenting `wheel` (passthrough + force feedback) with the
     other devices' controls folded in. With strict=True nothing is added to
     the wheel's own layout: overflow goes to the wheel's spare buttons
     (one gear onto the PS button) or is dropped."""
     if wheel.kind != KIND_WHEEL:
         raise ValueError("the combined device must be built around a wheel")
-    # 'auto': a wheel on its own keeps its real identity (games apply their
-    # built-in profile); once other devices are folded in the layout is no
-    # longer the wheel's, so present honestly as a generic combined device.
-    # Verified in Forza Horizon 6 under Proton: a recognised wheel switched
-    # to a custom profile loses force feedback, a generic device keeps it.
-    if identity == 'auto':
-        identity = 'generic' if others else 'wheel'
+    # identity 'wheel' (default): the combined device keeps the wheel's real
+    # identity so games apply their built-in profile. 'generic': present as
+    # "Oversteer Combined Wheel" — needed for Forza Horizon 6 under Proton,
+    # where a recognised wheel switched to a custom profile loses force
+    # feedback but a generic device keeps it.
     sources = {'wheel': {'match': {'vendor': '{:04x}'.format(wheel.vendor), 'product': '{:04x}'.format(wheel.product)},
                          'grab': True, 'hide': True, 'required': True}}
     mappings = []

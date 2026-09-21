@@ -3819,7 +3819,7 @@ Be careful when running the tests and follow the instructions as closely as poss
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
                     <property name="halign">start</property>
-                    <property name="label" translatable="yes">Racing equipment found on this computer. Ticked devices are folded into one virtual wheel when combining is on, so games that only talk to one device (force feedback, Forza's "Device 1") see everything at once. The real devices are hidden from games while combined. The combined device is generic ("Oversteer Combined Wheel"): set it up as a custom wheel in the game. Games only look for force feedback devices at start-up, so start the game after the combined device exists.</property>
+                    <property name="label" translatable="yes">Racing equipment found on this computer. Ticked devices are folded into one virtual wheel when combining is on, so games that only talk to one device (force feedback, Forza's "Device 1") see everything at once. The real devices are hidden from games while combined. By default the combined device keeps the wheel's identity; tick the generic option for games like Forza Horizon 6. Games only look for force feedback devices at start-up, so start the game after the combined device exists.</property>
                     <property name="wrap">True</property>
                     <property name="xalign">0</property>
                   </object>
@@ -3940,6 +3940,22 @@ Be careful when running the tests and follow the instructions as closely as poss
                       </packing>
                     </child>
                     <child>
+                      <object class="GtkCheckButton" id="combine_generic">
+                        <property name="label" translatable="yes">Present as generic "Oversteer Combined Wheel"</property>
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
+                        <property name="tooltip-text" translatable="yes">Off: the combined device keeps the wheel's own identity so games apply their built-in profile. On: a generic device set up as a custom wheel in the game. Needed for Forza Horizon 6, which drops force feedback for a recognised wheel in a custom profile but keeps it for a generic one. Forza will not navigate menus from an unknown device, so keep a gamepad or keyboard for menus.</property>
+                        <property name="draw-indicator">True</property>
+                        <signal name="toggled" handler="on_combine_generic_toggled" swapped="no"/>
+                      </object>
+                      <packing>
+                        <property name="expand">False</property>
+                        <property name="fill">True</property>
+                        <property name="position">2</property>
+                      </packing>
+                    </child>
+                    <child>
                       <object class="GtkLabel" id="combine_status">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
@@ -3950,7 +3966,7 @@ Be careful when running the tests and follow the instructions as closely as poss
                       <packing>
                         <property name="expand">True</property>
                         <property name="fill">True</property>
-                        <property name="position">2</property>
+                        <property name="position">3</property>
                       </packing>
                     </child>
                     <child>
@@ -3964,7 +3980,7 @@ Be careful when running the tests and follow the instructions as closely as poss
                       <packing>
                         <property name="expand">False</property>
                         <property name="fill">True</property>
-                        <property name="position">3</property>
+                        <property name="position">4</property>
                       </packing>
                     </child>
                   </object>

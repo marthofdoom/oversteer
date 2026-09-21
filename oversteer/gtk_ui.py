@@ -415,14 +415,19 @@ class GtkUi:
     def toggle_equipment(self, path):
         self.equipment_store[path][0] = not self.equipment_store[path][0]
 
-    def set_combine(self, enabled, status=''):
+    def set_combine(self, enabled, status='', generic=None):
         self.updating_combine = True
         try:
             self.combine_switch.set_sensitive(enabled is not None)
             self.combine_switch.set_active(bool(enabled))
+            if generic is not None:
+                self.combine_generic.set_active(bool(generic))
         finally:
             self.updating_combine = False
         self.combine_status.set_text(status)
+
+    def get_combine_generic(self):
+        return self.combine_generic.get_active()
 
     def set_ffb_leds(self, value):
         if value is None:
@@ -689,6 +694,7 @@ class GtkUi:
         self.equipment_view = self.builder.get_object('equipment_view')
         self.combine_switch = self.builder.get_object('combine_switch')
         self.combine_status = self.builder.get_object('combine_status')
+        self.combine_generic = self.builder.get_object('combine_generic')
         self.wheel_range_setup = self.builder.get_object('wheel_range_setup')
         self.wheel_sensitivity = self.builder.get_object('wheel_sensitivity')
         self.combine_none = self.builder.get_object('combine_none')

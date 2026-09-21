@@ -160,6 +160,10 @@ class GtkHandlers:
             self.controller.set_combine(state)
         return False
 
+    def on_combine_generic_toggled(self, widget):
+        if not self.ui.updating_combine:
+            self.controller.equipment_changed()
+
     def on_equipment_refresh_clicked(self, widget):
         self.controller.refresh_equipment()
 

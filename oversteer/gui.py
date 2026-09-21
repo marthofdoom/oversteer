@@ -211,7 +211,9 @@ class Gui:
             text = _("Combined device enabled, service not running")
         else:
             text = _("Off")
-        self.ui.set_combine(enabled, text)
+        from .proxy.equipment import GENERIC_IDENTITY
+        generic = spec is not None and spec.identity.vendor == int(GENERIC_IDENTITY['vendor'], 16)
+        self.ui.set_combine(enabled, text, generic=generic)
 
     def equipment_changed(self):
         spec = self._load_combined_spec()
@@ -219,7 +221,7 @@ class Gui:
             self.set_combine(True)
 
     def set_combine(self, state):
-        from .proxy.equipment import build_combined_specs, KIND_WHEEL
+        from .proxy.equipment import build_combined_spec, KIND_WHEEL
         import glob
         from .proxy import install
         from .proxy.manager import user_dir
@@ -234,7 +236,8 @@ class Gui:
                 return
             others = [eq for eq in selected if eq is not wheel]
             try:
-                specs = build_combined_specs(wheel, others, spec_id=self.COMBINED_ID)
+                identity = 'generic' if self.ui.get_combine_generic() else 'wheel'
+                specs = [build_combined_spec(wheel, others, spec_id=self.COMBINED_ID, identity=identity)]
             except Exception as e:
                 self.ui.error_dialog(_("Could not build the combined device."), str(e))
                 self.refresh_equipment()
