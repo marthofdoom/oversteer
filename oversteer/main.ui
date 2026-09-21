@@ -333,9 +333,10 @@
   </object>
   <object class="GtkApplicationWindow" id="main_window">
     <property name="can-focus">False</property>
-    <property name="resizable">False</property>
+    <property name="resizable">True</property>
     <property name="window-position">center</property>
-    <property name="default-width">600</property>
+    <property name="default-width">1000</property>
+    <property name="default-height">760</property>
     <property name="show-menubar">False</property>
     <signal name="destroy" handler="on_main_window_destroy" swapped="no"/>
     <child>
@@ -575,7 +576,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Range in degrees that the wheel will be able to rotate both ways. It will affect the sensitivity.</property>
+                            <property name="tooltip-text" translatable="yes">Total rotation lock to lock, in degrees. 900 is the wheel's full travel (what most sims expect); lower values make the steering quicker and stop the wheel harder at the ends. Games that set their own rotation override this while they run.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -616,7 +617,7 @@
                                 </child>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">2</property>
                               </packing>
@@ -676,7 +677,7 @@
                                 </child>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">2</property>
                               </packing>
@@ -2091,7 +2092,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Turn all force feedback off. The strength settings below are kept for when it's turned on again.</property>
+                            <property name="tooltip-text" translatable="yes">Switches all force feedback off (the wheel goes limp, games still see it). The strength settings below are remembered and restored when switched back on.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2136,7 +2137,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Global strength for all force feedback effects. Above 100% the wheel will clip strong effects; watch the FFBmeter.</property>
+                            <property name="tooltip-text" translatable="yes">Master strength for everything the game sends: road feel, self-aligning torque, kerbs, collisions, engine vibration. 100% is the wheel's full torque. Above 100% weak games get louder but strong effects flatten at the wheel's limit (clipping) and detail is lost there; the FFBmeter shows when that happens.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2168,7 +2169,7 @@
                                 <signal name="value-changed" handler="on_ff_gain_value_changed" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
                               </packing>
@@ -2188,7 +2189,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Allow games to scale the force feedback strength. When off only the strength set above applies.</property>
+                            <property name="tooltip-text" translatable="yes">Games can lower the force feedback strength through their own settings (DirectInput gain). On: their setting multiplies the global strength above. Off: the game's setting is ignored and only the global strength applies — useful when a game keeps resetting its FFB to a weak value.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2233,7 +2234,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Gain applied to spring effects. Higher values may produce more clipping.</property>
+                            <property name="tooltip-text" translatable="yes">Spring: a force that pulls the wheel back to a centre point, stronger the further you turn. Games use it for the tyres' self-aligning torque at speed and for the parked-car weight. This scales how hard the game's springs can pull; too high and the wheel snaps to centre on its own.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2262,7 +2263,7 @@
                                 <signal name="value-changed" handler="on_ff_spring_level_value_changed" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
                               </packing>
@@ -2282,7 +2283,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Gain applied to damper effects. Higher values may produce more clipping.</property>
+                            <property name="tooltip-text" translatable="yes">Damper: resistance that grows with how fast the wheel is turning, like moving through thick oil. Games use it to stop the wheel oscillating and to add weight when moving slowly. Higher values calm the wheel down but make quick corrections feel heavy.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2311,7 +2312,7 @@
                                 <signal name="value-changed" handler="on_ff_damper_level_value_changed" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
                               </packing>
@@ -2332,7 +2333,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Gain applied to friction effects. Higher values may produce more clipping.</property>
+                            <property name="tooltip-text" translatable="yes">Friction: a constant resistance whenever the wheel moves, the same at any speed, like a dry bearing. Games use it for the steering rack's own drag and for the front tyres scrubbing at low speed. On the G29 this is rendered by the driver (the wheel has no native friction).</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2361,7 +2362,7 @@
                                 <signal name="value-changed" handler="on_ff_friction_level_value_changed" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
                               </packing>
@@ -2381,7 +2382,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Strength of the vibration used to emulate gamepad rumble on the wheel. 0 disables it.</property>
+                            <property name="tooltip-text" translatable="yes">Rumble: games written for gamepads send motor rumble instead of wheel forces. The driver turns it into a vibration of the wheel rim (30 Hz for the big motor, 60 Hz for the small one). Set the strength to taste; 0 disables it. Racing sims don't use this.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2409,7 +2410,7 @@
                                 <signal name="value-changed" handler="on_ff_rumble_level_value_changed" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
                               </packing>
@@ -2429,7 +2430,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Render inertia effects from the measured wheel acceleration. When off they are played as a damper, like the Windows driver does.</property>
+                            <property name="tooltip-text" translatable="yes">Inertia: extra mass on the wheel — harder to get moving and harder to stop, but no resistance once it's turning steadily. Games use it for the weight of the steering column and front wheels. Off (default): played as a damper, like the Windows driver, since the wheel has no native inertia. On: rendered from the measured wheel acceleration; subtle, bounded so it can't oscillate.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2486,7 +2487,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Continuous autocenter force strength.</property>
+                            <property name="tooltip-text" translatable="yes">Centering spring built into the wheel, independent of any game: pulls the rim back to straight ahead whenever you let go. Useful for games without force feedback and in menus; most force feedback games turn it off and provide their own centring through spring effects.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2515,7 +2516,7 @@
                                 <signal name="value-changed" handler="on_autocenter_value_changed" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="expand">False</property>
+                                <property name="expand">True</property>
                                 <property name="fill">True</property>
                                 <property name="position">1</property>
                               </packing>
@@ -2535,7 +2536,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Games usually turn the centering spring off when they start. Keep it on at the strength set above regardless of what the game asks for.</property>
+                            <property name="tooltip-text" translatable="yes">Games normally switch the centering spring off when they start and replace it with their own forces. Keep it on anyway at the strength set above — for games with weak or no self-centring, or if you want a floor of centring under everything the game does.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
@@ -2799,7 +2800,7 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Enable FFBmeter using the leds in the wheel or the window overlay.</property>
+                            <property name="tooltip-text" translatable="yes">Force feedback meter: shows how much of the wheel's torque is being used. Leds: the wheel's rev lights fill up with force (all lit = 100%, then the pattern changes to show clipping above that). Overlay: a small always-on-top window with the same reading, for wheels without leds.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>
                             <child>
