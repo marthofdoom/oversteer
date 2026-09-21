@@ -271,8 +271,11 @@ class Gui:
                     except SpecError:
                         pass
         # Candidate directory: what the installer sees; copied to the user
-        # config only when the install went through.
-        candidate = tempfile.mkdtemp(prefix='oversteer-proxies-')
+        # config only when the install went through. It lives under the
+        # config dir, not /tmp: inside Flatpak /tmp is private to the sandbox
+        # and the installer runs on the host.
+        os.makedirs(user_dir(), 0o700, exist_ok=True)
+        candidate = tempfile.mkdtemp(prefix='.candidate-', dir=user_dir())
         for spec in specs:
             spec.save(os.path.join(candidate, spec.id + '.json'))
         self.combine_busy = True

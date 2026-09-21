@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3 — 2026-09-21
+
+### Fixed
+- Flatpak: 'Combine into one device' installed nothing because the candidate
+  spec was written to the sandbox's private /tmp, which the host-side
+  installer can't see. It now lives under the config directory.
+
 ## 0.10.2 — 2026-09-21
 
 ### Fixed

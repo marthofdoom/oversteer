@@ -61,6 +61,8 @@ def load_specs(dirs):
         if not directory or not os.path.isdir(directory):
             continue
         for path in sorted(glob.glob(os.path.join(directory, '*.json'))):
+            if os.path.basename(os.path.dirname(path)).startswith('.candidate-'):
+                continue
             try:
                 spec = ProxySpec.load(path, builtin=(directory == BUILTIN_DIR))
             except SpecError as e:

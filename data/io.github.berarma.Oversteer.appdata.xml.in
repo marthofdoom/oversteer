@@ -43,6 +43,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.10.3" date="2026-09-21">
+      <description><ul><li>Flatpak: fix "Combine into one device" installing nothing</li></ul></description>
+    </release>
     <release version="0.10.2" date="2026-09-21">
       <description><ul><li>Flatpak: Devices tab reads the proxy state correctly from the sandbox</li></ul></description>
     </release>
