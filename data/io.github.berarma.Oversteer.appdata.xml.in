@@ -43,6 +43,18 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.9.0" date="2026-09-20">
+      <description>
+        <ul>
+          <li>Steering sensitivity curve (with new-lg4ff 0.6.0)</li>
+          <li>Invert pedals per pedal</li>
+          <li>Force feedback on/off switch</li>
+          <li>Keep centering spring in games; let games adjust FFB strength</li>
+          <li>True inertia effects switch; gain up to 150%</li>
+          <li>udev rule covers the new driver attributes</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.3" date="2024-08-14">
       <description>
         <ul>
