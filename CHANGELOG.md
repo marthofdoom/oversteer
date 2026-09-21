@@ -10,6 +10,9 @@
   a hint when the in-kernel hid-logitech is loaded, and whether the
   combined device is active.
 - "Reset to defaults" on the Force Feedback tab.
+- Devices tab: the status line refreshes itself, explains which service is
+  involved when it isn't running (oversteer-proxy.service, with the
+  journalctl hint) and offers a Start service button.
 
 ### Changed
 - The main window is resizable; sliders grow with it.

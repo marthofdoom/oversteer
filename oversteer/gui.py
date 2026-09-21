@@ -220,14 +220,34 @@ class Gui:
         if running:
             text = _("Combined device {}: {}").format(running.get('devnode') or '', running.get('state'))
         elif enabled:
-            text = _("Combined device installed, service not running")
+            text = _("Installed, but oversteer-proxy.service is not running — the combined device does not exist. "
+                     "Start it here, or check why it stopped: journalctl -u oversteer-proxy")
         else:
             text = _("Off")
+        self.ui.set_combine_start_visible(enabled and not running)
         if installed is not None:
             spec = installed
         from .proxy.equipment import GENERIC_IDENTITY
         generic = spec is not None and spec.identity.vendor == int(GENERIC_IDENTITY['vendor'], 16)
         self.ui.set_combine(enabled, text, generic=generic)
+
+    def refresh_combine_status(self):
+        """Periodic refresh so the Devices tab reflects the service without
+        a manual Refresh."""
+        try:
+            self.refresh_equipment()
+        except Exception as e:
+            logging.debug("combine status: %s", e)
+        return True
+
+    def start_proxy_service(self):
+        from .proxy import install
+        code = install.start_service()
+        if code != 0:
+            self.ui.error_dialog(_("Could not start oversteer-proxy.service."),
+                    _("Check its log: journalctl -u oversteer-proxy"))
+        time.sleep(1.0)
+        self.refresh_equipment()
 
     def equipment_changed(self):
         spec = self._load_combined_spec()
@@ -336,6 +356,7 @@ class Gui:
             self.refresh_equipment()
         except Exception as e:
             logging.warning("equipment: %s", e)
+        GLib.timeout_add_seconds(5, self.refresh_combine_status)
         self.populate_devices()
         self.populate_profiles()
 
