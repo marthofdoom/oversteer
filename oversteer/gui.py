@@ -173,11 +173,19 @@ class Gui:
         wanted = None
         if spec is not None:
             wanted = {(src.vendor, src.product) for src in spec.sources.values()}
+            import glob
+            from .proxy.spec import ProxySpec, SpecError
+            for extra in glob.glob(os.path.join(os.path.dirname(self._combined_spec_path()), self.COMBINED_ID + '-*.json')):
+                try:
+                    wanted |= {(src.vendor, src.product) for src in ProxySpec.load(extra).sources.values()}
+                except SpecError:
+                    pass
         status = ProxyManager.read_status() or {}
         running = next((p for p in status.get('proxies', []) if p['id'] == self.COMBINED_ID), None)
         attached = set()
-        if running:
-            attached = {node for node in running.get('sources', {}).values() if node}
+        for p in status.get('proxies', []):
+            if p['id'] == self.COMBINED_ID or p['id'].startswith(self.COMBINED_ID + '-'):
+                attached |= {node for node in p.get('sources', {}).values() if node}
         rows = []
         self.equipment = list_equipment()
         wheel_seen = False
@@ -211,7 +219,8 @@ class Gui:
             self.set_combine(True)
 
     def set_combine(self, state):
-        from .proxy.equipment import build_combined_spec, KIND_WHEEL
+        from .proxy.equipment import build_combined_specs, KIND_WHEEL
+        import glob
         from .proxy import install
         from .proxy.manager import user_dir
         included = set(self.ui.get_included_equipment())
@@ -225,18 +234,26 @@ class Gui:
                 return
             others = [eq for eq in selected if eq is not wheel]
             try:
-                spec = build_combined_spec(wheel, others, spec_id=self.COMBINED_ID)
+                specs = build_combined_specs(wheel, others, spec_id=self.COMBINED_ID)
             except Exception as e:
                 self.ui.error_dialog(_("Could not build the combined device."), str(e))
                 self.refresh_equipment()
                 return
             os.makedirs(user_dir(), 0o700, exist_ok=True)
-            spec.save(path)
+            for old in glob.glob(os.path.join(user_dir(), self.COMBINED_ID + '-*.json')):
+                os.remove(old)
+            for spec in specs:
+                spec.save(os.path.join(user_dir(), spec.id + '.json'))
         else:
-            spec = self._load_combined_spec()
-            if spec is not None:
-                spec.enabled = False
-                spec.save(path)
+            from .proxy.spec import ProxySpec, SpecError
+            for old in [path] + glob.glob(os.path.join(user_dir(), self.COMBINED_ID + '-*.json')):
+                if os.path.exists(old):
+                    try:
+                        spec = ProxySpec.load(old)
+                        spec.enabled = False
+                        spec.save(old)
+                    except SpecError:
+                        os.remove(old)
         exec_start = '{} {} --proxy-daemon'.format(sys.executable, os.path.realpath(sys.argv[0]))
         code = install.install(exec_start)
         if code != 0:

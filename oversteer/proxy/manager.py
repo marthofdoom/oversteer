@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import threading
+import time
 
 from .device import ProxyDevice
 from .spec import ProxySpec, SpecError
@@ -109,8 +110,15 @@ class ProxyManager:
             wanted = [s for s in self.specs.values() if s.id in only]
         else:
             wanted = self.enabled_specs()
+        # The wheel must enumerate before its companions (games pick the first
+        # device for force feedback): specs whose id others are derived from
+        # go first, and each start waits for the previous device to exist.
+        wanted.sort(key=lambda s: (any(o.id.startswith(s.id + '-') for o in wanted) is False, s.id))
         for spec in wanted:
-            self.start_proxy(spec)
+            proxy = self.start_proxy(spec)
+            deadline = time.monotonic() + 3.0
+            while proxy.devnode is None and proxy.is_running() and time.monotonic() < deadline:
+                time.sleep(0.05)
         self._start_monitor()
         self.write_status()
 
