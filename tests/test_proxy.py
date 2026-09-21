@@ -1,0 +1,189 @@
+"""Functional tests for the proxy devices, using uinput-made fake sources.
+
+Needs /dev/uinput access (the same as running Oversteer's proxies). Run with
+`python3 -m pytest tests/`.
+"""
+
+import os
+import select
+import time
+
+import pytest
+from evdev import InputDevice, UInput, AbsInfo, ecodes as e, ff, list_devices
+
+from oversteer.proxy import ProxySpec, ProxyDevice, ProxyState
+from oversteer.proxy import uinput_ff
+
+pytestmark = pytest.mark.skipif(not os.access('/dev/uinput', os.W_OK), reason="needs /dev/uinput")
+
+FAKE_VENDOR, FAKE_PRODUCT = 0x1234, 0x5678
+
+
+def find_by_name(name, timeout=3.0):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        for path in list_devices():
+            dev = InputDevice(path)
+            if dev.name == name:
+                return dev
+            dev.close()
+        time.sleep(0.05)
+    raise AssertionError("device {!r} did not appear".format(name))
+
+
+def wait_state(proxy, state, timeout=3.0):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if proxy.state == state:
+            return
+        time.sleep(0.02)
+    raise AssertionError("proxy state {} (expected {})".format(proxy.state, state))
+
+
+def read_events(dev, timeout=1.0):
+    out = []
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        r, _, _ = select.select([dev.fd], [], [], 0.05)
+        if r:
+            for ev in dev.read():
+                if ev.type != e.EV_SYN:
+                    out.append((ev.type, ev.code, ev.value))
+    return out
+
+
+@pytest.fixture
+def fake_handbrake():
+    caps = {e.EV_ABS: [(e.ABS_THROTTLE, AbsInfo(0, 0, 65535, 255, 4095, 0))], e.EV_KEY: [e.BTN_TRIGGER]}
+    ui = UInput(caps, name='Fake ANNX', vendor=FAKE_VENDOR, product=FAKE_PRODUCT, version=1)
+    time.sleep(0.2)
+    yield ui
+    ui.close()
+
+
+def test_axis_mapping_and_identity(fake_handbrake):
+    spec = ProxySpec.from_dict({
+        'id': 'test-hb',
+        'name': 'test handbrake',
+        'identity': {'name': 'Proxied Handbrake', 'vendor': '0eb7', 'product': '00e5', 'version': '0001'},
+        'sources': {'hb': {'match': {'vendor': '1234', 'product': '5678'}, 'grab': True}},
+        'capabilities': {'keys': ['BTN_TRIGGER'], 'abs': {'ABS_Z': {'min': 0, 'max': 65535}}},
+        'mappings': [{'source': 'hb', 'from': 'ABS_THROTTLE', 'to': 'ABS_Z', 'invert': True},
+                     {'source': 'hb', 'from': 'BTN_TRIGGER', 'to': 'BTN_TRIGGER'}],
+    })
+    proxy = ProxyDevice(spec)
+    proxy.start()
+    try:
+        wait_state(proxy, ProxyState.RUNNING)
+        virt = find_by_name('Proxied Handbrake')
+        assert (virt.info.vendor, virt.info.product) == (0x0eb7, 0x00e5)
+        caps = virt.capabilities(absinfo=True)
+        assert e.ABS_THROTTLE not in [c for c, _ in caps[e.EV_ABS]]
+        assert [c for c, _ in caps[e.EV_ABS]] == [e.ABS_Z]
+
+        # The virtual axis was seeded from the source's current value (0 -> inverted 65535)
+        assert virt.absinfo(e.ABS_Z).value == 65535
+        fake_handbrake.write(e.EV_ABS, e.ABS_THROTTLE, 30000)
+        fake_handbrake.syn()
+        fake_handbrake.write(e.EV_ABS, e.ABS_THROTTLE, 65535)
+        fake_handbrake.syn()
+        fake_handbrake.write(e.EV_KEY, e.BTN_TRIGGER, 1)
+        fake_handbrake.syn()
+        events = read_events(virt)
+        assert (e.EV_ABS, e.ABS_Z, 35535) in events      # 30000 inverted
+        assert (e.EV_ABS, e.ABS_Z, 0) in events          # 65535 inverted
+        assert (e.EV_KEY, e.BTN_TRIGGER, 1) in events
+        assert proxy.events_out >= 3
+    finally:
+        proxy.stop()
+    assert proxy.state == ProxyState.STOPPED
+
+
+def test_source_hotplug():
+    spec = ProxySpec.from_dict({
+        'id': 'test-hotplug', 'name': 'hotplug',
+        'identity': {'name': 'Hotplug Proxy'},
+        'sources': {'hb': {'match': {'vendor': '1234', 'product': '5678'}}},
+        'capabilities': {'abs': {'ABS_Z': {'min': 0, 'max': 65535}}},
+        'mappings': [{'from': 'ABS_THROTTLE', 'to': 'ABS_Z'}],
+    })
+    proxy = ProxyDevice(spec)
+    proxy.start()
+    try:
+        wait_state(proxy, ProxyState.WAITING)
+        caps = {e.EV_ABS: [(e.ABS_THROTTLE, AbsInfo(0, 0, 65535, 0, 0, 0))]}
+        ui = UInput(caps, name='Late ANNX', vendor=FAKE_VENDOR, product=FAKE_PRODUCT, version=1)
+        proxy.poke()
+        wait_state(proxy, ProxyState.RUNNING)
+        ui.close()
+        # the source vanished: the virtual device stays, state degrades
+        t0 = time.time()
+        while proxy.state != ProxyState.DEGRADED and time.time() - t0 < 3:
+            time.sleep(0.05)
+        assert proxy.state == ProxyState.DEGRADED
+        assert proxy.devnode is not None
+    finally:
+        proxy.stop()
+
+
+def test_ff_passthrough():
+    """A fake FF-capable wheel receives the effects a game uploads to the proxy."""
+    wheel = UInput({e.EV_ABS: [(e.ABS_X, AbsInfo(32768, 0, 65535, 0, 0, 0))],
+                    e.EV_KEY: [e.BTN_TRIGGER],
+                    e.EV_FF: [e.FF_CONSTANT, e.FF_SPRING, e.FF_GAIN]},
+                   name='Fake Wheel', vendor=FAKE_VENDOR, product=0x9999, version=1, max_effects=8)
+    time.sleep(0.2)
+    spec = ProxySpec.from_dict({
+        'id': 'test-ff', 'name': 'ff',
+        'identity': {'name': 'Proxied Wheel', 'vendor': '046d', 'product': 'c24f'},
+        'sources': {'wheel': {'match': {'vendor': '1234', 'product': '9999'}}},
+        'passthrough': 'wheel',
+        'ff': {'source': 'wheel'},
+    })
+    proxy = ProxyDevice(spec)
+    proxy.start()
+    uploads = []
+    try:
+        wait_state(proxy, ProxyState.RUNNING)
+        virt = find_by_name('Proxied Wheel')
+        assert e.FF_CONSTANT in virt.capabilities()[e.EV_FF]
+
+        # Service the fake wheel's uinput FF requests (uploads and erases) while the test runs
+        erases = []
+        stop = {'now': False}
+
+        def service_wheel():
+            while not stop['now']:
+                r, _, _ = select.select([wheel.fd], [], [], 0.05)
+                if not r:
+                    continue
+                for ev in wheel.read():
+                    if ev.type == e.EV_UINPUT and ev.code == e.UI_FF_UPLOAD:
+                        up = uinput_ff.begin_upload(wheel.fd, ev.value)
+                        uploads.append((up.effect.type, up.effect.u.ff_constant_effect.level))
+                        up.retval = 0
+                        uinput_ff.end_upload(wheel.fd, up)
+                    elif ev.type == e.EV_UINPUT and ev.code == e.UI_FF_ERASE:
+                        er = uinput_ff.begin_erase(wheel.fd, ev.value)
+                        erases.append(er.effect_id)
+                        er.retval = 0
+                        uinput_ff.end_erase(wheel.fd, er)
+
+        import threading
+        t = threading.Thread(target=service_wheel, daemon=True)
+        t.start()
+        effect = ff.Effect(e.FF_CONSTANT, -1, 0x4000, ff.Trigger(0, 0), ff.Replay(100, 0),
+                           ff.EffectType(ff_constant_effect=ff.Constant(level=1234)))
+        eid = uinput_ff.upload_effect(virt.fd, effect)      # fcntl.ioctl releases the GIL
+        assert uploads == [(e.FF_CONSTANT, 1234)]
+        real_id = proxy.ff_effects.get(eid)
+        assert real_id is not None
+        uinput_ff.erase_effect(virt.fd, eid)
+        time.sleep(0.2)
+        assert eid not in proxy.ff_effects
+        assert erases == [real_id]
+        stop['now'] = True
+        t.join(1.0)
+    finally:
+        proxy.stop()
+        wheel.close()

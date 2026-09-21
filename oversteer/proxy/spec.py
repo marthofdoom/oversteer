@@ -127,6 +127,7 @@ class SourceSpec:
     name: str = None          # regular expression matched against the evdev name
     phys: str = None          # regular expression matched against phys
     grab: bool = True         # take exclusive access so games don't see the events
+    hide: bool = True         # make the real device root-only (udev rule) so games can't open it
     required: bool = True     # proxy stays down until this source is present
 
     @classmethod
@@ -141,6 +142,7 @@ class SourceSpec:
             name=match.get('name'),
             phys=match.get('phys'),
             grab=bool(data.get('grab', True)),
+            hide=bool(data.get('hide', True)),
             required=bool(data.get('required', True)),
         )
         for pattern in (source.name, source.phys):
@@ -161,7 +163,7 @@ class SourceSpec:
             match['name'] = self.name
         if self.phys is not None:
             match['phys'] = self.phys
-        return {'match': match, 'grab': self.grab, 'required': self.required}
+        return {'match': match, 'grab': self.grab, 'hide': self.hide, 'required': self.required}
 
     def matches(self, device):
         """device: evdev.InputDevice"""

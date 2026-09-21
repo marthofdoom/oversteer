@@ -22,6 +22,7 @@ import threading
 import time
 
 from .spec import code_name
+from . import uinput_ff
 
 # Types never copied from a passthrough source: we generate SYN ourselves and
 # FF is handled by the passthrough machinery.
@@ -37,6 +38,13 @@ class ProxyState(Enum):
     RUNNING = 'running'
     DEGRADED = 'degraded'    # virtual device exists but a source went away
     ERROR = 'error'
+
+
+class _FakeEvent:
+    __slots__ = ('type', 'code', 'value')
+
+    def __init__(self, etype, code, value):
+        self.type, self.code, self.value = etype, code, value
 
 
 class _Source:
@@ -227,8 +235,10 @@ class ProxyDevice:
         with self._lock:
             self.sources[spec.key] = source
         logging.info("proxy %s: attached %s = %s (%s)", self.spec.id, spec.key, device.name, device.path)
-        if self.ui is not None and spec.key == self.spec.ff_source:
-            self._restore_effects(source)
+        if self.ui is not None:
+            self._sync_axes(source)
+            if spec.key == self.spec.ff_source:
+                self._restore_effects(source)
         if self.on_change is not None:
             self.on_change(self)
 
@@ -291,6 +301,27 @@ class ProxyDevice:
         self.ui = UInput(caps, **kwargs)
         self.devnode = self.ui.device.path
         logging.info("proxy %s: created %s as %r", self.spec.id, self.devnode, ident.name)
+        with self._lock:
+            sources = list(self.sources.values())
+        for source in sources:
+            self._sync_axes(source)
+
+    def _sync_axes(self, source):
+        """Push the source's current axis positions through the mappings so
+        the virtual device starts coherent (e.g. a pedal already pressed)."""
+        wrote = False
+        key = source.spec.key
+        for code, info in source.absinfo.items():
+            rules = self._rules.get((key, ecodes.EV_ABS, code))
+            if rules:
+                for rule in rules:
+                    if rule.to_type == ecodes.EV_ABS:
+                        wrote |= self._apply(rule, source, _FakeEvent(ecodes.EV_ABS, code, info.value))
+            elif self.spec.passthrough == key:
+                self._write(ecodes.EV_ABS, code, info.value)
+                wrote = True
+        if wrote:
+            self.ui.syn()
 
     def _teardown(self):
         with self._lock:
@@ -442,7 +473,7 @@ class ProxyDevice:
                 self._ff_play(event.code, event.value)
 
     def _ff_upload(self, request_id):
-        upload = self.ui.begin_upload(request_id)
+        upload = uinput_ff.begin_upload(self.ui.fd, request_id)
         virtual_id = upload.effect.id
         device = self._ff_device()
         upload.retval = 0
@@ -454,17 +485,17 @@ class ProxyDevice:
                 data = bytes(memoryview(upload.effect).tobytes())
                 effect = ff.Effect.from_buffer_copy(data)
                 effect.id = self.ff_effects.get(virtual_id, -1)
-                real_id = device.upload_effect(effect)
+                real_id = uinput_ff.upload_effect(device.fd, effect)
                 self.ff_effects[virtual_id] = real_id
                 self._ff_cache[virtual_id] = data
         except OSError as e:
             logging.warning("proxy %s: effect upload failed: %s", self.spec.id, e)
             upload.retval = -(e.errno or errno.EIO)
         finally:
-            self.ui.end_upload(upload)
+            uinput_ff.end_upload(self.ui.fd, upload)
 
     def _ff_erase(self, request_id):
-        erase = self.ui.begin_erase(request_id)
+        erase = uinput_ff.begin_erase(self.ui.fd, request_id)
         virtual_id = erase.effect_id
         erase.retval = 0
         try:
@@ -472,12 +503,12 @@ class ProxyDevice:
             real_id = self.ff_effects.pop(virtual_id, None)
             device = self._ff_device()
             if real_id is not None and device is not None:
-                device.erase_effect(real_id)
+                uinput_ff.erase_effect(device.fd, real_id)
         except OSError as e:
             logging.warning("proxy %s: effect erase failed: %s", self.spec.id, e)
             erase.retval = -(e.errno or errno.EIO)
         finally:
-            self.ui.end_erase(erase)
+            uinput_ff.end_erase(self.ui.fd, erase)
 
     def _ff_play(self, code, value):
         device = self._ff_device()
@@ -500,7 +531,7 @@ class ProxyDevice:
             effect = ff.Effect.from_buffer_copy(data)
             effect.id = -1
             try:
-                self.ff_effects[virtual_id] = source.device.upload_effect(effect)
+                self.ff_effects[virtual_id] = uinput_ff.upload_effect(source.device.fd, effect)
             except OSError as e:
                 logging.warning("proxy %s: could not restore effect %d: %s", self.spec.id, virtual_id, e)
         if self._ff_cache:
