@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- "Try" buttons next to every force feedback control: play that effect on
+  the wheel for two seconds to feel what it does.
+- Rotation range presets (270/360/540/720/900) under the range slider.
+- Driver status line under the device selector: driver name and version,
+  a hint when the in-kernel hid-logitech is loaded, and whether the
+  combined device is active.
+- "Reset to defaults" on the Force Feedback tab.
+
+### Changed
+- The main window is resizable; sliders grow with it.
+- Force feedback tooltips explain what each force does to the wheel and
+  what games use it for.
+
 ## 0.10.4 — 2026-09-21
 
 ### Fixed
