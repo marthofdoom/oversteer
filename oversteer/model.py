@@ -129,6 +129,12 @@ class Model:
             elif self.types[key] == 'tuple':
                 data[key] = tuple(map(int, value.split(',')))
 
+        # Profiles from before the shift point: keep the old fixed 97 %
+        if data['rev_leds'] is not None:
+            if data['rev_leds_shift_unit'] not in ('percent', 'rpm'):
+                data['rev_leds_shift_unit'] = 'percent'
+            data['rev_leds_shift'] = self._clamp_shift(data['rev_leds_shift_unit'], data['rev_leds_shift'])
+
         self.data = data
         self.save_reference_values()
         self.profile = profile_file
@@ -261,14 +267,17 @@ class Model:
     def get_rev_leds_port(self):
         return self.data['rev_leds_port']
 
+    @staticmethod
+    def _clamp_shift(unit, value):
+        """The shift point within its unit's range; None -> the default."""
+        if unit == 'rpm':
+            return max(1000, min(25000, int(value))) if value is not None else 7000
+        return max(50, min(100, int(value))) if value is not None else 97
+
     def set_rev_leds_shift(self, value):
-        value = int(value)
-        if self.data['rev_leds_shift_unit'] == 'rpm':
-            value = max(1000, min(25000, value))
-        else:
-            value = max(50, min(100, value))
+        value = self._clamp_shift(self.get_rev_leds_shift_unit(), value)
         if self.set_if_changed('rev_leds_shift', value) and self.ui is not None and self.data['rev_leds']:
-            self.ui.controller.apply_rev_leds()
+            self.ui.controller.update_rev_leds_shift()
 
     def get_rev_leds_shift(self):
         return self.data['rev_leds_shift']
@@ -278,15 +287,15 @@ class Model:
         shift point in the new unit (the controller supplies it when the
         game's max RPM is known), otherwise the unit's default."""
         unit = 'rpm' if unit == 'rpm' else 'percent'
-        if not self.set_if_changed('rev_leds_shift_unit', unit):
+        if self.data['rev_leds_shift_unit'] == unit:
             return
-        if value is None:
-            value = 7000 if unit == 'rpm' else 97
-        self.data['rev_leds_shift'] = int(value)
+        # Value first, so the save button reflects both keys
+        self.data['rev_leds_shift'] = self._clamp_shift(unit, value)
+        self.set_if_changed('rev_leds_shift_unit', unit)
         if self.ui is not None:
             self.ui.set_rev_leds(self.data['rev_leds'], None, self.data['rev_leds_shift'], unit)
             if self.data['rev_leds']:
-                self.ui.controller.apply_rev_leds()
+                self.ui.controller.update_rev_leds_shift()
 
     def get_rev_leds_shift_unit(self):
         return self.data['rev_leds_shift_unit'] or 'percent'

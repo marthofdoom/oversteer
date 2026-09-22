@@ -240,6 +240,18 @@ class Gui:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
 
+    def update_rev_leds_shift(self):
+        """Push a changed shift point to the running listener without
+        restarting it (a restart would blink the LEDs and forget the
+        learnt max RPM)."""
+        if self.telemetry is None:
+            return
+        shift = self.model.get_rev_leds_shift()
+        if self.model.get_rev_leds_shift_unit() == 'rpm':
+            self.telemetry.set_shift(shift_rpm=shift or 7000)
+        else:
+            self.telemetry.set_shift(shift=(shift or 97) / 100.0)
+
     def change_rev_leds_shift_unit(self, unit):
         """Switch the shift point between % of max RPM and an RPM figure,
         converting the value when the game has told us the max RPM."""

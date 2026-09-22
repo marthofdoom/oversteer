@@ -40,16 +40,8 @@ import time
 DEFAULT_PORT = 5300
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
 LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point
-DEFAULT_THRESHOLDS = tuple(round(DEFAULT_SHIFT * x, 3) for x in LED_SPACING)
 FLASH_MARGIN = 0.03                                  # above the shift point: flash (shift now)
-
-
-def thresholds_for(shift):
-    """LED thresholds as fractions of max RPM for a shift point given as a
-    fraction of max RPM; all LEDs are on at the shift point, flashing
-    FLASH_MARGIN above it."""
-    shift = max(0.5, min(1.0, float(shift)))
-    return tuple(min(1.0, shift * x) for x in LED_SPACING)
+LEARNED_DECAY = 0.01                                 # OutGauge: learnt ceiling sags this much per second
 IDLE_TIMEOUT = 2.0                                   # seconds without telemetry -> LEDs off
 FLASH_PERIOD = 0.08                                  # limiter flash half-period (seconds)
 RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
@@ -152,9 +144,9 @@ class Telemetry:
         `shift_rpm`, when given, is an absolute shift point instead."""
         self.leds = leds
         self.port = int(port)
-        self.shift = max(0.5, min(1.0, float(shift)))
-        self.shift_rpm = float(shift_rpm) if shift_rpm else None
+        self.set_shift(shift, shift_rpm)
         self.last_max_rpm = 0.0
+        self._learned_at = 0.0
         self.on_status = on_status
         self.running = False
         self.last_packet = 0.0
@@ -163,6 +155,12 @@ class Telemetry:
         self._thread = None
         self._sock = None
         self._unknown_sizes = set()
+
+    def set_shift(self, shift=DEFAULT_SHIFT, shift_rpm=None):
+        """Change the shift point while running (plain attribute writes:
+        the listener thread reads them once per packet)."""
+        self.shift = max(0.5, min(1.0, float(shift)))
+        self.shift_rpm = float(shift_rpm) if shift_rpm else None
 
     def start(self):
         if self._thread is not None:
@@ -206,6 +204,7 @@ class Telemetry:
                     self.last_packet = 0.0
                     self.last_source = None
                     self.learned_max = 0.0
+                    self._learned_at = 0.0
                     self._status(None)
                 continue
             except OSError:
@@ -222,20 +221,24 @@ class Telemetry:
             if self.last_source != addr[0]:
                 self.last_source = addr[0]
                 self._status(addr[0])
+            shift_rpm, shift_fraction = self.shift_rpm, self.shift
             if max_rpm is None:
-                # OutGauge: learn the ceiling from what we see, letting it
-                # sag slowly so a change of car with a lower redline still
-                # fills the bar.
-                if rpm > self.learned_max:
-                    self.learned_max = rpm
-                else:
-                    self.learned_max = max(rpm, self.learned_max * 0.9995)
+                # OutGauge: learn the ceiling from the highest RPM seen. It
+                # sags slowly (per second, not per packet) so a change of
+                # car with a lower redline still fills the bar, but never
+                # below what keeps the current RPM at "all on": a steady
+                # cruise must not turn into a limiter flash (OutGauge has
+                # its own shift-light flag for that).
+                if self._learned_at:
+                    self.learned_max *= max(0.0, 1.0 - LEARNED_DECAY * (now - self._learned_at))
+                self._learned_at = now
+                self.learned_max = max(self.learned_max, rpm, rpm / shift_fraction if not shift_rpm else 0.0)
                 max_rpm = self.learned_max
             else:
                 self.last_max_rpm = max_rpm
             # Everything is relative to the shift point: the bar completes
             # there and flashes above it.
-            reference = self.shift_rpm if self.shift_rpm else self.shift * max_rpm
+            reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
             fraction = rpm / reference if reference > 0 else 0.0
             if shift or fraction >= 1.0 + FLASH_MARGIN:
                 if now - flash_at >= FLASH_PERIOD:
