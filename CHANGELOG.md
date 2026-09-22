@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 — 2026-09-21
 
 ### Added
 - **Shared-memory telemetry under Proton** (Assetto Corsa, Assetto Corsa
@@ -25,11 +25,21 @@
   when the set changes, so a game's use of spring / damper / friction /
   constant / periodic effects can be read off `/run/oversteer/proxies.json`.
 
-### Fixed
+### Fixed (pre-release review)
+- OutGauge: the learnt redline sagged per packet down to the current RPM,
+  so a steady cruise lit the whole bar and flashed; it now decays per
+  second and never below what keeps the current RPM at "all on".
+- Changing the shift point updates the running listener instead of
+  restarting it (no LED blink, learnt redline kept); profiles from before
+  the shift point load with the old 97 %; values are clamped to their
+  unit's range on load and on unit conversion.
+- Proxy status: effect bookkeeping is lock-protected and a change inside
+  the half-second refresh window is written when it ends instead of
+  being dropped.
 - WRC Generations telemetry was ignored: it sends the Codemasters
   extradata=3 layout natively but in a longer packet than DiRT Rally 2.0's
-  264 bytes. Any 4-byte-aligned length from 256 bytes up is accepted now,
-  and unknown packet sizes are logged once.
+  264 bytes. Any 4-byte-aligned length from 256 to 512 bytes is accepted
+  now, and unknown packet sizes are logged once.
 
 ## 0.11.0 — 2026-09-21
 

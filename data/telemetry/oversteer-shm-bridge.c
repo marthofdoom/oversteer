@@ -27,6 +27,7 @@
  */
 #include <winsock2.h>
 #include <windows.h>
+#include <tlhelp32.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,6 +91,28 @@ static const char *static_names[] = { "Local\\acpmf_static", "acpmf_static", "Gl
 
 static const void *open_any(const char **names, HANDLE *handle, size_t size, const char **used);
 
+/* Is a process with this image name (case-insensitive) running? */
+static int process_running(const char *image)
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    PROCESSENTRY32 pe;
+    int found = 0;
+
+    if (snap == INVALID_HANDLE_VALUE)
+        return 1;   /* can't tell: assume yes */
+    pe.dwSize = sizeof(pe);
+    if (Process32First(snap, &pe)) {
+        do {
+            if (!_stricmp(pe.szExeFile, image)) {
+                found = 1;
+                break;
+            }
+        } while (Process32Next(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
+}
+
 static const void *open_view(const char *name, HANDLE *handle, size_t size)
 {
     const void *view;
@@ -145,6 +168,7 @@ static float rd_f32(const void *base, size_t off)
 int main(int argc, char **argv)
 {
     const char *host = "127.0.0.1";
+    const char *watch = NULL;
     int port = 5300, rate = 60;
     WSADATA wsa;
     SOCKET sock;
@@ -152,10 +176,10 @@ int main(int argc, char **argv)
     HANDLE hphys = NULL, hstat = NULL;
     const void *phys = NULL, *stat = NULL;
     int32_t last_packet = -1;
-    DWORD last_change = 0, gone_since = 0, last_report = 0;
+    DWORD last_change = 0, last_report = 0, last_watch = 0;
     unsigned long sent = 0;
     const char *name_used = "?";
-    int seen = 0, i;
+    int seen = 0, announced = 0, i;
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--host") && i + 1 < argc)
@@ -168,10 +192,12 @@ int main(int argc, char **argv)
             verbose = 1;
         else if (!strcmp(argv[i], "--exit-when-gone"))
             exit_when_gone = 1;
+        else if (!strcmp(argv[i], "--watch") && i + 1 < argc)
+            watch = argv[++i];
         else if (!strcmp(argv[i], "--log") && i + 1 < argc)
             logfile = fopen(argv[++i], "a");
         else {
-            fprintf(stderr, "usage: %s [--host H] [--port N] [--rate HZ] [--verbose]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--host H] [--port N] [--rate HZ] [--exit-when-gone] [--watch GAME.exe] [--log FILE] [--verbose]\n", argv[0]);
             return 2;
         }
     }
@@ -197,55 +223,51 @@ int main(int argc, char **argv)
         logmsg("bad host %s", host);
         return 2;
     }
-    logmsg("sending to %s:%d at %d Hz; waiting for %s", host, port, rate, physics_names[0]);
+    logmsg("sending to %s:%d at %d Hz; waiting for %s%s%s", host, port, rate, physics_names[0],
+           watch ? ", watching " : "", watch ? watch : "");
 
     for (;;) {
         struct ovst_packet pkt;
         int32_t packet_id;
-        int changed;
         DWORD now = GetTickCount();
+
+        if (watch && now - last_watch > 3000) {
+            last_watch = now;
+            if (!process_running(watch)) {
+                logmsg("%s is not running, exiting", watch);
+                return 0;
+            }
+        }
 
         if (phys == NULL) {
             phys = open_any(physics_names, &hphys, PHYS_VIEW_SIZE, &name_used);
             if (phys == NULL) {
                 if (seen && exit_when_gone) {
-                    if (!gone_since)
-                        gone_since = now;
-                    else if (now - gone_since > 5000) {
-                        logmsg("telemetry gone, exiting");
-                        return 0;
-                    }
+                    logmsg("telemetry gone, exiting");
+                    return 0;
                 }
+                announced = 0;
                 Sleep(1000);
                 continue;
             }
             stat = open_any(static_names, &hstat, STATIC_VIEW_SIZE, NULL);
-            last_packet = -1;
+            /* Don't re-send the packet that was there before: a paused
+             * game keeps the same id until it resumes. */
+            last_packet = rd_i32(phys, PHYS_PACKET_ID);
             last_change = now;
-            gone_since = 0;
             seen = 1;
-            logmsg("telemetry found as %s (static %s, maxRpm %d, packetId %d, rpms %d)", name_used,
-                   stat ? "yes" : "no", stat ? rd_i32(stat, STATIC_MAX_RPM) : 0,
-                   rd_i32(phys, PHYS_PACKET_ID), rd_i32(phys, PHYS_RPMS));
+            if (!announced) {
+                announced = 1;
+                logmsg("telemetry found as %s (static %s, maxRpm %d, packetId %d, rpms %d)", name_used,
+                       stat ? "yes" : "no", stat ? rd_i32(stat, STATIC_MAX_RPM) : 0,
+                       last_packet, rd_i32(phys, PHYS_RPMS));
+            }
         }
 
         packet_id = rd_i32(phys, PHYS_PACKET_ID);
-        changed = packet_id != last_packet;
-        if (changed) {
+        if (packet_id != last_packet) {
             last_packet = packet_id;
             last_change = now;
-        } else if (now - last_change > 5000) {
-            /* Nothing written for a while: the game is gone or paused.
-             * Drop the views so a restarted game is picked up afresh. */
-            if (verbose)
-                logmsg("telemetry stalled, waiting again");
-            close_view(phys, &hphys);
-            close_view(stat, &hstat);
-            phys = stat = NULL;
-            continue;
-        }
-
-        if (changed) {
             memset(&pkt, 0, sizeof(pkt));
             memcpy(pkt.magic, "OVST", 4);
             pkt.version = OVST_VERSION;
@@ -262,6 +284,18 @@ int main(int argc, char **argv)
                 if (verbose)
                     logmsg("rpm %.0f / %.0f gear %d", pkt.rpm, pkt.max_rpm, pkt.gear);
             }
+        } else if (now - last_change > 2000) {
+            /* Nothing written for two seconds: paused, in a menu, or quit.
+             * Drop the views so we don't keep a quit game's section (and
+             * its wineserver) alive; they are re-opened every second while
+             * the mapping exists. */
+            if (verbose)
+                logmsg("telemetry stalled, releasing the mapping");
+            close_view(phys, &hphys);
+            close_view(stat, &hstat);
+            phys = stat = NULL;
+            Sleep(1000);
+            continue;
         }
         if (now - last_report > 10000) {
             last_report = now;

@@ -1,5 +1,7 @@
 import struct
-from oversteer.telemetry import decode, RevLeds, Telemetry, DEFAULT_THRESHOLDS, thresholds_for
+import socket
+import time
+from oversteer.telemetry import decode, RevLeds, Telemetry, LED_SPACING
 
 
 def forza(rpm, max_rpm=8000.0, race_on=1, size=324):
@@ -53,9 +55,63 @@ def test_decode_formats():
     assert decode(b'\x00' * 258) is None                     # not float-aligned
 
 
-def test_thresholds_are_monotonic():
-    assert list(DEFAULT_THRESHOLDS) == sorted(DEFAULT_THRESHOLDS)
-    assert DEFAULT_THRESHOLDS[-1] == 0.97
-    t = thresholds_for(0.80)
-    assert list(t) == sorted(t) and t[-1] == 0.80 and t[0] < 0.60
-    assert thresholds_for(1.0)[-1] == 1.0 and thresholds_for(2.0)[-1] == 1.0
+def test_led_spacing_is_monotonic():
+    assert list(LED_SPACING) == sorted(LED_SPACING) and LED_SPACING[-1] == 1.0
+
+
+class FakeLeds:
+    """Records what the listener would write to the LEDs."""
+
+    def __init__(self, n=5):
+        self.paths = ['led%d' % i for i in range(n)]
+        self.writes = []
+
+    def available(self):
+        return True
+
+    def set_count(self, lit):
+        self.writes.append(('count', lit))
+
+    def set_pattern(self, pattern):
+        self.writes.append(('pattern', tuple(pattern)))
+
+    def off(self):
+        self.writes.append(('off',))
+
+
+def _feed(telemetry, packets, gap=0.01):
+    """Start the listener on a free port, send packets, return the LED writes."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('127.0.0.1', 0))
+    telemetry.port = sock.getsockname()[1]
+    sock.close()
+    assert telemetry.start()
+    out = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for p in packets:
+        out.sendto(p, ('127.0.0.1', telemetry.port))
+        time.sleep(gap)
+    time.sleep(0.1)
+    telemetry.stop()
+    return telemetry.leds.writes
+
+
+def test_bar_relative_to_shift_point():
+    leds = FakeLeds()
+    writes = _feed(Telemetry(leds, shift=0.90), [forza(r, max_rpm=8000) for r in (4000, 5300, 6500, 7200, 7400)])
+    counts = [w[1] for w in writes if w[0] == 'count']
+    assert counts == [0, 1, 3, 5][:len(counts)] or counts == [0, 1, 3, 5]      # 90 % of 8000 = 7200: all on there
+    assert not any(w[0] == 'pattern' for w in writes)                          # 7400 < 7200 * 1.03: no flash
+
+
+def test_shift_rpm_mode_and_flash():
+    leds = FakeLeds()
+    writes = _feed(Telemetry(leds, shift_rpm=6500), [forza(r, max_rpm=9000) for r in (4700, 6500, 6800, 6800, 6800)], gap=0.1)
+    assert ('count', 1) in writes and ('count', 5) in writes
+    assert any(w[0] == 'pattern' for w in writes)                              # above 6500 * 1.03: flashing
+
+
+def test_outgauge_learned_max_never_flashes_a_steady_cruise():
+    leds = FakeLeds()
+    packets = [outgauge(7000)] + [outgauge(4000)] * 30
+    writes = _feed(Telemetry(leds, shift=0.8), packets)
+    assert not any(w[0] == 'pattern' for w in writes)

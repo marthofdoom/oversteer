@@ -446,18 +446,20 @@ class Gui:
             except OSError:
                 pass
             if app_files:
-                app_files = re.sub(r'/x86_64/[^/]+/[0-9a-f]{16,}/files$', '/current/active/files', app_files)
+                app_files = re.sub(r'/[^/]+/[^/]+/[0-9a-f]{16,}/files$', '/current/active/files', app_files)
                 candidates.append(os.path.join(app_files, 'bin', 'oversteer-run'))
         else:
             candidates.append(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'oversteer-run'))
             source_root = os.environ.get('MESON_SOURCE_ROOT')
             if source_root:
                 candidates.append(os.path.join(source_root, 'data', 'telemetry', 'oversteer-run'))
+            candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'telemetry', 'oversteer-run'))
             candidates.append(shutil.which('oversteer-run') or '')
         for path in candidates:
             if path and (in_flatpak() or os.path.exists(path)):
+                path = os.path.normpath(path)
                 return '"{}" %command%'.format(path) if ' ' in path else '{} %command%'.format(path)
-        return 'oversteer-run %command%'
+        return _("oversteer-run was not found: install Oversteer, or run it with scripts/run-dev.sh")
 
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""
@@ -496,6 +498,18 @@ class Gui:
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
+
+    def update_rev_leds_shift(self):
+        """Push a changed shift point to the running listener without
+        restarting it (a restart would blink the LEDs and forget the
+        learnt max RPM)."""
+        if self.telemetry is None:
+            return
+        shift = self.model.get_rev_leds_shift()
+        if self.model.get_rev_leds_shift_unit() == 'rpm':
+            self.telemetry.set_shift(shift_rpm=shift or 7000)
+        else:
+            self.telemetry.set_shift(shift=(shift or 97) / 100.0)
 
     def change_rev_leds_shift_unit(self, unit):
         """Switch the shift point between % of max RPM and an RPM figure,

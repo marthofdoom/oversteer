@@ -454,6 +454,11 @@ class GtkUi:
         self._set_switch(self.rev_leds, enabled)
         for w in (self.rev_leds_port, self.rev_leds_shift, self.rev_leds_shift_unit, self.rev_leds_test):
             w.set_sensitive(enabled is not None)
+        if enabled is not None:
+            # Pre-shift-point profiles carry no unit/value: show the defaults
+            unit = unit or 'percent'
+            if shift is None:
+                shift = 7000 if unit == 'rpm' else 97
         self.updating_rev_leds = True
         try:
             if port is not None:
