@@ -28,6 +28,13 @@
       <column type="gchararray"/>
     </columns>
   </object>
+  <object class="GtkAdjustment" id="rev_leds_shift_adjustment">
+    <property name="lower">50</property>
+    <property name="upper">100</property>
+    <property name="value">97</property>
+    <property name="step-increment">1</property>
+    <property name="page-increment">5</property>
+  </object>
   <object class="GtkAdjustment" id="rev_leds_port_adjustment">
     <property name="lower">1024</property>
     <property name="upper">65535</property>
@@ -3153,6 +3160,33 @@
                               </packing>
                             </child>
                             <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="label" translatable="yes">Shift at %</property>
+                                <property name="tooltip-text" translatable="yes">Where the last LED comes on, as a percentage of the engine's maximum RPM reported by the game. All five LEDs are on at the shift point and flash above it; the other LEDs are spaced below it. Rally and turbo cars usually shift well before the limiter, so lower this per profile until the bar completes where you want to change up.</property>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">4</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkSpinButton" id="rev_leds_shift">
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="adjustment">rev_leds_shift_adjustment</property>
+                                <property name="numeric">True</property>
+                                <signal name="value-changed" handler="on_rev_leds_shift_value_changed" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">5</property>
+                              </packing>
+                            </child>
+                            <child>
                               <object class="GtkButton" id="rev_leds_test">
                                 <property name="label" translatable="yes">Test LEDs</property>
                                 <property name="visible">True</property>
@@ -3163,7 +3197,7 @@
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">True</property>
-                                <property name="position">4</property>
+                                <property name="position">6</property>
                               </packing>
                             </child>
                             <child>
@@ -3176,7 +3210,7 @@
                               <packing>
                                 <property name="expand">False</property>
                                 <property name="fill">False</property>
-                                <property name="position">5</property>
+                                <property name="position">7</property>
                               </packing>
                             </child>
                           </object>

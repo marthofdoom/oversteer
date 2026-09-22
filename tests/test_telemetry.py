@@ -1,5 +1,5 @@
 import struct
-from oversteer.telemetry import decode, RevLeds, Telemetry, DEFAULT_THRESHOLDS
+from oversteer.telemetry import decode, RevLeds, Telemetry, DEFAULT_THRESHOLDS, thresholds_for
 
 
 def forza(rpm, max_rpm=8000.0, race_on=1, size=324):
@@ -55,3 +55,7 @@ def test_decode_formats():
 
 def test_thresholds_are_monotonic():
     assert list(DEFAULT_THRESHOLDS) == sorted(DEFAULT_THRESHOLDS)
+    assert DEFAULT_THRESHOLDS[-1] == 0.97
+    t = thresholds_for(0.80)
+    assert list(t) == sorted(t) and t[-1] == 0.80 and t[0] < 0.60
+    assert thresholds_for(1.0)[-1] == 1.0 and thresholds_for(2.0)[-1] == 1.0

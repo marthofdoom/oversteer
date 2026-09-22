@@ -485,7 +485,8 @@ class Gui:
                 if self.telemetry is not None and generation == self.telemetry_generation:
                     self.ui.set_rev_leds_status(text)
             self.ui.safe_call(show)
-        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status)
+        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300,
+                                   shift=(self.model.get_rev_leds_shift() or 97) / 100.0, on_status=status)
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
         else:
