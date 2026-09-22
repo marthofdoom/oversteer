@@ -5,18 +5,23 @@
 # Steam > game > Properties > Launch options:
 #     oversteer-run %command%
 #
-# The game starts exactly as Steam would start it. Alongside it, through
-# the same Steam Linux Runtime and Proton and therefore inside the same
-# prefix, oversteer-shm-bridge.exe reads the game's shared-memory
-# telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
-# Rally) and sends the engine RPM to Oversteer's rev lights over UDP.
-# Games without shared-memory telemetry are simply run.
+# The game starts exactly as Steam would start it. Alongside it, with the
+# same Proton and Steam environment and therefore in the same prefix,
+# oversteer-shm-bridge.exe reads the game's shared-memory telemetry
+# (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa Rally) and
+# sends the engine RPM to Oversteer's rev lights over UDP. Games without
+# shared-memory telemetry are simply run.
+#
+# The bridge is started with Proton directly on the host rather than
+# through the Steam Linux Runtime entry point: a second runtime container
+# for the same app does not start, while Proton on the host attaches to
+# the game's prefix and wineserver.
 #
 # Environment: OVERSTEER_TELEMETRY_PORT (default 5300, must match the port
 # in Oversteer's Rev lights row), OVERSTEER_SHM_BRIDGE (path to the .exe).
-# The bridge writes $XDG_RUNTIME_DIR/oversteer-shm-bridge.log (what it
-# found and how much it sent); its launcher's output goes to
-# $XDG_RUNTIME_DIR/oversteer-run.log.
+# The bridge writes <compatdata>/oversteer-shm-bridge.log next to the
+# game's prefix (what it found and how much it sent); its launcher's
+# output goes to $XDG_RUNTIME_DIR/oversteer-run.log.
 #
 # This file is part of Oversteer (GPL-3.0-or-later).
 
@@ -31,9 +36,8 @@ for candidate in "$here/../lib/oversteer/oversteer-shm-bridge.exe" \
 done
 port=${OVERSTEER_TELEMETRY_PORT:-5300}
 
-# Find Proton in the command: everything before it (the runtime entry
-# point) is kept, its verb becomes "run" so the bridge doesn't wait for
-# the game's wineserver, and the game executable is replaced.
+# Find Proton in the command; the bridge runs through it with the "run"
+# verb (no waiting for the game's wineserver).
 proton_index=-1
 for ((i = 1; i <= $#; i++)); do
     case "${!i}" in
@@ -45,22 +49,32 @@ if [ "$proton_index" -lt 0 ] || [ -z "$bridge" ]; then
     exec "$@"
 fi
 
-bridge_cmd=()
-for ((i = 1; i < proton_index; i++)); do
-    arg=${!i}
-    [ "$arg" = "--verb=waitforexitandrun" ] && arg="--verb=run"
-    bridge_cmd+=("$arg")
-done
 log=${XDG_RUNTIME_DIR:-/tmp}/oversteer-run.log
-bridge_log=${XDG_RUNTIME_DIR:-/tmp}/oversteer-shm-bridge.log
+if [ -n "$STEAM_COMPAT_DATA_PATH" ] && [ -d "$STEAM_COMPAT_DATA_PATH" ]; then
+    bridge_log=$STEAM_COMPAT_DATA_PATH/oversteer-shm-bridge.log
+else
+    bridge_log=${TMPDIR:-/tmp}/oversteer-shm-bridge.log
+fi
 : > "$bridge_log"
-bridge_cmd+=("${!proton_index}" run "$bridge" --port "$port" --exit-when-gone --log "Z:$bridge_log")
+bridge_cmd=("${!proton_index}" run "$bridge" --port "$port" --exit-when-gone --log "Z:$bridge_log")
 
 "$@" &
 game=$!
 
-# Give the game a moment to create its prefix objects, then start the bridge.
-( sleep 8; exec "${bridge_cmd[@]}" ) > "$log" 2>&1 &
+# The game's Proton is still bringing the prefix up for the first seconds
+# and a bridge started then is shut down with it; keep retrying while the
+# game runs. The bridge exits 0 by itself once it has seen telemetry and
+# it went away (the game quit), anything else is retried.
+(
+    sleep 15
+    while kill -0 "$game" 2> /dev/null; do
+        "${bridge_cmd[@]}"
+        rc=$?
+        echo "oversteer-run: bridge exited with $rc" >&2
+        [ "$rc" -eq 0 ] && break
+        sleep 10
+    done
+) > "$log" 2>&1 &
 bridge_pid=$!
 
 wait "$game"
