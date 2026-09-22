@@ -29,11 +29,13 @@ COMBINE_DEFAULT = (KIND_WHEEL, KIND_SHIFTER, KIND_PEDALS, KIND_HANDBRAKE, KIND_B
 G29_GEAR_CODES = [300, 301, 302, 303, 704, 705]
 G29_REVERSE_CODE = 706
 
-# Shifters whose button count exceeds their gear positions: (gears, index of reverse)
+# Shifters whose button count exceeds their gear positions:
+# (gear positions, index of reverse, (index of sequential down, up) or None).
+# The sequential positions are reported whether or not the plate is fitted.
 KNOWN_SHIFTERS = {
-    '044f:b660': (7, 7),    # Thrustmaster T500 RS Gear Shift (7 + R, 10 buttons reported)
-    '044f:b65c': (7, 7),    # Thrustmaster TH8A (7 + R)
-    '046d:c26f': (6, 6),    # Logitech Driving Force Shifter (standalone, G923/G PRO)
+    '044f:b660': (7, 7, (8, 9)),    # Thrustmaster T500 RS Gear Shift: 7 + R, then sequential down (BTN_BASE3), up (BTN_BASE4)
+    '044f:b65c': (7, 7, None),      # Thrustmaster TH8A (7 + R; sequential positions not verified)
+    '046d:c26f': (6, 6, None),      # Logitech Driving Force Shifter (standalone, G923/G PRO)
 }
 
 # Games identify a wheel by its exact control layout, not just VID/PID
@@ -298,7 +300,7 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
             # Button order is gear order on the shifters we know. Known
             # shifters say how many positions they have and which button is
             # reverse; otherwise 7 buttons means 6 + R and 8 means 7 + R.
-            n_gears, r_index = KNOWN_SHIFTERS.get(dev.usb_id, (None, None))
+            n_gears, r_index, seq_index = KNOWN_SHIFTERS.get(dev.usb_id, (None, None, None))
             if n_gears is None:
                 if len(buttons) in (7, 8):
                     n_gears, r_index = len(buttons) - 1, len(buttons) - 1
@@ -306,6 +308,11 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
                     n_gears, r_index = len(buttons), None
             gears = buttons[:n_gears]
             reverse = buttons[r_index] if r_index is not None and r_index < len(buttons) else None
+            sequential = {}
+            if seq_index is not None:
+                for label, i in zip(('sequential down', 'sequential up'), seq_index):
+                    if i < len(buttons):
+                        sequential[buttons[i]] = label
             for i, code in enumerate(gears):
                 if i < len(gear_codes):
                     target = gear_codes[i]
@@ -319,6 +326,23 @@ def build_combined_spec(wheel, others, spec_id='combined-wheel', name=None, stri
                 mappings.append({'source': key, 'from': code, 'to': target})
             if reverse is not None:
                 mappings.append({'source': key, 'from': reverse, 'to': reverse_code})
+            # Whatever the gear positions didn't claim is carried too: on the
+            # T500 RS and TH8A the last two buttons are the sequential
+            # plate's down and up, and an unknown shifter's extra controls
+            # must not be dropped silently.
+            claimed = set(gears) | ({reverse} if reverse is not None else set())
+            for code in [c for c in buttons if c not in claimed]:
+                target = next_free_key()
+                if target is None:
+                    notes.append("{}: no button left for {}".format(
+                        dev.name, sequential.get(code) or code_name(ecodes.EV_KEY, code)))
+                    continue
+                if target not in used_keys:
+                    extra_keys.append(target)
+                mappings.append({'source': key, 'from': code, 'to': target})
+                if code in sequential:
+                    notes.append("{} {} -> {}".format(dev.name, sequential[code],
+                                                      code_name(ecodes.EV_KEY, target)))
         else:
             for code in buttons:
                 target = next_free_key()

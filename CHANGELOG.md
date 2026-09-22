@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Combined device: a shifter's buttons beyond its gear positions were
+  dropped, so the T500 RS / TH8A sequential plate did nothing. Everything
+  the shifter reports is carried now; on the T500 RS the sequential
+  positions are recognised and the generated spec records which code each
+  one got (down -> BTN_TRIGGER_HAPPY11, up -> BTN_TRIGGER_HAPPY12, shown
+  as buttons 26 and 27 on the Controls tab).
+
+### Added
+- `scripts/probe-device.py`: name the raw events of any input device,
+  including one hidden or grabbed by the proxy (`--stop-proxy`), for
+  mapping new controls.
+
 ## 0.12.0 — 2026-09-21
 
 ### Added

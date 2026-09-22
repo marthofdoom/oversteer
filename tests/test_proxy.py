@@ -266,3 +266,31 @@ def test_load_specs_from_candidate_dir(tmp_path):
                                  '"capabilities":{"abs":{"ABS_Z":{"min":0,"max":255}}},"mappings":[{"from":"ABS_THROTTLE","to":"ABS_Z"}],"enabled":true}')
     specs, errors = load_specs([str(cand)])
     assert not errors and 'x' in specs and specs['x'].enabled
+
+
+def test_shifter_sequential_buttons_are_mapped():
+    """A T500 RS with the sequential plate reports two buttons past the gear
+    positions; they must reach the combined device, not be dropped."""
+    from types import SimpleNamespace
+    from oversteer.proxy.equipment import build_combined_spec, KIND_WHEEL, KIND_SHIFTER
+
+    def equipment(kind, name, usb_id, buttons, abs_codes=()):
+        vendor, product = (int(x, 16) for x in usb_id.split(':'))
+        return SimpleNamespace(kind=kind, name=name, usb_id=usb_id, vendor=vendor, product=product,
+                               keys=list(buttons), buttons=list(buttons),
+                               abs=list(abs_codes), axes=list(abs_codes),
+                               node='/dev/input/event0', sys_path='/sys/x', readable=True,
+                               version=0x0111, bustype=3, phys='usb-0000:00:14.0-1/input0',
+                               ff=(kind == KIND_WHEEL))
+
+    wheel = equipment(KIND_WHEEL, 'Logitech G29 Driving Force Racing Wheel', '046d:c24f',
+                      list(range(288, 304)) + list(range(704, 713)),
+                      [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ])
+    shifter = equipment(KIND_SHIFTER, 'Thustmaster T500 RS Gear Shift', '044f:b660', range(288, 298))
+    spec = build_combined_spec(wheel, [shifter], spec_id='t').to_dict()
+    targets = {m['from']: m['to'] for m in spec['mappings'] if m['source'].startswith('shifter')}
+    # gears 1-7 + reverse, then the sequential pair on the next free codes
+    assert targets['BTN_BASE3'] == 'BTN_TRIGGER_HAPPY11'      # 714, sequential down
+    assert targets['BTN_BASE4'] == 'BTN_TRIGGER_HAPPY12'      # 715, sequential up
+    assert len(set(targets.values())) == len(targets)         # no two controls share a code
+    assert 'sequential down' in spec['description'] and 'sequential up' in spec['description']
