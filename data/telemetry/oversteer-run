@@ -14,7 +14,9 @@
 #
 # Environment: OVERSTEER_TELEMETRY_PORT (default 5300, must match the port
 # in Oversteer's Rev lights row), OVERSTEER_SHM_BRIDGE (path to the .exe).
-# The bridge's output goes to $XDG_RUNTIME_DIR/oversteer-run.log.
+# The bridge writes $XDG_RUNTIME_DIR/oversteer-shm-bridge.log (what it
+# found and how much it sent); its launcher's output goes to
+# $XDG_RUNTIME_DIR/oversteer-run.log.
 #
 # This file is part of Oversteer (GPL-3.0-or-later).
 
@@ -49,13 +51,15 @@ for ((i = 1; i < proton_index; i++)); do
     [ "$arg" = "--verb=waitforexitandrun" ] && arg="--verb=run"
     bridge_cmd+=("$arg")
 done
-bridge_cmd+=("${!proton_index}" run "$bridge" --port "$port" --exit-when-gone)
+log=${XDG_RUNTIME_DIR:-/tmp}/oversteer-run.log
+bridge_log=${XDG_RUNTIME_DIR:-/tmp}/oversteer-shm-bridge.log
+: > "$bridge_log"
+bridge_cmd+=("${!proton_index}" run "$bridge" --port "$port" --exit-when-gone --log "Z:$bridge_log")
 
 "$@" &
 game=$!
 
 # Give the game a moment to create its prefix objects, then start the bridge.
-log=${XDG_RUNTIME_DIR:-/tmp}/oversteer-run.log
 ( sleep 8; exec "${bridge_cmd[@]}" ) > "$log" 2>&1 &
 bridge_pid=$!
 

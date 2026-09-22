@@ -15,7 +15,9 @@
  * Build (any mingw): x86_64-w64-mingw32-gcc -O2 -s -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
  *   or: zig cc -target x86_64-windows-gnu -O2 -s -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
  *
- * Usage: oversteer-shm-bridge.exe [--host 127.0.0.1] [--port 5300] [--rate 60] [--verbose] [--exit-when-gone]
+ * Usage: oversteer-shm-bridge.exe [--host 127.0.0.1] [--port 5300] [--rate 60] [--verbose] [--exit-when-gone] [--log FILE]
+ *   --log FILE: also append messages to FILE (Proton doesn't pass a console
+ *   program's stderr through, so this is how oversteer-run keeps a log).
  *   --exit-when-gone: once telemetry has been seen, exit when it is gone
  *   for a few seconds (the game has quit) instead of waiting for the next one.
  *
@@ -29,8 +31,6 @@
 #include <stdint.h>
 #include <stdarg.h>
 
-#define PHYSICS_NAME "Local\\acpmf_physics"
-#define STATIC_NAME  "Local\\acpmf_static"
 
 /* Offsets into the shared structs (4-byte packing, identical in AC/ACC/ACR) */
 #define PHYS_PACKET_ID   0     /* int */
@@ -60,6 +60,7 @@ struct ovst_packet {
 
 static int verbose = 0;
 static int exit_when_gone = 0;
+static FILE *logfile = NULL;
 
 static void logmsg(const char *fmt, ...)
 {
@@ -69,7 +70,23 @@ static void logmsg(const char *fmt, ...)
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);
+    if (logfile) {
+        va_start(ap, fmt);
+        fprintf(logfile, "[%lu] ", (unsigned long)GetTickCount() / 1000);
+        vfprintf(logfile, fmt, ap);
+        fprintf(logfile, "\n");
+        fflush(logfile);
+        va_end(ap);
+    }
 }
+
+/* The games create the mappings in the session-local namespace; try the
+ * spellings that resolve to it, and the global one, so an unusual
+ * launcher setup still works. */
+static const char *physics_names[] = { "Local\\acpmf_physics", "acpmf_physics", "Global\\acpmf_physics", NULL };
+static const char *static_names[] = { "Local\\acpmf_static", "acpmf_static", "Global\\acpmf_static", NULL };
+
+static const void *open_any(const char **names, HANDLE *handle, size_t size, const char **used);
 
 static const void *open_view(const char *name, HANDLE *handle, size_t size)
 {
@@ -82,6 +99,19 @@ static const void *open_view(const char *name, HANDLE *handle, size_t size)
     if (view == NULL) {
         CloseHandle(*handle);
         *handle = NULL;
+    }
+    return view;
+}
+
+static const void *open_any(const char **names, HANDLE *handle, size_t size, const char **used)
+{
+    const void *view = NULL;
+    int i;
+
+    for (i = 0; names[i] && view == NULL; i++) {
+        view = open_view(names[i], handle, size);
+        if (view && used)
+            *used = names[i];
     }
     return view;
 }
@@ -120,7 +150,9 @@ int main(int argc, char **argv)
     HANDLE hphys = NULL, hstat = NULL;
     const void *phys = NULL, *stat = NULL;
     int32_t last_packet = -1;
-    DWORD last_change = 0, gone_since = 0;
+    DWORD last_change = 0, gone_since = 0, last_report = 0;
+    unsigned long sent = 0;
+    const char *name_used = "?";
     int seen = 0, i;
 
     for (i = 1; i < argc; i++) {
@@ -134,6 +166,8 @@ int main(int argc, char **argv)
             verbose = 1;
         else if (!strcmp(argv[i], "--exit-when-gone"))
             exit_when_gone = 1;
+        else if (!strcmp(argv[i], "--log") && i + 1 < argc)
+            logfile = fopen(argv[++i], "a");
         else {
             fprintf(stderr, "usage: %s [--host H] [--port N] [--rate HZ] [--verbose]\n", argv[0]);
             return 2;
@@ -161,7 +195,7 @@ int main(int argc, char **argv)
         logmsg("bad host %s", host);
         return 2;
     }
-    logmsg("sending to %s:%d at %d Hz; waiting for %s", host, port, rate, PHYSICS_NAME);
+    logmsg("sending to %s:%d at %d Hz; waiting for %s", host, port, rate, physics_names[0]);
 
     for (;;) {
         struct ovst_packet pkt;
@@ -170,7 +204,7 @@ int main(int argc, char **argv)
         DWORD now = GetTickCount();
 
         if (phys == NULL) {
-            phys = open_view(PHYSICS_NAME, &hphys, PHYS_VIEW_SIZE);
+            phys = open_any(physics_names, &hphys, PHYS_VIEW_SIZE, &name_used);
             if (phys == NULL) {
                 if (seen && exit_when_gone) {
                     if (!gone_since)
@@ -183,12 +217,14 @@ int main(int argc, char **argv)
                 Sleep(1000);
                 continue;
             }
-            stat = open_view(STATIC_NAME, &hstat, STATIC_VIEW_SIZE);
+            stat = open_any(static_names, &hstat, STATIC_VIEW_SIZE, NULL);
             last_packet = -1;
             last_change = now;
             gone_since = 0;
             seen = 1;
-            logmsg("telemetry found (maxRpm %d)", stat ? rd_i32(stat, STATIC_MAX_RPM) : 0);
+            logmsg("telemetry found as %s (static %s, maxRpm %d, packetId %d, rpms %d)", name_used,
+                   stat ? "yes" : "no", stat ? rd_i32(stat, STATIC_MAX_RPM) : 0,
+                   rd_i32(phys, PHYS_PACKET_ID), rd_i32(phys, PHYS_RPMS));
         }
 
         packet_id = rd_i32(phys, PHYS_PACKET_ID);
@@ -216,10 +252,18 @@ int main(int argc, char **argv)
             pkt.max_rpm = stat ? (float)rd_i32(stat, STATIC_MAX_RPM) : 0.0f;
             pkt.gear = rd_i32(phys, PHYS_GEAR) - 1;
             pkt.speed_kmh = rd_f32(phys, PHYS_SPEED_KMH);
-            if (sendto(sock, (const char *)&pkt, sizeof(pkt), 0, (struct sockaddr *)&dest, sizeof(dest)) == SOCKET_ERROR && verbose)
-                logmsg("sendto failed: %d", WSAGetLastError());
-            else if (verbose)
-                logmsg("rpm %.0f / %.0f gear %d", pkt.rpm, pkt.max_rpm, pkt.gear);
+            if (sendto(sock, (const char *)&pkt, sizeof(pkt), 0, (struct sockaddr *)&dest, sizeof(dest)) == SOCKET_ERROR) {
+                if (verbose)
+                    logmsg("sendto failed: %d", WSAGetLastError());
+            } else {
+                sent++;
+                if (verbose)
+                    logmsg("rpm %.0f / %.0f gear %d", pkt.rpm, pkt.max_rpm, pkt.gear);
+            }
+        }
+        if (now - last_report > 10000) {
+            last_report = now;
+            logmsg("packetId %d, rpm %d, %lu datagrams sent", packet_id, rd_i32(phys, PHYS_RPMS), sent);
         }
         Sleep(1000 / rate);
     }
