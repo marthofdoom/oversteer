@@ -16,6 +16,9 @@
   as buttons 26 and 27 on the Controls tab).
 
 ### Added
+- Controls tab: a **Handbrake** column next to the pedals, shown when the
+  device has a handbrake axis (a combined device carrying one, or a wheel
+  that reports it) and scaled to that axis's range.
 - `scripts/probe-device.py`: name the raw events of any input device,
   including one hidden or grabbed by the proxy (`--stop-proxy`), for
   mapping new controls.

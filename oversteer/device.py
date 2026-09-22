@@ -574,6 +574,25 @@ class Device:
                 self.input_device = InputDevice(node)
         return self.input_device
 
+    def handbrake_axis(self):
+        """(code, min, max) of this device's handbrake axis, or None.
+
+        Oversteer's combined device puts a handbrake on the first spare
+        axis (ABS_THROTTLE), which is also what the handbrakes we have
+        seen report natively; a plain wheel has none of these."""
+        device = self.get_input_device()
+        if device is None:
+            return None
+        try:
+            axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
+        except OSError:
+            return None
+        for code in (ecodes.ABS_THROTTLE, ecodes.ABS_RUDDER):
+            info = axes.get(code)
+            if info is not None and info.max > info.min:
+                return (code, info.min, info.max)
+        return None
+
     def get_capabilities(self):
         return self.get_input_device().capabilities()
 

@@ -541,6 +541,18 @@ class GtkUi:
     def set_brakes_input(self, value):
         self.brakes_input.set_value(self._round_input((255 - value) / 255, 2))
 
+    def set_handbrake_input(self, fraction):
+        """`fraction` is 0 (released) to 1 (fully pulled)."""
+        self.handbrake_input.set_value(self._round_input(fraction, 2))
+
+    def set_handbrake_visible(self, visible):
+        """The handbrake column only shows on devices that have one: a
+        combined device carrying a handbrake, or a wheel with the axis."""
+        self.handbrake_input.set_visible(visible)
+        self.handbrake_label.set_visible(visible)
+        if not visible:
+            self.handbrake_input.set_value(0)
+
     def set_hatx_input(self, value):
         if value < 0:
             self.hat_left_input.set_value(-value)
@@ -805,6 +817,8 @@ class GtkUi:
         self.clutch_input = self.builder.get_object('clutch_input')
         self.accelerator_input = self.builder.get_object('accelerator_input')
         self.brakes_input = self.builder.get_object('brakes_input')
+        self.handbrake_input = self.builder.get_object('handbrake_input')
+        self.handbrake_label = self.builder.get_object('handbrake_label')
         self.hat_up_input = self.builder.get_object('hat_up_input')
         self.hat_down_input = self.builder.get_object('hat_down_input')
         self.hat_left_input = self.builder.get_object('hat_left_input')

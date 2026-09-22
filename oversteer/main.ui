@@ -1075,7 +1075,7 @@
                           </packing>
                         </child>
                         <child>
-                          <!-- n-columns=3 n-rows=3 -->
+                          <!-- n-columns=4 n-rows=3 -->
                           <object class="GtkGrid">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
@@ -1160,6 +1160,33 @@
                               </object>
                               <packing>
                                 <property name="left-attach">2</property>
+                                <property name="top-attach">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLevelBar" id="handbrake_input">
+                                <property name="no-show-all">True</property>
+                                <property name="width-request">50</property>
+                                <property name="height-request">80</property>
+                                <property name="can-focus">False</property>
+                                <property name="halign">center</property>
+                                <property name="orientation">vertical</property>
+                                <property name="inverted">True</property>
+                              </object>
+                              <packing>
+                                <property name="left-attach">3</property>
+                                <property name="top-attach">1</property>
+                                <property name="height">2</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkLabel" id="handbrake_label">
+                                <property name="no-show-all">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="label" translatable="yes">Handbrake</property>
+                              </object>
+                              <packing>
+                                <property name="left-attach">3</property>
                                 <property name="top-attach">0</property>
                               </packing>
                             </child>

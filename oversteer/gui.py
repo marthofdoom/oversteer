@@ -69,6 +69,7 @@ class Gui:
         self.equipment = []
         self.telemetry = None
         self.telemetry_generation = 0
+        self.handbrake_axis = None
         self.combine_busy = False
         self.combine_timer = None
         self.button_config = [-1] * 9
@@ -419,6 +420,8 @@ class Gui:
 
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
+        self.handbrake_axis = self.device.handbrake_axis()
+        self.ui.set_handbrake_visible(self.handbrake_axis is not None)
         self.update_driver_status()
         self.ui.set_launch_options(self.launch_options())
         self.apply_rev_leds()
@@ -800,6 +803,12 @@ class Gui:
                     self.ui.safe_call(self.ui.set_brakes_input, event.value)
                 elif event.code == ecodes.ABS_Y:
                     self.ui.safe_call(self.ui.set_clutch_input, event.value)
+                elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
+                    _, low, high = self.handbrake_axis
+                    span = high - low
+                    if span > 0:
+                        self.ui.safe_call(self.ui.set_handbrake_input,
+                                          min(1.0, max(0.0, (event.value - low) / span)))
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     if event.value == -1:
