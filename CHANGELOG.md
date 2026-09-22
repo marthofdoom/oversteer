@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.1 — 2026-09-22
 
 ### Fixed
 - The Controls tab went dead (no steering, no buttons) after the combined
@@ -8,17 +8,22 @@
   creates a new one under the same name, and Oversteer kept reading the
   deleted node. It now notices the node it holds is gone or replaced and
   re-opens, and a read error drops the device so the next read recovers.
-- Combined device: a shifter's buttons beyond its gear positions were
-  dropped, so the T500 RS / TH8A sequential plate did nothing. Everything
-  the shifter reports is carried now; on the T500 RS the sequential
-  positions are recognised and the generated spec records which code each
-  one got (down -> BTN_TRIGGER_HAPPY11, up -> BTN_TRIGGER_HAPPY12, shown
-  as buttons 26 and 27 on the Controls tab).
+- Combined device around a Logitech wheel: a shifter's buttons beyond its
+  gear positions were dropped, so the T500 RS / TH8A sequential plate did
+  nothing. Everything the shifter reports is carried now, and for the
+  T500 RS the generated spec records which code each sequential position
+  got (down -> BTN_TRIGGER_HAPPY11, up -> BTN_TRIGGER_HAPPY12, buttons 26
+  and 27 on the Controls tab). Wheels without gear codes already carried
+  every button.
 
 ### Added
 - Controls tab: a **Handbrake** column next to the pedals, shown when the
-  device has a handbrake axis (a combined device carrying one, or a wheel
-  that reports it) and scaled to that axis's range.
+  device has a handbrake. Which axis that is comes from the proxy's own
+  spec when a combined device presents the wheel, so it stays right
+  whatever else is folded in; a natively connected handbrake is probed
+  instead, skipping axes the wheel uses for something else (the T150, TMX
+  and T248 report their clutch on ABS_THROTTLE) and correcting one that
+  rests at the top of its travel.
 - `scripts/probe-device.py`: name the raw events of any input device,
   including one hidden or grabbed by the proxy (`--stop-proxy`), for
   mapping new controls.

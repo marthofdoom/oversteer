@@ -1,4 +1,4 @@
-from evdev import ecodes, InputDevice, ff
+from evdev import ecodes, InputDevice, InputEvent, ff
 import threading
 import grp
 import logging
@@ -23,6 +23,7 @@ class Device:
     def __init__(self, device_manager, data):
         self.device_manager = device_manager
         self.input_device = None
+        self._device_lock = threading.Lock()
         self.id = None
         self.vendor_id = None
         self.product_id = None
@@ -511,7 +512,12 @@ class Device:
                 effect_id = dev.upload_effect(effect)
                 dev.write(ecodes.EV_FF, effect_id, 1)
                 time.sleep(seconds + 0.2)
-                dev.erase_effect(effect_id)
+                try:
+                    dev.erase_effect(effect_id)
+                except OSError:
+                    # The device was re-opened (or went away) while the
+                    # effect played; the kernel frees the slot with the fd.
+                    pass
             except OSError as e:
                 logging.warning("demo effect %s: %s", kind, e)
                 if on_error is not None:
@@ -560,6 +566,10 @@ class Device:
             return True
 
     def get_input_device(self):
+        with self._device_lock:
+            return self._get_input_device_locked()
+
+    def _get_input_device_locked(self):
         if self._input_device_stale():
             if self.input_device is not None:
                 try:
@@ -574,23 +584,63 @@ class Device:
                 self.input_device = InputDevice(node)
         return self.input_device
 
-    def handbrake_axis(self):
-        """(code, min, max) of this device's handbrake axis, or None.
-
-        Oversteer's combined device puts a handbrake on the first spare
-        axis (ABS_THROTTLE), which is also what the handbrakes we have
-        seen report natively; a plain wheel has none of these."""
-        device = self.get_input_device()
-        if device is None:
-            return None
+    def _proxy_handbrake_axis(self):
+        """The axis a proxy maps a handbrake onto, from its spec: which
+        spare axis that is depends on what else was folded in."""
         try:
+            from .proxy.manager import (ProxyManager, load_specs, BUILTIN_DIR,
+                                        system_dir_readable, user_dir)
+            status = ProxyManager.read_status() or {}
+            proxy_id = next((p['id'] for p in status.get('proxies', [])
+                             if self.dev_name in p.get('sources', {}).values()), None)
+            if proxy_id is None:
+                return None
+            specs, _ = load_specs([BUILTIN_DIR, system_dir_readable(), user_dir()])
+            spec = specs.get(proxy_id)
+            if spec is None:
+                return None
+            for mapping in spec.mappings:
+                if str(mapping.source).startswith('handbrake') and mapping.to_type == ecodes.EV_ABS:
+                    return mapping.to_code
+        except Exception as e:
+            logging.debug("proxy handbrake axis: %s", e)
+        return None
+
+    def _axis_is_its_own(self, code):
+        """False when normalize_event turns this axis into one of the
+        wheel's own controls: the T150, TMX and T248 report their clutch
+        on ABS_THROTTLE, which is not a handbrake."""
+        try:
+            return self.normalize_event(InputEvent(0, 0, ecodes.EV_ABS, code, 0)).code == code
+        except Exception:
+            return True
+
+    def handbrake_axis(self):
+        """(code, min, max, inverted) of this device's handbrake axis, or
+        None. A proxy presenting this wheel says which axis it put the
+        handbrake on; otherwise the axes a handbrake reports natively are
+        probed, skipping any the wheel uses for something else."""
+        try:
+            device = self.get_input_device()
+            if device is None:
+                return None
             axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
-        except OSError:
+        except OSError as e:
+            logging.debug("handbrake axis: %s", e)
             return None
-        for code in (ecodes.ABS_THROTTLE, ecodes.ABS_RUDDER):
+        proxied = self._proxy_handbrake_axis()
+        if proxied is not None:
+            candidates = [proxied]
+        else:
+            candidates = [c for c in (ecodes.ABS_THROTTLE, ecodes.ABS_RUDDER) if self._axis_is_its_own(c)]
+        for code in candidates:
             info = axes.get(code)
             if info is not None and info.max > info.min:
-                return (code, info.min, info.max)
+                # A handbrake resting at the top of its travel reads
+                # backwards; the proxy levels this out with 'invert': auto,
+                # a natively read one does not.
+                inverted = info.value >= info.min + (info.max - info.min) * 0.75
+                return (code, info.min, info.max, inverted)
         return None
 
     def get_capabilities(self):
@@ -598,7 +648,11 @@ class Device:
 
     def read_events(self, timeout):
         input_device = self.get_input_device()
-        if input_device is not None and input_device.fd != -1:
+        if input_device is None or input_device.fd == -1:
+            # Nothing to read from (hidden wheel, proxy restarting): wait
+            # the timeout out instead of spinning.
+            time.sleep(timeout)
+        else:
             try:
                 r, _, _ = select.select({input_device.fd: input_device}, [], [], timeout)
                 if input_device.fd in r:
@@ -611,11 +665,13 @@ class Device:
                 # The device went away (unplugged, or a proxy restarted):
                 # drop it so the next read re-opens whatever is there now.
                 logging.debug("input device %s: %s", input_device.path, e)
-                try:
-                    input_device.close()
-                except OSError:
-                    pass
-                self.input_device = None
+                with self._device_lock:
+                    if self.input_device is input_device:
+                        try:
+                            input_device.close()
+                        except OSError:
+                            pass
+                        self.input_device = None
 
     def normalize_event(self, event):
         #

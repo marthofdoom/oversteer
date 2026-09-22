@@ -25,6 +25,20 @@ from evdev import InputDevice, categorize, ecodes, list_devices  # noqa: E402
 KEY_NAMES = {v: (k[0] if isinstance(k, list) else k) for v, k in ecodes.keys.items()}
 
 
+def _open(path):
+    try:
+        return InputDevice(path)
+    except OSError:
+        return None
+
+
+def _is_multitouch(code):
+    name = ecodes.ABS.get(code, '')
+    if isinstance(name, list):
+        name = name[0]
+    return str(name).startswith('ABS_MT_')
+
+
 def describe(dev):
     usb = ''
     try:
@@ -73,18 +87,32 @@ def main():
 
     stopped = False
     if args.stop_proxy:
-        subprocess.run(['systemctl', 'stop', 'oversteer-proxy.service'], check=False)
-        stopped = True
+        stopped = subprocess.run(['systemctl', 'stop', 'oversteer-proxy.service'],
+                                 check=False).returncode == 0
+        if not stopped:
+            print("could not stop oversteer-proxy.service (run me as root?)", file=sys.stderr)
+    try:
+        return probe(dev, args)
+    finally:
+        if stopped:
+            subprocess.run(['systemctl', 'start', 'oversteer-proxy.service'], check=False)
+            print("\noversteer-proxy.service started again")
+
+
+def probe(dev, args):
+    if args.stop_proxy:
+        # The devices are re-created as the proxy releases them
         time.sleep(0.5)
-        dev = find([InputDevice(p) for p in list_devices()], args.device) or dev
+        try:
+            dev = find([d for d in (_open(p) for p in list_devices()) if d], args.device) or dev
+        except OSError:
+            pass
 
     print("watching {}".format(describe(dev)))
     print("buttons: {}".format(sorted(dev.capabilities().get(ecodes.EV_KEY, []))))
     print("press/move the control; Ctrl-C to stop\n")
     seen_keys, seen_abs = {}, {}
     deadline = time.monotonic() + args.seconds if args.seconds else None
-    axes = (ecodes.ABS_X, ecodes.ABS_Y, ecodes.ABS_Z, ecodes.ABS_RX, ecodes.ABS_RY, ecodes.ABS_RZ,
-            ecodes.ABS_THROTTLE, ecodes.ABS_RUDDER, ecodes.ABS_HAT0X, ecodes.ABS_HAT0Y)
     try:
         while deadline is None or time.monotonic() < deadline:
             # select, not read_loop: a quiet device must not block past the deadline
@@ -96,8 +124,10 @@ def main():
                     name = KEY_NAMES.get(event.code, '?')
                     seen_keys[event.code] = name
                     print("KEY  code {:<5} {:<24} {}".format(event.code, name, 'down' if event.value else 'up'), flush=True)
-                elif event.type == ecodes.EV_ABS and event.code in axes:
-                    name = ecodes.ABS[event.code]
+                elif event.type == ecodes.EV_ABS and not _is_multitouch(event.code):
+                    name = ecodes.ABS.get(event.code, str(event.code))
+                    if isinstance(name, list):
+                        name = name[0]
                     if seen_abs.get(event.code) != event.value:
                         seen_abs[event.code] = event.value
                         print("ABS  code {:<5} {:<24} {}".format(event.code, name, event.value), flush=True)
@@ -105,10 +135,6 @@ def main():
         pass
     except OSError as e:
         print("read failed: {}".format(e), file=sys.stderr)
-    finally:
-        if stopped:
-            subprocess.run(['systemctl', 'start', 'oversteer-proxy.service'], check=False)
-            print("\noversteer-proxy.service started again")
     if seen_keys:
         print("\nbuttons seen: " + ", ".join("{} ({})".format(c, n) for c, n in sorted(seen_keys.items())))
     else:

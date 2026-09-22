@@ -248,6 +248,7 @@ class Gui:
             return True
         try:
             self.refresh_equipment()
+            self.update_handbrake()
         except Exception as e:
             logging.debug("combine status: %s", e)
         return True
@@ -367,6 +368,7 @@ class Gui:
                     _("The administrator password is needed to hide the real devices from games and run the proxy service."))
         shutil.rmtree(candidate, ignore_errors=True)
         self.refresh_equipment()
+        self.update_handbrake()
 
     def populate_devices(self):
         logging.debug("populate_devices")
@@ -401,6 +403,8 @@ class Gui:
         self.device = self.device_manager.get_device(device_id)
 
         if self.device is None or not self.device.is_ready():
+            self.handbrake_axis = None
+            self.ui.set_handbrake_visible(False)
             return
 
         if not self.device.check_permissions() and self.check_permissions:
@@ -420,8 +424,7 @@ class Gui:
 
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
-        self.handbrake_axis = self.device.handbrake_axis()
-        self.ui.set_handbrake_visible(self.handbrake_axis is not None)
+        self.update_handbrake()
         self.update_driver_status()
         self.ui.set_launch_options(self.launch_options())
         self.apply_rev_leds()
@@ -501,6 +504,17 @@ class Gui:
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
+
+    def update_handbrake(self):
+        """Show the handbrake column when the selected device has one.
+        Re-checked as proxies come and go: the axis lives on the virtual
+        device a proxy presents, which appears, changes and disappears
+        while Oversteer runs."""
+        axis = self.device.handbrake_axis() if self.device is not None else None
+        if axis == self.handbrake_axis:
+            return
+        self.handbrake_axis = axis
+        self.ui.set_handbrake_visible(axis is not None)
 
     def update_rev_leds_shift(self):
         """Push a changed shift point to the running listener without
@@ -804,11 +818,11 @@ class Gui:
                 elif event.code == ecodes.ABS_Y:
                     self.ui.safe_call(self.ui.set_clutch_input, event.value)
                 elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
-                    _, low, high = self.handbrake_axis
+                    _, low, high, inverted = self.handbrake_axis
                     span = high - low
                     if span > 0:
-                        self.ui.safe_call(self.ui.set_handbrake_input,
-                                          min(1.0, max(0.0, (event.value - low) / span)))
+                        fraction = min(1.0, max(0.0, (event.value - low) / span))
+                        self.ui.safe_call(self.ui.set_handbrake_input, 1.0 - fraction if inverted else fraction)
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     if event.value == -1:
