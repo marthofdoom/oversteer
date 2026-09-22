@@ -535,15 +535,43 @@ class Device:
                 return proxy['devnode']
         return None
 
+    def _input_node(self):
+        """The node to read this wheel from: its own, or the virtual device
+        of the proxy holding it."""
+        if os.access(self.dev_name, os.R_OK):
+            return self.dev_name
+        node = self._proxied_node()
+        return node if node and os.access(node, os.R_OK) else None
+
+    def _input_device_stale(self):
+        """True when the open device is gone or is no longer the node we
+        should be reading. A proxy that restarts destroys its virtual
+        device and creates a new one under the same name, which leaves us
+        holding a deleted node that never reports anything again."""
+        dev = self.input_device
+        if dev is None or dev.fd == -1:
+            return True
+        node = self._input_node()
+        if node is None or node != dev.path:
+            return node is not None
+        try:
+            return os.stat(node).st_ino != os.fstat(dev.fd).st_ino
+        except OSError:
+            return True
+
     def get_input_device(self):
-        if self.input_device is None or self.input_device.fd == -1:
-            if os.access(self.dev_name, os.R_OK):
-                self.input_device = InputDevice(self.dev_name)
-            else:
-                node = self._proxied_node()
-                if node and os.access(node, os.R_OK):
+        if self._input_device_stale():
+            if self.input_device is not None:
+                try:
+                    self.input_device.close()
+                except OSError:
+                    pass
+                self.input_device = None
+            node = self._input_node()
+            if node is not None:
+                if node != self.dev_name:
                     logging.debug("reading %s through its proxy %s", self.dev_name, node)
-                    self.input_device = InputDevice(node)
+                self.input_device = InputDevice(node)
         return self.input_device
 
     def get_capabilities(self):
@@ -552,13 +580,23 @@ class Device:
     def read_events(self, timeout):
         input_device = self.get_input_device()
         if input_device is not None and input_device.fd != -1:
-            r, _, _ = select.select({input_device.fd: input_device}, [], [], timeout)
-            if input_device.fd in r:
-                for event in input_device.read():
-                    event = self.normalize_event(event)
-                    if event.type == ecodes.EV_ABS:
-                        self.last_axis_value[ecodes.ABS_X] = event.value
-                    yield event
+            try:
+                r, _, _ = select.select({input_device.fd: input_device}, [], [], timeout)
+                if input_device.fd in r:
+                    for event in input_device.read():
+                        event = self.normalize_event(event)
+                        if event.type == ecodes.EV_ABS:
+                            self.last_axis_value[ecodes.ABS_X] = event.value
+                        yield event
+            except OSError as e:
+                # The device went away (unplugged, or a proxy restarted):
+                # drop it so the next read re-opens whatever is there now.
+                logging.debug("input device %s: %s", input_device.path, e)
+                try:
+                    input_device.close()
+                except OSError:
+                    pass
+                self.input_device = None
 
     def normalize_event(self, event):
         #

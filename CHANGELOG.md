@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Fixed
+- The Controls tab went dead (no steering, no buttons) after the combined
+  device was rebuilt: restarting a proxy destroys its virtual device and
+  creates a new one under the same name, and Oversteer kept reading the
+  deleted node. It now notices the node it holds is gone or replaced and
+  re-opens, and a read error drops the device so the next read recovers.
 - Combined device: a shifter's buttons beyond its gear positions were
   dropped, so the T500 RS / TH8A sequential plate did nothing. Everything
   the shifter reports is carried now; on the T500 RS the sequential
