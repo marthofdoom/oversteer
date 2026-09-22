@@ -20,6 +20,11 @@
   Rally and turbo cars shift well below the limiter, so set it per profile
   to where you change up.
 
+- Proxy status file: `ff_effect_types` (what the game has uploaded, by
+  type) and `ff_playing` (types currently playing) per proxy, refreshed
+  when the set changes, so a game's use of spring / damper / friction /
+  constant / periodic effects can be read off `/run/oversteer/proxies.json`.
+
 ### Fixed
 - WRC Generations telemetry was ignored: it sends the Codemasters
   extradata=3 layout natively but in a longer packet than DiRT Rally 2.0's

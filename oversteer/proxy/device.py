@@ -99,6 +99,10 @@ class ProxyDevice:
         self._auto_invert = {}            # (source key, from_code) -> bool, for 'auto' inversion
         self._pressed_by = {}             # source key -> set of virtual key codes it holds down
         self._ff_state = {}               # FF_GAIN / FF_AUTOCENTER last values, replayed on reconnect
+        self._ff_types = {}               # virtual id -> effect type name, for the status file
+        self._ff_playing = set()          # virtual ids currently playing
+        self._ff_summary = None
+        self._ff_notified = 0.0
         self._rules = {}                  # (source key, from_type, from_code) -> [Mapping]
         for m in spec.mappings:
             self._rules.setdefault((m.source, m.from_type, m.from_code), []).append(m)
@@ -158,7 +162,32 @@ class ProxyDevice:
                 'events_in': self.events_in,
                 'events_out': self.events_out,
                 'ff_effects': len(self.ff_effects),
+                'ff_effect_types': self._ff_type_summary(),
+                'ff_playing': sorted({self._ff_types[i] for i in self._ff_playing if i in self._ff_types}),
             }
+
+    FF_TYPE_NAMES = {ecodes.FF_CONSTANT: 'constant', ecodes.FF_PERIODIC: 'periodic', ecodes.FF_RAMP: 'ramp',
+                     ecodes.FF_SPRING: 'spring', ecodes.FF_DAMPER: 'damper', ecodes.FF_FRICTION: 'friction',
+                     ecodes.FF_INERTIA: 'inertia', ecodes.FF_RUMBLE: 'rumble'}
+
+    def _ff_type_summary(self):
+        """{type name: count} of the effects the game has uploaded."""
+        summary = {}
+        for name in self._ff_types.values():
+            summary[name] = summary.get(name, 0) + 1
+        return summary
+
+    def _ff_changed(self):
+        """Refresh the status file when the set of uploaded / playing effect
+        types changes (games re-upload every frame, so not on every call)."""
+        snapshot = (tuple(sorted(self._ff_type_summary().items())),
+                    tuple(sorted({self._ff_types[i] for i in self._ff_playing if i in self._ff_types})))
+        now = time.monotonic()
+        if snapshot != self._ff_summary and now - self._ff_notified >= 0.5:
+            self._ff_summary = snapshot
+            self._ff_notified = now
+            if self.on_change is not None:
+                self.on_change(self)
 
     # --- internals --------------------------------------------------------
 
@@ -557,6 +586,7 @@ class ProxyDevice:
         device = self._ff_device()
         upload.retval = 0
         try:
+            self._ff_types[virtual_id] = self.FF_TYPE_NAMES.get(upload.effect.type, str(upload.effect.type))
             if device is None:
                 # Accept the effect so the game keeps working; it plays once the wheel is back.
                 self._ff_cache[virtual_id] = bytes(memoryview(upload.effect).tobytes())
@@ -572,6 +602,7 @@ class ProxyDevice:
             upload.retval = -(e.errno or errno.EIO)
         finally:
             uinput_ff.end_upload(self.ui.fd, upload)
+        self._ff_changed()
 
     def _ff_erase(self, request_id):
         erase = uinput_ff.begin_erase(self.ui.fd, request_id)
@@ -579,6 +610,8 @@ class ProxyDevice:
         erase.retval = 0
         try:
             self._ff_cache.pop(virtual_id, None)
+            self._ff_types.pop(virtual_id, None)
+            self._ff_playing.discard(virtual_id)
             real_id = self.ff_effects.pop(virtual_id, None)
             device = self._ff_device()
             if real_id is not None and device is not None:
@@ -588,6 +621,7 @@ class ProxyDevice:
             erase.retval = -(e.errno or errno.EIO)
         finally:
             uinput_ff.end_erase(self.ui.fd, erase)
+        self._ff_changed()
 
     def _ff_play(self, code, value):
         device = self._ff_device()
@@ -598,6 +632,11 @@ class ProxyDevice:
             real = code
         else:
             real = self.ff_effects.get(code)
+            if value:
+                self._ff_playing.add(code)
+            else:
+                self._ff_playing.discard(code)
+            self._ff_changed()
             if real is None:
                 return
         try:
