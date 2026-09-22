@@ -189,6 +189,9 @@ class GtkHandlers:
         if not self.ui.updating_rev_leds:
             self.model.set_rev_leds_port(widget.get_value_as_int())
 
+    def on_launch_options_copy_clicked(self, widget):
+        self.ui.copy_launch_options()
+
     def on_rev_leds_test_clicked(self, widget):
         self.controller.test_rev_leds()
 

@@ -7,6 +7,7 @@ import locale as Locale
 from locale import gettext as _
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -419,6 +420,7 @@ class Gui:
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
         self.update_driver_status()
+        self.ui.set_launch_options(self.launch_options())
         self.apply_rev_leds()
 
         if self.model.get_profile():
@@ -426,6 +428,36 @@ class Gui:
         else:
             self.model.flush_device()
             self.model.flush_ui()
+
+    def launch_options(self):
+        """The Steam launch options that run a game with the shared-memory
+        telemetry bridge: the host path of oversteer-run."""
+        from .proxy.manager import in_flatpak
+        candidates = []
+        if in_flatpak():
+            # app-path is the versioned deployment; 'current/active' is the
+            # stable alias of the same files, so the string survives updates.
+            app_files = None
+            try:
+                with open('/.flatpak-info') as f:
+                    for line in f:
+                        if line.startswith('app-path='):
+                            app_files = line.split('=', 1)[1].strip()
+            except OSError:
+                pass
+            if app_files:
+                app_files = re.sub(r'/x86_64/[^/]+/[0-9a-f]{16,}/files$', '/current/active/files', app_files)
+                candidates.append(os.path.join(app_files, 'bin', 'oversteer-run'))
+        else:
+            candidates.append(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'oversteer-run'))
+            source_root = os.environ.get('MESON_SOURCE_ROOT')
+            if source_root:
+                candidates.append(os.path.join(source_root, 'data', 'telemetry', 'oversteer-run'))
+            candidates.append(shutil.which('oversteer-run') or '')
+        for path in candidates:
+            if path and (in_flatpak() or os.path.exists(path)):
+                return '"{}" %command%'.format(path) if ' ' in path else '{} %command%'.format(path)
+        return 'oversteer-run %command%'
 
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""

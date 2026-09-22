@@ -3194,6 +3194,66 @@
                           <object class="GtkBox">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
+                            <property name="tooltip-text" translatable="yes">Assetto Corsa, Assetto Corsa Competizione and Assetto Corsa Rally publish telemetry only through Windows shared memory, which stays inside the game's Proton prefix. Put this in the game's Steam launch options (Properties &gt; General) and Oversteer's bridge runs next to the game, inside the prefix, forwarding the engine RPM to the rev lights. Other games are unaffected by it.</property>
+                            <property name="valign">center</property>
+                            <property name="spacing">64</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="halign">start</property>
+                                <property name="label" translatable="yes">Shared-memory games (Assetto Corsa family): Steam launch options</property>
+                              </object>
+                              <packing>
+                                <property name="expand">True</property>
+                                <property name="fill">True</property>
+                                <property name="position">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="launch_options">
+                                <property name="width-request">420</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="editable">False</property>
+                                <property name="valign">center</property>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">1</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkButton" id="launch_options_copy">
+                                <property name="label" translatable="yes">Copy</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="receives-default">True</property>
+                                <property name="valign">center</property>
+                                <signal name="clicked" handler="on_launch_options_copy_clicked" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">False</property>
+                                <property name="position">2</property>
+                              </packing>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBoxRow">
+                        <property name="height-request">70</property>
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="activatable">False</property>
+                        <property name="selectable">False</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
                             <property name="tooltip-text" translatable="yes">Use wheel buttons to control some wheel settings. The buttons must be defined in the preferences window.</property>
                             <property name="valign">center</property>
                             <property name="spacing">64</property>

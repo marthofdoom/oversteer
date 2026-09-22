@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Shared-memory telemetry under Proton** (Assetto Corsa, Assetto Corsa
+  Competizione, Assetto Corsa Rally): `oversteer-shm-bridge.exe`, a small
+  Windows helper that runs inside the game's Proton prefix, reads the
+  `Local\acpmf_*` shared memory and sends RPM / redline / gear / speed to
+  the rev lights over UDP (24-byte `OVST` datagram). `oversteer-run
+  %command%` in the game's Steam launch options starts it alongside the
+  game through the same Steam Linux Runtime and Proton; the Tools tab
+  shows the exact launch options string with a Copy button. Source in
+  `data/telemetry/`, rebuild with `scripts/build-shm-bridge.sh`.
+
+### Fixed
+- WRC Generations telemetry was ignored: it sends the Codemasters
+  extradata=3 layout natively but in a longer packet than DiRT Rally 2.0's
+  264 bytes. Any 4-byte-aligned length from 256 bytes up is accepted now,
+  and unknown packet sizes are logged once.
+
 ## 0.11.0 — 2026-09-21
 
 ### Added

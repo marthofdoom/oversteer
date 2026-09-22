@@ -25,7 +25,15 @@ def codemasters(rpm, max_rpm, count=66):
     return struct.pack('<%df' % count, *floats)
 
 
+def ovst(rpm, max_rpm, shift=False, version=1):
+    return b'OVST' + struct.pack('<BBHffif', version, 1, 1 if shift else 0, rpm, max_rpm, 3, 120.0)
+
+
 def test_decode_formats():
+    assert decode(ovst(6000, 8500)) == (6000.0, 8500.0, False)
+    assert decode(ovst(6000, 0)) == (6000.0, None, False)         # redline unknown: learnt
+    assert decode(ovst(6000, 8500, shift=True))[2] is True
+    assert decode(ovst(6000, 8500, version=2)) is None
     assert decode(forza(4000)) == (4000.0, 8000.0, None)
     assert decode(forza(4000, size=232))[0] == 4000.0
     assert decode(forza(4000, race_on=0))[0] == 0.0          # menus: no revs

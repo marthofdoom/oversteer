@@ -18,6 +18,11 @@ Proton boundary and turns engine RPM into the wheel's five rev LEDs:
   rpm / 10. The packet length varies by game, so any 4-byte-aligned length
   from 256 bytes up is accepted once the Forza sizes are excluded.
 
+- Oversteer's own "OVST" datagram (24 bytes) from oversteer-shm-bridge, the
+  helper that runs inside a Proton prefix and forwards shared-memory
+  telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
+  Rally): rpm, max rpm (0 = unknown), gear, speed.
+
 The listener runs in a daemon thread and writes the LED brightness files
 through :class:`RevLeds`; when no packet arrives for a while the LEDs go
 out so a stale value never stays lit.
@@ -41,6 +46,8 @@ RPM_LIMIT = 30000.0                                  # anything above is not an 
 FORZA_SIZES = (232, 311, 324, 331)
 CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is 264, WRCG is longer
 CODEMASTERS_MAX = 512
+OVST_MAGIC = b'OVST'
+OVST_SIZE = 24
 
 
 class RevLeds:
@@ -95,6 +102,11 @@ def decode(data):
     """Return (rpm, max_rpm or None, shift_light or None) or None if the
     packet isn't a telemetry format we know (or carries nonsense)."""
     n = len(data)
+    if n == OVST_SIZE and data[:4] == OVST_MAGIC:
+        version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
+        if version != 1 or not (_plausible(rpm) and _plausible(max_rpm)):
+            return None
+        return (max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1))
     if n in FORZA_SIZES:
         race_on = struct.unpack_from('<i', data, 0)[0]
         max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
