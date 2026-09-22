@@ -13,10 +13,12 @@
   shows the exact launch options string with a Copy button. Source in
   `data/telemetry/`, rebuild with `scripts/build-shm-bridge.sh`.
 
-- Rev lights: a per-profile **shift point** (% of the game's maximum RPM,
-  default 97). All five LEDs are on at the shift point and flash above it;
-  rally and turbo cars shift well below the limiter, so lower it until the
-  bar completes where you change up.
+- Rev lights: a per-profile **shift point**, either as % of the game's
+  maximum RPM (default 97) or as an RPM figure (dropdown; the value is
+  converted when the game has reported its max RPM). All five LEDs are on
+  at the shift point and flash above it; the first comes on at 72 % of it.
+  Rally and turbo cars shift well below the limiter, so set it per profile
+  to where you change up.
 
 ### Fixed
 - WRC Generations telemetry was ignored: it sends the Codemasters

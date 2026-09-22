@@ -450,14 +450,19 @@ class GtkUi:
     def get_combine_generic(self):
         return self.combine_generic.get_active()
 
-    def set_rev_leds(self, enabled, port, shift=None):
+    def set_rev_leds(self, enabled, port, shift=None, unit=None):
         self._set_switch(self.rev_leds, enabled)
-        for w in (self.rev_leds_port, self.rev_leds_shift, self.rev_leds_test):
+        for w in (self.rev_leds_port, self.rev_leds_shift, self.rev_leds_shift_unit, self.rev_leds_test):
             w.set_sensitive(enabled is not None)
         self.updating_rev_leds = True
         try:
             if port is not None:
                 self.rev_leds_port.set_value(int(port))
+            if unit is not None:
+                # The spin button's range follows the unit
+                self.rev_leds_shift.set_adjustment(self.rev_leds_shift_rpm_adjustment if unit == 'rpm'
+                                                   else self.rev_leds_shift_percent_adjustment)
+                self.rev_leds_shift_unit.set_active_id(unit)
             if shift is not None:
                 self.rev_leds_shift.set_value(int(shift))
         finally:
@@ -765,6 +770,9 @@ class GtkUi:
         self.rev_leds = self.builder.get_object('rev_leds')
         self.rev_leds_port = self.builder.get_object('rev_leds_port')
         self.rev_leds_shift = self.builder.get_object('rev_leds_shift')
+        self.rev_leds_shift_unit = self.builder.get_object('rev_leds_shift_unit')
+        self.rev_leds_shift_percent_adjustment = self.builder.get_object('rev_leds_shift_adjustment')
+        self.rev_leds_shift_rpm_adjustment = self.builder.get_object('rev_leds_shift_rpm_adjustment')
         self.rev_leds_test = self.builder.get_object('rev_leds_test')
         self.rev_leds_status = self.builder.get_object('rev_leds_status')
         self.launch_options = self.builder.get_object('launch_options')

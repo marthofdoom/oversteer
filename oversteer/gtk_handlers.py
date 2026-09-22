@@ -196,6 +196,10 @@ class GtkHandlers:
         if not self.ui.updating_rev_leds:
             self.model.set_rev_leds_shift(widget.get_value_as_int())
 
+    def on_rev_leds_shift_unit_changed(self, widget):
+        if not self.ui.updating_rev_leds:
+            self.controller.change_rev_leds_shift_unit(widget.get_active_id())
+
     def on_rev_leds_test_clicked(self, widget):
         self.controller.test_rev_leds()
 

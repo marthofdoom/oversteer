@@ -45,8 +45,9 @@ FLASH_MARGIN = 0.03                                  # above the shift point: fl
 
 
 def thresholds_for(shift):
-    """LED thresholds (fractions of max RPM) for a shift point; all LEDs
-    are on at the shift point, flashing FLASH_MARGIN above it."""
+    """LED thresholds as fractions of max RPM for a shift point given as a
+    fraction of max RPM; all LEDs are on at the shift point, flashing
+    FLASH_MARGIN above it."""
     shift = max(0.5, min(1.0, float(shift)))
     return tuple(min(1.0, shift * x) for x in LED_SPACING)
 IDLE_TIMEOUT = 2.0                                   # seconds without telemetry -> LEDs off
@@ -146,12 +147,14 @@ def decode(data):
 class Telemetry:
     """UDP listener thread driving a RevLeds."""
 
-    def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, on_status=None):
+    def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None):
+        """`shift` is the shift point as a fraction of the game's max RPM;
+        `shift_rpm`, when given, is an absolute shift point instead."""
         self.leds = leds
         self.port = int(port)
         self.shift = max(0.5, min(1.0, float(shift)))
-        self.thresholds = thresholds_for(self.shift)
-        self.flash_at = min(0.995, self.shift + FLASH_MARGIN)
+        self.shift_rpm = float(shift_rpm) if shift_rpm else None
+        self.last_max_rpm = 0.0
         self.on_status = on_status
         self.running = False
         self.last_packet = 0.0
@@ -228,15 +231,20 @@ class Telemetry:
                 else:
                     self.learned_max = max(rpm, self.learned_max * 0.9995)
                 max_rpm = self.learned_max
-            fraction = rpm / max_rpm if max_rpm > 0 else 0.0
-            if shift or fraction >= self.flash_at:
+            else:
+                self.last_max_rpm = max_rpm
+            # Everything is relative to the shift point: the bar completes
+            # there and flashes above it.
+            reference = self.shift_rpm if self.shift_rpm else self.shift * max_rpm
+            fraction = rpm / reference if reference > 0 else 0.0
+            if shift or fraction >= 1.0 + FLASH_MARGIN:
                 if now - flash_at >= FLASH_PERIOD:
                     flash = not flash
                     flash_at = now
                     self.leds.set_pattern((flash,) * len(self.leds.paths))
                 lit_state = None
                 continue
-            lit = sum(1 for t in self.thresholds if fraction >= t)
+            lit = sum(1 for t in LED_SPACING if fraction >= t)
             if lit != lit_state:
                 self.leds.set_count(lit)
                 lit_state = lit

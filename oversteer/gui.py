@@ -485,13 +485,30 @@ class Gui:
                 if self.telemetry is not None and generation == self.telemetry_generation:
                     self.ui.set_rev_leds_status(text)
             self.ui.safe_call(show)
-        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300,
-                                   shift=(self.model.get_rev_leds_shift() or 97) / 100.0, on_status=status)
+        shift = self.model.get_rev_leds_shift()
+        if self.model.get_rev_leds_shift_unit() == 'rpm':
+            kwargs = {'shift_rpm': shift or 7000}
+        else:
+            kwargs = {'shift': (shift or 97) / 100.0}
+        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status, **kwargs)
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
+
+    def change_rev_leds_shift_unit(self, unit):
+        """Switch the shift point between % of max RPM and an RPM figure,
+        converting the value when the game has told us the max RPM."""
+        value = None
+        max_rpm = self.telemetry.last_max_rpm if self.telemetry is not None else 0.0
+        current = self.model.get_rev_leds_shift()
+        if max_rpm and current:
+            if unit == 'rpm' and self.model.get_rev_leds_shift_unit() != 'rpm':
+                value = int(round(current / 100.0 * max_rpm / 50.0) * 50)
+            elif unit != 'rpm' and self.model.get_rev_leds_shift_unit() == 'rpm':
+                value = int(round(current * 100.0 / max_rpm))
+        self.model.set_rev_leds_shift_unit(unit, value)
 
     def test_rev_leds(self):
         if self.device is None:
