@@ -324,33 +324,36 @@ class GtkUi:
         self._set_switch(self.inertia_mode, value)
 
     # invert_pedals bit mask as the driver defines it, by evdev axis
-    INVERT_CLUTCH = 1        # ABS_Y
-    INVERT_ACCELERATOR = 2   # ABS_Z
-    INVERT_BRAKES = 4        # ABS_RZ
+    # Which invert_pedals bit each box drives. The default is the usual
+    # layout; set_pedal_bits() replaces it per device, because several
+    # wheels report their pedals on other axes than they present them.
+    PEDAL_BOXES = ('clutch', 'accelerator', 'brakes')
+
+    def set_pedal_bits(self, bits):
+        """{'clutch'|'accelerator'|'brakes': invert_pedals bit or None} for
+        the current device."""
+        self.pedal_bits = dict(bits)
+
+    def _pedal_boxes(self):
+        return zip(self.PEDAL_BOXES, (self.invert_clutch, self.invert_accelerator, self.invert_brakes))
 
     def set_invert_pedals(self, mask):
-        buttons = (self.invert_clutch, self.invert_accelerator, self.invert_brakes)
-        if mask is None:
-            for b in buttons:
-                b.set_sensitive(False)
-            return
         # set_active emits 'clicked'; don't write partial masks to the device
         self.updating_invert_pedals = True
         try:
-            for b, bit in zip(buttons, (self.INVERT_CLUTCH, self.INVERT_ACCELERATOR, self.INVERT_BRAKES)):
-                b.set_sensitive(True)
-                b.set_active(bool(mask & bit))
+            for name, box in self._pedal_boxes():
+                bit = self.pedal_bits.get(name)
+                box.set_sensitive(mask is not None and bit is not None)
+                box.set_active(bool(mask) and bit is not None and bool(mask & bit))
         finally:
             self.updating_invert_pedals = False
 
     def get_invert_pedals(self):
         mask = 0
-        if self.invert_clutch.get_active():
-            mask |= self.INVERT_CLUTCH
-        if self.invert_accelerator.get_active():
-            mask |= self.INVERT_ACCELERATOR
-        if self.invert_brakes.get_active():
-            mask |= self.INVERT_BRAKES
+        for name, box in self._pedal_boxes():
+            bit = self.pedal_bits.get(name)
+            if bit is not None and box.get_active():
+                mask |= bit
         return mask
 
     def set_ffb_enabled(self, value):
@@ -753,6 +756,7 @@ class GtkUi:
     def _set_builder_objects(self):
         self._available = {}
         self.updating_invert_pedals = False
+        self.pedal_bits = {'clutch': 1, 'accelerator': 2, 'brakes': 4}
         self.updating_combine = False
         self.updating_rev_leds = False
         self.window = self.builder.get_object('main_window')

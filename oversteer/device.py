@@ -584,13 +584,32 @@ class Device:
                 self.input_device = InputDevice(node)
         return self.input_device
 
-    PEDAL_AXES = ((ecodes.ABS_Y, 1), (ecodes.ABS_Z, 2), (ecodes.ABS_RZ, 4))   # code, invert_pedals bit
+    # invert_pedals bits, by the *raw* axis the driver sees
+    PEDAL_BITS = {ecodes.ABS_Y: 1, ecodes.ABS_Z: 2, ecodes.ABS_RZ: 4}
+    PEDALS = (ecodes.ABS_Y, ecodes.ABS_Z, ecodes.ABS_RZ)   # as Oversteer sees them: clutch, accelerator, brakes
+
+    def _axis_now(self, device, code, fallback):
+        """An axis's current value. capabilities(absinfo=True) answers from
+        the snapshot taken when the device was opened, so a reading that
+        has to be current asks the kernel again."""
+        try:
+            return device.absinfo(code).value
+        except (AttributeError, OSError):
+            return fallback
+
+    def _normalized_axis(self, code, value):
+        """An axis reading as normalize_event will deliver it (code and
+        value): several wheels report their pedals on other axes, or the
+        other way round."""
+        event = self.normalize_event(InputEvent(0, 0, ecodes.EV_ABS, code, value))
+        return event.code, event.value
 
     def pedal_axes(self, mask=None):
-        """{code: (min, max, inverted)} for the pedals this device has.
-        `inverted` is what the driver is doing now (or `mask`, the value
-        about to be written), so a reading can be turned into a pedal
-        position: released is min when inverted, max when not."""
+        """{code: (released, pressed, bit)} for the pedals this device has,
+        keyed and valued the way events arrive (after normalize_event).
+        `released`/`pressed` are the readings at the ends of the travel, so
+        a reading becomes a pedal position; `bit` is the invert_pedals bit
+        that flips that pedal, or None when the driver can't."""
         try:
             device = self.get_input_device()
             if device is None:
@@ -602,19 +621,54 @@ class Device:
         if mask is None:
             mask = self.get_invert_pedals() or 0
         pedals = {}
-        for code, bit in self.PEDAL_AXES:
-            info = axes.get(code)
-            if info is not None and info.max > info.min:
-                pedals[code] = (info.min, info.max, bool(mask & bit))
+        for code, info in axes.items():
+            if info.max <= info.min:
+                continue
+            bit = self.PEDAL_BITS.get(code)
+            # Logitech pedals rest at the top of the axis unless the driver
+            # is inverting them; normalisation may flip that again.
+            rest_raw, pressed_raw = (info.min, info.max) if bit and (mask & bit) else (info.max, info.min)
+            norm_code, released = self._normalized_axis(code, rest_raw)
+            if norm_code not in self.PEDALS or norm_code in pedals:
+                continue
+            _, pressed = self._normalized_axis(code, pressed_raw)
+            if released != pressed:
+                pedals[norm_code] = (released, pressed, bit)
         return pedals
+
+    def pedal_values(self):
+        """{code: value} of the pedals right now, as events deliver them."""
+        try:
+            device = self.get_input_device()
+            if device is None:
+                return {}
+            axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
+        except OSError:
+            return {}
+        values = {}
+        for code, info in axes.items():
+            norm_code, value = self._normalized_axis(code, self._axis_now(device, code, info.value))
+            if norm_code in self.PEDALS and norm_code not in values:
+                values[norm_code] = value
+        return values
+
+    def axis_value(self, code):
+        """The current reading of one axis, or None."""
+        try:
+            device = self.get_input_device()
+            if device is None:
+                return None
+            return device.absinfo(code).value
+        except (AttributeError, OSError):
+            return None
 
     def suggested_invert_pedals(self):
         """The invert_pedals mask that leaves every pedal reading 0 when
-        released, which is what games expect. Derived from where the
-        pedals are resting now and what the driver is already doing, so it
-        is stable once applied. None when the driver can't invert."""
+        released, which is what games expect. Only offered on a pristine
+        setting (mask 0, as the driver comes up): anything else is somebody
+        else's decision. None when the driver can't invert."""
         mask = self.get_invert_pedals()
-        if mask is None:
+        if mask is None or mask != 0:
             return None
         try:
             device = self.get_input_device()
@@ -623,14 +677,13 @@ class Device:
             axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
         except OSError:
             return None
-        for code, bit in self.PEDAL_AXES:
+        # Every pedal the driver can invert: these wheels all report a
+        # released pedal at the top of its travel, and reading the current
+        # position instead would get it wrong for a pedal held down now.
+        for code, bit in self.PEDAL_BITS.items():
             info = axes.get(code)
-            if info is None or info.max <= info.min:
-                continue
-            # Resting in the top quarter of its travel: reading backwards,
-            # whichever way the driver is set right now.
-            if info.value >= info.min + (info.max - info.min) * 0.75:
-                mask ^= bit
+            if info is not None and info.max > info.min:
+                mask |= bit
         return mask
 
     def _proxy_handbrake_axis(self):
@@ -688,7 +741,8 @@ class Device:
                 # A handbrake resting at the top of its travel reads
                 # backwards; the proxy levels this out with 'invert': auto,
                 # a natively read one does not.
-                inverted = info.value >= info.min + (info.max - info.min) * 0.75
+                value = self._axis_now(device, code, info.value)
+                inverted = value >= info.min + (info.max - info.min) * 0.75
                 return (code, info.min, info.max, inverted)
         return None
 

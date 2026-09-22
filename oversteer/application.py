@@ -143,6 +143,8 @@ class Application:
         if args.combine_pedals is not None:
             model.set_combine_pedals(args.combine_pedals)
         if args.invert_pedals is not None:
+            # an explicit setting is not overridden by the GUI's default
+            self.invert_pedals_from_cli = True
             model.set_invert_pedals(args.invert_pedals)
         if args.ffb_enabled is not None:
             model.set_ffb_enabled(args.ffb_enabled)

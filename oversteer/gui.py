@@ -429,7 +429,6 @@ class Gui:
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
         self.update_handbrake()
-        self.update_pedals()
         self.update_driver_status()
         self.ui.set_launch_options(self.launch_options())
         self.apply_rev_leds()
@@ -443,7 +442,7 @@ class Gui:
             # that says otherwise always wins, which is how someone keeps
             # the raw direction.
             device_id = self.device.get_id()
-            if device_id not in self.pedals_defaulted:
+            if device_id not in self.pedals_defaulted and not getattr(self.app, 'invert_pedals_from_cli', False):
                 self.pedals_defaulted.add(device_id)
                 suggested = self.device.suggested_invert_pedals()
                 if suggested is not None and suggested != self.model.get_invert_pedals():
@@ -451,6 +450,7 @@ class Gui:
                     self.model.set_invert_pedals(suggested)
             self.model.flush_device()
             self.model.flush_ui()
+        self.update_pedals()
 
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory
@@ -522,11 +522,17 @@ class Gui:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
 
+    PEDAL_BOX = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'accelerator', ecodes.ABS_RZ: 'brakes'}
+
     def update_pedals(self, mask=None):
         """Re-read which end of each pedal axis means 'released'. `mask` is
         the invert_pedals value about to be written, so events arriving
         while the driver catches up are read the new way."""
         self.pedal_axes = self.device.pedal_axes(mask) if self.device is not None else {}
+        # Which bit each box flips depends on the wheel: the pedal shown as
+        # the clutch is not always the axis the driver calls the clutch.
+        self.ui.set_pedal_bits({name: (self.pedal_axes[code][2] if code in self.pedal_axes else None)
+                                for code, name in self.PEDAL_BOX.items()})
         # The driver re-emits the axes when the setting changes and the
         # value takes a moment to come back through a proxy; redraw once it
         # has, so the bars are right without touching anything.
@@ -534,35 +540,33 @@ class Gui:
 
     def redraw_inputs(self):
         """Draw the pedal and handbrake bars from where the axes are now."""
-        device = self.device.get_input_device() if self.device is not None else None
-        if device is None:
-            return False
-        try:
-            axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
-        except OSError:
+        if self.device is None:
             return False
         setters = {ecodes.ABS_Z: self.ui.set_accelerator_input,
                    ecodes.ABS_RZ: self.ui.set_brakes_input,
                    ecodes.ABS_Y: self.ui.set_clutch_input}
-        for code, setter in setters.items():
-            if code in self.pedal_axes and code in axes:
-                setter(self._pedal_position(code, axes[code].value))
-        if self.handbrake_axis is not None and self.handbrake_axis[0] in axes:
+        for code, value in self.device.pedal_values().items():
+            axis = self.pedal_axes.get(code)
+            if axis is not None and code in setters:
+                setters[code](self._pedal_position(axis, value))
+        if self.handbrake_axis is not None:
             code, low, high, inverted = self.handbrake_axis
+            value = self.device.axis_value(code)
             span = high - low
-            if span > 0:
-                fraction = min(1.0, max(0.0, (axes[code].value - low) / span))
+            if value is not None and span > 0:
+                fraction = min(1.0, max(0.0, (value - low) / span))
                 self.ui.set_handbrake_input(1.0 - fraction if inverted else fraction)
         return False
 
-    def _pedal_position(self, code, value):
-        """A raw pedal reading as 0 (released) to 1 (fully pressed)."""
-        low, high, inverted = self.pedal_axes[code]
-        span = high - low
-        if span <= 0:
+    @staticmethod
+    def _pedal_position(axis, value):
+        """A pedal reading as 0 (released) to 1 (fully pressed). `axis` is
+        (released, pressed, bit), so either direction works."""
+        released, pressed, _ = axis
+        span = pressed - released
+        if span == 0:
             return 0.0
-        fraction = min(1.0, max(0.0, (value - low) / span))
-        return fraction if inverted else 1.0 - fraction
+        return min(1.0, max(0.0, (value - released) / span))
 
     def _proxied_handbrake(self):
         """(proxy id, source key, from code, inverted) for the handbrake a
@@ -946,11 +950,12 @@ class Gui:
                     else:
                         self.ui.safe_call(self.ui.set_steering_input, event.value)
                 elif event.code in (ecodes.ABS_Z, ecodes.ABS_RZ, ecodes.ABS_Y):
-                    if event.code in self.pedal_axes:
+                    axis = self.pedal_axes.get(event.code)
+                    if axis is not None:
                         setter = {ecodes.ABS_Z: self.ui.set_accelerator_input,
                                   ecodes.ABS_RZ: self.ui.set_brakes_input,
                                   ecodes.ABS_Y: self.ui.set_clutch_input}[event.code]
-                        self.ui.safe_call(setter, self._pedal_position(event.code, event.value))
+                        self.ui.safe_call(setter, self._pedal_position(axis, event.value))
                 elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
                     _, low, high, inverted = self.handbrake_axis
                     span = high - low
@@ -999,6 +1004,11 @@ class Gui:
                         self.process_events(events)
                 except OSError as e:
                     logging.debug(e)
+                    time.sleep(1)
+                except Exception:
+                    # Reading input must not stop because one event upset
+                    # something: the whole window goes still if it does.
+                    logging.exception("input")
                     time.sleep(1)
             else:
                 time.sleep(1)

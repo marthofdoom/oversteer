@@ -153,6 +153,11 @@ class Model:
         # Profiles from before the force feedback switch existed
         if data['ffb_enabled'] is None and data['ff_gain'] is not None:
             data['ffb_enabled'] = True
+        # A profile saved before the driver could invert pedals says
+        # nothing about it; keep what the device is doing rather than
+        # greying the boxes out.
+        if data['invert_pedals'] is None:
+            data['invert_pedals'] = self.device.get_invert_pedals()
         # Profiles from before the shift point: keep the old fixed 97 %
         if data['rev_leds'] is not None:
             if data['rev_leds_shift_unit'] not in ('percent', 'rpm'):

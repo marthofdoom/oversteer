@@ -43,6 +43,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.12.2" date="2026-09-22">
+      <description><ul><li>Pedals are inverted at the driver by default so games read them the right way round</li><li>Invert boxes for each pedal and the handbrake on the Controls tab</li><li>Handbrake column shows the handbrake a combined device carries</li></ul></description>
+    </release>
     <release version="0.12.1" date="2026-09-22">
       <description><ul><li>Fix the Controls tab going dead after the combined device is rebuilt</li><li>Carry a shifter's sequential positions into the combined device</li><li>Show a handbrake on the Controls tab when the device has one</li></ul></description>
     </release>

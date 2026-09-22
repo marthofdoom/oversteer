@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.12.2 — 2026-09-22
+
+### Fixed
+- A profile saved before the driver could invert pedals no longer greys
+  the Invert boxes out.
+- Axis readings are taken from the kernel rather than the snapshot made
+  when the device was opened, which a bar redraw would otherwise show.
+- An error while handling one input event no longer stops Oversteer
+  reading the wheel for the rest of the session.
 
 ### Changed
 - **Pedals are straightened out instead of being hidden.** Logitech pedals
@@ -9,13 +17,17 @@
   while games still received a pedal that reads "fully pressed" when
   released (Assetto Corsa Rally shows this). On a wheel whose driver can
   invert pedals, Oversteer now inverts the ones that rest at the far end,
-  once per device per session, so games get 0 released / full pressed.
-  A profile's saved setting always wins, which is how to keep the raw
-  direction.
+  once per device per session and only while the driver's setting is
+  untouched, so games get 0 released / full pressed. A profile that
+  carries the setting always wins, which is how to keep the raw
+  direction, as does `--invert-pedals`.
 - The **Invert** boxes moved to the Controls tab, one under each pedal,
-  ticked when that pedal is inverted. The pedal bars follow the real
-  direction of the axis now rather than assuming the Logitech convention,
-  so they stay correct whichever way the boxes are set.
+  ticked when that pedal is inverted. Each box drives the axis the driver
+  associates with that pedal, which is not always the one Oversteer shows
+  it as (a G29 in DFP or DFGT emulation, a G920, the T150/TMX/T248 and the
+  G PRO all report their pedals on other axes), and the bars are drawn
+  from where each axis really rests instead of assuming the Logitech
+  convention.
 - The handbrake has an **Invert** box too, overriding the direction the
   combined device gives it (the proxy sets this automatically from where
   the lever rests; the daemon now reports what it decided so the box shows
