@@ -548,25 +548,25 @@ class Gui:
         for code, value in self.device.pedal_values().items():
             axis = self.pedal_axes.get(code)
             if axis is not None and code in setters:
-                setters[code](self._pedal_position(axis, value))
+                setters[code](self._axis_fraction(axis, value))
         if self.handbrake_axis is not None:
-            code, low, high, inverted = self.handbrake_axis
+            code, low, high = self.handbrake_axis
             value = self.device.axis_value(code)
-            span = high - low
-            if value is not None and span > 0:
-                fraction = min(1.0, max(0.0, (value - low) / span))
-                self.ui.set_handbrake_input(1.0 - fraction if inverted else fraction)
+            if value is not None and high > low:
+                self.ui.set_handbrake_input(min(1.0, max(0.0, (value - low) / (high - low))))
         return False
 
     @staticmethod
-    def _pedal_position(axis, value):
-        """A pedal reading as 0 (released) to 1 (fully pressed). `axis` is
-        (released, pressed, bit), so either direction works."""
-        released, pressed, _ = axis
-        span = pressed - released
+    def _axis_fraction(axis, value):
+        """Where a reading sits in its axis, 0 at the bottom to 1 at the
+        top. The bars show the axis as the game receives it, not the
+        pedal's position: that is what makes a pedal reading backwards
+        visible instead of hiding it behind a flipped display."""
+        low, high = min(axis[0], axis[1]), max(axis[0], axis[1])
+        span = high - low
         if span == 0:
             return 0.0
-        return min(1.0, max(0.0, (value - released) / span))
+        return min(1.0, max(0.0, (value - low) / span))
 
     def _proxied_handbrake(self):
         """(proxy id, source key, from code, inverted) for the handbrake a
@@ -955,13 +955,12 @@ class Gui:
                         setter = {ecodes.ABS_Z: self.ui.set_accelerator_input,
                                   ecodes.ABS_RZ: self.ui.set_brakes_input,
                                   ecodes.ABS_Y: self.ui.set_clutch_input}[event.code]
-                        self.ui.safe_call(setter, self._pedal_position(axis, event.value))
+                        self.ui.safe_call(setter, self._axis_fraction(axis, event.value))
                 elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
-                    _, low, high, inverted = self.handbrake_axis
-                    span = high - low
-                    if span > 0:
-                        fraction = min(1.0, max(0.0, (event.value - low) / span))
-                        self.ui.safe_call(self.ui.set_handbrake_input, 1.0 - fraction if inverted else fraction)
+                    _, low, high = self.handbrake_axis
+                    if high > low:
+                        self.ui.safe_call(self.ui.set_handbrake_input,
+                                          min(1.0, max(0.0, (event.value - low) / (high - low))))
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     if event.value == -1:

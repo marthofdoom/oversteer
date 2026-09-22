@@ -718,10 +718,10 @@ class Device:
             return True
 
     def handbrake_axis(self):
-        """(code, min, max, inverted) of this device's handbrake axis, or
-        None. A proxy presenting this wheel says which axis it put the
-        handbrake on; otherwise the axes a handbrake reports natively are
-        probed, skipping any the wheel uses for something else."""
+        """(code, min, max) of this device's handbrake axis, or None. A
+        proxy presenting this wheel says which axis it put the handbrake
+        on; otherwise the axes a handbrake reports natively are probed,
+        skipping any the wheel uses for something else."""
         try:
             device = self.get_input_device()
             if device is None:
@@ -738,12 +738,7 @@ class Device:
         for code in candidates:
             info = axes.get(code)
             if info is not None and info.max > info.min:
-                # A handbrake resting at the top of its travel reads
-                # backwards; the proxy levels this out with 'invert': auto,
-                # a natively read one does not.
-                value = self._axis_now(device, code, info.value)
-                inverted = value >= info.min + (info.max - info.min) * 0.75
-                return (code, info.min, info.max, inverted)
+                return (code, info.min, info.max)
         return None
 
     def get_capabilities(self):

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The Controls tab shows each axis as a game receives it rather than the
+  pedal's position: with Invert off a Logitech pedal sits full when
+  released, which is exactly what a game reads, and ticking Invert flips
+  the bar where you can see it. Hiding that behind a flipped display is
+  what made a wrongly-read pedal invisible in the first place.
+
 ## 0.12.2 — 2026-09-22
 
 ### Fixed
