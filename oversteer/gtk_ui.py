@@ -327,18 +327,25 @@ class GtkUi:
             self.ff_friction_level.set_sensitive(True)
             self.ff_friction_level.set_value(int(level))
 
-    def set_rev_leds(self, enabled, port):
+    def set_rev_leds(self, enabled, port, shift=None, unit=None):
         self.rev_leds.set_sensitive(enabled is not None)
         if enabled is not None:
             self.rev_leds.set_active(bool(enabled))
-        for w in (self.rev_leds_port, self.rev_leds_test):
+        for w in (self.rev_leds_port, self.rev_leds_shift, self.rev_leds_shift_unit, self.rev_leds_test):
             w.set_sensitive(enabled is not None)
-        if port is not None:
-            self.updating_rev_leds = True
-            try:
+        self.updating_rev_leds = True
+        try:
+            if port is not None:
                 self.rev_leds_port.set_value(int(port))
-            finally:
-                self.updating_rev_leds = False
+            if unit is not None:
+                # The spin button's range follows the unit
+                self.rev_leds_shift.set_adjustment(self.rev_leds_shift_rpm_adjustment if unit == 'rpm'
+                                                   else self.rev_leds_shift_percent_adjustment)
+                self.rev_leds_shift_unit.set_active_id(unit)
+            if shift is not None:
+                self.rev_leds_shift.set_value(int(shift))
+        finally:
+            self.updating_rev_leds = False
 
     def set_rev_leds_status(self, text):
         self.rev_leds_status.set_text(text)
@@ -613,6 +620,10 @@ class GtkUi:
         self.ffbmeter_leds = self.builder.get_object('ffbmeter_leds')
         self.rev_leds = self.builder.get_object('rev_leds')
         self.rev_leds_port = self.builder.get_object('rev_leds_port')
+        self.rev_leds_shift = self.builder.get_object('rev_leds_shift')
+        self.rev_leds_shift_unit = self.builder.get_object('rev_leds_shift_unit')
+        self.rev_leds_shift_percent_adjustment = self.builder.get_object('rev_leds_shift_adjustment')
+        self.rev_leds_shift_rpm_adjustment = self.builder.get_object('rev_leds_shift_rpm_adjustment')
         self.rev_leds_test = self.builder.get_object('rev_leds_test')
         self.rev_leds_status = self.builder.get_object('rev_leds_status')
         self.updating_rev_leds = False

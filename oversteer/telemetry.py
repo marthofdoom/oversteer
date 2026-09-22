@@ -18,6 +18,11 @@ Proton boundary and turns engine RPM into the wheel's five rev LEDs:
   rpm / 10. The packet length varies by game, so any 4-byte-aligned length
   from 256 bytes up is accepted once the Forza sizes are excluded.
 
+- Oversteer's own "OVST" datagram (24 bytes) from oversteer-shm-bridge, the
+  helper that runs inside a Proton prefix and forwards shared-memory
+  telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
+  Rally): rpm, max rpm (0 = unknown), gear, speed.
+
 The listener runs in a daemon thread and writes the LED brightness files
 through :class:`RevLeds`; when no packet arrives for a while the LEDs go
 out so a stale value never stays lit.
@@ -33,14 +38,26 @@ import threading
 import time
 
 DEFAULT_PORT = 5300
-DEFAULT_THRESHOLDS = (0.70, 0.78, 0.86, 0.92, 0.97)   # fraction of max RPM per LED
-LIMITER_FRACTION = 0.99
+DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
+LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point
+DEFAULT_THRESHOLDS = tuple(round(DEFAULT_SHIFT * x, 3) for x in LED_SPACING)
+FLASH_MARGIN = 0.03                                  # above the shift point: flash (shift now)
+
+
+def thresholds_for(shift):
+    """LED thresholds as fractions of max RPM for a shift point given as a
+    fraction of max RPM; all LEDs are on at the shift point, flashing
+    FLASH_MARGIN above it."""
+    shift = max(0.5, min(1.0, float(shift)))
+    return tuple(min(1.0, shift * x) for x in LED_SPACING)
 IDLE_TIMEOUT = 2.0                                   # seconds without telemetry -> LEDs off
 FLASH_PERIOD = 0.08                                  # limiter flash half-period (seconds)
 RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
 FORZA_SIZES = (232, 311, 324, 331)
 CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is 264, WRCG is longer
 CODEMASTERS_MAX = 512
+OVST_MAGIC = b'OVST'
+OVST_SIZE = 24
 
 
 class RevLeds:
@@ -95,6 +112,11 @@ def decode(data):
     """Return (rpm, max_rpm or None, shift_light or None) or None if the
     packet isn't a telemetry format we know (or carries nonsense)."""
     n = len(data)
+    if n == OVST_SIZE and data[:4] == OVST_MAGIC:
+        version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
+        if version != 1 or not (_plausible(rpm) and _plausible(max_rpm)):
+            return None
+        return (max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1))
     if n in FORZA_SIZES:
         race_on = struct.unpack_from('<i', data, 0)[0]
         max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
@@ -125,10 +147,14 @@ def decode(data):
 class Telemetry:
     """UDP listener thread driving a RevLeds."""
 
-    def __init__(self, leds, port=DEFAULT_PORT, thresholds=DEFAULT_THRESHOLDS, on_status=None):
+    def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None):
+        """`shift` is the shift point as a fraction of the game's max RPM;
+        `shift_rpm`, when given, is an absolute shift point instead."""
         self.leds = leds
         self.port = int(port)
-        self.thresholds = tuple(thresholds)
+        self.shift = max(0.5, min(1.0, float(shift)))
+        self.shift_rpm = float(shift_rpm) if shift_rpm else None
+        self.last_max_rpm = 0.0
         self.on_status = on_status
         self.running = False
         self.last_packet = 0.0
@@ -205,15 +231,20 @@ class Telemetry:
                 else:
                     self.learned_max = max(rpm, self.learned_max * 0.9995)
                 max_rpm = self.learned_max
-            fraction = rpm / max_rpm if max_rpm > 0 else 0.0
-            if shift or fraction >= LIMITER_FRACTION:
+            else:
+                self.last_max_rpm = max_rpm
+            # Everything is relative to the shift point: the bar completes
+            # there and flashes above it.
+            reference = self.shift_rpm if self.shift_rpm else self.shift * max_rpm
+            fraction = rpm / reference if reference > 0 else 0.0
+            if shift or fraction >= 1.0 + FLASH_MARGIN:
                 if now - flash_at >= FLASH_PERIOD:
                     flash = not flash
                     flash_at = now
                     self.leds.set_pattern((flash,) * len(self.leds.paths))
                 lit_state = None
                 continue
-            lit = sum(1 for t in self.thresholds if fraction >= t)
+            lit = sum(1 for t in LED_SPACING if fraction >= t)
             if lit != lit_state:
                 self.leds.set_count(lit)
                 lit_state = lit

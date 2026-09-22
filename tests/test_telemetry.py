@@ -1,5 +1,5 @@
 import struct
-from oversteer.telemetry import decode, RevLeds, Telemetry, DEFAULT_THRESHOLDS
+from oversteer.telemetry import decode, RevLeds, Telemetry, DEFAULT_THRESHOLDS, thresholds_for
 
 
 def forza(rpm, max_rpm=8000.0, race_on=1, size=324):
@@ -25,7 +25,15 @@ def codemasters(rpm, max_rpm, count=66):
     return struct.pack('<%df' % count, *floats)
 
 
+def ovst(rpm, max_rpm, shift=False, version=1):
+    return b'OVST' + struct.pack('<BBHffif', version, 1, 1 if shift else 0, rpm, max_rpm, 3, 120.0)
+
+
 def test_decode_formats():
+    assert decode(ovst(6000, 8500)) == (6000.0, 8500.0, False)
+    assert decode(ovst(6000, 0)) == (6000.0, None, False)         # redline unknown: learnt
+    assert decode(ovst(6000, 8500, shift=True))[2] is True
+    assert decode(ovst(6000, 8500, version=2)) is None
     assert decode(forza(4000)) == (4000.0, 8000.0, None)
     assert decode(forza(4000, size=232))[0] == 4000.0
     assert decode(forza(4000, race_on=0))[0] == 0.0          # menus: no revs
@@ -47,3 +55,7 @@ def test_decode_formats():
 
 def test_thresholds_are_monotonic():
     assert list(DEFAULT_THRESHOLDS) == sorted(DEFAULT_THRESHOLDS)
+    assert DEFAULT_THRESHOLDS[-1] == 0.97
+    t = thresholds_for(0.80)
+    assert list(t) == sorted(t) and t[-1] == 0.80 and t[0] < 0.60
+    assert thresholds_for(1.0)[-1] == 1.0 and thresholds_for(2.0)[-1] == 1.0
