@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **Pedals are straightened out instead of being hidden.** Logitech pedals
+  report their released position at the far end of the axis; Oversteer used
+  to flip that for its own display only, so the Controls tab looked right
+  while games still received a pedal that reads "fully pressed" when
+  released (Assetto Corsa Rally shows this). On a wheel whose driver can
+  invert pedals, Oversteer now inverts the ones that rest at the far end,
+  once per device per session, so games get 0 released / full pressed.
+  A profile's saved setting always wins, which is how to keep the raw
+  direction.
+- The **Invert** boxes moved to the Controls tab, one under each pedal,
+  ticked when that pedal is inverted. The pedal bars follow the real
+  direction of the axis now rather than assuming the Logitech convention,
+  so they stay correct whichever way the boxes are set.
+
 ## 0.12.1 — 2026-09-22
 
 ### Fixed

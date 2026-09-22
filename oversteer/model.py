@@ -249,6 +249,9 @@ class Model:
         mask = int(mask)
         if self.set_if_changed('invert_pedals', mask):
             self.device.set_invert_pedals(mask)
+            if self.ui is not None:
+                # the bars show a pedal position, so they follow the change
+                self.ui.controller.update_pedals()
 
     def get_invert_pedals(self):
         return self.data['invert_pedals']

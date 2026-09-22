@@ -905,90 +905,6 @@
                         </child>
                       </object>
                     </child>
-                    <child>
-                      <object class="GtkListBoxRow">
-                        <property name="height-request">70</property>
-                        <property name="visible">True</property>
-                        <property name="can-focus">True</property>
-                        <property name="activatable">False</property>
-                        <property name="selectable">False</property>
-                        <child>
-                          <object class="GtkBox">
-                            <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="tooltip-text" translatable="yes">Report 0 when a pedal is released and full value when pressed, like gamepad triggers. Some games need this.</property>
-                            <property name="valign">center</property>
-                            <property name="spacing">64</property>
-                            <child>
-                              <object class="GtkLabel">
-                                <property name="visible">True</property>
-                                <property name="can-focus">False</property>
-                                <property name="halign">start</property>
-                                <property name="label" translatable="yes">Invert pedals</property>
-                              </object>
-                              <packing>
-                                <property name="expand">True</property>
-                                <property name="fill">True</property>
-                                <property name="position">0</property>
-                              </packing>
-                            </child>
-                            <child>
-                              <object class="GtkBox">
-                                <property name="visible">True</property>
-                                <property name="can-focus">False</property>
-                                <child>
-                                  <object class="GtkToggleButton" id="invert_clutch">
-                                    <property name="label" translatable="yes">Clutch</property>
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="receives-default">True</property>
-                                    <signal name="clicked" handler="on_invert_pedals_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                    <property name="position">0</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkToggleButton" id="invert_accelerator">
-                                    <property name="label" translatable="yes">Accelerator</property>
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="receives-default">True</property>
-                                    <signal name="clicked" handler="on_invert_pedals_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                    <property name="position">1</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkToggleButton" id="invert_brakes">
-                                    <property name="label" translatable="yes">Brakes</property>
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="receives-default">True</property>
-                                    <signal name="clicked" handler="on_invert_pedals_clicked" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                    <property name="position">2</property>
-                                  </packing>
-                                </child>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                                <property name="position">1</property>
-                              </packing>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
                     <style>
                       <class name="list"/>
                     </style>
@@ -1075,7 +991,7 @@
                           </packing>
                         </child>
                         <child>
-                          <!-- n-columns=4 n-rows=3 -->
+                          <!-- n-columns=4 n-rows=4 -->
                           <object class="GtkGrid">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
@@ -1161,6 +1077,48 @@
                               <packing>
                                 <property name="left-attach">2</property>
                                 <property name="top-attach">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkCheckButton" id="invert_clutch">
+                                <property name="label" translatable="yes">Invert</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="halign">center</property>
+                                <property name="tooltip-text" translatable="yes">Logitech pedals report their released position at the far end of the axis, which some games read backwards (a pedal that looks fully pressed when you are not touching it). Inverted, the pedal reads 0 released and full pressed, which is what games expect. Saved in the profile.</property>
+                                <signal name="clicked" handler="on_invert_pedals_clicked" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="left-attach">0</property>
+                                <property name="top-attach">3</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkCheckButton" id="invert_brakes">
+                                <property name="label" translatable="yes">Invert</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="halign">center</property>
+                                <property name="tooltip-text" translatable="yes">Logitech pedals report their released position at the far end of the axis, which some games read backwards (a pedal that looks fully pressed when you are not touching it). Inverted, the pedal reads 0 released and full pressed, which is what games expect. Saved in the profile.</property>
+                                <signal name="clicked" handler="on_invert_pedals_clicked" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="left-attach">1</property>
+                                <property name="top-attach">3</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkCheckButton" id="invert_accelerator">
+                                <property name="label" translatable="yes">Invert</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="halign">center</property>
+                                <property name="tooltip-text" translatable="yes">Logitech pedals report their released position at the far end of the axis, which some games read backwards (a pedal that looks fully pressed when you are not touching it). Inverted, the pedal reads 0 released and full pressed, which is what games expect. Saved in the profile.</property>
+                                <signal name="clicked" handler="on_invert_pedals_clicked" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="left-attach">2</property>
+                                <property name="top-attach">3</property>
                               </packing>
                             </child>
                             <child>

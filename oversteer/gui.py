@@ -70,6 +70,8 @@ class Gui:
         self.telemetry = None
         self.telemetry_generation = 0
         self.handbrake_axis = None
+        self.pedal_axes = {}
+        self.pedals_defaulted = set()     # device ids whose pedals we already straightened
         self.combine_busy = False
         self.combine_timer = None
         self.button_config = [-1] * 9
@@ -404,6 +406,7 @@ class Gui:
 
         if self.device is None or not self.device.is_ready():
             self.handbrake_axis = None
+            self.pedal_axes = {}
             self.ui.set_handbrake_visible(False)
             return
 
@@ -425,6 +428,7 @@ class Gui:
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
         self.update_handbrake()
+        self.update_pedals()
         self.update_driver_status()
         self.ui.set_launch_options(self.launch_options())
         self.apply_rev_leds()
@@ -432,6 +436,18 @@ class Gui:
         if self.model.get_profile():
             self.ui.set_profile(self.model.get_profile())
         else:
+            # No profile for this wheel: leave its pedals reading the way
+            # games expect (0 released). Once per device per session, so a
+            # deliberate change isn't undone by the next rescan; a profile
+            # that says otherwise always wins, which is how someone keeps
+            # the raw direction.
+            device_id = self.device.get_id()
+            if device_id not in self.pedals_defaulted:
+                self.pedals_defaulted.add(device_id)
+                suggested = self.device.suggested_invert_pedals()
+                if suggested is not None and suggested != self.model.get_invert_pedals():
+                    logging.debug("pedals rest at the far end; inverting (mask %s)", suggested)
+                    self.model.set_invert_pedals(suggested)
             self.model.flush_device()
             self.model.flush_ui()
 
@@ -504,6 +520,19 @@ class Gui:
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
+
+    def update_pedals(self):
+        """Re-read which end of each pedal axis means 'released'."""
+        self.pedal_axes = self.device.pedal_axes() if self.device is not None else {}
+
+    def _pedal_position(self, code, value):
+        """A raw pedal reading as 0 (released) to 1 (fully pressed)."""
+        low, high, inverted = self.pedal_axes[code]
+        span = high - low
+        if span <= 0:
+            return 0.0
+        fraction = min(1.0, max(0.0, (value - low) / span))
+        return fraction if inverted else 1.0 - fraction
 
     def update_handbrake(self):
         """Show the handbrake column when the selected device has one.
@@ -612,6 +641,7 @@ class Gui:
         self.model.load(profile_file)
         self.model.flush_device()
         self.model.flush_ui()
+        self.update_pedals()
         self.apply_rev_leds()
 
     def save_profile(self, profile_name, check_exists = False):
@@ -811,12 +841,12 @@ class Gui:
                         self.test.append_data(event.timestamp(), event.value)
                     else:
                         self.ui.safe_call(self.ui.set_steering_input, event.value)
-                elif event.code == ecodes.ABS_Z:
-                    self.ui.safe_call(self.ui.set_accelerator_input, event.value)
-                elif event.code == ecodes.ABS_RZ:
-                    self.ui.safe_call(self.ui.set_brakes_input, event.value)
-                elif event.code == ecodes.ABS_Y:
-                    self.ui.safe_call(self.ui.set_clutch_input, event.value)
+                elif event.code in (ecodes.ABS_Z, ecodes.ABS_RZ, ecodes.ABS_Y):
+                    if event.code in self.pedal_axes:
+                        setter = {ecodes.ABS_Z: self.ui.set_accelerator_input,
+                                  ecodes.ABS_RZ: self.ui.set_brakes_input,
+                                  ecodes.ABS_Y: self.ui.set_clutch_input}[event.code]
+                        self.ui.safe_call(setter, self._pedal_position(event.code, event.value))
                 elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
                     _, low, high, inverted = self.handbrake_axis
                     span = high - low

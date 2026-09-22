@@ -584,6 +584,54 @@ class Device:
                 self.input_device = InputDevice(node)
         return self.input_device
 
+    PEDAL_AXES = ((ecodes.ABS_Y, 1), (ecodes.ABS_Z, 2), (ecodes.ABS_RZ, 4))   # code, invert_pedals bit
+
+    def pedal_axes(self):
+        """{code: (min, max, inverted)} for the pedals this device has.
+        `inverted` is what the driver is doing now, so a reading can be
+        turned into a pedal position: released is min when inverted, max
+        when not."""
+        try:
+            device = self.get_input_device()
+            if device is None:
+                return {}
+            axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
+        except OSError as e:
+            logging.debug("pedal axes: %s", e)
+            return {}
+        mask = self.get_invert_pedals() or 0
+        pedals = {}
+        for code, bit in self.PEDAL_AXES:
+            info = axes.get(code)
+            if info is not None and info.max > info.min:
+                pedals[code] = (info.min, info.max, bool(mask & bit))
+        return pedals
+
+    def suggested_invert_pedals(self):
+        """The invert_pedals mask that leaves every pedal reading 0 when
+        released, which is what games expect. Derived from where the
+        pedals are resting now and what the driver is already doing, so it
+        is stable once applied. None when the driver can't invert."""
+        mask = self.get_invert_pedals()
+        if mask is None:
+            return None
+        try:
+            device = self.get_input_device()
+            if device is None:
+                return None
+            axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
+        except OSError:
+            return None
+        for code, bit in self.PEDAL_AXES:
+            info = axes.get(code)
+            if info is None or info.max <= info.min:
+                continue
+            # Resting in the top quarter of its travel: reading backwards,
+            # whichever way the driver is set right now.
+            if info.value >= info.min + (info.max - info.min) * 0.75:
+                mask ^= bit
+        return mask
+
     def _proxy_handbrake_axis(self):
         """The axis a proxy maps a handbrake onto, from its spec: which
         spare axis that is depends on what else was folded in."""

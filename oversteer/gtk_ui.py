@@ -532,14 +532,17 @@ class GtkUi:
             self.steering_left_input.set_value(0)
             self.steering_right_input.set_value(self._round_input((value - 32768) / 32768, 3))
 
-    def set_clutch_input(self, value):
-        self.clutch_input.set_value(self._round_input((255 - value) / 255, 2))
+    # The pedal bars take a position, 0 released to 1 fully pressed; which
+    # end of the axis that is depends on the device and on invert_pedals,
+    # so the controller works it out (Device.pedal_axes).
+    def set_clutch_input(self, fraction):
+        self.clutch_input.set_value(self._round_input(fraction, 2))
 
-    def set_accelerator_input(self, value):
-        self.accelerator_input.set_value(self._round_input((255 - value) / 255, 2))
+    def set_accelerator_input(self, fraction):
+        self.accelerator_input.set_value(self._round_input(fraction, 2))
 
-    def set_brakes_input(self, value):
-        self.brakes_input.set_value(self._round_input((255 - value) / 255, 2))
+    def set_brakes_input(self, fraction):
+        self.brakes_input.set_value(self._round_input(fraction, 2))
 
     def set_handbrake_input(self, fraction):
         """`fraction` is 0 (released) to 1 (fully pulled)."""
