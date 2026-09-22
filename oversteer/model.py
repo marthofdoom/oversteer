@@ -16,6 +16,8 @@ class Model:
         'damper_level': None,
         'friction_level': None,
         'ffb_leds': None,
+        'rev_leds': None,
+        'rev_leds_port': None,
         'ffb_overlay': None,
         'range_overlay': None,
         'use_buttons': None,
@@ -33,6 +35,8 @@ class Model:
         'damper_level': 'integer',
         'friction_level': 'integer',
         'ffb_leds': 'integer',
+        'rev_leds': 'boolean',
+        'rev_leds_port': 'integer',
         'ffb_overlay': 'boolean',
         'range_overlay': 'string',
         'use_buttons': 'boolean',
@@ -80,6 +84,8 @@ class Model:
             'damper_level': self.device.get_damper_level(),
             'friction_level': self.device.get_friction_level(),
             'ffb_leds': self.device.get_ffb_leds(),
+            'rev_leds': False if self.device.has_rev_leds() else None,
+            'rev_leds_port': 5300 if self.device.has_rev_leds() else None,
             'ffb_overlay': False if self.device.get_peak_ffb_level() is not None else None,
             'range_overlay': 'never' if self.device.get_peak_ffb_level() is not None else None,
             'use_buttons': False if self.device.get_range() is not None else None,
@@ -233,6 +239,22 @@ class Model:
     def get_ffb_leds(self):
         return self.data['ffb_leds']
 
+    def set_rev_leds(self, value):
+        value = bool(value)
+        if self.set_if_changed('rev_leds', value) and self.ui is not None:
+            self.ui.controller.apply_rev_leds()
+
+    def get_rev_leds(self):
+        return self.data['rev_leds']
+
+    def set_rev_leds_port(self, value):
+        value = int(value)
+        if self.set_if_changed('rev_leds_port', value) and self.ui is not None and self.data['rev_leds']:
+            self.ui.controller.apply_rev_leds()
+
+    def get_rev_leds_port(self):
+        return self.data['rev_leds_port']
+
     def set_ffb_overlay(self, value):
         self.set_if_changed('ffb_overlay', bool(value))
 
@@ -299,6 +321,7 @@ class Model:
         self.ui.set_damper_level(data['damper_level'])
         self.ui.set_friction_level(data['friction_level'])
         self.ui.set_ffb_leds(data['ffb_leds'])
+        self.ui.set_rev_leds(data['rev_leds'], data['rev_leds_port'])
         self.ui.set_ffb_overlay(data['ffb_overlay'])
         self.ui.set_range_overlay(data['range_overlay'])
         self.ui.set_use_buttons(data['use_buttons'])
