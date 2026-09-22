@@ -12,8 +12,11 @@ Proton boundary and turns engine RPM into the wheel's five rev LEDs:
   16, the shift-light flag (DL_SHIFT) in the ShowLights word at 44. There is
   no max RPM in the packet, so the ceiling is learnt from the highest RPM
   seen and forgotten when the telemetry stops.
-- Codemasters extradata=3 (DiRT Rally 2.0, DiRT 4): 264 bytes of floats,
-  engine rate at index 37 and max at 63.
+- Codemasters extradata=3 (DiRT Rally 2.0, DiRT 4) and the games that copy
+  its layout (WRC 10 / WRC Generations native telemetry): 64 or more
+  little-endian floats, engine rate at index 37 and max at 63, both in
+  rpm / 10. The packet length varies by game, so any 4-byte-aligned length
+  from 256 bytes up is accepted once the Forza sizes are excluded.
 
 The listener runs in a daemon thread and writes the LED brightness files
 through :class:`RevLeds`; when no packet arrives for a while the LEDs go
@@ -36,6 +39,8 @@ IDLE_TIMEOUT = 2.0                                   # seconds without telemetry
 FLASH_PERIOD = 0.08                                  # limiter flash half-period (seconds)
 RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
 FORZA_SIZES = (232, 311, 324, 331)
+CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is 264, WRCG is longer
+CODEMASTERS_MAX = 512
 
 
 class RevLeds:
@@ -108,8 +113,8 @@ def decode(data):
         dashlights, showlights = struct.unpack_from('<II', data, 40)
         shift = bool(showlights & (1 << 0))          # DL_SHIFT
         return (max(0.0, rpm), None, shift)
-    if n == 264:
-        floats = struct.unpack_from('<66f', data, 0)
+    if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
+        floats = struct.unpack_from('<64f', data, 0)
         rpm, max_rpm = floats[37] * 10.0, floats[63] * 10.0
         if not (_plausible(max_rpm) and _plausible(rpm)) or max_rpm <= 0:
             return None
@@ -131,6 +136,7 @@ class Telemetry:
         self.learned_max = 0.0
         self._thread = None
         self._sock = None
+        self._unknown_sizes = set()
 
     def start(self):
         if self._thread is not None:
@@ -180,6 +186,9 @@ class Telemetry:
                 break
             decoded = decode(data)
             if decoded is None:
+                if len(data) not in self._unknown_sizes:
+                    self._unknown_sizes.add(len(data))
+                    logging.info("telemetry: unknown %d-byte packet from %s", len(data), addr[0])
                 continue
             rpm, max_rpm, shift = decoded
             now = time.monotonic()

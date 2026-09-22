@@ -18,11 +18,11 @@ def outgauge(rpm, shift=False, eng_temp=89.73):
     return bytes(data)
 
 
-def codemasters(rpm, max_rpm):
-    floats = [0.0] * 66
+def codemasters(rpm, max_rpm, count=66):
+    floats = [0.0] * count
     floats[37] = rpm / 10.0
     floats[63] = max_rpm / 10.0
-    return struct.pack('<66f', *floats)
+    return struct.pack('<%df' % count, *floats)
 
 
 def test_decode_formats():
@@ -38,7 +38,11 @@ def test_decode_formats():
     assert decode(codemasters(5000, float('inf'))) is None
     rpm, mx, _ = decode(codemasters(5000, 7500))
     assert abs(rpm - 5000) < 1e-3 and abs(mx - 7500) < 1e-3
+    rpm, mx, _ = decode(codemasters(6000, 7000, count=70))    # WRC Generations (longer packet)
+    assert abs(rpm - 6000) < 1e-3 and abs(mx - 7000) < 1e-3
+    assert decode(codemasters(6000, 7000, count=64))[1] == 7000.0
     assert decode(b'\x00' * 50) is None
+    assert decode(b'\x00' * 258) is None                     # not float-aligned
 
 
 def test_thresholds_are_monotonic():
