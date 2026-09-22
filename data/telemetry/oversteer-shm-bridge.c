@@ -12,8 +12,10 @@
  * (packetId, gas, brake, fuel, gear, rpms / ... sectorCount, maxTorque,
  * maxPower, maxRpm), which is all that is read here.
  *
- * Build (any mingw): x86_64-w64-mingw32-gcc -O2 -s -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
- *   or: zig cc -target x86_64-windows-gnu -O2 -s -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
+ * Built for the Windows (GUI) subsystem so no console window appears when it
+ * runs next to the game; all output goes to the --log file.
+ * Build (any mingw): x86_64-w64-mingw32-gcc -O2 -s -mwindows -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
+ *   or: zig cc -target x86_64-windows-gnu -O2 -s -Wl,--subsystem,windows -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
  *
  * Usage: oversteer-shm-bridge.exe [--host 127.0.0.1] [--port 5300] [--rate 60] [--verbose] [--exit-when-gone] [--log FILE]
  *   --log FILE: also append messages to FILE (Proton doesn't pass a console
