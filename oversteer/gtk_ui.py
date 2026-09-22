@@ -352,6 +352,13 @@ class GtkUi:
         finally:
             self.updating_rev_leds = False
 
+    def set_launch_options(self, text):
+        self.launch_options.set_text(text)
+
+    def copy_launch_options(self):
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(self.launch_options.get_text(), -1)
+
     def set_rev_leds_status(self, text):
         self.rev_leds_status.set_text(text)
 
@@ -631,6 +638,7 @@ class GtkUi:
         self.rev_leds_shift_rpm_adjustment = self.builder.get_object('rev_leds_shift_rpm_adjustment')
         self.rev_leds_test = self.builder.get_object('rev_leds_test')
         self.rev_leds_status = self.builder.get_object('rev_leds_status')
+        self.launch_options = self.builder.get_object('launch_options')
         self.updating_rev_leds = False
         self.ffbmeter_overlay = self.builder.get_object('ffbmeter_overlay')
         self.wheel_range_overlay_never = self.builder.get_object('wheel_range_overlay_never')

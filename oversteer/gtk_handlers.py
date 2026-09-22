@@ -128,6 +128,9 @@ class GtkHandlers:
         if not self.ui.updating_rev_leds:
             self.controller.change_rev_leds_shift_unit(widget.get_active_id())
 
+    def on_launch_options_copy_clicked(self, widget):
+        self.ui.copy_launch_options()
+
     def on_rev_leds_test_clicked(self, widget):
         self.controller.test_rev_leds()
 
