@@ -43,6 +43,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.12.3" date="2026-09-22">
+      <description><ul><li>The Controls tab shows each axis as a game receives it, so a pedal read backwards is visible and the Invert boxes show their effect</li></ul></description>
+    </release>
     <release version="0.12.2" date="2026-09-22">
       <description><ul><li>Pedals are inverted at the driver by default so games read them the right way round</li><li>Invert boxes for each pedal and the handbrake on the Controls tab</li><li>Handbrake column shows the handbrake a combined device carries</li></ul></description>
     </release>
