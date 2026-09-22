@@ -98,6 +98,10 @@ class GtkHandlers:
     def on_combine_clutch_clicked(self, widget):
         self.model.set_combine_pedals(2)
 
+    def on_invert_handbrake_clicked(self, widget):
+        if not self.ui.updating_invert_pedals:
+            self.controller.set_handbrake_invert(widget.get_active())
+
     def on_invert_pedals_clicked(self, widget):
         if self.ui.updating_invert_pedals:
             return

@@ -171,7 +171,25 @@ class ProxyDevice:
                 'ff_effects': len(self.ff_effects),
                 'ff_effect_types': dict(self._ff_summary[0]) if self._ff_summary else {},
                 'ff_playing': list(self._ff_summary[1]) if self._ff_summary else [],
+                'inverted_axes': self._inverted_axes(),
             }
+
+    def _inverted_axes(self):
+        """{'<source>:<code>': bool} for every axis this proxy maps, with
+        'auto' resolved to what it decided at attach: the GUI can only show
+        an axis's true direction if it knows this."""
+        inverted = {}
+        for (key, etype, code), rules in self._rules.items():
+            if etype != ecodes.EV_ABS:
+                continue
+            for rule in rules:
+                if rule.to_type != ecodes.EV_ABS:
+                    continue
+                value = rule.invert
+                if value == 'auto':
+                    value = self._auto_invert.get((key, code), False)
+                inverted['{}:{}'.format(key, code)] = bool(value)
+        return inverted
 
     FF_TYPE_NAMES = {ecodes.FF_CONSTANT: 'constant', ecodes.FF_PERIODIC: 'periodic', ecodes.FF_RAMP: 'ramp',
                      ecodes.FF_SPRING: 'spring', ecodes.FF_DAMPER: 'damper', ecodes.FF_FRICTION: 'friction',

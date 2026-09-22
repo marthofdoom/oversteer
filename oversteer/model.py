@@ -248,10 +248,11 @@ class Model:
     def set_invert_pedals(self, mask):
         mask = int(mask)
         if self.set_if_changed('invert_pedals', mask):
-            self.device.set_invert_pedals(mask)
+            # Read events the new way before the driver starts sending them:
+            # it re-emits the axes as soon as the setting is written.
             if self.ui is not None:
-                # the bars show a pedal position, so they follow the change
-                self.ui.controller.update_pedals()
+                self.ui.controller.update_pedals(mask)
+            self.device.set_invert_pedals(mask)
 
     def get_invert_pedals(self):
         return self.data['invert_pedals']

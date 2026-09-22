@@ -16,6 +16,14 @@
   ticked when that pedal is inverted. The pedal bars follow the real
   direction of the axis now rather than assuming the Logitech convention,
   so they stay correct whichever way the boxes are set.
+- The handbrake has an **Invert** box too, overriding the direction the
+  combined device gives it (the proxy sets this automatically from where
+  the lever rests; the daemon now reports what it decided so the box shows
+  the truth). Changing it reinstalls the combined device, so it asks for
+  the administrator password.
+- Toggling any Invert box redraws the bars from where the axes are right
+  then, instead of waiting for the next movement, and events arriving
+  while the driver catches up are already read the new way.
 
 ## 0.12.1 — 2026-09-22
 

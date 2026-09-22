@@ -553,8 +553,22 @@ class GtkUi:
         combined device carrying a handbrake, or a wheel with the axis."""
         self.handbrake_input.set_visible(visible)
         self.handbrake_label.set_visible(visible)
+        self.invert_handbrake.set_visible(visible)
         if not visible:
             self.handbrake_input.set_value(0)
+
+    def set_handbrake_invert(self, state):
+        """Tick state of the handbrake's Invert box; None when nothing can
+        change it (the handbrake is read directly, not through a proxy)."""
+        self.invert_handbrake.set_sensitive(state is not None)
+        self.updating_invert_pedals = True
+        try:
+            self.invert_handbrake.set_active(bool(state))
+        finally:
+            self.updating_invert_pedals = False
+
+    def get_handbrake_invert(self):
+        return self.invert_handbrake.get_active()
 
     def set_hatx_input(self, value):
         if value < 0:
@@ -822,6 +836,7 @@ class GtkUi:
         self.brakes_input = self.builder.get_object('brakes_input')
         self.handbrake_input = self.builder.get_object('handbrake_input')
         self.handbrake_label = self.builder.get_object('handbrake_label')
+        self.invert_handbrake = self.builder.get_object('invert_handbrake')
         self.hat_up_input = self.builder.get_object('hat_up_input')
         self.hat_down_input = self.builder.get_object('hat_down_input')
         self.hat_left_input = self.builder.get_object('hat_left_input')

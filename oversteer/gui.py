@@ -70,6 +70,7 @@ class Gui:
         self.telemetry = None
         self.telemetry_generation = 0
         self.handbrake_axis = None
+        self.handbrake_invert = None
         self.pedal_axes = {}
         self.pedals_defaulted = set()     # device ids whose pedals we already straightened
         self.combine_busy = False
@@ -521,9 +522,38 @@ class Gui:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
 
-    def update_pedals(self):
-        """Re-read which end of each pedal axis means 'released'."""
-        self.pedal_axes = self.device.pedal_axes() if self.device is not None else {}
+    def update_pedals(self, mask=None):
+        """Re-read which end of each pedal axis means 'released'. `mask` is
+        the invert_pedals value about to be written, so events arriving
+        while the driver catches up are read the new way."""
+        self.pedal_axes = self.device.pedal_axes(mask) if self.device is not None else {}
+        # The driver re-emits the axes when the setting changes and the
+        # value takes a moment to come back through a proxy; redraw once it
+        # has, so the bars are right without touching anything.
+        GLib.timeout_add(250, self.redraw_inputs)
+
+    def redraw_inputs(self):
+        """Draw the pedal and handbrake bars from where the axes are now."""
+        device = self.device.get_input_device() if self.device is not None else None
+        if device is None:
+            return False
+        try:
+            axes = dict(device.capabilities(absinfo=True).get(ecodes.EV_ABS, []))
+        except OSError:
+            return False
+        setters = {ecodes.ABS_Z: self.ui.set_accelerator_input,
+                   ecodes.ABS_RZ: self.ui.set_brakes_input,
+                   ecodes.ABS_Y: self.ui.set_clutch_input}
+        for code, setter in setters.items():
+            if code in self.pedal_axes and code in axes:
+                setter(self._pedal_position(code, axes[code].value))
+        if self.handbrake_axis is not None and self.handbrake_axis[0] in axes:
+            code, low, high, inverted = self.handbrake_axis
+            span = high - low
+            if span > 0:
+                fraction = min(1.0, max(0.0, (axes[code].value - low) / span))
+                self.ui.set_handbrake_input(1.0 - fraction if inverted else fraction)
+        return False
 
     def _pedal_position(self, code, value):
         """A raw pedal reading as 0 (released) to 1 (fully pressed)."""
@@ -534,16 +564,90 @@ class Gui:
         fraction = min(1.0, max(0.0, (value - low) / span))
         return fraction if inverted else 1.0 - fraction
 
+    def _proxied_handbrake(self):
+        """(proxy id, source key, from code, inverted) for the handbrake a
+        proxy folds into this wheel, or None when there is no proxy: only
+        then can Oversteer change the direction games see.
+
+        The spec says what to do with the axis; 'auto' is resolved by the
+        daemon at attach and reported in its status, so an older daemon
+        just means the box starts unticked until it is set explicitly."""
+        if self.device is None:
+            return None
+        try:
+            from .proxy.manager import ProxyManager
+            status = ProxyManager.read_status() or {}
+        except Exception:
+            return None
+        proxy = next((p for p in status.get('proxies', [])
+                      if self.device.dev_name in p.get('sources', {}).values()), None)
+        if proxy is None or not any(k.startswith('handbrake') for k in proxy.get('sources', {})):
+            return None
+        spec = self._load_combined_spec()
+        if spec is None:
+            return None
+        for mapping in spec.mappings:
+            if not str(mapping.source).startswith('handbrake') or mapping.to_type != ecodes.EV_ABS:
+                continue
+            if mapping.invert in (True, False):
+                inverted = bool(mapping.invert)
+            else:
+                reported = (proxy.get('inverted_axes') or {}).get(
+                    '{}:{}'.format(mapping.source, mapping.from_code))
+                inverted = bool(reported)
+            return (proxy['id'], mapping.source, mapping.from_code, inverted)
+        return None
+
     def update_handbrake(self):
         """Show the handbrake column when the selected device has one.
         Re-checked as proxies come and go: the axis lives on the virtual
         device a proxy presents, which appears, changes and disappears
         while Oversteer runs."""
         axis = self.device.handbrake_axis() if self.device is not None else None
-        if axis == self.handbrake_axis:
+        proxied = self._proxied_handbrake()
+        state = proxied[3] if proxied is not None else None
+        if axis == self.handbrake_axis and state == self.handbrake_invert:
             return
         self.handbrake_axis = axis
+        self.handbrake_invert = state
         self.ui.set_handbrake_visible(axis is not None)
+        self.ui.set_handbrake_invert(state)
+
+    def set_handbrake_invert(self, state):
+        """Override the direction the proxy gives the handbrake. The spec
+        lives in /etc, so this reinstalls the combined device through
+        pkexec, off the GTK thread like the Devices tab does."""
+        from .proxy import install
+        from .proxy.manager import user_dir
+        import tempfile
+        proxied = self._proxied_handbrake()
+        spec = self._load_combined_spec()
+        if proxied is None or spec is None or self.combine_busy:
+            self.ui.set_handbrake_invert(self.handbrake_invert)
+            return
+        changed = False
+        for mapping in spec.mappings:
+            if mapping.source == proxied[1] and mapping.from_code == proxied[2]:
+                mapping.invert = bool(state)
+                changed = True
+        if not changed:
+            self.ui.set_handbrake_invert(self.handbrake_invert)
+            return
+        os.makedirs(user_dir(), 0o700, exist_ok=True)
+        candidate = tempfile.mkdtemp(prefix='.candidate-', dir=user_dir())
+        spec.save(os.path.join(candidate, spec.id + '.json'))
+        self.combine_busy = True
+        self.ui.set_combine_busy(True, _("Applying…"))
+
+        def work():
+            try:
+                code = install.install(spec_dirs=[candidate])
+            except Exception:
+                logging.exception("handbrake invert")
+                code = -1
+            self.ui.safe_call(self._combine_done, code, candidate, [spec])
+
+        Thread(target=work, daemon=True).start()
 
     def update_rev_leds_shift(self):
         """Push a changed shift point to the running listener without

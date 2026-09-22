@@ -586,11 +586,11 @@ class Device:
 
     PEDAL_AXES = ((ecodes.ABS_Y, 1), (ecodes.ABS_Z, 2), (ecodes.ABS_RZ, 4))   # code, invert_pedals bit
 
-    def pedal_axes(self):
+    def pedal_axes(self, mask=None):
         """{code: (min, max, inverted)} for the pedals this device has.
-        `inverted` is what the driver is doing now, so a reading can be
-        turned into a pedal position: released is min when inverted, max
-        when not."""
+        `inverted` is what the driver is doing now (or `mask`, the value
+        about to be written), so a reading can be turned into a pedal
+        position: released is min when inverted, max when not."""
         try:
             device = self.get_input_device()
             if device is None:
@@ -599,7 +599,8 @@ class Device:
         except OSError as e:
             logging.debug("pedal axes: %s", e)
             return {}
-        mask = self.get_invert_pedals() or 0
+        if mask is None:
+            mask = self.get_invert_pedals() or 0
         pedals = {}
         for code, bit in self.PEDAL_AXES:
             info = axes.get(code)
