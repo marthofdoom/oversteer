@@ -22,6 +22,11 @@
 # resolve) is kept next to the prefix in the game's compatdata directory,
 # which both sides see.
 #
+# A bridge that outlives the game keeps the prefix's wineserver, and with
+# it Steam's "Running" state, alive: it therefore releases the mapping
+# whenever the game stops writing, exits as soon as the mapping is gone,
+# and exits when the game's process is no longer there (--watch).
+#
 # Environment: OVERSTEER_TELEMETRY_PORT (default 5300, must match the port
 # in Oversteer's Rev lights row), OVERSTEER_SHM_BRIDGE (path to the .exe).
 # Logs: <compatdata>/oversteer-run.log (launcher and Proton output) and
@@ -49,20 +54,25 @@ for ((i = 1; i <= $#; i++)); do
     esac
 done
 
-if [ "$proton_index" -lt 0 ] || [ -z "$bridge" ]; then
+# Without a compatdata directory Proton can't run anything anyway (and
+# there is nowhere safe for the logs): just run the game.
+if [ "$proton_index" -lt 0 ] || [ -z "$bridge" ] || [ -z "$STEAM_COMPAT_DATA_PATH" ] || [ ! -d "$STEAM_COMPAT_DATA_PATH" ]; then
     exec "$@"
 fi
 
-if [ -n "$STEAM_COMPAT_DATA_PATH" ] && [ -d "$STEAM_COMPAT_DATA_PATH" ]; then
-    logdir=$STEAM_COMPAT_DATA_PATH
-else
-    logdir=${TMPDIR:-/tmp}
-fi
-log=$logdir/oversteer-run.log
-bridge_log=$logdir/oversteer-shm-bridge.log
+log=$STEAM_COMPAT_DATA_PATH/oversteer-run.log
+bridge_log=$STEAM_COMPAT_DATA_PATH/oversteer-shm-bridge.log
 : > "$log"
 : > "$bridge_log"
+# The game executable follows Proton's verb; the bridge exits when no
+# process of that name is left, so a game that never publishes telemetry
+# doesn't leave a bridge (and the prefix's wineserver) behind.
+exe_index=$((proton_index + 2))
+game_exe=$(basename "${!exe_index}")
 bridge_cmd=("${!proton_index}" run "$bridge" --port "$port" --exit-when-gone --log "Z:$bridge_log")
+case "$game_exe" in
+    *.exe|*.EXE) bridge_cmd+=(--watch "$game_exe") ;;
+esac
 
 "$@" &
 game=$!
