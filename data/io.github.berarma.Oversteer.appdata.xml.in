@@ -38,8 +38,12 @@
   </description>
   <screenshots>
     <screenshot type="default">
-      <caption>Home page</caption>
-      <image>https://raw.githubusercontent.com/berarma/oversteer/master/data/oversteer-readme.png</image>
+      <caption>Wheel settings and live controls</caption>
+      <image>https://raw.githubusercontent.com/marthofdoom/oversteer/master/data/readme-controls.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Racing equipment folded into one device for games that only talk to one</caption>
+      <image>https://raw.githubusercontent.com/marthofdoom/oversteer/master/data/readme-devices.png</image>
     </screenshot>
   </screenshots>
   <releases>
