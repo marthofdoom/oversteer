@@ -1,7 +1,7 @@
 # Oversteer — Steering Wheel Manager for Linux
 
 <p align="center">
-  <img src="data/oversteer-readme.png">
+  <img src="data/readme-controls.png">
 </p>
 
 A fork of [berarma/oversteer](https://github.com/berarma/oversteer) aimed at
