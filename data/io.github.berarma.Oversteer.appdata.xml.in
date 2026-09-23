@@ -47,6 +47,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.12.4" date="2026-09-22">
+      <description><ul><li>The rotation range slider no longer repeats the degrees its preset buttons already show</li><li>A range preset the wheel cannot reach is hidden instead of clamping</li></ul></description>
+    </release>
     <release version="0.12.3" date="2026-09-22">
       <description><ul><li>The Controls tab shows each axis as a game receives it, so a pedal read backwards is visible and the Invert boxes show their effect</li></ul></description>
     </release>

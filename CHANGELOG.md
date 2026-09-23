@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.4 — 2026-09-22
 
 ### Changed
 - The rotation range slider shows plain ticks instead of repeating the
