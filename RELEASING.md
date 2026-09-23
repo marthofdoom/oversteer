@@ -10,7 +10,7 @@ against the wheel and the matching new-lg4ff release exists.
    that the CLI flags round-trip (`--list`, then set/restore a value).
 3. If the udev rule changed, install it and confirm the new attributes are
    writable as the user.
-4. **Fable diff review**: have the Fable model review
+4. **Opus 5.5 diff review**: have Opus 5.5 (`claude-opus-5-5`) review
    `git diff <previous tag>..master` for correctness (profile round-trip,
    model/UI re-entrancy, old-driver fallbacks), GTK/Glade handler wiring,
    CLI parsing and udev quoting. Fix or consciously waive every finding.
