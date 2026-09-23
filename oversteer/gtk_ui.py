@@ -238,6 +238,9 @@ class GtkUi:
     def set_max_range(self, max_range):
         self.wheel_range_setup.set_upper(max_range / 10)
         self._set_range_markers(max_range)
+        # A preset the wheel can't reach would just clamp to its maximum
+        for degrees, button in self.range_presets.items():
+            button.set_visible(max_range >= degrees)
 
     def set_modes(self, modes):
         self.change_emulation_mode_button.set_sensitive(False)
@@ -787,6 +790,8 @@ class GtkUi:
         self.combine_generic = self.builder.get_object('combine_generic')
         self.combine_start = self.builder.get_object('combine_start')
         self.wheel_range_setup = self.builder.get_object('wheel_range_setup')
+        self.range_presets = {d: self.builder.get_object('range_preset_' + str(d))
+                              for d in (270, 360, 540, 720, 900)}
         self.wheel_sensitivity = self.builder.get_object('wheel_sensitivity')
         self.combine_none = self.builder.get_object('combine_none')
         self.combine_brakes = self.builder.get_object('combine_brakes')
@@ -929,21 +934,12 @@ class GtkUi:
         for v in (20, 40, 60, 80, 100):
             self.ff_rumble_level.add_mark(v, Gtk.PositionType.BOTTOM, str(v))
 
+    RANGE_MARKS = (180, 270, 360, 450, 540, 720, 900, 1080)
+
     def _set_range_markers(self, max_range):
+        # Ticks without labels: the preset buttons underneath carry the
+        # numbers, and printing them twice just crowds the row.
         self.wheel_range.clear_marks()
-        if max_range >= 180:
-            self.wheel_range.add_mark(18, Gtk.PositionType.BOTTOM, '180')
-        if max_range >= 270:
-            self.wheel_range.add_mark(27, Gtk.PositionType.BOTTOM, '270')
-        if max_range >= 360:
-            self.wheel_range.add_mark(36, Gtk.PositionType.BOTTOM, '360')
-        if max_range >= 450:
-            self.wheel_range.add_mark(45, Gtk.PositionType.BOTTOM, '450')
-        if max_range >= 540:
-            self.wheel_range.add_mark(54, Gtk.PositionType.BOTTOM, '540')
-        if max_range >= 720:
-            self.wheel_range.add_mark(72, Gtk.PositionType.BOTTOM, '720')
-        if max_range >= 900:
-            self.wheel_range.add_mark(90, Gtk.PositionType.BOTTOM, '900')
-        if max_range >= 1080:
-            self.wheel_range.add_mark(108, Gtk.PositionType.BOTTOM, '1080')
+        for degrees in self.RANGE_MARKS:
+            if max_range >= degrees:
+                self.wheel_range.add_mark(degrees / 10, Gtk.PositionType.BOTTOM, None)

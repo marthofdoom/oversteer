@@ -661,6 +661,7 @@
                                     <property name="spacing">4</property>
                                 <child>
                                   <object class="GtkButton" id="range_preset_270">
+                                    <property name="no-show-all">True</property>
                                     <property name="label">270°</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
@@ -676,6 +677,7 @@
                                 </child>
                                 <child>
                                   <object class="GtkButton" id="range_preset_360">
+                                    <property name="no-show-all">True</property>
                                     <property name="label">360°</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
@@ -691,6 +693,7 @@
                                 </child>
                                 <child>
                                   <object class="GtkButton" id="range_preset_540">
+                                    <property name="no-show-all">True</property>
                                     <property name="label">540°</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
@@ -706,6 +709,7 @@
                                 </child>
                                 <child>
                                   <object class="GtkButton" id="range_preset_720">
+                                    <property name="no-show-all">True</property>
                                     <property name="label">720°</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
@@ -721,6 +725,7 @@
                                 </child>
                                 <child>
                                   <object class="GtkButton" id="range_preset_900">
+                                    <property name="no-show-all">True</property>
                                     <property name="label">900°</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>

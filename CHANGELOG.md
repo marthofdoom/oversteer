@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The rotation range slider shows plain ticks instead of repeating the
+  degrees the preset buttons underneath already give, and a preset the
+  wheel can't reach is hidden rather than silently clamping.
+
 ## 0.12.3 — 2026-09-22
 
 ### Changed

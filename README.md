@@ -1,26 +1,70 @@
-# Oversteer - Steering Wheel Manager for Linux
+# Oversteer — Steering Wheel Manager for Linux
 
 <p align="center">
   <img src="data/oversteer-readme.png">
 </p>
 
-<a href="https://repology.org/project/unit/versions">
-    <img src="https://repology.org/badge/vertical-allrepos/oversteer.svg" alt="Packaging status" align="right" style="margin-left:2em;">
-</a>
+A fork of [berarma/oversteer](https://github.com/berarma/oversteer) aimed at
+making a Logitech G29 on Linux match — and then beat — what it does on
+Windows. It pairs with the [new-lg4ff fork](https://github.com/marthofdoom/new-lg4ff),
+which adds the driver side of the same work.
 
-[_Oversteer_](https://github.com/berarma/oversteer) manages steering wheels on
-Linux using the features provided by the loaded modules. It doesn't provide
-hardware support, you'll still need a driver module that enables the hardware
-on Linux.
-
-Most wheels will work but won't have FFB without specific drivers that support
-that feature.
-
-I can test only on a Logitech G29 Driving Force. Please, report your
-results with other devices. More wheel models will be added to this list
-as they are requested.
+_Oversteer_ manages steering wheels using the features the loaded driver
+provides. It doesn't provide hardware support: you still need a driver module
+that supports your wheel, and most wheels won't have force feedback without
+one.
 
 __Use at your own risk. Suggestions, bugs and pull requests welcome.__
+
+## What this fork adds
+
+**Force feedback and wheel settings** (with the
+[new-lg4ff fork](https://github.com/marthofdoom/new-lg4ff)):
+
+- Steering sensitivity curve, like the Windows software.
+- Force feedback on/off, keeping the strength settings for when it's back on.
+- Persistent centering spring, and a switch for whether games may lower the
+  strength themselves.
+- Rumble strength, true inertia, and global gain up to 150 %.
+- **Try** buttons that play each effect on the wheel so you can feel what it
+  does, rotation range presets, and a reset to sane defaults.
+- Pedals are **inverted at the driver by default** so games read them the way
+  they expect (0 released, full pressed) instead of backwards. The Controls
+  tab shows each axis as a game receives it, with an Invert box per pedal and
+  one for the handbrake; a profile carries whatever you choose.
+
+**One device for games that only listen to one** (Devices tab):
+
+- Fold a wheel, shifter, handbrake, pedals and button box into a single
+  virtual device, with force feedback passed through to the wheel, and hide
+  the real ones from games. This exists because Forza Horizon 6 sends force
+  feedback only to the first device it finds, so a connected shifter or
+  handbrake silently kills it.
+- The handbrake stays an axis, a T500 RS / TH8A sequential plate is carried as
+  two buttons, and the combined device can present itself as the wheel (so
+  games apply their built-in profile) or as a generic device.
+
+<p align="center">
+  <img src="data/readme-devices.png">
+</p>
+
+**Rev lights from game telemetry** (Tools tab):
+
+- The wheel's LEDs fill with engine RPM and flash at the shift point, which is
+  set as a percentage of the redline or as an RPM figure, per profile.
+- Reads Forza Horizon / Motorsport "Data Out", BeamNG / Live for Speed
+  OutGauge, and the Codemasters layout used by DiRT Rally 2.0, DiRT 4 and
+  WRC Generations.
+- Games with no UDP telemetry at all — Assetto Corsa, Competizione and Rally —
+  are covered by `oversteer-run`, a Steam launch-options wrapper that runs a
+  small helper inside the game's Proton prefix and forwards its shared-memory
+  telemetry. The Tools tab shows the exact launch options with a Copy button.
+
+**Diagnostics**: `scripts/probe-device.py` names the raw events of any device,
+including one hidden or grabbed by the proxy; `scripts/telemetry-capture.py`
+shows what arrives on the telemetry port and how it decodes.
+
+Pieces of this are being sent back upstream as separate pull requests.
 
 ## Install (this fork)
 
@@ -31,7 +75,9 @@ __Use at your own risk. Suggestions, bugs and pull requests welcome.__
   the app installs the service itself (asks for the administrator password).
 - **From source**: `meson setup build -Dprefix=/usr/local && sudo ninja -C build install`.
 - Pair with the [new-lg4ff fork](https://github.com/marthofdoom/new-lg4ff)
-  (`.deb` on its releases page) for the Logitech features.
+  (`.deb` on its releases page) for the Logitech features above.
+
+Everything below is from upstream and still applies.
 
 ## Supported devices
 
@@ -275,6 +321,21 @@ each time. This can be done from the command line or from a setting in the UI.
 An example that would work for any Steam game would be:
 
 `oversteer -p myprofile -g "%command%"`
+
+### Telemetry from games with no UDP output (this fork)
+
+Assetto Corsa, Assetto Corsa Competizione and Assetto Corsa Rally publish
+telemetry only through Windows shared memory, which under Proton stays inside
+the game's prefix. Put this in the game's Steam launch options and the rev
+lights work anyway:
+
+`oversteer-run %command%`
+
+It runs the game untouched and starts a small helper next to it, inside the
+same prefix, that forwards the engine RPM to Oversteer over UDP. The Tools tab
+shows the exact string for your installation with a Copy button. Games that
+send UDP telemetry themselves (Forza, BeamNG, DiRT, WRC) need nothing but the
+port set in the same place.
 
 ## Known issues
 
