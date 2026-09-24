@@ -56,9 +56,15 @@ class RevLeds:
     """The wheel's rev LEDs (Linux LED class), lit as a bar."""
 
     def __init__(self, sysfs_device_path):
+        self.sysfs_path = sysfs_device_path
         pattern = os.path.join(sysfs_device_path, 'leds', '*RPM*', 'brightness')
         self.paths = sorted(glob.glob(pattern), key=lambda p: os.path.dirname(p))
         self._last = None
+        self._lock = threading.Lock()
+        self._held_until = 0.0         # show(): a pattern that telemetry must not overwrite yet
+        self._wanted = None            # what telemetry asked for meanwhile
+        self._timer = None
+        self._generation = 0           # which show() a pending release belongs to
 
     def available(self):
         return bool(self.paths) and all(os.access(p, os.W_OK) for p in self.paths)
@@ -70,6 +76,48 @@ class RevLeds:
 
     def set_pattern(self, pattern):
         pattern = tuple(bool(x) for x in pattern)
+        with self._lock:
+            self._wanted = pattern
+            if time.monotonic() < self._held_until:
+                return
+            self._write(pattern)
+
+    def show(self, pattern, seconds=1.0):
+        """Show `pattern` for a moment over whatever is lit (a hotkey's new
+        level), then go back to what telemetry wants by now."""
+        pattern = tuple(bool(x) for x in pattern)
+        with self._lock:
+            self._held_until = time.monotonic() + seconds
+            self._write(pattern)
+            if self._timer is not None:
+                self._timer.cancel()
+            # cancel() can't stop a release already waiting on the lock:
+            # the generation makes that one a no-op
+            self._generation += 1
+            self._timer = threading.Timer(seconds, self._release, (self._generation,))
+            self._timer.daemon = True
+            self._timer.start()
+
+    def show_level(self, fraction, seconds=1.0):
+        """A bar for a 0..1 level; at least one LED so 'lowest' is visible."""
+        n = len(self.paths)
+        lit = max(1, int(round(max(0.0, min(1.0, fraction)) * n)))
+        self.show(tuple(i < lit for i in range(n)), seconds)
+
+    def show_state(self, on, seconds=1.0):
+        """A switch turned on (all lit) or off (just the two ends)."""
+        n = len(self.paths)
+        self.show(tuple(on or i in (0, n - 1) for i in range(n)), seconds)
+
+    def _release(self, generation):
+        with self._lock:
+            if generation != self._generation:
+                return
+            self._held_until = 0.0
+            self._timer = None
+            self._write(self._wanted if self._wanted is not None else (False,) * len(self.paths))
+
+    def _write(self, pattern):
         if pattern == self._last:
             return
         for path, on in zip(self.paths, pattern):
