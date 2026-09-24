@@ -81,7 +81,8 @@ class Gui:
         self.pressed_button_count = 0
         self.hotkey_capture = None
         self.keyboard_hotkeys = None
-        self.hotkey_leds = None
+        self.keyboard_bind_failed = False
+        self.global_hotkeys = {}          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
 
@@ -406,6 +407,7 @@ class Gui:
         self.populate_profiles()
 
     def change_device(self, device_id):
+        self.cancel_hotkey_capture()
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
@@ -813,6 +815,9 @@ class Gui:
                 Locale.setlocale(Locale.LC_ALL, (self.locale, 'UTF-8'))
             if 'check_permissions' in config['DEFAULT']:
                 self.check_permissions = config['DEFAULT']['check_permissions'] == '1'
+            if 'hotkeys' in config['DEFAULT']:
+                self.global_hotkeys = {a: i for a, i in hotkeys.parse(config['DEFAULT']['hotkeys']).items()
+                                       if a in hotkeys.GLOBAL_ACTIONS}
             if 'button_config' in config['DEFAULT'] and config['DEFAULT']['button_config'] != '':
                 if 'button_toggle' not in config['DEFAULT']:
                     self.button_config = list(map(int, config['DEFAULT']['button_config'].split(',')))
@@ -846,6 +851,7 @@ class Gui:
             'check_permissions': '1' if self.check_permissions else '0',
             'button_toggle': ','.join(map(str, self.button_config[0])),
             'button_config': ','.join(map(str, self.button_config[1:])),
+            'hotkeys': hotkeys.serialize(self.global_hotkeys),
         }
         config_file = os.path.join(self.config_path, 'config.ini')
         with open(config_file, 'w') as file:
@@ -935,18 +941,44 @@ class Gui:
         """Declare every action to the desktop's shortcut portal. All of
         them, every time: the desktop forgets any we leave out."""
         from .global_shortcuts import GlobalShortcuts
-        self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey, self.ui.set_keyboard_triggers)
+        self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey,
+                                                self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed)
         if not self.keyboard_hotkeys.start():
             self.keyboard_hotkeys = None
             self.ui.set_keyboard_triggers(None)
             return
+        self.bind_keyboard_hotkeys()
+
+    def bind_keyboard_hotkeys(self):
+        self.keyboard_bind_failed = False
         self.keyboard_hotkeys.bind([(a.id, a.description()) for a in hotkeys.ACTIONS])
+
+    def on_keyboard_hotkeys_bound(self, triggers):
+        self.keyboard_bind_failed = False
+        self.ui.set_keyboard_triggers(triggers)
+
+    def on_keyboard_hotkeys_failed(self, method):
+        if method is None:
+            self.keyboard_hotkeys = None
+            self.ui.set_keyboard_triggers(None)
+            self.ui.set_hotkeys_status(_("Keyboard keys need the desktop's shortcut portal, which isn't running"))
+            return
+        # Turned down (a dialog dismissed) or failed: let the button retry
+        self.keyboard_bind_failed = True
+        self.ui.set_keyboard_triggers({})
+        self.ui.set_hotkeys_status(_("The desktop didn't take the keyboard shortcuts; \"Set keyboard keys…\" tries again"))
 
     def configure_keyboard_hotkeys(self):
         """Show where the keys are assigned: the portal's own editor when
         it has one, otherwise the desktop's shortcut settings."""
-        if self.keyboard_hotkeys is not None and self.keyboard_hotkeys.configure():
-            return
+        if self.keyboard_hotkeys is None:
+            self.open_shortcut_settings()
+        elif self.keyboard_bind_failed or self.keyboard_hotkeys.session is None:
+            self.bind_keyboard_hotkeys()
+        else:
+            self.keyboard_hotkeys.configure(self.open_shortcut_settings)
+
+    def open_shortcut_settings(self):
         from .proxy.manager import in_flatpak
         desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').upper()
         if 'KDE' in desktop:
@@ -959,7 +991,8 @@ class Gui:
             if in_flatpak():
                 cmd = ['flatpak-spawn', '--host'] + cmd
             try:
-                subprocess.Popen(cmd)
+                proc = subprocess.Popen(cmd)
+                Thread(target=proc.wait, daemon=True).start()
                 return
             except OSError as e:
                 logging.debug("shortcut settings: %s", e)
@@ -967,42 +1000,89 @@ class Gui:
                             _("Assign keys to Oversteer's actions in your desktop's keyboard shortcut settings."))
 
     def on_keyboard_hotkey(self, action_id):
-        self.run_hotkey(action_id)
+        if not self._hotkeys_suppressed():
+            self.run_hotkey(action_id)
+
+    def _hotkeys_suppressed(self):
+        """Presses that belong to something else: the Preferences button
+        setup, or a test that is waiting for a press or measuring. Read on
+        the input thread, before on_button_press can change it."""
+        if self.button_setup_step is not False:
+            return True
+        test = self.test
+        return bool(test and (test.is_awaiting_action() or test.is_collecting_data()))
+
+    def hotkey_bindings(self):
+        """All bindings: the profile's, plus the app-wide ones."""
+        bindings = {a: i for a, i in hotkeys.parse(self.model.get_hotkeys()).items()
+                    if a not in hotkeys.GLOBAL_ACTIONS}
+        bindings.update(self.global_hotkeys)
+        return bindings
+
+    def _store_hotkeys(self, bindings):
+        global_hotkeys = {a: i for a, i in bindings.items() if a in hotkeys.GLOBAL_ACTIONS}
+        if global_hotkeys != self.global_hotkeys:
+            self.global_hotkeys = global_hotkeys
+            self.save_preferences()
+        self.model.set_hotkeys(hotkeys.serialize({a: i for a, i in bindings.items()
+                                                  if a not in hotkeys.GLOBAL_ACTIONS}))
+        self.ui.set_hotkeys(self.model.get_hotkeys())
 
     def start_hotkey_capture(self, action_id):
         self.hotkey_capture = None if self.hotkey_capture == action_id else action_id
         self.ui.set_hotkey_capture(self.hotkey_capture)
 
-    def clear_hotkey(self, action_id):
-        bindings = hotkeys.parse(self.model.get_hotkeys())
-        if bindings.pop(action_id, None) is not None:
-            self.model.set_hotkeys(hotkeys.serialize(bindings))
-            self.ui.set_hotkeys(self.model.get_hotkeys())
+    def cancel_hotkey_capture(self):
+        if self.hotkey_capture is not None:
+            self.hotkey_capture = None
+            self.ui.set_hotkey_capture(None)
 
-    def on_wheel_hotkey(self, wheel_input):
+    def clear_hotkey(self, action_id):
+        bindings = self.hotkey_bindings()
+        if bindings.pop(action_id, None) is not None:
+            self._store_hotkeys(bindings)
+
+    def on_wheel_hotkey(self, wheel_input, suppressed=False):
         """A wheel button went down (main thread)."""
         if self.hotkey_capture is not None:
             action_id, self.hotkey_capture = self.hotkey_capture, None
-            bindings = hotkeys.parse(self.model.get_hotkeys())
+            bindings = self.hotkey_bindings()
             # One action per button: a button pressing two things is a trap
             taken = [a for a, i in bindings.items() if i == wheel_input and a != action_id]
             for other in taken:
                 del bindings[other]
             bindings[action_id] = wheel_input
-            self.model.set_hotkeys(hotkeys.serialize(bindings))
+            self._store_hotkeys(bindings)
             self.ui.set_hotkey_capture(None)
-            self.ui.set_hotkeys(self.model.get_hotkeys())
             text = _("{} set to {}").format(hotkeys.BY_ID[action_id].label, hotkeys.input_name(wheel_input))
             if taken:
                 text += ' ' + _("(taken from {})").format(', '.join(hotkeys.BY_ID[a].label for a in taken))
+            if self._use_buttons_input(wheel_input):
+                text += ' ' + _("— also one of the Preferences wheel buttons")
+            if action_id not in hotkeys.GLOBAL_ACTIONS and not self.ui.profile_combobox.get_active_id():
+                text += ' ' + _("— save a profile to keep it")
             self.ui.set_hotkeys_status(text)
             return
-        if self.button_setup_step is not False or (self.test and self.test.is_awaiting_action()):
+        if suppressed:
             return
-        for action_id, bound in hotkeys.parse(self.model.get_hotkeys()).items():
+        for action_id, bound in self.hotkey_bindings().items():
             if bound == wheel_input:
                 self.run_hotkey(action_id)
                 return
+
+    def _use_buttons_input(self, wheel_input):
+        """True when the upstream Preferences button setup uses this input."""
+        if not self.model.get_use_buttons():
+            return False
+        numbers = set(self.button_config[0]) | set(self.button_config[1:])
+        kind, _sep, rest = wheel_input.partition(':')
+        if kind == 'btn':
+            number = hotkeys.button_number(int(rest))
+            return number is not None and number in numbers
+        code, direction = map(int, rest.split(':'))
+        hat = {(ecodes.ABS_HAT0X, -1): 100, (ecodes.ABS_HAT0X, 1): 101,
+               (ecodes.ABS_HAT0Y, -1): 102, (ecodes.ABS_HAT0Y, 1): 103}.get((code, direction))
+        return hat in numbers
 
     def run_hotkey(self, action_id):
         """Move the action's control as if by hand (main thread); the
@@ -1015,10 +1095,9 @@ class Gui:
             self.ui.set_hotkeys_status(_("{}: not available now").format(action.label))
             return
         if action.kind == 'toggle':
-            state = not widget.get_active()
-            widget.set_active(state)
+            widget.set_active(not widget.get_active())
             state = widget.get_active()
-            self.hotkey_feedback(pattern=(True,) * 5 if state else (True, False, False, False, True))
+            self.hotkey_feedback(state=state)
             self.ui.set_hotkeys_status('{}: {}'.format(action.label, _("on") if state else _("off")))
             return
         if action.kind == 'profile':
@@ -1053,24 +1132,17 @@ class Gui:
         self.hotkey_feedback(fraction=fraction)
         self.ui.set_hotkeys_status('{}: {}'.format(action.label, shown))
 
-    def hotkey_feedback(self, fraction=None, pattern=None):
+    def hotkey_feedback(self, fraction=None, state=None):
         """Show the new level on the rev LEDs for a moment, over the rev
         lights if they are running. Not while the driver's FFB meter has
         the LEDs."""
-        if self.device is None:
+        if self.device is None or (self.telemetry is None and self.model.get_ffb_leds()):
             return
-        if self.telemetry is not None:
-            leds = self.telemetry.leds
-        elif self.model.get_ffb_leds():
-            return
-        else:
-            if self.hotkey_leds is None or self.hotkey_leds[0] is not self.device:
-                self.hotkey_leds = (self.device, self.device.rev_leds())
-            leds = self.hotkey_leds[1]
+        leds = self.device.rev_leds()
         if not leds.available():
             return
-        if pattern is not None:
-            leds.show(pattern[:len(leds.paths)])
+        if state is not None:
+            leds.show_state(state)
         else:
             leds.show_level(fraction)
 
@@ -1117,7 +1189,8 @@ class Gui:
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     if event.value:
-                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value))
+                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
+                                          self._hotkeys_suppressed())
                     if event.value == -1:
                         self.on_button_press(100, 1)
                     elif event.value == 1:
@@ -1125,14 +1198,15 @@ class Gui:
                 elif event.code == ecodes.ABS_HAT0Y:
                     self.ui.safe_call(self.ui.set_haty_input, event.value)
                     if event.value:
-                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value))
+                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
+                                          self._hotkeys_suppressed())
                     if event.value == -1:
                         self.on_button_press(102, 1)
                     elif event.value == 1:
                         self.on_button_press(103, 1)
             if event.type == ecodes.EV_KEY:
                 if event.value == 1:
-                    self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code))
+                    self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
                 if event.value:
                     delay = 0
                     if self.test and self.test.is_awaiting_action():

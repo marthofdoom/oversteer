@@ -68,3 +68,30 @@ def test_level_display_without_telemetry_goes_dark(tmp_path):
     assert _lit(leds) == (True, False, False, False, False)    # lowest still shows one LED
     time.sleep(0.25)
     assert _lit(leds) == (False,) * 5
+
+
+def test_a_late_release_does_not_cut_a_newer_display_short(tmp_path):
+    leds = _fake_leds(tmp_path)
+    leds.show_level(0.2, seconds=5)
+    stale = leds._generation
+    leds.show_level(1.0, seconds=5)
+    leds._release(stale)                       # the first timer, already past cancel()
+    assert _lit(leds) == (True,) * 5
+    leds.set_count(0)
+    assert _lit(leds) == (True,) * 5           # still held for the newer display
+    leds._release(leds._generation)
+    assert _lit(leds) == (False,) * 5
+
+
+def test_switch_state_display(tmp_path):
+    leds = _fake_leds(tmp_path)
+    leds.show_state(True, seconds=5)
+    assert _lit(leds) == (True,) * 5
+    leds.show_state(False, seconds=5)
+    assert _lit(leds) == (True, False, False, False, True)
+    leds._release(leds._generation)
+
+
+def test_profile_switching_is_app_wide():
+    assert set(hotkeys.GLOBAL_ACTIONS) <= set(hotkeys.BY_ID)
+    assert all(hotkeys.BY_ID[a].kind == 'profile' for a in hotkeys.GLOBAL_ACTIONS)

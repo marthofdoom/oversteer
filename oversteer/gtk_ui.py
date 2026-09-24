@@ -776,8 +776,9 @@ class GtkUi:
         intro.set_max_width_chars(80)
         intro.set_markup('<small>' + GLib.markup_escape_text(
             _("Change settings while you drive. Wheel buttons are saved with the profile; "
-              "the game still sees them, so pick buttons it doesn't use. Keyboard keys are "
-              "assigned in your desktop's shortcut settings and work in every profile.")) + '</small>')
+              "the game still sees them, so pick buttons it doesn't use. The profile buttons and "
+              "keyboard keys work in every profile; keys are assigned in your desktop's shortcut "
+              "settings.")) + '</small>')
         page.pack_start(intro, False, False, 0)
 
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -838,6 +839,8 @@ class GtkUi:
         page.pack_start(scrolled, True, True, 0)
 
         self.main_notebook.insert_page(page, Gtk.Label(label=_("Hotkeys")), self.HOTKEYS_TAB_POSITION)
+        # A capture left armed would take the next press in a game
+        self.main_notebook.connect('switch-page', lambda *args: self.controller.cancel_hotkey_capture())
         self._refresh_hotkey_rows()
 
     def _refresh_hotkey_rows(self):
@@ -855,7 +858,10 @@ class GtkUi:
         self.keyboard_shortcuts_button.set_sensitive(self.keyboard_triggers is not None)
 
     def set_hotkeys(self, text):
-        self.hotkey_bindings = hotkeys.parse(text)
+        """The profile's wheel bindings; the app-wide ones come from the
+        controller."""
+        self.hotkey_bindings = {a: i for a, i in hotkeys.parse(text).items() if a not in hotkeys.GLOBAL_ACTIONS}
+        self.hotkey_bindings.update(self.controller.global_hotkeys)
         self._refresh_hotkey_rows()
 
     def set_hotkey_capture(self, action_id):

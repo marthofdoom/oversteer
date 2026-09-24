@@ -459,8 +459,14 @@ class Device:
         return RevLeds(self.dev_path).available() if self.dev_path else False
 
     def rev_leds(self):
+        """The wheel's rev LEDs: one object per wheel, shared by the rev
+        lights, hotkey feedback and the test, so a moment's display from
+        one isn't undone by another's stale state."""
         from .telemetry import RevLeds
-        return RevLeds(self.dev_path)
+        leds = getattr(self, '_rev_leds', None)
+        if leds is None or leds.sysfs_path != self.dev_path:
+            leds = self._rev_leds = RevLeds(self.dev_path)
+        return leds
 
     def driver_info(self):
         """(driver name, version, has new-lg4ff features) for the status line."""

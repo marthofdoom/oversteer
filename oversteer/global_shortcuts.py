@@ -27,13 +27,15 @@ def in_sandbox():
 
 class GlobalShortcuts:
 
-    def __init__(self, app_id, on_activated, on_bound=None):
+    def __init__(self, app_id, on_activated, on_bound=None, on_failed=None):
         """`on_activated(shortcut_id)` runs when a bound key is pressed;
         `on_bound({shortcut_id: trigger description})` whenever we learn
-        which keys the desktop has assigned."""
+        which keys the desktop has assigned; `on_failed(message)` when
+        the portal is missing or turns a request down."""
         self.app_id = app_id
         self.on_activated = on_activated
         self.on_bound = on_bound
+        self.on_failed = on_failed
         self.conn = None
         self.session = None
         self.version = 0
@@ -44,8 +46,9 @@ class GlobalShortcuts:
         return self.conn is not None and self.version > 0
 
     def start(self):
-        """Connect and open a session. False when there is no portal or it
-        has no GlobalShortcuts interface (older desktops)."""
+        """Connect and open a session, without blocking the main loop: a
+        portal that is slow to start must not freeze the window. False
+        only when there is no session bus at all."""
         try:
             # A private connection: a host app must register its id before
             # any other portal call on the connection, and GTK may already
@@ -59,35 +62,43 @@ class GlobalShortcuts:
             logging.info("global shortcuts: no session bus: %s", e.message)
             self.conn = None
             return False
-        if not in_sandbox():
+        if in_sandbox():
+            self._get_version()
+        else:
             # Tell the portal who we are (a Flatpak is identified by its
             # sandbox). Portals before 1.19 lack this; the desktop then
             # names the shortcuts after the process instead.
-            try:
-                self.conn.call_sync(BUS_NAME, OBJECT_PATH, 'org.freedesktop.host.portal.Registry', 'Register',
-                                    GLib.Variant('(sa{sv})', (self.app_id, {})), None,
-                                    Gio.DBusCallFlags.NONE, 2000, None)
-            except GLib.Error as e:
-                logging.debug("global shortcuts: registry: %s", e.message)
-        try:
-            reply = self.conn.call_sync(BUS_NAME, OBJECT_PATH, 'org.freedesktop.DBus.Properties', 'Get',
-                                        GLib.Variant('(ss)', (INTERFACE, 'version')), None,
-                                        Gio.DBusCallFlags.NONE, 2000, None)
-            self.version = reply.unpack()[0]
-        except GLib.Error as e:
-            logging.info("global shortcuts: portal unavailable: %s", e.message)
-            self.conn = None
-            return False
-        self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'Activated', OBJECT_PATH, None,
-                                   Gio.DBusSignalFlags.NONE, self._activated)
-        self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'ShortcutsChanged', OBJECT_PATH, None,
-                                   Gio.DBusSignalFlags.NONE, self._changed)
-        token = self._token()
-        self._request('CreateSession', GLib.Variant('(a{sv})', ({
-            'handle_token': GLib.Variant('s', token),
-            'session_handle_token': GLib.Variant('s', self._token()),
-        },)), token, self._session_created)
+            def registered(conn, result):
+                try:
+                    conn.call_finish(result)
+                except GLib.Error as e:
+                    logging.debug("global shortcuts: registry: %s", e.message)
+                self._get_version()
+            self.conn.call(BUS_NAME, OBJECT_PATH, 'org.freedesktop.host.portal.Registry', 'Register',
+                           GLib.Variant('(sa{sv})', (self.app_id, {})), None,
+                           Gio.DBusCallFlags.NONE, -1, None, registered)
         return True
+
+    def _get_version(self):
+        def got(conn, result):
+            try:
+                self.version = conn.call_finish(result).unpack()[0]
+            except GLib.Error as e:
+                logging.info("global shortcuts: portal unavailable: %s", e.message)
+                self._fail(None)
+                return
+            self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'Activated', OBJECT_PATH, None,
+                                       Gio.DBusSignalFlags.NONE, self._activated)
+            self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'ShortcutsChanged', OBJECT_PATH, None,
+                                       Gio.DBusSignalFlags.NONE, self._changed)
+            token = self._token()
+            self._request('CreateSession', GLib.Variant('(a{sv})', ({
+                'handle_token': GLib.Variant('s', token),
+                'session_handle_token': GLib.Variant('s', self._token()),
+            },)), token, self._session_created)
+        self.conn.call(BUS_NAME, OBJECT_PATH, 'org.freedesktop.DBus.Properties', 'Get',
+                       GLib.Variant('(ss)', (INTERFACE, 'version')), None,
+                       Gio.DBusCallFlags.NONE, -1, None, got)
 
     def bind(self, shortcuts):
         """Declare our shortcuts: [(id, description), ...]. The desktop
@@ -101,28 +112,23 @@ class GlobalShortcuts:
         self._request('BindShortcuts', GLib.Variant('(oa(sa{sv})sa{sv})', (
             self.session, entries, '', {'handle_token': GLib.Variant('s', token)})), token, self._bound)
 
-    def configure(self):
-        """Open the desktop's editor for our shortcuts (portal version 2);
-        False when the desktop has none, so the caller can explain where
-        to find them instead."""
+    def configure(self, on_unsupported):
+        """Open the desktop's editor for our shortcuts (portal version 2).
+        `on_unsupported()` runs instead when there is none: an old portal,
+        or a new portal whose desktop backend lacks the editor."""
         if self.session is None or self.version < 2:
-            return False
-        try:
-            self.conn.call(BUS_NAME, OBJECT_PATH, INTERFACE, 'ConfigureShortcuts',
-                           GLib.Variant('(osa{sv})', (self.session, '', {})), None,
-                           Gio.DBusCallFlags.NONE, -1, None, None, None)
-        except GLib.Error:
-            return False
-        return True
+            on_unsupported()
+            return
 
-    def close(self):
-        if self.conn is not None and self.session is not None:
+        def done(conn, result):
             try:
-                self.conn.call_sync(BUS_NAME, self.session, 'org.freedesktop.portal.Session', 'Close',
-                                    None, None, Gio.DBusCallFlags.NONE, 1000, None)
-            except GLib.Error:
-                pass
-        self.session = None
+                conn.call_finish(result)
+            except GLib.Error as e:
+                logging.debug("global shortcuts: configure: %s", e.message)
+                on_unsupported()
+        self.conn.call(BUS_NAME, OBJECT_PATH, INTERFACE, 'ConfigureShortcuts',
+                       GLib.Variant('(osa{sv})', (self.session, '', {})), None,
+                       Gio.DBusCallFlags.NONE, -1, None, done)
 
     # -- plumbing --
 
@@ -142,6 +148,7 @@ class GlobalShortcuts:
             code, results = args.unpack()
             if code != 0:
                 logging.info("global shortcuts: %s answered %d", method, code)
+                self._fail(method)
                 return
             done(results)
         sub['id'] = self.conn.signal_subscribe(BUS_NAME, REQUEST_INTERFACE, 'Response', path, None,
@@ -153,8 +160,16 @@ class GlobalShortcuts:
             except GLib.Error as e:
                 conn.signal_unsubscribe(sub['id'])
                 logging.info("global shortcuts: %s failed: %s", method, e.message)
+                self._fail(method)
         self.conn.call(BUS_NAME, OBJECT_PATH, INTERFACE, method, params, None,
                        Gio.DBusCallFlags.NONE, -1, None, called)
+
+    def _fail(self, method):
+        """No portal (method None), or a request turned down or failed."""
+        if method is None:
+            self.conn = None
+        if self.on_failed is not None:
+            self.on_failed(method)
 
     def _session_created(self, results):
         self.session = results.get('session_handle')

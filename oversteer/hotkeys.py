@@ -66,6 +66,10 @@ def _actions():
 ACTIONS = _actions()
 BY_ID = {a.id: a for a in ACTIONS}
 
+# Saved with the preferences, not the profile: switching to a profile that
+# binds other buttons must not strand you there.
+GLOBAL_ACTIONS = ('profile_next', 'profile_prev')
+
 SHIFT_STEP = {'percent': 1, 'rpm': 100}      # one press of the shift point hotkey
 
 HAT_NAMES = {
