@@ -81,7 +81,7 @@ class Gui:
         self.pressed_button_count = 0
         self.hotkey_capture = None
         self.keyboard_hotkeys = None
-        self.keyboard_bind_failed = False
+        self.keyboard_needs_bind = False
         self.global_hotkeys = {}          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
@@ -938,8 +938,10 @@ class Gui:
     APP_ID = 'io.github.berarma.Oversteer'
 
     def start_keyboard_hotkeys(self):
-        """Declare every action to the desktop's shortcut portal. All of
-        them, every time: the desktop forgets any we leave out."""
+        """Pick up the keys the desktop already has for our actions. The
+        desktop delivers them to any session of ours, so a startup only
+        lists them; declaring (bind_keyboard_hotkeys) waits for the button,
+        because Plasma opens its shortcut settings on every declaration."""
         from .global_shortcuts import GlobalShortcuts
         self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey,
                                                 self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed)
@@ -947,14 +949,19 @@ class Gui:
             self.keyboard_hotkeys = None
             self.ui.set_keyboard_triggers(None)
             return
-        self.bind_keyboard_hotkeys()
+        self.keyboard_hotkeys.list(self.on_keyboard_hotkeys_listed)
+
+    def on_keyboard_hotkeys_listed(self, triggers):
+        # Never declared, or declared by a version with fewer actions: the
+        # button declares them (all of them: the desktop forgets any left out)
+        self.keyboard_needs_bind = any(a.id not in triggers for a in hotkeys.ACTIONS)
 
     def bind_keyboard_hotkeys(self):
-        self.keyboard_bind_failed = False
+        self.keyboard_needs_bind = False
         self.keyboard_hotkeys.bind([(a.id, a.description()) for a in hotkeys.ACTIONS])
 
     def on_keyboard_hotkeys_bound(self, triggers):
-        self.keyboard_bind_failed = False
+        self.keyboard_needs_bind = False
         self.ui.set_keyboard_triggers(triggers)
 
     def on_keyboard_hotkeys_failed(self, method):
@@ -964,7 +971,7 @@ class Gui:
             self.ui.set_hotkeys_status(_("Keyboard keys need the desktop's shortcut portal, which isn't running"))
             return
         # Turned down (a dialog dismissed) or failed: let the button retry
-        self.keyboard_bind_failed = True
+        self.keyboard_needs_bind = True
         self.ui.set_keyboard_triggers({})
         self.ui.set_hotkeys_status(_("The desktop didn't take the keyboard shortcuts; \"Set keyboard keys…\" tries again"))
 
@@ -973,7 +980,7 @@ class Gui:
         it has one, otherwise the desktop's shortcut settings."""
         if self.keyboard_hotkeys is None:
             self.open_shortcut_settings()
-        elif self.keyboard_bind_failed or self.keyboard_hotkeys.session is None:
+        elif self.keyboard_needs_bind or self.keyboard_hotkeys.session is None:
             self.bind_keyboard_hotkeys()
         else:
             self.keyboard_hotkeys.configure(self.open_shortcut_settings)
