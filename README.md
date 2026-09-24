@@ -60,6 +60,17 @@ __Use at your own risk. Suggestions, bugs and pull requests welcome.__
   small helper inside the game's Proton prefix and forwards its shared-memory
   telemetry. The Tools tab shows the exact launch options with a Copy button.
 
+**Hotkeys while you drive** (Hotkeys tab):
+
+- Bind a wheel button or a keyboard key to the shift point, force feedback
+  on/off and strength, centering spring, spring, damper, friction, rumble,
+  rotation range, sensitivity, or the next/previous profile. The rev LEDs show
+  the new level for a moment.
+- Wheel buttons are saved with the profile. Keyboard keys go through the
+  desktop's shortcut portal (assign them in System Settings → Shortcuts →
+  Oversteer on Plasma), so they work over a full-screen game and Oversteer
+  never reads the keyboard.
+
 **Diagnostics**: `scripts/probe-device.py` names the raw events of any device,
 including one hidden or grabbed by the proxy; `scripts/telemetry-capture.py`
 shows what arrives on the telemetry port and how it decodes.

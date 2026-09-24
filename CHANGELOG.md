@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-09-23
 
 ### Added
 - Hotkeys tab: change settings while you drive, from a wheel button or a
@@ -10,7 +10,9 @@
   sensitivity and next/previous profile. Wheel buttons are saved with the
   profile; keyboard keys go through the desktop's shortcut portal (Plasma,
   GNOME), so they work over a full-screen game and nothing reads the
-  keyboard. The rev LEDs show the new level for a moment.
+  keyboard. The rev LEDs show the new level for a moment. Next/previous
+  profile bindings are app-wide, so a profile with other buttons can't
+  strand you.
 
 ## 0.12.4 — 2026-09-22
 
