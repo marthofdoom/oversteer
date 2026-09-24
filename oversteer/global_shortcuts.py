@@ -100,10 +100,26 @@ class GlobalShortcuts:
                        GLib.Variant('(ss)', (INTERFACE, 'version')), None,
                        Gio.DBusCallFlags.NONE, -1, None, got)
 
+    def list(self, done):
+        """What the desktop already has for us: `done({id: trigger
+        description})`. Quiet, unlike bind(): Plasma opens its shortcut
+        settings on every bind, so a bind belongs to a user's click."""
+        if self.session is None:
+            self._pending.append(lambda: self.list(done))
+            return
+        token = self._token()
+
+        def listed(results):
+            self._record(results.get('shortcuts', []))
+            done(dict(self.triggers))
+        self._request('ListShortcuts', GLib.Variant('(oa{sv})', (
+            self.session, {'handle_token': GLib.Variant('s', token)})), token, listed)
+
     def bind(self, shortcuts):
         """Declare our shortcuts: [(id, description), ...]. The desktop
-        shows its dialog for any it hasn't seen, keeps the keys the user
-        chose for the rest, and answers with the current assignments."""
+        shows its dialog (Plasma: its shortcut settings), keeps the keys
+        the user chose, forgets any id left out, and answers with the
+        current assignments."""
         if self.session is None:
             self._pending.append(lambda: self.bind(shortcuts))
             return
@@ -129,6 +145,15 @@ class GlobalShortcuts:
         self.conn.call(BUS_NAME, OBJECT_PATH, INTERFACE, 'ConfigureShortcuts',
                        GLib.Variant('(osa{sv})', (self.session, '', {})), None,
                        Gio.DBusCallFlags.NONE, -1, None, done)
+
+    def close(self):
+        """End the session (a retry needs a new one: GNOME refuses a second
+        bind on a session, even after a dismissed dialog)."""
+        if self.conn is not None and self.session is not None:
+            self.conn.call(BUS_NAME, self.session, 'org.freedesktop.portal.Session', 'Close',
+                           None, None, Gio.DBusCallFlags.NONE, -1, None, None)
+        self.session = None
+        self._pending = []
 
     # -- plumbing --
 
