@@ -82,6 +82,7 @@ class Gui:
         self.hotkey_capture = None
         self.keyboard_hotkeys = None
         self.keyboard_needs_bind = False
+        self.keyboard_session_failed = False
         self.global_hotkeys = {}          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
@@ -937,31 +938,46 @@ class Gui:
 
     APP_ID = 'io.github.berarma.Oversteer'
 
-    def start_keyboard_hotkeys(self):
-        """Pick up the keys the desktop already has for our actions. The
-        desktop delivers them to any session of ours, so a startup only
-        lists them; declaring (bind_keyboard_hotkeys) waits for the button,
-        because Plasma opens its shortcut settings on every declaration."""
+    def start_keyboard_hotkeys(self, bind=False):
+        """Open a portal session and pick up the keys the desktop has for
+        our actions. Plasma keeps them per app and delivers them to any
+        session of ours, so there a startup only lists them: it opens its
+        shortcut settings on every declaration, which belongs to a click on
+        "Set keyboard keys…". GNOME keeps them per session, so there every
+        start declares them (silently, once the desktop knows them all)."""
         from .global_shortcuts import GlobalShortcuts
+        if self.keyboard_hotkeys is not None:
+            self.keyboard_hotkeys.close()
+        self.keyboard_session_failed = False
         self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey,
                                                 self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed)
         if not self.keyboard_hotkeys.start():
             self.keyboard_hotkeys = None
             self.ui.set_keyboard_triggers(None)
             return
-        self.keyboard_hotkeys.list(self.on_keyboard_hotkeys_listed)
+        if bind:
+            self.bind_keyboard_hotkeys()
+        else:
+            self.keyboard_hotkeys.list(self.on_keyboard_hotkeys_listed)
+
+    @staticmethod
+    def _desktop_keeps_shortcuts():
+        return 'KDE' in os.environ.get('XDG_CURRENT_DESKTOP', '').upper()
 
     def on_keyboard_hotkeys_listed(self, triggers):
-        # Never declared, or declared by a version with fewer actions: the
-        # button declares them (all of them: the desktop forgets any left out)
-        self.keyboard_needs_bind = any(a.id not in triggers for a in hotkeys.ACTIONS)
+        # Never declared, or declared by a version with fewer actions
+        missing = any(a.id not in triggers for a in hotkeys.ACTIONS)
+        if missing and not self._desktop_keeps_shortcuts():
+            self.bind_keyboard_hotkeys()
+        else:
+            self.keyboard_needs_bind = missing
 
     def bind_keyboard_hotkeys(self):
+        """Declare every action: all of them, the desktop forgets any left out."""
         self.keyboard_needs_bind = False
         self.keyboard_hotkeys.bind([(a.id, a.description()) for a in hotkeys.ACTIONS])
 
     def on_keyboard_hotkeys_bound(self, triggers):
-        self.keyboard_needs_bind = False
         self.ui.set_keyboard_triggers(triggers)
 
     def on_keyboard_hotkeys_failed(self, method):
@@ -970,16 +986,20 @@ class Gui:
             self.ui.set_keyboard_triggers(None)
             self.ui.set_hotkeys_status(_("Keyboard keys need the desktop's shortcut portal, which isn't running"))
             return
-        # Turned down (a dialog dismissed) or failed: let the button retry
-        self.keyboard_needs_bind = True
+        # Declined (a dialog dismissed) or failed: the button retries on a
+        # new session
+        self.keyboard_session_failed = True
         self.ui.set_keyboard_triggers({})
-        self.ui.set_hotkeys_status(_("The desktop didn't take the keyboard shortcuts; \"Set keyboard keys…\" tries again"))
+        self.ui.set_hotkeys_status(_("Keyboard keys aren't set up with the desktop; \"Set keyboard keys…\" tries again"))
 
     def configure_keyboard_hotkeys(self):
-        """Show where the keys are assigned: the portal's own editor when
+        """Show where the keys are assigned: declare them first if the
+        desktop doesn't have them all, then the portal's own editor when
         it has one, otherwise the desktop's shortcut settings."""
         if self.keyboard_hotkeys is None:
             self.open_shortcut_settings()
+        elif self.keyboard_session_failed:
+            self.start_keyboard_hotkeys(bind=True)
         elif self.keyboard_needs_bind or self.keyboard_hotkeys.session is None:
             self.bind_keyboard_hotkeys()
         else:

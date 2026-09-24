@@ -146,6 +146,15 @@ class GlobalShortcuts:
                        GLib.Variant('(osa{sv})', (self.session, '', {})), None,
                        Gio.DBusCallFlags.NONE, -1, None, done)
 
+    def close(self):
+        """End the session (a retry needs a new one: GNOME refuses a second
+        bind on a session, even after a dismissed dialog)."""
+        if self.conn is not None and self.session is not None:
+            self.conn.call(BUS_NAME, self.session, 'org.freedesktop.portal.Session', 'Close',
+                           None, None, Gio.DBusCallFlags.NONE, -1, None, None)
+        self.session = None
+        self._pending = []
+
     # -- plumbing --
 
     @staticmethod
