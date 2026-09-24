@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.1 — 2026-09-24
+
+### Fixed
+- Plasma opened System Settings on the Shortcuts page every time Oversteer
+  started. Its portal does that whenever an app declares shortcuts, so on
+  Plasma a start now only reads the keys already assigned (they still
+  work), and declaring waits for "Set keyboard keys…". Other desktops keep
+  their shortcuts per session and still declare at start, silently once
+  they know them.
+
 ## 0.13.0 — 2026-09-23
 
 ### Added

@@ -1,5 +1,5 @@
 project('oversteer',
-  version: '0.13.0',
+  version: '0.13.1',
   meson_version: '>= 0.56.0'
 )
 
