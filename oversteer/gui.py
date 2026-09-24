@@ -19,6 +19,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
+from . import hotkeys
 from .model import Model
 from .test import Test
 from .combined_chart import CombinedChart
@@ -78,6 +79,9 @@ class Gui:
         self.button_config = [-1] * 9
         self.button_config[0] = [-1]
         self.pressed_button_count = 0
+        self.hotkey_capture = None
+        self.keyboard_hotkeys = None
+        self.hotkey_leds = None
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
 
@@ -101,6 +105,8 @@ class Gui:
         self.ui.start()
 
         self.model.set_ui(self.ui)
+
+        self.start_keyboard_hotkeys()
 
         self.populate_window()
 
@@ -921,6 +927,153 @@ class Gui:
                 else:
                     self.pressed_button_count -= 1
 
+    # -- hotkeys --
+
+    APP_ID = 'io.github.berarma.Oversteer'
+
+    def start_keyboard_hotkeys(self):
+        """Declare every action to the desktop's shortcut portal. All of
+        them, every time: the desktop forgets any we leave out."""
+        from .global_shortcuts import GlobalShortcuts
+        self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey, self.ui.set_keyboard_triggers)
+        if not self.keyboard_hotkeys.start():
+            self.keyboard_hotkeys = None
+            self.ui.set_keyboard_triggers(None)
+            return
+        self.keyboard_hotkeys.bind([(a.id, a.description()) for a in hotkeys.ACTIONS])
+
+    def configure_keyboard_hotkeys(self):
+        """Show where the keys are assigned: the portal's own editor when
+        it has one, otherwise the desktop's shortcut settings."""
+        if self.keyboard_hotkeys is not None and self.keyboard_hotkeys.configure():
+            return
+        from .proxy.manager import in_flatpak
+        desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').upper()
+        if 'KDE' in desktop:
+            cmd = ['systemsettings', 'kcm_keys']
+        elif 'GNOME' in desktop:
+            cmd = ['gnome-control-center', 'keyboard']
+        else:
+            cmd = None
+        if cmd is not None:
+            if in_flatpak():
+                cmd = ['flatpak-spawn', '--host'] + cmd
+            try:
+                subprocess.Popen(cmd)
+                return
+            except OSError as e:
+                logging.debug("shortcut settings: %s", e)
+        self.ui.info_dialog(_("Keyboard keys"),
+                            _("Assign keys to Oversteer's actions in your desktop's keyboard shortcut settings."))
+
+    def on_keyboard_hotkey(self, action_id):
+        self.run_hotkey(action_id)
+
+    def start_hotkey_capture(self, action_id):
+        self.hotkey_capture = None if self.hotkey_capture == action_id else action_id
+        self.ui.set_hotkey_capture(self.hotkey_capture)
+
+    def clear_hotkey(self, action_id):
+        bindings = hotkeys.parse(self.model.get_hotkeys())
+        if bindings.pop(action_id, None) is not None:
+            self.model.set_hotkeys(hotkeys.serialize(bindings))
+            self.ui.set_hotkeys(self.model.get_hotkeys())
+
+    def on_wheel_hotkey(self, wheel_input):
+        """A wheel button went down (main thread)."""
+        if self.hotkey_capture is not None:
+            action_id, self.hotkey_capture = self.hotkey_capture, None
+            bindings = hotkeys.parse(self.model.get_hotkeys())
+            # One action per button: a button pressing two things is a trap
+            taken = [a for a, i in bindings.items() if i == wheel_input and a != action_id]
+            for other in taken:
+                del bindings[other]
+            bindings[action_id] = wheel_input
+            self.model.set_hotkeys(hotkeys.serialize(bindings))
+            self.ui.set_hotkey_capture(None)
+            self.ui.set_hotkeys(self.model.get_hotkeys())
+            text = _("{} set to {}").format(hotkeys.BY_ID[action_id].label, hotkeys.input_name(wheel_input))
+            if taken:
+                text += ' ' + _("(taken from {})").format(', '.join(hotkeys.BY_ID[a].label for a in taken))
+            self.ui.set_hotkeys_status(text)
+            return
+        if self.button_setup_step is not False or (self.test and self.test.is_awaiting_action()):
+            return
+        for action_id, bound in hotkeys.parse(self.model.get_hotkeys()).items():
+            if bound == wheel_input:
+                self.run_hotkey(action_id)
+                return
+
+    def run_hotkey(self, action_id):
+        """Move the action's control as if by hand (main thread); the
+        control's own handler writes the model and the driver."""
+        action = hotkeys.BY_ID.get(action_id)
+        if action is None or self.device is None:
+            return
+        widget = getattr(self.ui, action.widget)
+        if not widget.get_sensitive():
+            self.ui.set_hotkeys_status(_("{}: not available now").format(action.label))
+            return
+        if action.kind == 'toggle':
+            state = not widget.get_active()
+            widget.set_active(state)
+            state = widget.get_active()
+            self.hotkey_feedback(pattern=(True,) * 5 if state else (True, False, False, False, True))
+            self.ui.set_hotkeys_status('{}: {}'.format(action.label, _("on") if state else _("off")))
+            return
+        if action.kind == 'profile':
+            name = self.ui.cycle_profile(action.delta)
+            self.ui.set_hotkeys_status('{}: {}'.format(action.label, name or _("no saved profiles")))
+            return
+        if action.kind == 'range':
+            self.add_range(action.delta)
+            value = self.model.get_range()
+            self.hotkey_feedback(fraction=(value - 40) / max(1, self.device.get_max_range() - 40))
+            self.ui.set_hotkeys_status('{}: {}°'.format(action.label, value))
+            return
+        adjustment = widget.get_adjustment()
+        delta = action.delta
+        if action.kind == 'shift':
+            unit = self.model.get_rev_leds_shift_unit()
+            delta *= hotkeys.SHIFT_STEP[unit]
+        widget.set_value(widget.get_value() + delta)       # the adjustment clamps it
+        value = widget.get_value()
+        low, high = adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
+        fraction = (value - low) / (high - low) if high > low else 1.0
+        if action.kind == 'shift':
+            max_rpm = self.telemetry.last_max_rpm if self.telemetry is not None else 0.0
+            if unit == 'rpm':
+                if max_rpm:
+                    fraction = value / max_rpm
+                shown = '{} rpm'.format(int(value))
+            else:
+                shown = '{} %'.format(int(value)) + (' ({} rpm)'.format(int(round(value / 100.0 * max_rpm))) if max_rpm else '')
+        else:
+            shown = str(int(value))
+        self.hotkey_feedback(fraction=fraction)
+        self.ui.set_hotkeys_status('{}: {}'.format(action.label, shown))
+
+    def hotkey_feedback(self, fraction=None, pattern=None):
+        """Show the new level on the rev LEDs for a moment, over the rev
+        lights if they are running. Not while the driver's FFB meter has
+        the LEDs."""
+        if self.device is None:
+            return
+        if self.telemetry is not None:
+            leds = self.telemetry.leds
+        elif self.model.get_ffb_leds():
+            return
+        else:
+            if self.hotkey_leds is None or self.hotkey_leds[0] is not self.device:
+                self.hotkey_leds = (self.device, self.device.rev_leds())
+            leds = self.hotkey_leds[1]
+        if not leds.available():
+            return
+        if pattern is not None:
+            leds.show(pattern[:len(leds.paths)])
+        else:
+            leds.show_level(fraction)
+
     def add_range(self, delta):
         max_range = self.device.get_max_range()
         wrange = self.model.get_range()
@@ -963,17 +1116,23 @@ class Gui:
                                           min(1.0, max(0.0, (event.value - low) / (high - low))))
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
+                    if event.value:
+                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value))
                     if event.value == -1:
                         self.on_button_press(100, 1)
                     elif event.value == 1:
                         self.on_button_press(101, 1)
                 elif event.code == ecodes.ABS_HAT0Y:
                     self.ui.safe_call(self.ui.set_haty_input, event.value)
+                    if event.value:
+                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value))
                     if event.value == -1:
                         self.on_button_press(102, 1)
                     elif event.value == 1:
                         self.on_button_press(103, 1)
             if event.type == ecodes.EV_KEY:
+                if event.value == 1:
+                    self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code))
                 if event.value:
                     delay = 0
                     if self.test and self.test.is_awaiting_action():

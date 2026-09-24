@@ -5,6 +5,7 @@ import logging
 import math
 import os
 from .gtk_handlers import GtkHandlers
+from . import hotkeys
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -51,6 +52,7 @@ class GtkUi:
 
         self.set_range_overlay('never')
         self.disable_save_profile()
+        self._build_hotkeys_page()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -756,6 +758,132 @@ class GtkUi:
         visual = screen.get_rgba_visual()
         self.overlay_window.set_visual(visual)
 
+    HOTKEYS_TAB_POSITION = 3        # after Tools
+
+    def _build_hotkeys_page(self):
+        """The Hotkeys tab: one row per action, with its wheel button (saved
+        in the profile) and its keyboard key (the desktop's)."""
+        self.hotkey_rows = {}
+        self.hotkey_bindings = {}
+        self.hotkey_capturing = None
+        self.keyboard_triggers = None
+
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        page.set_border_width(12)
+
+        intro = Gtk.Label(xalign=0)
+        intro.set_line_wrap(True)
+        intro.set_max_width_chars(80)
+        intro.set_markup('<small>' + GLib.markup_escape_text(
+            _("Change settings while you drive. Wheel buttons are saved with the profile; "
+              "the game still sees them, so pick buttons it doesn't use. Keyboard keys are "
+              "assigned in your desktop's shortcut settings and work in every profile.")) + '</small>')
+        page.pack_start(intro, False, False, 0)
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.keyboard_shortcuts_button = Gtk.Button(label=_("Set keyboard keys…"))
+        self.keyboard_shortcuts_button.set_tooltip_text(
+            _("Open the desktop's shortcut settings, where Oversteer's actions are listed"))
+        self.keyboard_shortcuts_button.connect('clicked', lambda w: self.controller.configure_keyboard_hotkeys())
+        bar.pack_start(self.keyboard_shortcuts_button, False, False, 0)
+        self.hotkeys_status = Gtk.Label(xalign=0)
+        self.hotkeys_status.get_style_context().add_class('dim-label')
+        self.hotkeys_status.set_ellipsize(3)        # Pango.EllipsizeMode.END
+        bar.pack_start(self.hotkeys_status, True, True, 0)
+        page.pack_start(bar, False, False, 0)
+
+        grid = Gtk.Grid(column_spacing=12, row_spacing=4)
+        grid.set_margin_top(4)
+        row = 0
+        for text, column in ((_("Action"), 0), (_("Wheel button"), 1), (_("Keyboard"), 3)):
+            header = Gtk.Label(xalign=0)
+            header.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(text)))
+            grid.attach(header, column, row, 1, 1)
+        row += 1
+        group = None
+        for action in hotkeys.ACTIONS:
+            if action.group != group:
+                group = action.group
+                heading = Gtk.Label(xalign=0)
+                heading.set_markup('<small><b>{}</b></small>'.format(GLib.markup_escape_text(group)))
+                heading.set_margin_top(6)
+                grid.attach(heading, 0, row, 4, 1)
+                row += 1
+            label = Gtk.Label(label=action.label, xalign=0)
+            label.set_margin_start(12)
+            label.set_hexpand(True)
+            grid.attach(label, 0, row, 1, 1)
+            button = Gtk.Button()
+            button.set_size_request(170, -1)
+            button.set_tooltip_text(_("Click, then press a button on the wheel"))
+            button.connect('clicked', lambda w, a=action.id: self.controller.start_hotkey_capture(a))
+            grid.attach(button, 1, row, 1, 1)
+            clear = Gtk.Button.new_from_icon_name('edit-clear-symbolic', Gtk.IconSize.BUTTON)
+            clear.set_relief(Gtk.ReliefStyle.NONE)
+            clear.set_tooltip_text(_("Remove the wheel button"))
+            clear.set_no_show_all(True)         # only shown next to a set button
+            clear.connect('clicked', lambda w, a=action.id: self.controller.clear_hotkey(a))
+            grid.attach(clear, 2, row, 1, 1)
+            keys = Gtk.Label(xalign=0)
+            keys.set_size_request(140, -1)
+            keys.get_style_context().add_class('dim-label')
+            grid.attach(keys, 3, row, 1, 1)
+            self.hotkey_rows[action.id] = (button, clear, keys)
+            row += 1
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        scrolled.add(grid)
+        page.pack_start(scrolled, True, True, 0)
+
+        self.main_notebook.insert_page(page, Gtk.Label(label=_("Hotkeys")), self.HOTKEYS_TAB_POSITION)
+        self._refresh_hotkey_rows()
+
+    def _refresh_hotkey_rows(self):
+        for action_id, (button, clear, keys) in self.hotkey_rows.items():
+            if action_id == self.hotkey_capturing:
+                button.set_label(_("Press a wheel button…"))
+            else:
+                wheel_input = self.hotkey_bindings.get(action_id)
+                button.set_label(hotkeys.input_name(wheel_input) if wheel_input else _("Not set"))
+            clear.set_visible(action_id in self.hotkey_bindings)
+            if self.keyboard_triggers is None:
+                keys.set_text('')
+            else:
+                keys.set_text(self.keyboard_triggers.get(action_id) or '—')
+        self.keyboard_shortcuts_button.set_sensitive(self.keyboard_triggers is not None)
+
+    def set_hotkeys(self, text):
+        self.hotkey_bindings = hotkeys.parse(text)
+        self._refresh_hotkey_rows()
+
+    def set_hotkey_capture(self, action_id):
+        self.hotkey_capturing = action_id
+        self._refresh_hotkey_rows()
+
+    def set_keyboard_triggers(self, triggers):
+        """{action id: key description} from the desktop; None when the
+        desktop has no shortcut portal."""
+        self.keyboard_triggers = triggers
+        self._refresh_hotkey_rows()
+
+    def set_hotkeys_status(self, text):
+        self.hotkeys_status.set_text(text)
+        self.hotkeys_status.set_tooltip_text(text)
+
+    def cycle_profile(self, delta):
+        """Select the next/previous saved profile (wrapping); the name, or
+        None when there are none."""
+        names = [row[0] for row in self.profile_combobox.get_model() or [] if row[0]]
+        if not names:
+            return None
+        current = self.profile_combobox.get_active_id()
+        index = names.index(current) + delta if current in names else (0 if delta > 0 else -1)
+        name = names[index % len(names)]
+        self.profile_combobox.set_active_id(name)
+        return name
+
     def _set_builder_objects(self):
         self._available = {}
         self.updating_invert_pedals = False
@@ -776,6 +904,7 @@ class GtkUi:
         self.device_combobox = self.builder.get_object('device')
         self.driver_status = self.builder.get_object('driver_status')
         self.profile_combobox = self.builder.get_object('profile')
+        self.main_notebook = self.builder.get_object('main_notebook')
         self.new_profile_name_entry = self.builder.get_object('new_profile_name')
         self.save_profile_button = self.builder.get_object('save_profile')
         self.new_profile_name = self.builder.get_object('new_profile_name')

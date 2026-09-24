@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Hotkeys tab: change settings while you drive, from a wheel button or a
+  keyboard key. Shift point up/down (1 % or 100 rpm a press), rev LEDs,
+  force feedback on/off, overall strength, centering spring, spring,
+  damper, friction, rumble, the FFB switches, rotation range (±10°/±90°),
+  sensitivity and next/previous profile. Wheel buttons are saved with the
+  profile; keyboard keys go through the desktop's shortcut portal (Plasma,
+  GNOME), so they work over a full-screen game and nothing reads the
+  keyboard. The rev LEDs show the new level for a moment.
+
 ## 0.12.4 — 2026-09-22
 
 ### Changed

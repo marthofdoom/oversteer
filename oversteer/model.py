@@ -30,6 +30,7 @@ class Model:
         'ffb_overlay': None,
         'range_overlay': None,
         'use_buttons': None,
+        'hotkeys': None,
         'center_wheel': None,
         'start_app_manually': None,
     }
@@ -58,6 +59,7 @@ class Model:
         'ffb_overlay': 'boolean',
         'range_overlay': 'string',
         'use_buttons': 'boolean',
+        'hotkeys': 'string',
         'center_wheel': 'boolean',
         'start_app_manually': 'boolean',
     }
@@ -116,6 +118,7 @@ class Model:
             'ffb_overlay': False if self.device.get_peak_ffb_level() is not None else None,
             'range_overlay': 'never' if self.device.get_peak_ffb_level() is not None else None,
             'use_buttons': False if self.device.get_range() is not None else None,
+            'hotkeys': self.data.get('hotkeys') or '',
             'center_wheel': False,
             'start_app_manually': False,
         }
@@ -163,6 +166,11 @@ class Model:
             if data['rev_leds_shift_unit'] not in ('percent', 'rpm'):
                 data['rev_leds_shift_unit'] = 'percent'
             data['rev_leds_shift'] = self._clamp_shift(data['rev_leds_shift_unit'], data['rev_leds_shift'])
+
+        # A profile saved before hotkeys existed keeps the ones in use, so
+        # switching to it (perhaps by a hotkey) doesn't strand the others.
+        if data['hotkeys'] is None:
+            data['hotkeys'] = self.data.get('hotkeys') or ''
 
         self.data = data
         self.save_reference_values()
@@ -412,6 +420,13 @@ class Model:
     def get_use_buttons(self):
         return self.data['use_buttons']
 
+    def set_hotkeys(self, value):
+        """The wheel-button bindings, as hotkeys.serialize() writes them."""
+        self.set_if_changed('hotkeys', value or '')
+
+    def get_hotkeys(self):
+        return self.data['hotkeys'] or ''
+
     def set_center_wheel(self, value):
         value = bool(value)
         if self.set_if_changed('center_wheel', value) and value:
@@ -484,6 +499,7 @@ class Model:
         self.ui.set_ffb_overlay(data['ffb_overlay'])
         self.ui.set_range_overlay(data['range_overlay'])
         self.ui.set_use_buttons(data['use_buttons'])
+        self.ui.set_hotkeys(data['hotkeys'])
         self.ui.set_center_wheel(data['center_wheel'])
         self.ui.set_start_app_manually(data['start_app_manually'])
         # Last: it greys out the strength controls when force feedback is off
