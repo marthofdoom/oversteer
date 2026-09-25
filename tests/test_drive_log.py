@@ -1,5 +1,6 @@
 """The drive log: writes leave the listener for their own thread, and what
 the thread writes is what an inline replay writes."""
+import sqlite3
 import threading
 import time
 
@@ -239,3 +240,83 @@ def test_forza_motorsport_laps_through_the_live_path(tmp_path):
     [tune] = reader.db.execute('SELECT tyre_radius FROM tunes').fetchall()
     assert tune[0] is not None and abs(tune[0] - 0.33) < 0.005
     learner.close()
+
+
+def test_a_rolled_back_batch_leaves_no_stale_row_ids(tmp_path, monkeypatch):
+    """A batch that cannot be committed (a full disk) is rolled back and
+    SQLite hands its row ids out again: the session written in it starts
+    again, and nothing lands in a row that is not its own."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    store = learner.log.store
+    real_commit = store.commit
+    monkeypatch.setattr(store, 'commit', lambda: None)       # one batch, as on the thread
+    samples = course_samples(Course(STAGE))
+    feed_course(learner, samples[:1500])
+    first = learner.session
+    assert first in learner._session_rows and learner.runs.run_rows
+
+    def full():
+        raise sqlite3.OperationalError('database or disk is full')
+    monkeypatch.setattr(store, 'commit', full)
+    learner.log._commit()
+    assert learner._session_rows == {} and learner.runs.run_rows == {}
+    assert store.db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 0
+    monkeypatch.setattr(store, 'commit', real_commit)
+    feed_course(learner, samples[1500:])
+    assert learner.session != first
+    learner.save()
+    [(session, runs)] = store.db.execute('SELECT s.id, COUNT(r.id) FROM sessions s JOIN runs r ON r.session = s.id '
+                                         'GROUP BY s.id').fetchall()
+    assert runs == 1 and learner._session_rows == {}
+
+
+def test_a_failing_call_does_not_keep_the_caller_waiting(tmp_path):
+    log = DriveLog(str(tmp_path / 'telemetry.db'))
+
+    def broken():
+        raise ValueError('broken')
+    started = time.monotonic()
+    assert log.call(broken, timeout=2.0) is None
+    assert time.monotonic() - started < 1.0
+    log.close()
+
+
+def test_forza_above_100_m_s_is_one_run(tmp_path):
+    """At 60 packets a second the jump between two positions implies the
+    car's own speed: 396 km/h is no teleport."""
+    samples = course_samples(Course([('straight', 4000)]), game='forza-fh', car='forza-fh/1', top=110.0)
+    x, last = 0.0, samples[0][0]
+    for t, sample, _ in samples:                                  # positions that move at the car's speed
+        x += sample.speed * (t - last)
+        last = t
+        sample.pos = (x, 20.0, 0.0)
+    assert max(s.speed for _, s, _ in samples) > 105
+    learner, reader, session = drive_runs(tmp_path, samples)
+    [run] = session['runs']
+    assert run['distance'] > 3900 and learner.runs._runs == 1
+
+
+def test_a_long_pause_keeps_no_rows(tmp_path):
+    """DiRT repeats its last packet while paused, a parked car sends on at
+    packet rate: neither piles up rows for the segment being driven."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples = course_samples(Course(STAGE))
+    t = feed_course(learner, samples[:3000])
+    runs = learner.runs
+    rows, trace = len(runs._rows), len(runs._trace)
+    _, last, _ = samples[2999]
+    from oversteer.telemetry import Sample
+    for i in range(20 * 60 * 60 // 10):                          # 2 minutes of a frozen DiRT pause
+        p = Sample(last.rpm, last.max_rpm, gear=last.gear, speed=0.0, car=last.car, game=last.game)
+        p.pos, p.stage_time, p.lap_distance = last.pos, last.stage_time, last.lap_distance
+        t += 1 / 60
+        learner.feed(t, p, 7500.0, 0.0, 0.0)
+    assert (len(runs._rows), len(runs._trace)) == (rows, trace)
+    stage_time = last.stage_time
+    for i in range(10000):                                        # parked with the clock running
+        p = Sample(900.0, 7500.0, gear=1, speed=0.0, car=last.car, game=last.game)
+        stage_time += 1 / 60
+        p.pos, p.stage_time, p.lap_distance = last.pos, stage_time, last.lap_distance
+        t += 1 / 60
+        learner.feed(t, p, 7500.0, 0.0, 0.0)
+    assert len(runs._rows) <= drive_log.SEGMENT_ROWS

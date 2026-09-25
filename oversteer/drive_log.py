@@ -11,6 +11,7 @@ Without a thread (tests, replays) events run at once, in the caller's
 thread, and are committed as they go.
 """
 
+import bisect
 import logging
 import math
 import queue
@@ -31,7 +32,11 @@ class DriveLog:
     thread that uses it. `post(fn, *args)` never blocks: when the queue is
     full the event is dropped and counted in `dropped`. An event function
     returns True to have its writes committed at once. `ticks` are called
-    about once a second on the thread (publishing snapshots)."""
+    about once a second on the thread (publishing snapshots). `batch`
+    counts the batches committed or rolled back: a row id handed out in a
+    batch that is rolled back is handed out again, so `on_rollback`
+    (called on the thread with that batch) lets the owners of row ids
+    forget them."""
 
     def __init__(self, path, threaded=True):
         self.path = path
@@ -39,6 +44,8 @@ class DriveLog:
         self.threaded = threaded
         self.dropped = 0
         self.ticks = []
+        self.batch = 0
+        self.on_rollback = []
         self._queue = queue.Queue(maxsize=QUEUE_SIZE)
         self._thread = None
         self._commit_at = time.monotonic()
@@ -70,8 +77,10 @@ class DriveLog:
         box = []
 
         def run():
-            box.append(fn(*args))
-            done.set()
+            try:
+                box.append(fn(*args))
+            finally:
+                done.set()                               # a failure must not keep the GTK thread waiting
             return True
         try:
             self._queue.put((run, ()), timeout=timeout)
@@ -95,7 +104,12 @@ class DriveLog:
             except queue.Full:
                 pass
             self._thread.join(timeout)
-            self._thread = None
+            alive, self._thread = self._thread.is_alive(), None
+            if alive:
+                # Still writing: the connection is the thread's; it commits
+                # what it has when it reaches the end of the queue
+                logging.warning("drive log: still writing at exit")
+                return
         self.store.commit()
 
     def _handle(self, fn, args):
@@ -137,13 +151,20 @@ class DriveLog:
                 self.store.rollback()
             except Exception:
                 pass
+            for forget in self.on_rollback:
+                try:
+                    forget(self.batch)
+                except Exception:
+                    logging.exception("drive log rollback")
+        self.batch += 1
         self._commit_at = time.monotonic()
 
 
 # -- runs, segments, corners (docs/telemetry-coaching.md, section 8.4) --
 
-TELEPORT = 50.0                  # m between consecutive positions: a restart or a new stage
-TELEPORT_SPEED = 100.0           # m/s implied between two packets: the same
+TELEPORT = 50.0                  # m between consecutive positions, beyond what the speed covers: a restart...
+TELEPORT_SPEED = 100.0           # ...or m/s implied between two packets, and...
+TELEPORT_FACTOR = 3.0            # ...this many times the car's own speed (Forza passes 100 m/s)
 NO_POSITION_GAP = 10.0           # s of silence that end a run in a game that sends no position
 RESTART_DROP = 1.0               # s the stage clock must go back by to be a restart
 MOVING = 1.0                     # m/s
@@ -152,6 +173,7 @@ STOP = 3.0                       # s standing still after the start: a stop
 LAUNCH_THROTTLE = 0.5            # held while standing before the start: a launch
 SEGMENT = 200.0                  # m per segment
 SEGMENT_MIN = 50.0               # m: a shorter tail is not kept
+SEGMENT_ROWS = 3600              # rows (a minute at 60 Hz): a segment closes then however short (a parked car)
 TRACE_EVERY = 0.1                # s between trace rows
 RUN_MIN = 100.0                  # m moving: a shorter run (menus, a car parked) is not kept
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
@@ -180,6 +202,7 @@ class RunTracker:
         self.run = None                  # the run going on: a number, its row id is the drive log's
         self._runs = 0
         self.run_rows = {}               # run number -> runs.id; drive-log thread only
+        self.run_batch = {}              # run number -> the drive log's batch its row was written in
         self._n_in_session = {}          # session number -> runs started in it
         self._reset()
         self._waiting()
@@ -254,8 +277,12 @@ class RunTracker:
         pos, last = sample.pos, self._last_pos
         gap = now - self._last_t if self._last_t is not None else 0.0
         if pos is not None and last is not None:
+            # Measured against the car's own speed: at 110 m/s every packet
+            # implies 110 m/s, and a hitch of half a second covers 55 m
             jump = math.sqrt(sum((a - b) ** 2 for a, b in zip(pos, last)))
-            if jump > TELEPORT or (gap > 0 and jump / gap > TELEPORT_SPEED):
+            speed = max(sample.speed or 0.0, self._last_speed or 0.0)
+            implied = max(TELEPORT_SPEED, TELEPORT_FACTOR * speed)
+            if jump > TELEPORT + speed * gap or (gap > 0 and jump / gap > implied):
                 return 'teleport'
         elif pos is None and gap > NO_POSITION_GAP:
             return 'silence'
@@ -347,6 +374,10 @@ class RunTracker:
             summary['stage_length'] = sample.stage_length
         if sample.gears and not summary['gears']:
             summary['gears'] = sample.gears
+        if self._paused or frozen:
+            # Nothing moves: no rows, which would pile up at packet rate for
+            # as long as the pause lasts and swamp the next segment's features
+            return
         d = self._d(sample)
         lap = sample.lap
         if lap is not None and self._last_lap is not None and lap > self._last_lap:
@@ -394,7 +425,7 @@ class RunTracker:
             self._trace.append(tuple(_nan(v) for v in (
                 now - self._t0, d, speed, sample.rpm, sample.gear, throttle, sample.brake, sample.clutch,
                 sample.handbrake, sample.steer, a_long, a_lat, sample.yaw_rate, slip, rms, pos[0], pos[1], pos[2])))
-        if d - self._seg_d0 >= SEGMENT:
+        if d - self._seg_d0 >= SEGMENT or len(self._rows) >= SEGMENT_ROWS:
             self._close_segment(now, d)
 
     def _close_segment(self, now, d):
@@ -440,6 +471,7 @@ class RunTracker:
             # DiRT names no stage: its length and where it starts do
             stage = store.match_stage(game, stage_length, start_pos[2])
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
+        self.run_batch[number] = learner.log.batch
 
     def _write_lap(self, number, n, lap_time, distance):
         run = self.run_rows.get(number)
@@ -454,7 +486,8 @@ class RunTracker:
         self.learner.log.store.add_segment(run, d0, d1, t0, t1, features, pushed=pushed(features))
 
     def _write_end(self, number, ended, summary, trace):
-        run = self.run_rows.get(number)
+        run = self.run_rows.pop(number, None)          # nothing is posted for a run after its end
+        self.run_batch.pop(number, None)
         if run is None:
             return
         store = self.learner.log.store
@@ -700,7 +733,9 @@ def _corner(trace, yaw, i, j, sign):
 
     def at(seconds):
         target = t[apex] + seconds
-        k = min(range(len(t)), key=lambda k: abs(t[k] - target))
+        k = bisect.bisect_left(t, target)
+        if k == len(t) or (k > 0 and target - t[k - 1] <= t[k] - target):
+            k -= 1
         return speed[k]
     gears = [row[T['gear']] for row in trace[i:j + 1] if not math.isnan(row[T['gear']]) and row[T['gear']] >= 1]
     steer = [(row[T['steer']], yaw[i + k]) for k, row in enumerate(trace[i:j + 1]) if not math.isnan(row[T['steer']])]

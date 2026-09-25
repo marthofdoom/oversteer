@@ -619,6 +619,8 @@ class ShiftLearner:
         self.session = None                 # the drive going on: a number, its row id is the drive log's
         self._sessions = 0
         self._session_rows = {}             # session number -> (sessions.id, cars.id); drive-log thread only
+        self._session_batch = {}            # session number -> the drive log's batch its row was written in
+        self._session_lost = False          # its row was rolled back: start the session again
         self._last_feed = None              # monotonic time of the last packet fed
         self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
         self._wheels = DrivenWheels()
@@ -644,6 +646,7 @@ class ShiftLearner:
     def open(self, path):
         from .drive_log import DriveLog
         log = DriveLog(path, threaded=self.threaded)
+        log.on_rollback.append(self._rolled_back)
         if self.threaded:
             log.ticks.append(self.publish)
         with self.lock:
@@ -753,6 +756,24 @@ class ShiftLearner:
             data = car.to_dict()
         car_id = store.car_id(profile, car.key, car.game or 'unknown', car.name, data)
         self._session_rows[number] = (store.start_session(profile, car_id, car.game, started, track, stage), car_id)
+        self._session_batch[number] = self.log.batch
+
+    def _rolled_back(self, batch):
+        """Drive-log thread: the writes of `batch` were rolled back (a full
+        disk, a lock held too long). SQLite hands their row ids out again,
+        so the sessions and runs written in it are forgotten here, or later
+        shifts and runs would land in whatever row gets the id next; a
+        session that lost its row starts again with the next packet."""
+        runs = self.runs
+        lost = [n for n, b in self._session_batch.items() if b == batch]
+        for number in lost:
+            self._session_rows.pop(number, None)
+            del self._session_batch[number]
+        for number in [n for n, b in runs.run_batch.items() if b == batch]:
+            runs.run_rows.pop(number, None)
+            del runs.run_batch[number]
+        if lost:
+            self._session_lost = True
 
     def _end_session_locked(self):
         if self.session is None:
@@ -774,6 +795,7 @@ class ShiftLearner:
 
     def _write_session_end(self, number, ended, limiter_time, ratios, retuned, radius):
         row = self._session_rows.pop(number, None)
+        self._session_batch.pop(number, None)
         if row is not None:
             store = self.log.store
             session, car = row
@@ -993,6 +1015,9 @@ class ShiftLearner:
             return
         with self.lock:
             if self.session is not None and self._last_feed is not None and now - self._last_feed > SESSION_GAP:
+                self._end_session_locked()
+            if self._session_lost:
+                self._session_lost = False
                 self._end_session_locked()
             if self.car is None or self.car.key != sample.car:
                 self._end_session_locked()
