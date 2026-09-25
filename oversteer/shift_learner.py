@@ -1193,11 +1193,6 @@ class ShiftLearner:
         if row is not None:
             self.log.store.add_shift(row[0], run, shift)
 
-    def detect(self, summary, trace, store):
-        """Drive-log thread, at the end of a run: the verdicts on it, as
-        runs columns (drive_detect)."""
-        return {}
-
     def _check_retune(self, car, gear, ratio, speed, now, from_wheels):
         """A clean sample off the gear's ratio. Setups change in menus, which
         end sessions in every game, so a new ratio is only believed in

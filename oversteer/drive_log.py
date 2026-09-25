@@ -17,6 +17,7 @@ import queue
 import threading
 import time
 
+from . import drive_detect
 from .shift_learner import drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
@@ -454,7 +455,7 @@ class RunTracker:
                 stage = fields['stage'] = store.match_cell(summary['game'], cell, summary['distance'])
                 fields['stage_game'] = summary['game']
         summary['stage'] = stage
-        verdicts = self.learner.detect(summary, trace, store)
+        verdicts = drive_detect.detect_run(store, run, summary, trace, TRACE_CHANNELS)
         fields.update(verdicts)
         store.end_run(run, **fields)
         store.add_trace(run, trace)

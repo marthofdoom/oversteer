@@ -645,11 +645,11 @@ class Reader:
         return {'version': r[0], 'model': json.loads(r[1]), 'trained': r[2], 'runs': r[3], 'segments': r[4],
                 'holdout': r[5], 'deployed': bool(r[6])}
 
-    def stage_history(self, key, limit=20):
+    def stage_history(self, key, limit=20, exclude=None):
         """Discipline and surface verdicts of the stage's recent runs, for
         its priors."""
         return self._rows('SELECT discipline, discipline_conf, surface, surface_conf FROM runs WHERE stage = ? '
-                          'ORDER BY started DESC LIMIT ?', (key, limit))
+                          'AND id IS NOT ? AND ended IS NOT NULL ORDER BY started DESC LIMIT ?', (key, exclude, limit))
 
 
 class Store(Reader):
@@ -879,6 +879,15 @@ class Store(Reader):
         row = self._do('SELECT stage FROM runs WHERE id = ?', (run,)).fetchone()
         if row is not None and row[0] is not None:
             self._do('UPDATE stages SET runs = runs + 1 WHERE key = ?', (row[0],))
+
+    def set_segment_surface(self, run, d0, surface, margin):
+        self._do('UPDATE segments SET surface = ?, margin = ? WHERE run = ? AND d0 = ?', (surface, margin, run, d0))
+
+    def set_stage_prior(self, key, kind, value, source):
+        """A stage's prior ('surface' or 'discipline'): shown next to what a
+        run measured, never merged into it."""
+        column = {'surface': 'surface_prior', 'discipline': 'discipline_prior'}[kind]
+        self._do('UPDATE stages SET {0} = ?, {0}_source = ? WHERE key = ?'.format(column), (value, source, key))
 
     def run_stage(self, run):
         row = self._do('SELECT stage FROM runs WHERE id = ?', (run,)).fetchone()
