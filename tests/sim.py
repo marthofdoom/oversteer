@@ -124,3 +124,132 @@ def exits(learner, car='test-car', runs=2, road=None, t=1000.0, jitter=0.0):
                 road.accel(t, 0, speed, 0.0)
                 learner.feed(t, road.sample(RATIOS[gear] * speed, speed, gear, car, 1 / 60), LIMITER, 0.0, 0.0)
     return t
+
+
+# -- a car on a course: stages, circuits and corners for the run tracker --
+
+STAGE = [('straight', 300), ('left', 60, 70), ('straight', 250), ('right', 45, 90), ('straight', 400),
+         ('left', 80, 45), ('right', 50, 60), ('straight', 350), ('right', 70, 80), ('straight', 300),
+         ('left', 40, 100), ('straight', 450), ('right', 90, 50), ('straight', 300), ('left', 50, 80),
+         ('straight', 500), ('right', 60, 40), ('straight', 400), ('left', 70, 60), ('straight', 300)]
+STAGE_CORNERS = [1, -1, 1, -1, -1, 1, -1, 1, -1, 1]          # left 1, right -1, in order
+CIRCUIT = [('straight', 400), ('left', 60, 90), ('straight', 200), ('left', 60, 90), ('straight', 400),
+           ('left', 60, 90), ('straight', 200), ('left', 60, 90)]
+
+
+class Course:
+    """A road as points every metre: (s, x, y, z, heading, curvature). World
+    x and z are horizontal, y up; heading turns positive to the left (seen
+    from above), as yaw rate does."""
+
+    def __init__(self, pieces, grade=0.0, start=(100.0, 20.0, 104.9), heading=0.3):
+        self.points = []
+        x, y, z = start
+        s = 0.0
+        for piece in pieces:
+            if piece[0] == 'straight':
+                steps, curvature = int(piece[1]), 0.0
+            else:
+                radius, degrees = piece[1], piece[2]
+                steps = int(round(radius * math.radians(degrees)))
+                curvature = (1.0 if piece[0] == 'left' else -1.0) * math.radians(degrees) / steps
+            for _ in range(steps):
+                self.points.append((s, x, y, z, heading, curvature))
+                # a step along the chord: a loop closes on itself
+                x += math.cos(heading + curvature / 2)
+                z -= math.sin(heading + curvature / 2)
+                heading += curvature
+                y += grade
+                s += 1.0
+        self.length = s
+
+    def at(self, s):
+        return self.points[min(int(s), len(self.points) - 1)]
+
+    def speeds(self, top=30.0, lateral=8.0, accel=4.0, brake=7.0, rolling=False):
+        """Speed per point: the corners' limit, reached and left within the
+        car's acceleration and braking."""
+        limit = [min(top, math.sqrt(lateral / abs(p[5]))) if p[5] else top for p in self.points]
+        limit[0] = top if rolling else 0.0
+        for i in range(1, len(limit)):
+            limit[i] = min(limit[i], math.sqrt(limit[i - 1] ** 2 + 2 * accel))
+        for i in range(len(limit) - 2, -1, -1):
+            limit[i] = min(limit[i], math.sqrt(limit[i + 1] ** 2 + 2 * brake))
+        return limit
+
+
+def course_samples(course, laps=1, game='dirt', car='dirt/7500-800-5', standing=3.0, rolling=False, slide=False,
+                   packets=False, top=30.0, t=0.0, dt=1 / 60):
+    """(t, sample, throttle) along the course: a stand at the start with the
+    revs held (a launch), then the laps. `slide`: past the middle of each
+    left-hand corner the car slides and the driver steers right against
+    it. `packets`: EA SPORTS WRC's start and end packets."""
+    speeds = course.speeds(top=top, rolling=rolling)
+    out = []
+
+    def sample(s, v, a_long, lap, lap_time, total_s, packet=None, throttle=0.3):
+        _, x, y, z, heading, curvature = course.at(s)
+        gear = next((g for g in sorted(RATIOS) if RATIOS[g] * v <= 6800.0), 5)
+        rpm = max(900.0, RATIOS[gear] * v) if v > 0.5 else 5500.0 if throttle > 0.5 else 900.0
+        sm = Sample(rpm, LIMITER, gear=gear if v > 0.5 else 1, speed=v, car=car, game=game,
+                    throttle=throttle, clutch=0.0, brake=0.6 if a_long < -1.0 else 0.0)
+        grade = course.points[1][2] - course.points[0][2] if len(course.points) > 1 else 0.0
+        sm.pos = (x, y, z)
+        sm.forward = (math.cos(heading), grade, -math.sin(heading))
+        sm.yaw_rate = v * curvature
+        steer = max(-1.0, min(1.0, curvature * 15.0))
+        if slide and curvature > 0 and v > 5:
+            piece_start = s
+            while piece_start > 0 and course.at(piece_start - 1)[5] == curvature:
+                piece_start -= 1
+            if s - piece_start > 20:
+                steer = -0.2                                    # caught the slide: steering right in a left
+        sm.steer = steer
+        sm.accel = (a_long, v * v * curvature, 0.0)
+        sm.accel_kind = 'kinematic'
+        sm.wheel_speed = (v, v, v, v)
+        sm.handbrake = 0.0
+        sm.stage_time = lap_time
+        sm.lap, sm.laps = lap, laps if laps > 1 else 0
+        if game == 'eawrc':
+            sm.distance, sm.stage_length = s + 0.0, course.length
+            sm.progress = s / course.length
+            sm.packet = packet or 'update'
+            sm.stage = 'eawrc:4:12'
+        else:
+            sm.lap_distance, sm.stage_length = s + 0.0, course.length
+            sm.progress = (total_s / (course.length * laps))
+        return sm
+
+    if not rolling:
+        for i in range(int(standing / dt)):
+            t += dt
+            out.append((t, sample(0.0, 0.0, 0.0, 0, 0.0, 0.0, 'start' if packets and i == 0 else None, 0.9), 0.9))
+    lap_time = 0.0
+    total = 0.0
+    for lap in range(laps):
+        s = 0.0
+        lap_time = 0.0
+        v = speeds[0] if lap == 0 else speeds[-1]
+        while s < course.length - 1:
+            target = speeds[min(int(s) + 1, len(speeds) - 1)]
+            a_long = (target - v) / dt
+            a_long = max(-7.0, min(4.0, a_long))
+            v = max(0.5, v + a_long * dt)
+            s += v * dt
+            total += v * dt
+            t += dt
+            lap_time += dt
+            throttle = 1.0 if a_long > 0.5 else 0.0 if a_long < -1.0 else 0.3
+            out.append((t, sample(s, v, a_long, lap, lap_time, total, None, throttle), throttle))
+    if packets:
+        last = out[-1][1]
+        last.packet = 'end'
+        last.progress = 1.0
+    return out
+
+
+def feed_course(learner, samples):
+    for t, sample, throttle in samples:
+        learner.feed(t, sample, LIMITER, throttle, 0.0)
+    return samples[-1][0]

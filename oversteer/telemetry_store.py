@@ -880,6 +880,33 @@ class Store(Reader):
         if row is not None and row[0] is not None:
             self._do('UPDATE stages SET runs = runs + 1 WHERE key = ?', (row[0],))
 
+    def run_stage(self, run):
+        row = self._do('SELECT stage FROM runs WHERE id = ?', (run,)).fetchone()
+        return row[0] if row else None
+
+    def summarise_session(self, session):
+        """The session's distance and time on the move from its runs, and
+        its discipline and surface: what most of its distance was, with
+        the confidence of the runs that said so."""
+        rows = self._do('SELECT distance, moving_time, discipline, discipline_conf, surface, surface_conf, wet '
+                        'FROM runs WHERE session = ?', (session,)).fetchall()
+        if not rows:
+            return
+        fields = {'distance': sum(r[0] or 0.0 for r in rows), 'moving_time': sum(r[1] or 0.0 for r in rows)}
+        for name, value, conf in (('discipline', 2, 3), ('surface', 4, 5), ('wet', 6, None)):
+            weight = {}
+            for r in rows:
+                if r[value] is not None and r[value] != 'unknown':
+                    weight[r[value]] = weight.get(r[value], 0.0) + (r[0] or 0.0)
+            if weight:
+                best = max(weight, key=weight.get)
+                fields[name] = best
+                if conf is not None:
+                    confs = [r[conf] for r in rows if r[value] == best and r[conf]]
+                    order = ('low', 'medium', 'high', 'game')
+                    fields[name + '_conf'] = min(confs, key=order.index) if confs else None
+        self.update_session(session, **fields)
+
     def drop_run(self, run):
         self._do('DELETE FROM runs WHERE id = ?', (run,))
 

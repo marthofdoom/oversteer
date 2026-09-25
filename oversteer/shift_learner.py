@@ -599,6 +599,8 @@ class ShiftLearner:
         self._last_feed = None              # monotonic time of the last packet fed
         self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
         self._wheels = DrivenWheels()
+        from .drive_log import RunTracker
+        self.runs = RunTracker(self)
         self._session_moving = 0.0          # s on the move this session, for the re-tune window
         self._session_distance = 0.0        # m
         self._retuned = set()               # gears re-tuned this session
@@ -734,6 +736,8 @@ class ShiftLearner:
             return
         if self.car is not None:
             self._flush_shifts_locked(self.car)
+        if self.log is not None:
+            self.runs.end(self._last_feed or 0.0, 'session')
         number, self.session = self.session, None
         if self.log is None:
             self.history_changed += 1
@@ -753,6 +757,7 @@ class ShiftLearner:
             tune = self._write_tune(car, ended, ratios, retuned, radius)
             store.update_session(session, ended=ended, limiter_time=limiter_time,
                                  shifter=store.session_shifter(session), tune=tune)
+            store.summarise_session(session)
             if store.drop_session_if_empty(session):
                 store.drop_car_if_empty(row[1])
             store.commit()
@@ -979,6 +984,8 @@ class ShiftLearner:
                 car.drivetrain = sample.drivetrain
             if self.session is None:
                 self._start_session_locked(now, sample)
+            if self.log is not None:
+                self.runs.feed(now, sample, throttle, self.session, self.profile)
             self._press = press
             if car.set_limiter(limiter, limiter_source):
                 self._dirty = True
@@ -1143,7 +1150,7 @@ class ShiftLearner:
                  'best_high': band[1] if band else None, 'throttle': throttle,
                  'method': shift_method(getattr(self, '_press', None), left_at, now, via_neutral),
                  'neutral_time': now - left_at if via_neutral else 0.0, 'engage_rpm': engage_rpm,
-                 'flat_out': int(flat_out), 'slip': slip, 'flags': []}
+                 'flat_out': int(flat_out), 'slip': slip, 'flags': [], '_run': self.runs.run}
         pending = self._pending
         if len(pending) >= 1:
             # Two taps the same way in a blink, the second taken back at once:
@@ -1182,8 +1189,14 @@ class ShiftLearner:
 
     def _write_shift(self, number, shift):
         row = self._session_rows.get(number)
+        run = self.runs.run_rows.get(shift.pop('_run'))
         if row is not None:
-            self.log.store.add_shift(row[0], None, shift)
+            self.log.store.add_shift(row[0], run, shift)
+
+    def detect(self, summary, trace, store):
+        """Drive-log thread, at the end of a run: the verdicts on it, as
+        runs columns (drive_detect)."""
+        return {}
 
     def _check_retune(self, car, gear, ratio, speed, now, from_wheels):
         """A clean sample off the gear's ratio. Setups change in menus, which
