@@ -176,6 +176,7 @@ class Sample:
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
 _codemasters_units = {}                              # (game, raw max) -> rpm per unit of the engine fields
+_eawrc_odd_gears = set()                             # EA SPORTS WRC (gear index, gear count) logged as not understood
 
 
 def _near_multiple(x, step, tolerance):
@@ -441,6 +442,12 @@ def _eawrc(data, n):
         gear = -1
     else:
         gear = index if 1 <= index <= top else None                # forward gears from 1: verify
+        if gear is None and (index, top) not in _eawrc_odd_gears and len(_eawrc_odd_gears) < 100:
+            # Once each: the gear convention waits for a capture to confirm
+            # it, and a car whose gears all read as unknown learns nothing
+            _eawrc_odd_gears.add((index, top))
+            logging.info("telemetry: EA SPORTS WRC gear index %s of %s (neutral %s, reverse %s) not understood",
+                         index, top, values['vehicle_gear_index_neutral'], values['vehicle_gear_index_reverse'])
     sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, gear=gear, speed=speed,
                     throttle=_finite(values['vehicle_throttle']), clutch=_finite(values['vehicle_clutch']),
                     brake=_finite(values['vehicle_brake']), game='eawrc')
