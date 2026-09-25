@@ -1442,17 +1442,17 @@ Run 5 (in progress): two independent reviews (Opus, Fable) of
 `v0.13.1..HEAD`. Every finding is checked against the code; the ones
 found real are fixed with a test where one makes sense, the others are
 listed with the reason. The checklist is the recovery point:
-- [ ] O1 learnt shift point at or near the limiter never flashes
-- [ ] O2 one over-rev packet raises the launch limiter for good; launch at speed; `set_limiter` never lowers a launch figure
-- [ ] O3 `ceiling()` falls back to `top_seen`: early shifters locked in, false limiter coaching
-- [ ] O4 tips go quiet after two tab refreshes, not two sessions
+- [x] O1 learnt shift point at or near the limiter never flashes: fixed (544adc2): the learnt point is capped at LEARNT_FLASH (99.5 %) of the limiter / 1.03, so the flash starts before it
+- [x] O2 one over-rev packet raises the launch limiter for good; launch at speed; `set_limiter` never lowers a launch figure: fixed (544adc2): raised on the move only when held flat out, clutch out, in gear for LAUNCH_RAISE_HOLD (0.5 s) without climbing; a launch needs speed ≤ LAUNCH_SPEED; `set_limiter` lets a launch replace a launch either way
+- [x] O3 `ceiling()` falls back to `top_seen`: early shifters locked in, false limiter coaching: fixed (0d69860): `CarModel.known_limiter()` (launch or game); `ceiling()` falls back to `top_seen` only when no limiter is known, and then "pulls to the limiter" is never answered; `car_context` passes the known limiter; limiter time and the over-rev/skip flags use it too. A game that over-reports its maximum (WRCG) now needs a launch for its pull-to-the-limiter gears; the percentage rule stands in meanwhile
+- [x] O4 tips go quiet after two tab refreshes, not two sessions: fixed (0d69860): `coach.SHOWING` (6 h): views within it of the last counted showing change nothing
 - [ ] O5 / F-low web slots held by idle keep-alive connections
 - [ ] O6 / F-low migration drops a merged car's sessions and shifts
 - [ ] O7 a rolled-back commit leaves stale row ids in memory
-- [ ] O8 `*/unknown` cars (BeamNG, AC pmf) share one model and drive the lights
+- [x] O8 `*/unknown` cars (BeamNG, AC pmf) share one model and drive the lights: fixed (0d69860): `shared_car()`: `*/unknown` keys learn nothing about the car (limiter, ratios, power) and give no learnt shift point; sessions, runs and shifts are still written
 - [ ] F1 Forza above 100 m/s restarts the run every packet
-- [ ] F2 `shift.error` measured against a best the lights would not trust
-- [ ] F3 limiter below top gear counts top gear when the game sends no gear count
+- [x] F2 `shift.error` measured against a best the lights would not trust: fixed (0d69860): `SHIFT_COVERAGE` (0.6) gates the stored best, the coach's best and the live advice
+- [x] F3 limiter below top gear counts top gear when the game sends no gear count: fixed (0d69860): the highest gear learnt stands in for top in `limiter.per_km` only; `limiter.top`, `top.share`, `top.peak` still need the game's count; with neither, no limiter metric
 - [ ] F4 / O-low migration backups miss the WAL
 - [ ] F5 / O-low segment rows grow while paused or parked
 - [ ] Lows and nits (listed with their outcome when done)
