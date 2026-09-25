@@ -1448,13 +1448,13 @@ listed with the reason. The checklist is the recovery point:
 - [x] O4 tips go quiet after two tab refreshes, not two sessions: fixed (0d69860): `coach.SHOWING` (6 h): views within it of the last counted showing change nothing
 - [ ] O5 / F-low web slots held by idle keep-alive connections
 - [ ] O6 / F-low migration drops a merged car's sessions and shifts
-- [ ] O7 a rolled-back commit leaves stale row ids in memory
+- [x] O7 a rolled-back commit leaves stale row ids in memory: fixed: `DriveLog.batch` and `on_rollback`; the learner forgets the session and run rows written in the rolled-back batch and starts the session again (`_session_lost`)
 - [x] O8 `*/unknown` cars (BeamNG, AC pmf) share one model and drive the lights: fixed (0d69860): `shared_car()`: `*/unknown` keys learn nothing about the car (limiter, ratios, power) and give no learnt shift point; sessions, runs and shifts are still written
-- [ ] F1 Forza above 100 m/s restarts the run every packet
+- [x] F1 Forza above 100 m/s restarts the run every packet: fixed: `jump > TELEPORT + speed × gap` or implied speed above max(100 m/s, 3 × the car's speed)
 - [x] F2 `shift.error` measured against a best the lights would not trust: fixed (0d69860): `SHIFT_COVERAGE` (0.6) gates the stored best, the coach's best and the live advice
 - [x] F3 limiter below top gear counts top gear when the game sends no gear count: fixed (0d69860): the highest gear learnt stands in for top in `limiter.per_km` only; `limiter.top`, `top.share`, `top.peak` still need the game's count; with neither, no limiter metric
 - [ ] F4 / O-low migration backups miss the WAL
-- [ ] F5 / O-low segment rows grow while paused or parked
+- [x] F5 / O-low segment rows grow while paused or parked: fixed: paused or frozen packets add no segment or trace row; a segment closes at `SEGMENT_ROWS` (3600) rows however short. The design's "10 s if no distance" cut is this row cap
 - [ ] Lows and nits (listed with their outcome when done)
 
 ### Step B
