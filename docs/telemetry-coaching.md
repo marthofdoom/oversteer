@@ -222,7 +222,7 @@ are fixed here and every decoder converts to them:
 | Timing | `game_time` (the game's own clock, s), `running` (False in menus/pause where the game says so), `packet` ('update', 'start', 'end', 'pause', 'resume' for EA WRC) |
 | Inputs | `brake, handbrake, steer` (+1 full left .. -1 full right, normalised; lock unknown) |
 | Motion | `pos` (world x, y up, z; m), `vel` (car frame), `accel`, `accel_kind`, `yaw_rate`, `forward`, `up` (world unit vectors) |
-| Wheels | `wheel_speed` (m/s at the tread), `slip_ratio` (game's own figure, `slip_kind` says 'raw' or 'normalised'), `slip_angle`, `susp, susp_vel, susp_norm, wheel_load, tyre_radius`, `ride_height` (front, rear; m), `fx, fy` (N, ACC/ACR) |
+| Wheels | `wheel_speed` (m/s at the tread), `wheel_rot` (rad/s, Forza: turned into m/s once the tyre radius is learnt, §8.3), `slip_ratio` (game's own figure, `slip_kind` says 'raw' or 'normalised'), `slip_angle`, `susp, susp_vel, susp_norm, wheel_load, tyre_radius`, `ride_height` (front, rear; m), `fx, fy` (N, ACC/ACR) |
 | Surface hints | `puddle` (per wheel), `rumble` (per wheel, kerb), `surface_rumble` (Forza), `grip` (AC surfaceGrip level), `rain` (ACC) |
 | Structure | `lap, laps, lap_distance, distance, progress` (0..1), `stage_time`, `race_position` |
 | Game's own | `game_shift_rpm` (EA shiftlights_rpm_end), `boost`, `brake_bias`, `auto_shift` (AC autoShifterOn) |
@@ -250,7 +250,7 @@ appendix (§17).
   undocumented and only ever a hint).
 - Dash: position B+0..8, boost B+40, distance B+48, lap B+68, race position
   B+70, brake B+72, handbrake B+74, steer B+76 (s8 / 127), current race time
-  B+60. FM2023: track ordinal 327 → `stage = 'fm:<n>'`.
+  **B+64** (B+60 is the current lap's time; corrected while building). FM2023: track ordinal 327 → `stage = 'fm:<n>'`.
 - `game`: 324 → `forza-fh`, 311/331 → `forza-fm`, 232 → `forza`.
 - Tyre radius per wheel = speed / undriven-wheel rad/s, learnt (not
   decoded) in §8.3.
@@ -1341,6 +1341,7 @@ Design revised after the independent review (§3.2): done.
 - [x] GTK: snapshot cache (`load_snapshot()` keyed by (profile, key, `updated`); rename bumps `updated`), history on events only (`method_shifts()`), advice limited to 3 tips by size, 1 praise line, 1 re-tune line, 1 "still learning" line. The quiet "still:" lines and re-showing rules need `coach_state` (Step C)
 - [x] `telemetry_formats.py` split (acb5ba0); EA SPORTS WRC decoder (both structures), shipped structure file, copy buttons with the target folder. **Deferred:** the id → name table (game's `ids.json` and its terms not available here, §5.3)
 
+- [x] `Sample` v2 decoded for Forza, Codemasters, EA WRC (and OutGauge time/boost), one private function per format (`_ovst`, `_forza`, `_outgauge`, `_codemasters`, `_eawrc`); brought forward from Step C item 3. As built: `accel_kind` is `'kinematic'` for all three until a hill capture says otherwise; Codemasters' "pitch" vector (14–16) is taken as forward and the "roll" vector (11–13) as left, up = forward × left (verify handedness); suspension mm → m (verify); DiRT g × 9.80665, WRCG taken as m/s² (verify); steer negated to positive-left in every game (verify); Forza yaw rate = −ω_y (verify). Decode costs 8–13 µs a packet, `Telemetry.handle` with the learner 0.02 ms mean on this machine. Nothing reads the new fields yet (Step C)
 - [x] Capture format, writer, reader, replay through `Telemetry.handle`; `telemetry-capture.py --write`, `telemetry-replay.py` (brought forward from Step D; `tests/test_capture.py`)
 
 ### Step B
@@ -1352,7 +1353,7 @@ Design revised after the independent review (§3.2): done.
 - [ ] Drive-log thread; SQLite writes off the listener lock
 - [ ] Schema v2, migration with backup, reader/writer APIs, `forget_model`
 - [ ] Car keys `<game>/<id>` with adoption; stage keys with tolerance
-- [ ] `Sample` v2 fields for Forza, Codemasters, EA WRC
+- [x] `Sample` v2 fields for Forza, Codemasters, EA WRC (done in Step A with the decoders; see the Step A note)
 - [ ] Sessions, runs, segment features, corners, traces
 - [ ] Shift learner §8.1 items 1–7, 10; shifts with downshifts and flags
 - [ ] Tunes and re-tune rules

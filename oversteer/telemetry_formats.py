@@ -113,18 +113,50 @@ def _plausible(x):
     return math.isfinite(x) and -RPM_LIMIT < x < RPM_LIMIT
 
 
+G = 9.80665
+
+
 class Sample:
-    """One decoded packet. Everything but rpm may be None (not in this
-    format): max_rpm, shift (the game's shift light), gear (1.. forward,
-    0 neutral, -1 reverse), speed (m/s), car (a key naming the car within
-    its game), car_name, throttle, brake and clutch (0..1, the game's
-    view), power (W, Forza only), game (which game or family sent it:
-    'forza-fh', 'forza-fm', 'forza', 'dirt', 'wrcg', 'eawrc', 'acpmf',
-    'beamng', 'lfs'), track (as the game names it) and stage (a key for
-    the stage or route where the game identifies one)."""
+    """One decoded packet, in one set of units and conventions whatever the
+    game (docs/telemetry-coaching.md, section 5.2). Everything but rpm is
+    None where the format does not carry it.
+
+    Car frame: x forward, y left, z up (ISO 8855); m, m/s, m/s^2, rad/s.
+    yaw_rate and steer are positive to the left. Per-wheel tuples are
+    ordered FL, FR, RL, RR. Signs and units marked "verify" in the design
+    are converted as the research says and are to be confirmed on a
+    capture.
+
+    - Engine and car: rpm, max_rpm, idle_rpm, shift (the game's shift
+      light), gear (1.. forward, 0 neutral, -1 reverse), gears (forward
+      gear count), power (W, Forza), boost, game_shift_rpm (where the
+      game's own shift lights end), car (a key naming the car within its
+      game), car_name, car_class, drivetrain ('fwd', 'rwd', 'awd').
+    - Game: game ('forza-fh', 'forza-fm', 'forza', 'dirt', 'wrcg',
+      'eawrc', 'acpmf', 'beamng', 'lfs'), track (as the game names it),
+      stage (a key where the game identifies the stage or route),
+      stage_length (m), game_time (the game's clock, s), running (False
+      in menus or paused, where the game says), packet (EA SPORTS WRC:
+      'start', 'update', 'end', 'pause', 'resume').
+    - Inputs as the game sees them, 0..1: throttle, brake, clutch,
+      handbrake; steer -1..1, positive left.
+    - Motion: speed (m/s), pos (world, y up), vel and accel (car frame),
+      accel_kind ('kinematic': the change of velocity; 'specific': what an
+      accelerometer reads), yaw_rate, forward and up (world unit vectors).
+    - Wheels: wheel_speed (m/s at the tread), wheel_rot (rad/s), slip_ratio
+      and slip_kind ('raw' or 'normalised'), slip_angle, susp (m,
+      compression positive), susp_vel, susp_norm (0..1 of travel).
+    - Surface hints: puddle, rumble (per wheel), surface_rumble.
+    - Structure: lap, laps, lap_distance, distance (m), progress (0..1),
+      stage_time (s), race_position."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
-                 'track', 'game', 'brake', 'stage', 'packet')
+                 'track', 'game', 'brake', 'stage', 'packet',
+                 'idle_rpm', 'gears', 'car_class', 'drivetrain', 'stage_length', 'game_time', 'running',
+                 'handbrake', 'steer', 'pos', 'vel', 'accel', 'accel_kind', 'yaw_rate', 'forward', 'up',
+                 'wheel_speed', 'wheel_rot', 'slip_ratio', 'slip_kind', 'slip_angle', 'susp', 'susp_vel',
+                 'susp_norm', 'puddle', 'rumble', 'surface_rumble', 'lap', 'laps', 'lap_distance', 'distance',
+                 'progress', 'stage_time', 'race_position', 'game_shift_rpm', 'boost')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -132,9 +164,14 @@ class Sample:
         self.gear, self.speed, self.car, self.car_name = gear, speed, car, car_name
         self.throttle, self.clutch, self.power, self.brake = throttle, clutch, power, brake
         self.game = game
-        self.track = None
-        self.stage = None
-        self.packet = None                # EA SPORTS WRC: 'start', 'update', 'end', 'pause', 'resume'
+        self.track = self.stage = self.packet = None
+        self.idle_rpm = self.gears = self.car_class = self.drivetrain = self.stage_length = None
+        self.game_time = self.running = self.handbrake = self.steer = None
+        self.pos = self.vel = self.accel = self.accel_kind = self.yaw_rate = self.forward = self.up = None
+        self.wheel_speed = self.wheel_rot = self.slip_ratio = self.slip_kind = self.slip_angle = None
+        self.susp = self.susp_vel = self.susp_norm = self.puddle = self.rumble = self.surface_rumble = None
+        self.lap = self.laps = self.lap_distance = self.distance = self.progress = None
+        self.stage_time = self.race_position = self.game_shift_rpm = self.boost = None
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -177,25 +214,220 @@ def _finite(x):
     return x if math.isfinite(x) else None
 
 
+def _vector(values):
+    """A tuple of floats, or None when any of them is not finite."""
+    return tuple(values) if all(math.isfinite(v) for v in values) else None
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _to_car(world, forward, left, up):
+    """A world vector in the car frame (x forward, y left, z up)."""
+    if world is None or forward is None or left is None or up is None:
+        return None
+    return (_dot(world, forward), _dot(world, left), _dot(world, up))
+
+
 def _ascii(raw):
     text = raw.split(b'\0', 1)[0].decode('ascii', 'replace').strip()
     return text if text and all(0x20 <= ord(c) < 0x7f for c in text) else None
 
 
+def _ovst(data, n):
+    """Oversteer's own datagram from oversteer-shm-bridge (AC, ACC, ACR)."""
+    version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
+    if version not in (1, 2) or (version == 2) != (n == OVST2_SIZE):
+        return None
+    if not (_plausible(rpm) and _plausible(max_rpm)):
+        return None
+    sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
+                    gear=gear if -1 <= gear <= 12 else None,
+                    speed=_finite(speed / 3.6), car='acpmf', game='acpmf')
+    if version == 2:
+        gas, brake = struct.unpack_from('<ff', data, 24)
+        sample.throttle, sample.brake = _finite(gas), _finite(brake)
+        name = _ascii(data[32:64])
+        if name:
+            sample.car, sample.car_name = 'acpmf-' + name, name
+        sample.track = _ascii(data[64:96])
+    return sample
+
+
+FORZA_DRIVETRAINS = {0: 'fwd', 1: 'rwd', 2: 'awd'}
+
+
+def _forza(data, n):
+    """Forza "Data Out": the sled (232 bytes), and the dash after it in
+    FM7 (311), FH4 and later (324, 12 more bytes first) and FM 2023 (331).
+    Its car space is x right, y up, z forward (left-handed)."""
+    race_on, timestamp = struct.unpack_from('<iI', data, 0)
+    max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
+    if not (_plausible(max_rpm) and _plausible(rpm)):
+        return None
+    game = FORZA_GAMES[n]
+    if race_on == 0 or max_rpm <= 0:
+        # Menus and pause: no car, so no learning session starts
+        sample = Sample(0.0, max_rpm if max_rpm > 0 else None, game=game)
+        sample.running = False
+        return sample
+    ordinal, car_class, pi, drivetrain = struct.unpack_from('<iiii', data, 212)
+    sample = Sample(max(0.0, rpm), max_rpm, car='forza-{}'.format(ordinal),
+                    car_name='Forza car {}'.format(ordinal), game=game)
+    sample.running = True
+    sample.game_time = timestamp / 1000.0
+    sample.idle_rpm = _finite(idle_rpm)
+    sample.drivetrain = FORZA_DRIVETRAINS.get(drivetrain)
+    sample.car_class = 'class:{} pi:{}'.format(car_class, pi)
+    ax, ay, az, vx, vy, vz, wx, wy, wz = struct.unpack_from('<9f', data, 20)
+    sample.accel = _vector((az, -ax, ay))
+    sample.accel_kind = 'kinematic'                        # verify on a capture (a hill at constant speed)
+    sample.vel = _vector((vz, -vx, vy))
+    # Left-handed axes: a positive turn about y is to the right (verify: a left turn must give yaw_rate > 0)
+    sample.yaw_rate = _finite(-wy)
+    sample.susp_norm = _vector(struct.unpack_from('<4f', data, 68))
+    sample.slip_ratio = _vector(struct.unpack_from('<4f', data, 84))
+    sample.slip_kind = 'normalised'
+    sample.wheel_rot = _vector(struct.unpack_from('<4f', data, 100))
+    sample.rumble = struct.unpack_from('<4i', data, 116)
+    if game == 'forza-fh':
+        sample.puddle = tuple(float(x) for x in struct.unpack_from('<4i', data, 132))    # 0 or 1
+    else:
+        sample.puddle = _vector(struct.unpack_from('<4f', data, 132))                    # depth 0..1
+    sample.surface_rumble = _vector(struct.unpack_from('<4f', data, 148))
+    sample.slip_angle = _vector(struct.unpack_from('<4f', data, 164))
+    sample.susp = _vector(struct.unpack_from('<4f', data, 196))
+    if n == 232:
+        sample.speed = _finite(math.sqrt(vx * vx + vy * vy + vz * vz))
+        return sample
+    if game == 'forza-fh':
+        sample.car_class += ' group:{}'.format(struct.unpack_from('<I', data, 232)[0])   # undocumented: a hint
+    # The dash block follows the sled; Horizon puts 12 more bytes first
+    base = 244 if n == 324 else 232
+    px, py, pz, speed, power = struct.unpack_from('<5f', data, base)
+    boost, distance = struct.unpack_from('<f4xf', data, base + 40)
+    race_time, lap, position = struct.unpack_from('<fHB', data, base + 64)
+    accel, brake, clutch, handbrake, gear, steer = struct.unpack_from('<BBBBBb', data, base + 71)
+    sample.speed, sample.power = _finite(speed), _finite(power)
+    sample.pos = _vector((px, py, pz))
+    sample.boost, sample.distance, sample.stage_time = _finite(boost), _finite(distance), _finite(race_time)
+    sample.lap, sample.race_position = lap, position
+    sample.throttle, sample.clutch, sample.brake = accel / 255.0, clutch / 255.0, brake / 255.0
+    sample.handbrake = handbrake / 255.0
+    sample.steer = -steer / 127.0                            # the game's is negative left (verify)
+    # 0 is reverse and 11 neutral (an H-pattern box shows it between gears)
+    sample.gear = gear if 1 <= gear <= 10 else {0: -1, 11: 0}.get(gear)
+    if n == 331:
+        sample.stage = 'fm:{}'.format(struct.unpack_from('<i', data, 327)[0])
+    return sample
+
+
+def _outgauge(data, n):
+    """OutGauge (Live for Speed's layout; BeamNG.drive sends it too)."""
+    car = data[4:8]
+    if any(b and not 0x20 <= b < 0x7f for b in car):     # Car[4]: short ASCII name
+        return None
+    speed, rpm, boost = struct.unpack_from('<fff', data, 12)
+    if not _plausible(rpm):
+        return None
+    dashlights, showlights = struct.unpack_from('<II', data, 40)
+    shift = bool(showlights & (1 << 0))          # DL_SHIFT
+    gear = data[10]                              # 0 reverse, 1 neutral, 2 first
+    throttle, brake, clutch = struct.unpack_from('<fff', data, 48)
+    name = _ascii(car)
+    # BeamNG always sends "beam": every BeamNG car is one car until the
+    # fingerprint split of Step C
+    sample = Sample(max(0.0, rpm), None, shift, gear=gear - 1 if gear >= 1 else -1,
+                    speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
+                    throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake),
+                    game='beamng' if name == 'beam' else 'lfs')
+    sample.game_time = struct.unpack_from('<I', data, 0)[0] / 1000.0
+    sample.boost = _finite(boost)
+    return sample
+
+
+def _codemasters(data, n):
+    """Codemasters extradata 3: DiRT Rally 1/2 and DiRT 4 (264 bytes), and
+    WRC Generations, which copies the layout in a longer packet. Wheels
+    come rear first; the vectors are in the world frame."""
+    floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
+    game = 'dirt' if n == CODEMASTERS_DIRT else 'wrcg'
+    raw_max = floats[63]
+    if not (math.isfinite(raw_max) and 0 < raw_max < RPM_LIMIT and math.isfinite(floats[37])):
+        return None
+    unit = _codemasters_unit(game, raw_max)
+    rpm, max_rpm = floats[37] * unit, raw_max * unit
+    if not (_plausible(max_rpm) and _plausible(rpm)):
+        return None
+    idle = floats[64] * unit if len(floats) > 64 else float('nan')
+    gears = floats[65] if len(floats) > 65 else float('nan')
+    gear = floats[33]
+    if not math.isfinite(gear):
+        gear = None
+    elif gear < 0 or gear == 10:           # reverse: 10 in DiRT Rally and WRCG, negative in some titles
+        gear = -1
+    else:
+        gear = int(gear) if gear <= 9 else None
+    # No car name in this format: the engine and gearbox tell cars apart.
+    # Rounded to 10 rpm, so the key is the same whatever the float noise.
+    top = round(max_rpm, -1)
+    key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(top, round(idle, -1) if math.isfinite(idle) else 0,
+                                                   gears if math.isfinite(gears) else 0)
+    name = '{:.0f} rpm, {:.0f} gears'.format(top, gears) if math.isfinite(gears) else None
+    sample = Sample(max(0.0, rpm), max_rpm, gear=gear,
+                    speed=_finite(floats[7]), car=key, car_name=name,
+                    throttle=_finite(floats[29]), clutch=_finite(floats[32]), brake=_finite(floats[31]),
+                    game=game)
+    sample.idle_rpm = _finite(idle)
+    sample.gears = int(gears) if math.isfinite(gears) and 0 < gears < 20 else None
+    sample.game_time, sample.stage_time = _finite(floats[0]), _finite(floats[1])
+    sample.lap_distance, sample.progress = _finite(floats[2]), _finite(floats[3])
+    sample.pos = _vector(floats[4:7])
+    # The "pitch" vector points forward and the "roll" vector sideways,
+    # taken as to the left (verify: sideways velocity in a left-hand slide)
+    forward, left = _vector(floats[14:17]), _vector(floats[11:14])
+    sample.forward = forward
+    if forward is not None and left is not None:
+        sample.up = _cross(forward, left)
+    sample.vel = _to_car(_vector(floats[8:11]), forward, left, sample.up)
+    rl, rr, fl, fr = floats[17:21]
+    sample.susp = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))    # mm (verify unit and sign)
+    rl, rr, fl, fr = floats[21:25]
+    sample.susp_vel = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))
+    rl, rr, fl, fr = floats[25:29]
+    sample.wheel_speed = _vector((fl, fr, rl, rr))                         # m/s (verify sign in reverse)
+    sample.steer = _finite(-floats[30])                                    # the game's is negative left (verify)
+    lateral, longitudinal = floats[34], floats[35]
+    # g in DiRT Rally; WRCG probably sends m/s^2 (verify)
+    scale = G if game == 'dirt' else 1.0
+    sample.accel = _vector((longitudinal * scale, lateral * scale, 0.0))   # lateral sign: verify
+    sample.accel_kind = 'kinematic'
+    if len(floats) > 61:
+        sample.lap = int(floats[36]) if math.isfinite(floats[36]) else None
+        sample.laps = int(floats[60]) if math.isfinite(floats[60]) and 0 <= floats[60] < 1000 else None
+        sample.stage_length = _finite(floats[61])
+    return sample
+
+
 def _eawrc(data, n):
     """EA SPORTS WRC, Oversteer's structure (4CC header) or the game's
-    default one; None when the packet is not one of them."""
+    default one; None when the packet is not one of them. Its axes are x
+    left, y up, z forward; the car frame comes from projecting on the
+    direction vectors the packet carries."""
     if n == EAWRC_SIZE:
         fourcc = data[:4]
         packet = EAWRC_PACKETS.get(fourcc) or EAWRC_PACKETS.get(fourcc[::-1])     # byte order: verify on a capture
         if packet is None:
             return None
         values = dict(zip(['packet_4cc'] + EAWRC_CHANNELS, struct.unpack(EAWRC_FORMAT, data)))
-    elif n == EAWRC_DEFAULT_SIZE:
+    else:
         packet = 'update'
         values = dict(zip(EAWRC_DEFAULT_CHANNELS, struct.unpack(EAWRC_DEFAULT_FORMAT, data)))
-    else:
-        return None
     rpm, max_rpm = values['vehicle_engine_rpm_current'], values['vehicle_engine_rpm_max']
     speed = values['vehicle_speed']
     if not (_plausible(rpm) and _plausible(max_rpm) and math.isfinite(speed)):
@@ -206,14 +438,41 @@ def _eawrc(data, n):
     elif index == values['vehicle_gear_index_reverse']:
         gear = -1
     else:
-        gear = index if 1 <= index <= top else None
+        gear = index if 1 <= index <= top else None                # forward gears from 1: verify
     sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, gear=gear, speed=speed,
                     throttle=_finite(values['vehicle_throttle']), clutch=_finite(values['vehicle_clutch']),
                     brake=_finite(values['vehicle_brake']), game='eawrc')
     sample.packet = packet
+    sample.running = packet not in ('pause', 'end')
+    sample.gears = top
+    sample.idle_rpm = _finite(values['vehicle_engine_rpm_idle'])
+    if values['shiftlights_rpm_valid']:
+        sample.game_shift_rpm = _finite(values['shiftlights_rpm_end'])
+    sample.handbrake = _finite(values['vehicle_handbrake'])
+    sample.steer = _finite(-values['vehicle_steering'])             # the game's is negative left (verify)
+    sample.game_time = _finite(values['game_total_time'])
+    sample.stage_time = _finite(values['stage_current_time'])
+    sample.distance = _finite(values['stage_current_distance'])
+    length = values['stage_length']
+    sample.stage_length = length if math.isfinite(length) and length > 0 else None
+    if sample.stage_length and sample.distance is not None:
+        sample.progress = sample.distance / sample.stage_length
+
+    def vector(name):
+        return _vector([values['vehicle_{}_{}'.format(name, axis)] for axis in 'xyz'])
+
+    sample.pos = vector('position')
+    forward, left, up = vector('forward_direction'), vector('left_direction'), vector('up_direction')
+    sample.forward, sample.up = forward, up
+    sample.vel = _to_car(vector('velocity'), forward, left, up)
+    sample.accel = _to_car(vector('acceleration'), forward, left, up)
+    sample.accel_kind = 'kinematic'                                  # verify on a capture
+    bl, br, fl, fr = (values['vehicle_cp_forward_speed_' + w] for w in EAWRC_WHEELS)
+    sample.wheel_speed = _vector((fl, fr, bl, br))
     if 'vehicle_id' in values:
         sample.car = 'eawrc-{}'.format(values['vehicle_id'])
         sample.car_name = 'EA WRC car {}'.format(values['vehicle_id'])
+        sample.car_class = 'class:{}'.format(values['vehicle_class_id'])
         location, route = values['location_id'], values['route_id']
         sample.stage = 'eawrc:{}:{}'.format(location, route)
         sample.track = 'location {}, route {}'.format(location, route)
@@ -232,63 +491,11 @@ def decode_sample(data):
     (or carries nonsense)."""
     n = len(data)
     if n in (OVST_SIZE, OVST2_SIZE) and data[:4] == OVST_MAGIC:
-        version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
-        if version not in (1, 2) or (version == 2) != (n == OVST2_SIZE):
-            return None
-        if not (_plausible(rpm) and _plausible(max_rpm)):
-            return None
-        sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
-                        gear=gear if -1 <= gear <= 12 else None,
-                        speed=_finite(speed / 3.6), car='acpmf', game='acpmf')
-        if version == 2:
-            gas, brake = struct.unpack_from('<ff', data, 24)
-            sample.throttle, sample.brake = _finite(gas), _finite(brake)
-            name = _ascii(data[32:64])
-            if name:
-                sample.car, sample.car_name = 'acpmf-' + name, name
-            sample.track = _ascii(data[64:96])
-        return sample
+        return _ovst(data, n)
     if n in FORZA_SIZES:
-        race_on = struct.unpack_from('<i', data, 0)[0]
-        max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
-        if not (_plausible(max_rpm) and _plausible(rpm)):
-            return None
-        game = FORZA_GAMES[n]
-        if race_on == 0 or max_rpm <= 0:
-            return Sample(0.0, max_rpm if max_rpm > 0 else None, game=game)
-        ordinal = struct.unpack_from('<i', data, 212)[0]
-        sample = Sample(max(0.0, rpm), max_rpm, car='forza-{}'.format(ordinal),
-                        car_name='Forza car {}'.format(ordinal), game=game)
-        if n == 232:
-            vx, vy, vz = struct.unpack_from('<fff', data, 32)
-            sample.speed = _finite(math.sqrt(vx * vx + vy * vy + vz * vz))
-        else:
-            # The dash block follows the sled; Horizon puts 12 more bytes first
-            base = 244 if n == 324 else 232
-            speed, power = struct.unpack_from('<ff', data, base + 12)
-            accel, brake, clutch, handbrake, gear = struct.unpack_from('<BBBBB', data, base + 71)
-            sample.speed, sample.power = _finite(speed), _finite(power)
-            sample.throttle, sample.clutch, sample.brake = accel / 255.0, clutch / 255.0, brake / 255.0
-            # 0 is reverse and 11 neutral (an H-pattern box shows it between gears)
-            sample.gear = gear if 1 <= gear <= 10 else {0: -1, 11: 0}.get(gear)
-        return sample
+        return _forza(data, n)
     if n in (92, 96):
-        car = data[4:8]
-        if any(b and not 0x20 <= b < 0x7f for b in car):     # Car[4]: short ASCII name
-            return None
-        rpm = struct.unpack_from('<f', data, 16)[0]
-        if not _plausible(rpm):
-            return None
-        dashlights, showlights = struct.unpack_from('<II', data, 40)
-        shift = bool(showlights & (1 << 0))          # DL_SHIFT
-        gear = data[10]                              # 0 reverse, 1 neutral, 2 first
-        speed = struct.unpack_from('<f', data, 12)[0]
-        throttle, brake, clutch = struct.unpack_from('<fff', data, 48)
-        name = _ascii(car)
-        return Sample(max(0.0, rpm), None, shift, gear=gear - 1 if gear >= 1 else -1,
-                      speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
-                      throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake),
-                      game='beamng' if name == 'beam' else 'lfs')
+        return _outgauge(data, n)
     if n in (EAWRC_SIZE, EAWRC_DEFAULT_SIZE):
         # Before the Codemasters catch-all, which would take any 4-aligned
         # length from 256 bytes up
@@ -301,34 +508,7 @@ def decode_sample(data):
                             "copy the structure file into the game again", n, EAWRC_SIZE)
         return None
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
-        floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
-        game = 'dirt' if n == CODEMASTERS_DIRT else 'wrcg'
-        raw_max = floats[63]
-        if not (math.isfinite(raw_max) and 0 < raw_max < RPM_LIMIT and math.isfinite(floats[37])):
-            return None
-        unit = _codemasters_unit(game, raw_max)
-        rpm, max_rpm = floats[37] * unit, raw_max * unit
-        if not (_plausible(max_rpm) and _plausible(rpm)):
-            return None
-        idle = floats[64] * unit if len(floats) > 64 else float('nan')
-        gears = floats[65] if len(floats) > 65 else float('nan')
-        gear = floats[33]
-        if not math.isfinite(gear):
-            gear = None
-        elif gear < 0 or gear == 10:           # reverse: 10 in DiRT Rally and WRCG, negative in some titles
-            gear = -1
-        else:
-            gear = int(gear) if gear <= 9 else None
-        # No car name in this format: the engine and gearbox tell cars apart.
-        # Rounded to 10 rpm, so the key is the same whatever the float noise.
-        top = round(max_rpm, -1)
-        key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(top, round(idle, -1) if math.isfinite(idle) else 0,
-                                                       gears if math.isfinite(gears) else 0)
-        name = '{:.0f} rpm, {:.0f} gears'.format(top, gears) if math.isfinite(gears) else None
-        return Sample(max(0.0, rpm), max_rpm, gear=gear,
-                      speed=_finite(floats[7]), car=key, car_name=name,
-                      throttle=_finite(floats[29]), clutch=_finite(floats[32]), brake=_finite(floats[31]),
-                      game=game)
+        return _codemasters(data, n)
     return None
 
 
