@@ -126,14 +126,13 @@ UDP :5310 ──► telemetry thread (Telemetry._run → Telemetry.handle)
                decode_sample() ─► RevLeds / launch limiter        (as now)
                                ─► ShiftLearner.feed()   in-memory, O(1)
                                ─► RunTracker.feed()     in-memory, O(1) accumulators
-                               ─► capture queue (raw bytes)       optional
+                               ─► capture queue (raw bytes)       optional, its own writer thread
                                └► events ──► queue.Queue(maxsize=8192)
                                                   │
                          drive-log thread (DriveLog) ◄┘
                            owns the only write connection (WAL)
                            runs/segments/corners/shifts/metrics/tunes
                            detectors, coach, snapshots every 1 s
-                           capture file writer (gzip)
                                   │ publishes immutable dicts
              ┌────────────────────┴───────────────────┐
      GTK main loop (1 s refresh)                web threads (GET only)
@@ -155,7 +154,8 @@ UDP :5310 ──► telemetry thread (Telemetry._run → Telemetry.handle)
   per packet and make the learner end and start a session on each.
 - **Drive-log thread** (new, `oversteer/drive_log.py`). Consumes events:
   shift, launch, run start/end, segment closed (≈ every 200 m), sample at
-  10 Hz for the trace, raw packet for the capture. Computes segment features,
+  10 Hz for the trace. (Raw packets for a capture go to the recorder's own
+  thread instead, §6.1: recording then needs no database.) Computes segment features,
   corners, run metrics, verdicts, coaching; writes SQLite in batches (commit
   at most every 5 s and at every run end). Publishes snapshots by building
   a new dict and then assigning it to an attribute (atomic in CPython); a
@@ -453,10 +453,13 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
 ```
 
 - `CaptureWriter(path, port, note, version)`: `.write(now, addr, data)`
-  (any clock; stored from the first packet on), `.close()`; in the app it
-  is driven by the drive-log thread from the raw-packet events (the
-  listener only enqueues). Source addresses are IPv4; anything else is
-  stored as 0.0.0.0.
+  (any clock; stored from the first packet on), `.close()`. In the app a
+  `Recorder` drives it on its own thread (the listener only enqueues, as
+  built in run 4: the plan had the drive-log thread write it, but then
+  recording would need a database, and a slow gzip flush would delay the
+  SQLite commits). A file per stretch of driving, closed after 60 s
+  without telemetry. Source addresses are IPv4; anything else is stored
+  as 0.0.0.0.
 - `replay(records, learner)`: the records through `Telemetry.handle` with
   a `NullLeds`, on the capture's clock from t = 1000 s, then idle.
 - `read_capture(path) -> (meta, iterator of (t, addr, data))` tolerates a
@@ -464,9 +467,12 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
   the iterator quietly.
 - A sidecar `<file>.json` holds the labels once set (§8.6), so a capture
   copied elsewhere (a test fixture, a bug report) describes itself.
-- Size: ≈ 20 KB/s raw at 60 Hz, ≈ 5 KB/s gzipped. Cap 1 GB in total
-  (preference); the oldest **unlabelled** captures go first. Recording is
-  off by default, switched in the tab.
+- Size: ≈ 20 KB/s raw at 60 Hz, ≈ 5 KB/s gzipped (simulated EA WRC
+  stages: 15 KB/s raw, 1.6 KB/s gzipped; real data is noisier). Cap 1 GB
+  in total (preference `telemetry_capture_cap`, in GB); the oldest
+  **unlabelled** captures go first, checked each time a file opens or
+  closes, so a lower cap applies from the next drive rather than deleting
+  at a click. Recording is off by default, switched in the tab.
 
 ### 6.2 Tools
 
@@ -1166,7 +1172,9 @@ What shows first is what requirement 1 asks for. Top to bottom:
    9.8 km) · gravel (medium) · usually gravel here · H-pattern". Clicking
    shows the evidence.
 3. **Shift table**: Gear | Best (± band) | You | H-pattern | Sequential |
-   Paddles | Data; method columns only when they have shifts.
+   Paddles | Data; method columns only when they have shifts. As built:
+   Gear | rpm per km/h | Best upshift (with its range) | of limiter | You
+   change up | the method columns | Samples.
 4. **Coaching**: focus habit, up to 3 tips, praise, growth line; "Show all"
    expander with the quiet lines.
 5. **Tuning**: current tune (ratios, change type, measured ride height /
@@ -1202,7 +1210,8 @@ strings from snapshots) is unit-tested; `gtk_ui.py` only places widgets.
 - **Simulator** (`tests/sim.py`, Step C): the simulated car now in
   `test_shift_learner.py` moves there and gains a grade profile, a steady
   drive-slip setting and a left-hand corner; `encode(sample, fmt)` exists
-  only for formats a test actually drives end to end (added in Step D).
+  only for formats a test actually drives end to end: `eawrc_packet()`
+  (run 2) and `forza_packet()`/`forza_packets()` (run 4).
   Surfaces, roughness spectra and driver models wait until measured
   detectors need them.
 - **Learner corrections**, each with a test: slope (a hilly stage still
@@ -1357,6 +1366,12 @@ checklist below.
   change between tunes are used.
 - Read access to the game's Proton prefix in the Flatpak manifest: not
   planned; copy buttons and a shipped id table instead (§3.2 #8).
+- The `captures` table (§7.2): not written yet (run 4). The capture folder
+  and its label sidecars are the record; "Re-check old runs" (Step D item
+  4) is the first thing that needs the table, and can fill it from the
+  folder then. The tab shows the folder's path but has no "Open folder"
+  button: opening a folder from the Flatpak goes through the OpenURI
+  portal, which could not be tried here without running the app.
 - Listening on 5300 and 5310 at once: rejected, 5300 is the port FH6 may
   need for its own socket (§3.2 #17).
 
@@ -1400,7 +1415,7 @@ under Step D. The GTK code was exercised off-screen (the tab built with
 a stub controller under GDK's broadway backend, the gui's web methods on
 a stub), never by running the app.
 
-Run 4 (in progress): the build prompt's "Step D" is "GTK Telemetry tab
+Run 4 (done, 161 tests green): the build prompt's "Step D" is "GTK Telemetry tab
 integration, preferences (web on/off, port), docs/README/CHANGELOG +
 tests", the order before the review re-cut the steps. Most of it came
 with run 3 (the tab sections, the web preferences); what §12 still
@@ -1412,6 +1427,16 @@ and written by one tested function, a second encoder in `tests/sim.py`
 with an end-to-end test, and the README section. Bridge v3, BeamNG
 MotionSim and the measured detectors (Step D items 2–5) are not part of
 this run: they need a Windows toolchain run or the §6.3 captures.
+As built, besides the items ticked under Step D: `telemetry_view.shift_table()`
+and `shift_summary()` (the tab's table, redrawn only when its text
+changed; the best change up as "7100 rpm (6950–7200)", the 10–90 %
+bootstrap range the web page shows too); `read_preferences()` /
+`write_preferences()` over `PREFERENCES` (attribute, config key, default;
+numbers clamped, unknown choices back to the default); each setting's
+status line now sits in the Settings list under its own switch. Checked
+off-screen: the tab built under GDK's broadway backend with a stub
+controller and rendered to an image, and the gui's recording and
+preference methods on a stub, never by running the app.
 
 ### Step B
 - [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
@@ -1436,12 +1461,12 @@ this run: they need a Windows toolchain run or the §6.3 captures.
 
 ### Step D
 - [x] Capture switch and folder size in the tab (run 4). As built: `telemetry_capture.Recorder` writes on **its own thread**, not the drive-log thread the plan named: recording then works with no database (rev lights alone, a database that failed to open) and a slow gzip flush never delays the SQLite commits; the listener only queues (`Telemetry.recorder`, every datagram before decoding, unknown ones included; 4096 queued, then dropped and counted). A file per stretch of driving, closed after 60 s without telemetry (a session ends after 120 s, so a capture sits inside its session). Preferences `telemetry_capture` (0/1) and `telemetry_capture_cap` (GB, 1–100, default 1); the oldest unlabelled captures go first (`prune()`). "Label last session…" writes the label to the sidecar of every capture overlapping the session (`label_captures()`), which keeps them. The `captures` table is not written yet: the folder and its sidecars are the record until "Re-check old runs" needs the table
-- [ ] Encoders in `tests/sim.py` for the formats tested end to end. The format, reader, writer and scripts were done in Step A
+- [x] Encoders in `tests/sim.py` for the formats tested end to end (run 4): `forza_packet()` (FM 2023's 331 bytes, Horizon's 324 with `size`) and `forza_packets()`, whose race clock and distance run over the whole race as Forza's do (a per-lap clock split every lap into its own run: correct for a game with a per-lap clock and no lap counter, so the encoder, not the tracker, was wrong). `test_forza_motorsport_laps_through_the_live_path`: three laps through decoder and listener, one circuit run (`game` tier) with its laps and left corners, ratios within 1 %, tyre radius 0.33 m from the wheels. Codemasters and OutGauge have no encoder: nothing drives them end to end yet
 - [ ] OVST v3 bridge (C) built, and decoder
 - [ ] BeamNG MotionSim (optional)
 - [ ] Measured surface classifier, calibration, `telemetry-calibrate.py` (needs §6.3 captures)
 - [ ] Drag fit, `BOOST_HOLD` per car (optional)
-- [ ] README, CHANGELOG, this document
+- [x] README, CHANGELOG, this document (run 4: the README's telemetry section covers the history, coaching, setup advice, the web page, learning without LEDs, recording and EA SPORTS WRC; the surface is said to stay mostly unknown until labels exist)
 
 ## 17. Appendix: format research findings
 
