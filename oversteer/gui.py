@@ -108,7 +108,8 @@ class Gui:
         self.keyboard_hotkeys = None
         self.keyboard_needs_bind = False
         self.keyboard_session_failed = False
-        self.global_hotkeys = {}          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
+        self.global_hotkeys = {}
+        self.last_profile = ''                  # reopened at start (preferences)          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
 
@@ -139,6 +140,11 @@ class Gui:
 
         if self.app.args.profile is not None:
             self.ui.set_profile(self.app.args.profile)
+        elif self.last_profile and not self._settings_from_command_line():
+            # Cars and runs are learnt per profile: starting on none shows
+            # an empty Telemetry tab and files the next drive apart
+            if os.path.exists(os.path.join(self.app.profile_path, self.last_profile + '.ini')):
+                self.ui.set_profile(self.last_profile)
 
         start_manually = self.app.args.start_manually
         if start_manually is None:
@@ -1136,6 +1142,22 @@ class Gui:
         self.update_pedals()
         self.update_learner_directory()
         self.apply_rev_leds()
+        self._remember_profile(profile_name)
+
+    # Settings given on the command line: a start with any of them keeps
+    # to them rather than reopening the last profile over them
+    COMMAND_LINE_SETTINGS = ('mode', 'range', 'sensitivity', 'combine_pedals', 'invert_pedals', 'ffb_enabled',
+                             'inertia_mode', 'autocenter', 'ff_gain', 'autocenter_persistent', 'app_gain',
+                             'spring_level', 'damper_level', 'friction_level', 'rumble_level', 'ffb_leds',
+                             'center_wheel')
+
+    def _settings_from_command_line(self):
+        return any(getattr(self.app.args, name, None) is not None for name in self.COMMAND_LINE_SETTINGS)
+
+    def _remember_profile(self, name):
+        if name != self.last_profile:
+            self.last_profile = name
+            self.save_preferences()
 
     def save_profile(self, profile_name, check_exists = False):
         if self.device is None:
@@ -1155,12 +1177,16 @@ class Gui:
         current_file = os.path.join(self.app.profile_path, current_name + '.ini')
         new_file = os.path.join(self.app.profile_path, new_name + '.ini')
         os.rename(current_file, new_file)
+        if self.last_profile == current_name:
+            self._remember_profile(new_name)
 
     def delete_profile(self, profile_name):
         if profile_name != '' and profile_name is not None:
             profile_file = os.path.join(self.app.profile_path, profile_name + '.ini')
             if self.ui.confirmation_dialog(_("This profile will be deleted, are you sure?")):
                 os.remove(profile_file)
+                if self.last_profile == profile_name:
+                    self._remember_profile('')
             else:
                 raise Exception()
 
@@ -1192,6 +1218,7 @@ class Gui:
                 Locale.setlocale(Locale.LC_ALL, (self.locale, 'UTF-8'))
             if 'check_permissions' in config['DEFAULT']:
                 self.check_permissions = config['DEFAULT']['check_permissions'] == '1'
+            self.last_profile = config['DEFAULT'].get('last_profile', '')
             from .telemetry_view import read_preferences
             for name, value in read_preferences(config['DEFAULT']).items():
                 setattr(self, name, value)
@@ -1232,6 +1259,7 @@ class Gui:
             'button_toggle': ','.join(map(str, self.button_config[0])),
             'button_config': ','.join(map(str, self.button_config[1:])),
             'hotkeys': hotkeys.serialize(self.global_hotkeys),
+            'last_profile': self.last_profile,
         }
         from .telemetry_view import write_preferences
         config['DEFAULT'].update(write_preferences(self._telemetry_preferences()))
