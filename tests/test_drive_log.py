@@ -320,3 +320,88 @@ def test_a_long_pause_keeps_no_rows(tmp_path):
         t += 1 / 60
         learner.feed(t, p, 7500.0, 0.0, 0.0)
     assert len(runs._rows) <= drive_log.SEGMENT_ROWS
+
+
+def wrcg_samples(course, finish, overrun_clock=True):
+    """WRC Generations as it seems to be: no stage length, no progress; the
+    stage clock stops at `finish` m while the car rolls on."""
+    samples = course_samples(course, game='wrcg', car='wrcg/7500-800-5')
+    stopped = None
+    for _, s, _ in samples:
+        s.stage_length = s.progress = None
+        if s.lap_distance is not None and s.lap_distance >= finish and overrun_clock:
+            stopped = s.stage_time if stopped is None else stopped
+            s.stage_time = stopped
+    return samples
+
+
+def test_wrc_generations_stage_by_the_distance_to_the_finish(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    from tests.test_store import _tables
+    length = Course(STAGE).length
+    tables = _tables('wrcg', {'location': 'Rally Sweden', 'stage': 'Vargasen', 'length_m': length + 20.0,
+                              'surface': 'snow'},
+                     {'location': 'Rally Sweden', 'stage': 'Hof-Finnskog', 'length_m': length * 1.5, 'surface': 'snow'})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    # 300 m past the line to stop control: beyond 1 %, the stopped clock marks the finish
+    course = Course(STAGE + [('straight', 300)])
+    learner, reader, session = drive_runs(tmp_path, wrcg_samples(course, length))
+    [run] = session['runs']
+    assert run['stage'] == 'wrcg:rally-sweden:vargasen'
+    assert (run['surface'], run['surface_conf']) == ('snow', 'game')
+    assert 'Vargasen (Rally Sweden) is snow' in run['surface_evidence'][0]
+    stage = reader.stage(run['stage'])
+    assert (stage['name'], stage['location'], stage['runs']) == ('Vargasen', 'Rally Sweden', 1)
+
+
+def test_wrc_generations_two_stages_of_one_length(tmp_path, monkeypatch):
+    """A stage and its reverse, one length, neither driven before: which
+    stage stays open (a start cell key), but where is known."""
+    from oversteer import stage_tables
+    from tests.test_store import _tables
+    length = Course(STAGE).length
+    tables = _tables('wrcg', {'location': 'Rally Sweden', 'stage': 'Lesjofors', 'length_m': length, 'surface': 'snow'},
+                     {'location': 'Rally Sweden', 'stage': 'Lesjofors Reverse', 'length_m': length,
+                      'surface': 'snow', 'reverse_of': 'Lesjofors'})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    learner, reader, session = drive_runs(tmp_path, wrcg_samples(Course(STAGE), length, overrun_clock=False))
+    [run] = session['runs']
+    assert run['stage'].startswith('cell:wrcg:')
+    assert reader.stage(run['stage'])['location'] == 'Rally Sweden'
+    assert (run['surface'], run['surface_conf']) == ('snow', 'game')
+
+
+def test_a_stage_given_up_is_not_matched_by_distance(tmp_path, monkeypatch):
+    """Where the game sends progress, a run that stops short of the finish
+    is not the stage whose length it happens to have driven."""
+    from oversteer import stage_tables
+    from tests.test_store import _tables
+    monkeypatch.setattr(stage_tables, '_tables', _tables('wrcg', {'location': 'Wales', 'stage': 'Short',
+                                                                  'length_m': 2000.0, 'surface': 'gravel'}))
+    samples = [x for x in course_samples(Course(STAGE), game='wrcg', car='wrcg/7500-800-5')
+               if x[1].lap_distance is None or x[1].lap_distance < 2000.0]
+    for _, s, _ in samples:
+        s.stage_length = None
+    learner, reader, session = drive_runs(tmp_path, samples)
+    [run] = session['runs']
+    assert run['finished'] != 1 and run['stage'].startswith('cell:wrcg:')
+
+
+def test_two_stages_of_one_length_on_one_surface(tmp_path, monkeypatch):
+    """A location with more than one surface: the stages the distance
+    leaves open still share one."""
+    from oversteer import stage_tables
+    from tests.test_store import _tables
+    length = Course(STAGE).length
+    tables = _tables('wrcg', {'location': 'Rally de Portugal', 'stage': 'Felgueiras', 'length_m': length,
+                              'surface': 'gravel'},
+                     {'location': 'Rally de Portugal', 'stage': 'Felgueiras reverse', 'length_m': length,
+                      'surface': 'gravel', 'reverse_of': 'Felgueiras'},
+                     {'location': 'Rally de Portugal', 'stage': 'Lousada', 'length_m': 3580.0, 'surface': 'mixed',
+                      'surface_parts': {'tarmac': 0.62, 'gravel': 0.38}})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    learner, reader, session = drive_runs(tmp_path, wrcg_samples(Course(STAGE), length, overrun_clock=False))
+    [run] = session['runs']
+    assert run['stage'].startswith('cell:wrcg:') and (run['surface'], run['surface_conf']) == ('gravel', 'game')
+    assert 'Felgueiras (Rally de Portugal) or Felgueiras reverse (Rally de Portugal): all gravel' in \
+        run['surface_evidence'][0]

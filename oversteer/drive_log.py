@@ -18,7 +18,7 @@ import queue
 import threading
 import time
 
-from . import coach, drive_detect
+from . import coach, drive_detect, stage_tables
 from .shift_learner import drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
@@ -52,6 +52,9 @@ class DriveLog:
         if threaded:
             self._thread = threading.Thread(target=self._run, name='drive-log', daemon=True)
             self._thread.start()
+        # The shipped stage tables, so a stage has its name, location and
+        # surface from its first run
+        self.post(self.store.seed_stages, stage_tables.tables())
 
     def post(self, fn, *args):
         if self._thread is None:
@@ -177,6 +180,8 @@ SEGMENT_ROWS = 3600              # rows (a minute at 60 Hz): a segment closes th
 TRACE_EVERY = 0.1                # s between trace rows
 RUN_MIN = 100.0                  # m moving: a shorter run (menus, a car parked) is not kept
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
+CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
+FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
 
 # One row per packet of the segment being driven, for its features
 SEGMENT_CHANNELS = ('t', 'speed', 'a_long', 'a_lat', 'yaw_rate', 'throttle', 'gear', 'slip', 'susp_fl', 'susp_fr',
@@ -320,6 +325,9 @@ class RunTracker:
         self._progress = sample.progress
         self._finished = None
         self._result_time = None
+        self._finish_d = None                        # where the run crossed the finish, as far as it can tell
+        self._clock_d = None                         # d at the last packet the stage clock moved
+        self._clock_still = 0.0                      # s moving since it last did
         self._puddles = self._samples = 0
         self._paused = sample.packet == 'pause'
         self._packets = {sample.packet} if sample.packet else set()
@@ -333,7 +341,19 @@ class RunTracker:
         self._stood = self._launch = self._launch_rpm = 0.0
         self._rolling = None
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
-                         sample.stage_length, list(sample.pos) if sample.pos is not None else None)
+                         sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track)
+
+    def _clock(self, sample, d, dt, speed):
+        """The finish of a stage in a game that sends no progress: the
+        stage clock stops at the line while the car rolls on."""
+        if self._finish_d is not None or sample.stage_time is None:
+            return
+        if sample.stage_time != self._last_stage_time or self._clock_d is None:
+            self._clock_d, self._clock_still = d, 0.0
+        elif speed > START_MOVING and sample.stage_time > 0:
+            self._clock_still += dt
+            if self._clock_still >= CLOCK_STOPPED and self._clock_d >= FINISH_AFTER:
+                self._finish_d = self._clock_d
 
     def _d(self, sample):
         """Where along the run the car is: the game's stage distance where
@@ -389,7 +409,9 @@ class RunTracker:
         if sample.progress is not None:
             if self._finished is None and sample.progress >= FINISHED and (self._progress or 0.0) < FINISHED:
                 self._finished, self._result_time = 1, sample.stage_time
+                self._finish_d = d
             self._progress = sample.progress
+        self._clock(sample, d, dt, speed)
         if sample.puddle is not None:
             self._samples += 1
             if any(p > 0 for p in sample.puddle):
@@ -444,7 +466,8 @@ class RunTracker:
         # metrics see them all (a double tap at the very end goes unflagged)
         if self.learner.car is not None:
             self.learner._flush_shifts_locked(self.learner.car)
-        self._close_segment(self._last_t or now, self._trace[-1][T['distance']] if self._trace else 0.0)
+        last_d = self._trace[-1][T['distance']] if self._trace else 0.0
+        self._close_segment(self._last_t or now, last_d)
         summary = dict(self._summary)
         finished = self._finished
         if reason == 'end':
@@ -454,19 +477,30 @@ class RunTracker:
         summary.update(distance=self._distance, duration=self._duration, moving_time=self._moving,
                        stops=self._stops, finished=finished, result_time=self._result_time, laps_done=self._laps_done,
                        packets=sorted(self._packets), end=reason,
-                       puddles=self._puddles / self._samples if self._samples else None)
+                       puddles=self._puddles / self._samples if self._samples else None,
+                       progress=self._progress,
+                       course=self._finish_d if self._finish_d is not None else last_d)
         self.learner.log.post(self._write_end, self.run, self.learner.wall(self._last_t or now), summary, self._trace)
         self._reset()
         self._waiting()
 
     # -- the drive-log thread --
 
-    def _write_start(self, number, session, n, started, stage, game, stage_length, start_pos):
+    def _write_start(self, number, session, n, started, stage, game, stage_length, start_pos, track=None):
         learner = self.learner
         row = learner._session_rows.get(session)
         if row is None:
             return
         store = learner.log.store
+        if stage is None and game in ('acr', 'acpmf') and track:
+            # Assetto Corsa Rally names the stage in its shared memory (the
+            # bridge before version 3 does not say which AC game it is)
+            stage = store.match_track(track, stage_length)
+            if stage is not None:
+                game = 'acr'
+        if stage is None and game == 'wrcg' and stage_length:
+            # Should WRC Generations send its length after all: against the published ones
+            stage = store.match_distance(game, stage_length, start_pos)[0]
         if stage is None and game in ('dirt', 'wrcg') and stage_length and start_pos is not None:
             # DiRT names no stage: its length and where it starts do
             stage = store.match_stage(game, stage_length, start_pos[2])
@@ -498,11 +532,31 @@ class RunTracker:
                   'moving_time': summary['moving_time'], 'finished': summary['finished'],
                   'result_time': summary['result_time']}
         stage = store.run_stage(run)
-        if stage is None and summary['has_pos'] and summary['game']:
+        game = summary['game']
+        location = None
+        if stage is None and game in stage_tables.tables() and (summary['finished'] == 1 or not summary['progress']):
+            # A game that names no stage and sends no length (WRC
+            # Generations): the distance to the finish, against the
+            # published lengths; the start tells apart two of one length
+            start = (trace[0][T['x']], trace[0][T['y']], trace[0][T['z']]) if trace and summary['has_pos'] else None
+            if start is not None and any(math.isnan(v) for v in start):
+                start = None
+            stage, candidates = store.match_distance(game, summary['course'], start)
+            if stage is not None:
+                fields['stage'], fields['stage_game'] = stage, game
+            elif candidates:
+                # Which stage is open (a stage and its reverse), but maybe
+                # not where, nor on what
+                summary['stage_candidates'] = candidates
+                if len({c.get('location') for c in candidates}) == 1:
+                    location = candidates[0].get('location')
+        if stage is None and summary['has_pos'] and game:
             cell = start_cell(trace)
             if cell is not None:
-                stage = fields['stage'] = store.match_cell(summary['game'], cell, summary['distance'])
-                fields['stage_game'] = summary['game']
+                stage = fields['stage'] = store.match_cell(game, cell, summary['distance'])
+                fields['stage_game'] = game
+                if location is not None:
+                    store.upsert_stage(stage, game, location=location)
         summary['stage'] = stage
         verdicts = drive_detect.detect_run(store, run, summary, trace, TRACE_CHANNELS)
         fields.update(verdicts)

@@ -5,6 +5,7 @@ import os
 import subprocess
 from .device_manager import DeviceManager
 from .model import Model
+from . import stage_tables
 import sys
 from xdg.BaseDirectory import save_config_path
 
@@ -13,6 +14,7 @@ class Application:
     def __init__(self, version, pkgdatadir, icondir):
         self.version = version
         self.datadir = pkgdatadir
+        stage_tables.DATADIR = pkgdatadir
         self.icondir = icondir
         self.udev_path = self.datadir + '/udev/'
         self.target_dir = '/etc/udev/rules.d/'

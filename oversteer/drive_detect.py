@@ -15,6 +15,8 @@ table) is the only surface evidence.
 
 import math
 
+from . import stage_tables
+
 CONFIDENCE = ('low', 'medium', 'high', 'game')
 
 DISCIPLINES = ('rally-stage', 'hillclimb', 'circuit', 'rallycross', 'drift', 'free-roam', 'time-attack')
@@ -255,14 +257,19 @@ def location_name(game, stage, known=None):
     return None
 
 
-def route_surface(game, location):
-    """(surface, prior): what the route table says for a location. A
-    single-surface location is the game's word (surface); a mixed one
-    only a prior."""
+def route_surface(game, location, stage=None):
+    """(surface, prior): what the shipped tables say for a stage key, or
+    else for its location. A single surface is the game's word (surface);
+    a mixed one only a prior."""
+    entry = stage_tables.entry(stage)
+    if entry is not None:
+        surface, prior = stage_tables.surface_of(entry)
+        if surface is not None or prior is not None:
+            return surface, prior
     table = LOCATION_SURFACES.get(game, {})
     surface = table.get(location) if location else None
     if surface is None:
-        return None, None
+        return stage_tables.location_surface(game, location)
     if surface.startswith('mixed:'):
         return None, surface
     return surface, None
@@ -368,11 +375,22 @@ def classify_surface(summary, segments, calibration=None, location=None, prior=N
     (telemetry_store.Reader.calibration()); `location` its name where
     known; `prior` the stage's learnt or user prior, shown apart."""
     game = summary.get('game')
-    surface, table_prior = route_surface(game, location)
+    entry = stage_tables.entry(summary.get('stage'))
+    surface, table_prior = route_surface(game, location, summary.get('stage'))
     shown_prior = prior or table_prior
+    candidates = summary.get('stage_candidates') or []
+    if surface is None and entry is None and candidates:
+        surface = stage_tables.candidates_surface(candidates)
     if surface is not None:
-        return Verdict(surface, 'game', ['{}: {} is a {} rally.'.format(_game(summary), location, surface)],
-                       prior=shown_prior)
+        if entry is not None:
+            line = '{}: {} ({}) is {}.'.format(_game(summary), entry['stage'], entry['location'], surface)
+        elif candidates:
+            line = '{}: {} m to the finish, as long as {}: all {}.'.format(
+                _game(summary), '{:.0f}'.format(summary.get('course') or 0.0),
+                ' or '.join('{} ({})'.format(c['stage'], c['location']) for c in candidates[:4]), surface)
+        else:
+            line = '{}: {} is a {} rally.'.format(_game(summary), location, surface)
+        return Verdict(surface, 'game', [line], prior=shown_prior)
     evidence = []
     if location:
         evidence.append('{} has more than one surface.'.format(location))

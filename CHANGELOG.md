@@ -65,6 +65,13 @@
   keeps them.
 - Telemetry tab: the best upshift of each gear shows the range it is
   known to.
+- Stage tables for DiRT Rally 2.0 (every rally stage, rallycross track
+  and DirtFish), WRC Generations (all 21 rallies and 165 stages, 128
+  with a published length) and Assetto Corsa Rally (46 stages to update
+  0.6): a run on a known stage has its name, rally and surface from the
+  first drive, without labelling. WRC Generations names no stage, so a
+  run to the finish is matched by its distance (within 1 %) and, for a
+  stage and its reverse of one length, by where earlier runs started.
 
 ### Changed
 - Profiles saved before this version get both new rev light switches

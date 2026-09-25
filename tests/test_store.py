@@ -232,3 +232,93 @@ def test_a_reader_on_an_awkward_path(tmp_path):
     path = str(folder / 'telemetry.db')
     open_store(path).db.close()
     assert open_reader(path).db.execute('SELECT COUNT(*) FROM cars').fetchone() == (0,)
+
+
+def _tables(game, *entries):
+    """Shipped stage tables for a test: {game: {key: entry}}."""
+    from oversteer import stage_tables
+    table = {}
+    for entry in entries:
+        entry = dict(entry, key=stage_tables.stage_key(game, entry))
+        table[entry['key']] = entry
+    return {game: table}
+
+
+def test_shipped_stages_are_seeded_and_matched_first(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    tables = _tables('dirt', {'location': 'Wales', 'stage': 'Fferm Wynt', 'length_m': 9843.62, 'start_z': 99.2,
+                              'surface': 'gravel'},
+                     {'location': 'Monte Carlo', 'stage': 'Pra d´Alart', 'length_m': 6000.0, 'start_z': 10.0,
+                      'surface': 'mixed', 'surface_parts': ['tarmac', 'snow']})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    store.upsert_stage('dirt:9843:110', 'dirt', 9843.4)                     # a measured key from before the table
+    store.seed_stages(tables)
+    wales = store.stage('dirt:9844:100')
+    assert (wales['name'], wales['location'], wales['length']) == ('Fferm Wynt', 'Wales', 9843.62)
+    assert wales['surface_prior'] is None                                   # one surface: the game's word, no prior
+    monte = store.stage('dirt:6000:10')
+    assert (monte['surface_prior'], monte['surface_prior_source']) == ('mixed:tarmac,snow', 'table')
+    assert store.match_stage('dirt', 9843.4, 104.9) == 'dirt:9844:100'      # the table before the stored key
+    assert store.match_stage('dirt', 9843.4, 160.0) == 'dirt:9843:160'      # another start: not that stage
+
+
+def test_a_run_to_the_finish_matches_a_published_length(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    tables = _tables('wrcg', {'location': 'Rally Sweden', 'stage': 'Vargasen', 'length_m': 14520.0, 'surface': 'snow'},
+                     {'location': 'Rally Sweden', 'stage': 'Lesjofors', 'length_m': 9450.0, 'surface': 'snow'},
+                     {'location': 'Rally Sweden', 'stage': 'Lesjofors Reverse', 'length_m': 9450.0,
+                      'surface': 'snow', 'reverse_of': 'Lesjofors'},
+                     {'location': 'Rally Italia Sardegna', 'stage': 'Monte Lerno', 'length_m': 9500.0,
+                      'surface': 'gravel'})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    store.seed_stages(tables)
+    assert store.match_distance('wrcg', 14400.0, (0, 0, 0))[0] == 'wrcg:rally-sweden:vargasen'   # within 1 %
+    assert store.match_distance('wrcg', 14300.0, (0, 0, 0)) == (None, [])                        # not within 1 %
+    key, candidates = store.match_distance('wrcg', 9460.0, (500.0, 0.0, 800.0))
+    assert key is None and [c['stage'] for c in candidates] == ['Lesjofors', 'Lesjofors Reverse', 'Monte Lerno']
+    # Once a run of each is known, where a run starts tells them apart
+    car = store.car_id('p', 'wrcg/7000-800-6', 'wrcg')
+    session = store.start_session('p', car, 'wrcg', 1.0)
+    store.start_run(session, 1, 1.0, 'wrcg:rally-sweden:lesjofors', start_pos=[500.0, 3.0, 800.0])
+    store.start_run(session, 2, 2.0, 'wrcg:rally-sweden:lesjofors-reverse', start_pos=[-2000.0, 3.0, 4000.0])
+    store.start_run(session, 3, 3.0, 'wrcg:rally-italia-sardegna:monte-lerno', start_pos=[90.0, 1.0, 60.0])
+    assert store.match_distance('wrcg', 9460.0, (520.0, 0.0, 790.0))[0] == 'wrcg:rally-sweden:lesjofors'
+    assert store.match_distance('wrcg', 9460.0, (-1990.0, 0.0, 4010.0))[0] == 'wrcg:rally-sweden:lesjofors-reverse'
+    assert store.match_distance('wrcg', 9460.0, (7000.0, 0.0, 7000.0))[0] is None     # none started there
+
+
+def test_assetto_corsa_rally_by_its_track_name(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    tables = _tables('acr', {'location': 'Alsace', 'stage': 'Forêt de Munster', 'track': 'Alsace Forêt',
+                             'length_m': 6800.0, 'surface': 'tarmac'},
+                     {'location': 'Alsace', 'stage': 'Forêt de Saverne', 'track': 'Alsace Forêt', 'length_m': 9100.0,
+                      'surface': 'tarmac'},
+                     {'location': 'Monte Carlo', 'stage': 'St. Geniez - Sisteron',
+                      'track': 'Monte Carlo St. Geniez - Sistero', 'length_m': 13100.0, 'surface': 'tarmac'})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    # as the bridge sends them: ASCII, cut to 31 characters
+    assert store.match_track('Monte Carlo St. Geniez - Sister') == 'acr:monte-carlo:st-geniez-sisteron'
+    assert store.match_track('Alsace For_t', 7300.0) == 'acr:alsace:foret-de-munster'    # the nearer length
+    assert store.match_track('Alsace For_t') is None                                   # one name, two stages
+    assert store.match_track('Imola') is None
+
+
+def test_the_shipped_tables():
+    """Every table loads, every stage has a key of its own, a location, a
+    name and a surface the detector knows."""
+    from oversteer import stage_tables
+    tables = stage_tables.load()
+    assert {'dirt', 'wrcg', 'acr'} <= set(tables)
+    for game, entries in tables.items():
+        for key, entry in entries.items():
+            assert entry['location'] and entry['stage'] and entry['confidence'] in ('high', 'medium', 'low')
+            assert entry['surface'] in stage_tables.SINGLE + ('mixed',)
+            surface, prior = stage_tables.surface_of(entry)
+            assert (surface is None) != (prior is None), key
+    assert stage_tables.surface_of({'surface': 'mixed', 'surface_parts': {'gravel': 0.98, 'tarmac': 0.02}}) == (
+        'gravel', None)                                                        # 2 % tarmac: a gravel stage
+    assert stage_tables.surface_of({'surface': 'mixed', 'surface_parts': {'tarmac': 0.62, 'gravel': 0.38}}) == (
+        None, 'mixed:tarmac,gravel')

@@ -23,6 +23,8 @@ import urllib.parse
 import zlib
 from array import array
 
+from . import stage_tables
+
 VERSION = 2
 
 SCHEMA = """
@@ -230,6 +232,8 @@ TRACES_CAP = 200 * 1024 * 1024       # bytes of traces kept; the oldest go first
 
 STAGE_LENGTH_TOLERANCE = {'dirt': 2.0, 'wrcg': 2.0, 'acr': 10.0}     # m, a measured length on a rounding boundary
 STAGE_START_TOLERANCE = 15.0                                         # m of start z (DiRT)
+STAGE_DISTANCE_TOLERANCE = 0.01      # of a published length: a run to the finish, or a length the game sent
+STAGE_START_NEAR = 50.0              # m between two starts of one stage (x and z)
 
 
 def _split(script):
@@ -880,12 +884,84 @@ class Store(Reader):
                  'surface_prior_source = COALESCE(stages.surface_prior_source, excluded.surface_prior_source)',
                  (key, game, name, location, length, surface_prior, surface_prior_source))
 
+    def seed_stages(self, tables):
+        """The shipped stage tables ({game: {key: entry}}, stage_tables)
+        into `stages`: name, location, length and, for a mixed surface,
+        the table's prior. What a row already has is kept."""
+        for game, entries in tables.items():
+            for key, entry in entries.items():
+                _, prior = stage_tables.surface_of(entry)
+                self.upsert_stage(key, game, entry.get('length_m'), entry.get('stage'), entry.get('location'),
+                                  prior, 'table' if prior else None)
+        return True
+
+    def _starts(self, key, limit=10):
+        """Where the last runs of a stage started ([x, y, z] each)."""
+        starts = []
+        for (text,) in self._do('SELECT start_pos FROM runs WHERE stage = ? AND start_pos IS NOT NULL '
+                                'ORDER BY id DESC LIMIT ?', (key, limit)):
+            try:
+                pos = json.loads(text)
+                starts.append((float(pos[0]), float(pos[1]), float(pos[2])))
+            except (ValueError, TypeError, IndexError):
+                continue
+        return starts
+
+    def match_distance(self, game, distance, start=None):
+        """(key, candidates): the shipped stage of `game` whose published
+        length a run to the finish (or a length the game sent) is within
+        1 % of, and every stage that close. Where two or more are, the
+        start ((x, y, z)) decides: a stage with earlier runs from within
+        50 m of it wins, one whose runs all started elsewhere is out.
+        None for the key when it stays open."""
+        if not distance:
+            return None, []
+        candidates = [e for e in stage_tables.tables().get(game, {}).values() if e.get('length_m')
+                      and abs(e['length_m'] - distance) <= STAGE_DISTANCE_TOLERANCE * e['length_m']]
+        if start is not None and candidates:
+            near, unknown = [], []
+            for entry in candidates:
+                starts = self._starts(entry['key'])
+                if not starts:
+                    unknown.append(entry)
+                elif any(math.hypot(x - start[0], z - start[2]) <= STAGE_START_NEAR for x, _, z in starts):
+                    near.append(entry)
+            candidates = near or unknown
+        candidates.sort(key=lambda e: abs(e['length_m'] - distance))
+        return (candidates[0]['key'] if len(candidates) == 1 else None), candidates
+
+    def match_track(self, track, length=None, game='acr'):
+        """The shipped stage whose shared-memory track name `track` is, as
+        the bridge sends it (Assetto Corsa Rally), or None. Two of one name
+        (the bridge cuts names and replaces accents) are told apart by the
+        length the game sent: the nearest published one."""
+        if not track:
+            return None
+        found = [e for e in stage_tables.tables().get(game, {}).values()
+                 if e.get('track') and stage_tables.bridge_track(e['track']) == track]
+        if len(found) > 1 and length:
+            found.sort(key=lambda e: abs((e.get('length_m') or 0.0) - length))
+            return found[0]['key']
+        return found[0]['key'] if len(found) == 1 else None
+
     def match_stage(self, game, length, start_z=None):
-        """The key of a stage already stored that a measured (length, start
-        z) is, within tolerance, or a new rounded key: a value on a
-        rounding boundary must not split one stage in two."""
+        """The key of a stage that a measured (length, start z) is, within
+        tolerance: the shipped table's first, then one already stored;
+        else a new rounded key: a value on a rounding boundary must not
+        split one stage in two."""
         tolerance = STAGE_LENGTH_TOLERANCE.get(game, 5.0)
         best = None
+        for entry in stage_tables.tables().get(game, {}).values():
+            known_length, known_z = entry.get('length_m'), entry.get('start_z')
+            if known_length is None or known_z is None or abs(known_length - length) > tolerance:
+                continue
+            if start_z is not None and abs(known_z - start_z) > STAGE_START_TOLERANCE:
+                continue
+            miss = abs(known_length - length) + (abs(known_z - start_z) if start_z is not None else 0.0)
+            if best is None or miss < best[0]:
+                best = (miss, entry['key'])
+        if best is not None:
+            return best[1]
         for (key,) in self._do('SELECT key FROM stages WHERE game = ? AND key LIKE ?', (game, game + ':%')):
             parts = key.split(':')
             try:
