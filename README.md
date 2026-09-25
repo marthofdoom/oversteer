@@ -54,12 +54,33 @@ __Use at your own risk. Suggestions, bugs and pull requests welcome.__
   set as a percentage of the redline, of the limiter learnt at each launch, or
   as an RPM figure, per profile. The switches are under the tab's Settings.
 - Oversteer learns each car's gearing and power curve as you drive and shows
-  the best upshift for every gear next to where you change up (per way of
-  changing: H-pattern, sequential, paddles), with coaching; the rev lights can
-  use the learnt shift points. Telemetry arrives on UDP 5310.
+  the best upshift for every gear, with the range it is known to, next to
+  where you change up (per way of changing: H-pattern, sequential, paddles);
+  the rev lights can use the learnt shift points. Telemetry arrives on UDP
+  5310. "Learn from game telemetry" learns with the rev lights off, or on a
+  wheel without them.
+- Every drive is kept, per Oversteer profile, as runs (a stage attempt, a lap
+  session, a stretch of free driving) with their corners and every change of
+  gear. The tab says what the last session was (rally stage, hillclimb,
+  circuit, ...) and why, or "unknown" when nothing shows it. The surface
+  mostly stays unknown for now: "Label last session…" says what it was, and
+  those labels are what Oversteer will learn surfaces from.
+- Coaching from that history: the habit to work on first, up to three tips
+  with their numbers (changing up early or late, the limiter, missed gates,
+  bogged launches, both pedals at once, corners against your best run of a
+  stage), praise when a habit improves, and setup advice for the car's
+  current gearing and balance, always with the driving alternative first.
+- A read-only web page for a phone or a laptop on the same network (off by
+  default, TCP 5301): the live gear and revs against the shift point, the
+  shift tables, coaching and recent sessions. Nothing can be changed from it,
+  and it can be limited to this computer.
+- "Record raw telemetry" (off by default) keeps what the game sends in
+  capture files, capped in size: `scripts/telemetry-replay.py` plays one back
+  through the learner, and one attached to a bug report shows what happened.
 - Reads Forza Horizon / Motorsport "Data Out", BeamNG / Live for Speed
-  OutGauge, and the Codemasters layout used by DiRT Rally 2.0, DiRT 4 and
-  WRC Generations.
+  OutGauge, the Codemasters layout used by DiRT Rally 2.0, DiRT 4 and WRC
+  Generations, and EA SPORTS WRC (set up with two Copy buttons under the
+  tab's Settings).
 - Games with no UDP telemetry at all — Assetto Corsa, Competizione and Rally —
   are covered by `oversteer-run`, a Steam launch-options wrapper that runs a
   small helper inside the game's Proton prefix and forwards its shared-memory

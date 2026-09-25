@@ -54,6 +54,13 @@
   computer.
 - "Learn from game telemetry": learn shift points and keep the history
   with the rev lights off, or with a wheel that has none.
+- "Record raw telemetry" under the Telemetry tab's Settings (off by
+  default): what the game sends is kept as it arrived, a file per drive,
+  in Oversteer's data folder, up to a size you choose (1 GB by default;
+  the oldest go first). Labelling a session also labels its captures and
+  keeps them.
+- Telemetry tab: the best upshift of each gear shows the range it is
+  known to.
 
 ### Changed
 - The shift learner compares each gear's own power curve where it knows
