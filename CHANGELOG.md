@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Rev lights: a third shift point unit, **% of launch limiter**. A rally
+  stage starts with clutch in, handbrake up and the throttle floored,
+  which holds the engine on its limiter; Oversteer learns that RPM at
+  every launch and puts the shift point at the chosen percentage of it,
+  so each car on each stage gets its own shift light even when the game
+  reports no maximum or the wrong one. It is raised if the car later
+  revs past it (a launch control capping the revs at the line), and
+  forgotten when the telemetry stops between stages. With no handbrake
+  fitted, clutch in and throttle floored is the launch.
+
 ## 0.13.1 — 2026-09-24
 
 ### Fixed

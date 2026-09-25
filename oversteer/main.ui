@@ -3207,7 +3207,11 @@
                                 <items>
                                   <item id="percent" translatable="yes">% of max</item>
                                   <item id="rpm" translatable="yes">RPM</item>
+                                  <item id="launch" translatable="yes">% of launch limiter</item>
                                 </items>
+                                <property name="tooltip-text" translatable="yes">% of max: of the maximum RPM the game reports.
+RPM: a fixed engine speed.
+% of launch limiter: of the RPM the engine holds on its limiter at a launch (clutch in, handbrake up, throttle floored), learnt again at every start. For rally games, whose reported maximum is often missing or wrong.</property>
                                 <signal name="changed" handler="on_rev_leds_shift_unit_changed" swapped="no"/>
                               </object>
                               <packing>

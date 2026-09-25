@@ -70,6 +70,10 @@ class Gui:
         self.equipment = []
         self.telemetry = None
         self.telemetry_generation = 0
+        # Pedals as pressed fractions for the rev lights' launch mode; the
+        # input thread writes, the telemetry thread reads (plain floats)
+        self.launch_inputs = {'clutch': None, 'throttle': None, 'handbrake': None}
+        self.telemetry_status = lambda: None
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -512,19 +516,30 @@ class Gui:
         self.telemetry_generation += 1
         generation = self.telemetry_generation
 
-        def status(source):
-            text = _("telemetry from {}").format(source) if source else _("waiting for telemetry")
+        shown = {'source': None, 'limiter': 0.0}
 
-            def show():
-                if self.telemetry is not None and generation == self.telemetry_generation:
-                    self.ui.set_rev_leds_status(text)
+        def show():
+            if self.telemetry is None or generation != self.telemetry_generation:
+                return
+            text = _("telemetry from {}").format(shown['source']) if shown['source'] else _("waiting for telemetry")
+            if shown['source'] and self.model.get_rev_leds_shift_unit() == 'launch':
+                text += '  ·  ' + (_("limiter {} rpm (from the launch)").format(int(round(shown['limiter'])))
+                                   if shown['limiter'] else _("launch to learn the limiter"))
+            self.ui.set_rev_leds_status(text)
+
+        def status(source):
+            shown['source'] = source
+            if not source:
+                shown['limiter'] = 0.0          # the listener forgets it when telemetry stops
             self.ui.safe_call(show)
-        shift = self.model.get_rev_leds_shift()
-        if self.model.get_rev_leds_shift_unit() == 'rpm':
-            kwargs = {'shift_rpm': shift or 7000}
-        else:
-            kwargs = {'shift': (shift or 97) / 100.0}
-        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status, **kwargs)
+
+        def limiter(rpm):
+            shown['limiter'] = rpm
+            self.ui.safe_call(show)
+        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status,
+                                   inputs=lambda: self.launch_inputs, on_limiter=limiter,
+                                   **self._shift_kwargs())
+        self.telemetry_status = show
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
         else:
@@ -564,6 +579,17 @@ class Gui:
             if value is not None and high > low:
                 self.ui.set_handbrake_input(min(1.0, max(0.0, (value - low) / (high - low))))
         return False
+
+    LAUNCH_PEDAL = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'throttle'}
+
+    @staticmethod
+    def _pressed_fraction(axis, value):
+        """How far a pedal is pressed, 0 released to 1 floored, whichever
+        way its axis runs."""
+        released, pressed = axis[0], axis[1]
+        if pressed == released:
+            return 0.0
+        return min(1.0, max(0.0, (value - released) / (pressed - released)))
 
     @staticmethod
     def _axis_fraction(axis, value):
@@ -622,6 +648,8 @@ class Gui:
         if axis == self.handbrake_axis and state == self.handbrake_invert:
             return
         self.handbrake_axis = axis
+        if axis is None:
+            self.launch_inputs['handbrake'] = None     # none fitted: clutch and throttle make the launch
         self.handbrake_invert = state
         self.ui.set_handbrake_visible(axis is not None)
         self.ui.set_handbrake_invert(state)
@@ -662,25 +690,31 @@ class Gui:
 
         Thread(target=work, daemon=True).start()
 
+    def _shift_kwargs(self):
+        shift = self.model.get_rev_leds_shift()
+        unit = self.model.get_rev_leds_shift_unit()
+        if unit == 'rpm':
+            return {'shift_rpm': shift or 7000}
+        return {'shift': (shift or 97) / 100.0, 'launch': unit == 'launch'}
+
     def update_rev_leds_shift(self):
         """Push a changed shift point to the running listener without
         restarting it (a restart would blink the LEDs and forget the
         learnt max RPM)."""
         if self.telemetry is None:
             return
-        shift = self.model.get_rev_leds_shift()
-        if self.model.get_rev_leds_shift_unit() == 'rpm':
-            self.telemetry.set_shift(shift_rpm=shift or 7000)
-        else:
-            self.telemetry.set_shift(shift=(shift or 97) / 100.0)
+        self.telemetry.set_shift(**self._shift_kwargs())
+        self.telemetry_status()
 
     def change_rev_leds_shift_unit(self, unit):
         """Switch the shift point between % of max RPM and an RPM figure,
         converting the value when the game has told us the max RPM."""
         value = None
-        max_rpm = self.telemetry.last_max_rpm if self.telemetry is not None else 0.0
+        max_rpm = self.telemetry.reference_max() if self.telemetry is not None else 0.0
         current = self.model.get_rev_leds_shift()
-        if max_rpm and current:
+        if current and 'rpm' not in (unit, self.model.get_rev_leds_shift_unit()):
+            value = current                 # % of max <-> % of the launch limiter: same figure
+        elif max_rpm and current:
             if unit == 'rpm' and self.model.get_rev_leds_shift_unit() != 'rpm':
                 value = int(round(current / 100.0 * max_rpm / 50.0) * 50)
             elif unit != 'rpm' and self.model.get_rev_leds_shift_unit() == 'rpm':
@@ -1147,7 +1181,7 @@ class Gui:
         low, high = adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
         fraction = (value - low) / (high - low) if high > low else 1.0
         if action.kind == 'shift':
-            max_rpm = self.telemetry.last_max_rpm if self.telemetry is not None else 0.0
+            max_rpm = self.telemetry.reference_max() if self.telemetry is not None else 0.0
             if unit == 'rpm':
                 if max_rpm:
                     fraction = value / max_rpm
@@ -1208,11 +1242,17 @@ class Gui:
                                   ecodes.ABS_RZ: self.ui.set_brakes_input,
                                   ecodes.ABS_Y: self.ui.set_clutch_input}[event.code]
                         self.ui.safe_call(setter, self._axis_fraction(axis, event.value))
+                        name = self.LAUNCH_PEDAL.get(event.code)
+                        if name is not None:
+                            self.launch_inputs[name] = self._pressed_fraction(axis, event.value)
                 elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
                     _, low, high = self.handbrake_axis
                     if high > low:
-                        self.ui.safe_call(self.ui.set_handbrake_input,
-                                          min(1.0, max(0.0, (event.value - low) / (high - low))))
+                        # As the game receives it: pulled is high once the
+                        # Invert box is right, which the game needs too
+                        pulled = min(1.0, max(0.0, (event.value - low) / (high - low)))
+                        self.launch_inputs['handbrake'] = pulled
+                        self.ui.safe_call(self.ui.set_handbrake_input, pulled)
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     if event.value:

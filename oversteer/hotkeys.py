@@ -70,7 +70,7 @@ BY_ID = {a.id: a for a in ACTIONS}
 # binds other buttons must not strand you there.
 GLOBAL_ACTIONS = ('profile_next', 'profile_prev')
 
-SHIFT_STEP = {'percent': 1, 'rpm': 100}      # one press of the shift point hotkey
+SHIFT_STEP = {'percent': 1, 'launch': 1, 'rpm': 100}      # one press of the shift point hotkey
 
 HAT_NAMES = {
     (ecodes.ABS_HAT0X, -1): _("D-pad left"),

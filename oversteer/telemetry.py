@@ -51,6 +51,17 @@ CODEMASTERS_MAX = 512
 OVST_MAGIC = b'OVST'
 OVST_SIZE = 24
 
+# Launch mode: a rally stage starts with clutch in, handbrake up and the
+# throttle floored, which holds the engine on its limiter. That RPM is the
+# car's real ceiling, whatever (if anything) the game reports as its max.
+LAUNCH_CLUTCH = 0.6                                  # pressed at least this far
+LAUNCH_THROTTLE = 0.85
+LAUNCH_HANDBRAKE = 0.5
+LAUNCH_HOLD = 0.6                                    # seconds held before the RPM counts
+LAUNCH_SETTLE = 0.3                                  # the last this-many seconds must not climb...
+LAUNCH_RISE = 0.02                                   # ...by more than this fraction: on the limiter
+LAUNCH_MIN_RPM = 2000.0
+
 
 class RevLeds:
     """The wheel's rev LEDs (Linux LED class), lit as a bar."""
@@ -187,12 +198,21 @@ def decode(data):
 class Telemetry:
     """UDP listener thread driving a RevLeds."""
 
-    def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None):
+    def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None,
+                 launch=False, inputs=None, on_limiter=None):
         """`shift` is the shift point as a fraction of the game's max RPM;
-        `shift_rpm`, when given, is an absolute shift point instead."""
+        `shift_rpm`, when given, is an absolute shift point instead. With
+        `launch`, `shift` is a fraction of the limiter learnt at the last
+        launch (see LAUNCH_*): `inputs()` gives the pedals as pressed
+        fractions, {'clutch', 'throttle', 'handbrake'} (None = unknown),
+        and `on_limiter(rpm)` hears each limiter learnt."""
         self.leds = leds
         self.port = int(port)
-        self.set_shift(shift, shift_rpm)
+        self.set_shift(shift, shift_rpm, launch)
+        self.inputs = inputs
+        self.on_limiter = on_limiter
+        self.launch_max = 0.0             # limiter from the last launch; 0 = none yet
+        self._launch_samples = []         # (time, rpm) while a launch is held
         self.last_max_rpm = 0.0
         self._learned_at = 0.0
         self.on_status = on_status
@@ -204,11 +224,59 @@ class Telemetry:
         self._sock = None
         self._unknown_sizes = set()
 
-    def set_shift(self, shift=DEFAULT_SHIFT, shift_rpm=None):
+    def set_shift(self, shift=DEFAULT_SHIFT, shift_rpm=None, launch=False):
         """Change the shift point while running (plain attribute writes:
         the listener thread reads them once per packet)."""
         self.shift = max(0.5, min(1.0, float(shift)))
         self.shift_rpm = float(shift_rpm) if shift_rpm else None
+        self.launch = bool(launch) and not self.shift_rpm
+
+    def reference_max(self):
+        """The RPM the shift fraction applies to right now (0 = unknown)."""
+        if self.launch and self.launch_max:
+            return self.launch_max
+        return self.last_max_rpm or self.learned_max
+
+    def _launch_held(self):
+        if self.inputs is None:
+            return False
+        try:
+            state = self.inputs()
+        except Exception:
+            return False
+        clutch, throttle, handbrake = state.get('clutch'), state.get('throttle'), state.get('handbrake')
+        if clutch is None or throttle is None:
+            return False
+        # No handbrake fitted: clutch in and throttle floored is the launch
+        return (clutch >= LAUNCH_CLUTCH and throttle >= LAUNCH_THROTTLE
+                and (handbrake is None or handbrake >= LAUNCH_HANDBRAKE))
+
+    def _learn_launch(self, now, rpm):
+        """Watch a launch hold; once the RPM has stopped climbing, its
+        peak is the limiter. A clutch kick that never reaches the limiter
+        is still climbing when released, and teaches nothing."""
+        if not self._launch_held():
+            self._launch_samples = []
+            return
+        samples = self._launch_samples
+        samples.append((now, rpm))
+        if now - samples[0][0] < LAUNCH_HOLD:
+            return
+        recent = [r for t, r in samples if now - t <= LAUNCH_SETTLE]
+        earlier = [r for t, r in samples if now - t > LAUNCH_SETTLE]
+        peak_earlier = max(earlier) if earlier else 0.0
+        if peak_earlier < LAUNCH_MIN_RPM or max(recent) > peak_earlier * (1.0 + LAUNCH_RISE):
+            return
+        limiter = max(r for t, r in samples)
+        # Keep only the settle window: a long hold stays cheap
+        self._launch_samples = [(t, r) for t, r in samples if now - t <= LAUNCH_HOLD]
+        if abs(limiter - self.launch_max) > 1.0:
+            self.launch_max = limiter
+            if self.on_limiter is not None:
+                try:
+                    self.on_limiter(limiter)
+                except Exception:
+                    pass
 
     def start(self):
         if self._thread is not None:
@@ -253,6 +321,10 @@ class Telemetry:
                     self.last_source = None
                     self.learned_max = 0.0
                     self._learned_at = 0.0
+                    # Menus or a loading screen: the next stage may be
+                    # another car, and it starts with a launch anyway
+                    self.launch_max = 0.0
+                    self._launch_samples = []
                     self._status(None)
                 continue
             except OSError:
@@ -270,6 +342,18 @@ class Telemetry:
                 self.last_source = addr[0]
                 self._status(addr[0])
             shift_rpm, shift_fraction = self.shift_rpm, self.shift
+            if self.launch:
+                self._learn_launch(now, rpm)
+                if self.launch_max and rpm > self.launch_max:
+                    # Past the launch figure on the move (a launch control
+                    # that caps the revs at the line): it was not the top
+                    report = rpm > self.launch_max * 1.01
+                    self.launch_max = rpm
+                    if report and self.on_limiter is not None:
+                        try:
+                            self.on_limiter(rpm)
+                        except Exception:
+                            pass
             if max_rpm is None:
                 # OutGauge: learn the ceiling from the highest RPM seen. It
                 # sags slowly (per second, not per packet) so a change of
@@ -286,6 +370,8 @@ class Telemetry:
                 self.last_max_rpm = max_rpm
             # Everything is relative to the shift point: the bar completes
             # there and flashes above it.
+            if self.launch and self.launch_max:
+                max_rpm = self.launch_max
             reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
             fraction = rpm / reference if reference > 0 else 0.0
             if shift or fraction >= 1.0 + FLASH_MARGIN:

@@ -163,7 +163,7 @@ class Model:
             data['invert_pedals'] = self.device.get_invert_pedals()
         # Profiles from before the shift point: keep the old fixed 97 %
         if data['rev_leds'] is not None:
-            if data['rev_leds_shift_unit'] not in ('percent', 'rpm'):
+            if data['rev_leds_shift_unit'] not in ('percent', 'rpm', 'launch'):
                 data['rev_leds_shift_unit'] = 'percent'
             data['rev_leds_shift'] = self._clamp_shift(data['rev_leds_shift_unit'], data['rev_leds_shift'])
 
@@ -385,10 +385,11 @@ class Model:
         return self.data['rev_leds_shift']
 
     def set_rev_leds_shift_unit(self, unit, value=None):
-        """Change the unit of the shift point; `value` is the converted
-        shift point in the new unit (the controller supplies it when the
-        game's max RPM is known), otherwise the unit's default."""
-        unit = 'rpm' if unit == 'rpm' else 'percent'
+        """Change the unit of the shift point: 'percent' of the game's max
+        RPM, 'rpm', or 'launch' (percent of the limiter learnt at each
+        launch). `value` is the converted shift point in the new unit (the
+        controller supplies it when it can), otherwise the unit's default."""
+        unit = unit if unit in ('rpm', 'launch') else 'percent'
         if self.data['rev_leds_shift_unit'] == unit:
             return
         # Value first, so the save button reflects both keys

@@ -115,3 +115,67 @@ def test_outgauge_learned_max_never_flashes_a_steady_cruise():
     packets = [outgauge(7000)] + [outgauge(4000)] * 30
     writes = _feed(Telemetry(leds, shift=0.8), packets)
     assert not any(w[0] == 'pattern' for w in writes)
+
+
+def _launch(telemetry, profile, inputs):
+    """Drive _learn_launch with (seconds, rpm) samples and fixed pedal inputs."""
+    telemetry.inputs = lambda: inputs
+    for t, rpm in profile:
+        telemetry._learn_launch(t, rpm)
+
+
+def _hold_on_limiter(limiter=7450.0, seconds=1.5):
+    """Revs climbing to the limiter, then bouncing just under it."""
+    samples, t = [], 0.0
+    while t < seconds:
+        rpm = min(limiter, 2500 + t * 12000) if t < 0.5 else limiter - (0 if int(t * 50) % 2 else 120)
+        samples.append((t, rpm))
+        t += 0.02
+    return samples
+
+
+LAUNCH = {'clutch': 1.0, 'throttle': 1.0, 'handbrake': 1.0}
+
+
+def test_launch_learns_the_limiter():
+    learnt = []
+    telemetry = Telemetry(FakeLeds(), shift=0.95, launch=True, on_limiter=learnt.append)
+    telemetry.last_max_rpm = 9000.0                          # what the game claims
+    assert telemetry.reference_max() == 9000.0               # before a launch: the game's figure
+    _launch(telemetry, _hold_on_limiter(7450), LAUNCH)
+    assert telemetry.launch_max == 7450.0 and learnt[-1] == 7450.0
+    assert telemetry.reference_max() == 7450.0
+
+
+def test_launch_without_a_handbrake_fitted():
+    telemetry = Telemetry(FakeLeds(), launch=True)
+    _launch(telemetry, _hold_on_limiter(6900), {'clutch': 0.9, 'throttle': 0.95, 'handbrake': None})
+    assert telemetry.launch_max == 6900.0
+
+
+def test_no_launch_no_learning():
+    telemetry = Telemetry(FakeLeds(), launch=True)
+    # handbrake down: driving, not a launch
+    _launch(telemetry, _hold_on_limiter(), dict(LAUNCH, handbrake=0.0))
+    assert telemetry.launch_max == 0.0
+    # a clutch kick: too short to count
+    _launch(telemetry, _hold_on_limiter(seconds=0.4), LAUNCH)
+    assert telemetry.launch_max == 0.0
+    # revs still climbing the whole time: never reached the limiter
+    telemetry._launch_samples = []
+    _launch(telemetry, [(i * 0.02, 2500 + i * 60) for i in range(75)], LAUNCH)
+    assert telemetry.launch_max == 0.0
+    # other modes don't learn at all
+    assert Telemetry(FakeLeds(), shift=0.95).launch is False
+    assert Telemetry(FakeLeds(), shift_rpm=7000, launch=True).launch is False
+
+
+def test_launch_limiter_drives_the_bar_and_is_raised_on_the_move():
+    inputs = dict(LAUNCH)
+    telemetry = Telemetry(FakeLeds(), shift=0.9, launch=True, inputs=lambda: inputs)
+    writes = _feed(telemetry, [ovst(rpm, 9000) for _, rpm in _hold_on_limiter(7000, seconds=1.2)], gap=0.02)
+    assert telemetry.launch_max == 7000.0                    # learnt through the listener
+    assert any(w[0] == 'pattern' for w in writes)            # on the limiter: past 90 % of 7000, flashing
+    inputs.update(clutch=0.0, handbrake=0.0)                 # driving away, past a capped launch
+    writes = _feed(telemetry, [ovst(7300, 9000)], gap=0.02)
+    assert telemetry.launch_max == 7300.0
