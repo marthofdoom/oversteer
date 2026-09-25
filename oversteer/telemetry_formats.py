@@ -18,12 +18,16 @@ None. The formats:
   in rad/s in DiRT Rally (see codemasters_unit()). The packet length varies
   by game, so any 4-byte-aligned length from 256 bytes up is accepted once
   the Forza sizes are excluded.
+- EA SPORTS WRC's own UDP output: the game's default "wrc" structure
+  (237 bytes, no header) or Oversteer's structure (eawrc_structure(),
+  252 bytes, a 4CC per packet and the car and stage ids).
 - Oversteer's own "OVST" datagram (24 bytes) from oversteer-shm-bridge, the
   helper that runs inside a Proton prefix and forwards shared-memory
   telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
   Rally): rpm, max rpm (0 = unknown), gear, speed.
 """
 
+import json
 import logging
 import math
 import struct
@@ -37,6 +41,72 @@ CODEMASTERS_DIRT = 264                               # DiRT Rally 1/2 and DiRT 4
 OVST_MAGIC = b'OVST'
 OVST_SIZE = 24
 OVST2_SIZE = 96                                      # + throttle, brake, car and track names
+
+# EA SPORTS WRC: the game sends whatever a packet structure file (JSON, in
+# its Documents/My Games/WRC/telemetry/udp folder) lists, channel by
+# channel, packed little-endian with no padding. Its default structure,
+# "wrc", sends session_update with no header: 237 bytes. Oversteer's own,
+# "oversteer" (eawrc_structure()), adds a 4CC header naming each packet and
+# the ids of the car and the stage. Types from the game's channels.json
+# (data version 2); a boolean is 1 byte.
+EAWRC_TYPES = {
+    'packet_4cc': '4s', 'packet_uid': 'Q', 'game_total_time': 'f', 'game_delta_time': 'f',
+    'game_frame_count': 'Q', 'shiftlights_fraction': 'f', 'shiftlights_rpm_start': 'f',
+    'shiftlights_rpm_end': 'f', 'shiftlights_rpm_valid': 'B', 'vehicle_gear_index': 'B',
+    'vehicle_gear_index_neutral': 'B', 'vehicle_gear_index_reverse': 'B', 'vehicle_gear_maximum': 'B',
+    'stage_current_time': 'f', 'stage_current_distance': 'd', 'stage_length': 'd', 'stage_shakedown': 'B',
+    'vehicle_id': 'H', 'vehicle_class_id': 'H', 'vehicle_manufacturer_id': 'H', 'location_id': 'H',
+    'route_id': 'H',
+}
+EAWRC_WHEELS = ('bl', 'br', 'fl', 'fr')
+EAWRC_DEFAULT_CHANNELS = (
+    ['packet_uid', 'game_total_time', 'game_delta_time', 'game_frame_count', 'shiftlights_fraction',
+     'shiftlights_rpm_start', 'shiftlights_rpm_end', 'shiftlights_rpm_valid', 'vehicle_gear_index',
+     'vehicle_gear_index_neutral', 'vehicle_gear_index_reverse', 'vehicle_gear_maximum', 'vehicle_speed',
+     'vehicle_transmission_speed']
+    + ['vehicle_{}_{}'.format(v, a) for v in ('position', 'velocity', 'acceleration', 'left_direction',
+                                              'forward_direction', 'up_direction') for a in 'xyz']
+    + ['vehicle_{}_{}'.format(v, w) for v in ('hub_position', 'hub_velocity', 'cp_forward_speed',
+                                              'brake_temperature') for w in EAWRC_WHEELS]
+    + ['vehicle_engine_rpm_max', 'vehicle_engine_rpm_idle', 'vehicle_engine_rpm_current', 'vehicle_throttle',
+       'vehicle_brake', 'vehicle_clutch', 'vehicle_steering', 'vehicle_handbrake', 'stage_current_time',
+       'stage_current_distance', 'stage_length'])
+EAWRC_CHANNELS = EAWRC_DEFAULT_CHANNELS + ['stage_shakedown', 'vehicle_id', 'vehicle_class_id',
+                                           'vehicle_manufacturer_id', 'location_id', 'route_id']
+EAWRC_PACKETS = {b'SESS': 'start', b'SESU': 'update', b'SESE': 'end', b'SESP': 'pause', b'SESR': 'resume'}
+EAWRC_PACKET_IDS = {'start': 'session_start', 'update': 'session_update', 'end': 'session_end',
+                    'pause': 'session_pause', 'resume': 'session_resume'}
+EAWRC_STRUCTURE = 'oversteer'
+_eawrc_mismatches = set()                            # packet lengths already logged
+
+
+def _struct_format(channels):
+    return '<' + ''.join(EAWRC_TYPES.get(c, 'f') for c in channels)
+
+
+EAWRC_DEFAULT_FORMAT = _struct_format(EAWRC_DEFAULT_CHANNELS)
+EAWRC_DEFAULT_SIZE = struct.calcsize(EAWRC_DEFAULT_FORMAT)                   # 237
+EAWRC_FORMAT = _struct_format(['packet_4cc'] + EAWRC_CHANNELS)
+EAWRC_SIZE = struct.calcsize(EAWRC_FORMAT)                                   # 252
+
+
+def eawrc_structure():
+    """Oversteer's packet structure for EA SPORTS WRC, as the JSON text the
+    game reads from telemetry/udp/oversteer.json."""
+    return json.dumps({
+        'versions': {'schema': 1, 'data': 2},
+        'id': EAWRC_STRUCTURE,
+        'header': {'channels': ['packet_4cc']},
+        'packets': [{'id': packet, 'channels': EAWRC_CHANNELS} for packet in EAWRC_PACKET_IDS.values()],
+    }, indent=4) + '\n'
+
+
+def eawrc_config_lines(port, ip='127.0.0.1'):
+    """The entries for the "packets" list of the game's telemetry
+    config.json that send Oversteer's structure to `port`."""
+    return ',\n'.join(json.dumps({'structure': EAWRC_STRUCTURE, 'packet': packet, 'ip': ip, 'port': int(port),
+                                  'frequencyHz': 60, 'bEnabled': True}, indent=4)
+                      for packet in EAWRC_PACKET_IDS.values()) + '\n'
 
 
 def _plausible(x):
@@ -54,7 +124,7 @@ class Sample:
     the stage or route where the game identifies one)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
-                 'track', 'game', 'brake', 'stage')
+                 'track', 'game', 'brake', 'stage', 'packet')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -64,6 +134,7 @@ class Sample:
         self.game = game
         self.track = None
         self.stage = None
+        self.packet = None                # EA SPORTS WRC: 'start', 'update', 'end', 'pause', 'resume'
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -109,6 +180,51 @@ def _finite(x):
 def _ascii(raw):
     text = raw.split(b'\0', 1)[0].decode('ascii', 'replace').strip()
     return text if text and all(0x20 <= ord(c) < 0x7f for c in text) else None
+
+
+def _eawrc(data, n):
+    """EA SPORTS WRC, Oversteer's structure (4CC header) or the game's
+    default one; None when the packet is not one of them."""
+    if n == EAWRC_SIZE:
+        fourcc = data[:4]
+        packet = EAWRC_PACKETS.get(fourcc) or EAWRC_PACKETS.get(fourcc[::-1])     # byte order: verify on a capture
+        if packet is None:
+            return None
+        values = dict(zip(['packet_4cc'] + EAWRC_CHANNELS, struct.unpack(EAWRC_FORMAT, data)))
+    elif n == EAWRC_DEFAULT_SIZE:
+        packet = 'update'
+        values = dict(zip(EAWRC_DEFAULT_CHANNELS, struct.unpack(EAWRC_DEFAULT_FORMAT, data)))
+    else:
+        return None
+    rpm, max_rpm = values['vehicle_engine_rpm_current'], values['vehicle_engine_rpm_max']
+    speed = values['vehicle_speed']
+    if not (_plausible(rpm) and _plausible(max_rpm) and math.isfinite(speed)):
+        return None
+    index, top = values['vehicle_gear_index'], values['vehicle_gear_maximum']
+    if index == values['vehicle_gear_index_neutral']:
+        gear = 0
+    elif index == values['vehicle_gear_index_reverse']:
+        gear = -1
+    else:
+        gear = index if 1 <= index <= top else None
+    sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, gear=gear, speed=speed,
+                    throttle=_finite(values['vehicle_throttle']), clutch=_finite(values['vehicle_clutch']),
+                    brake=_finite(values['vehicle_brake']), game='eawrc')
+    sample.packet = packet
+    if 'vehicle_id' in values:
+        sample.car = 'eawrc-{}'.format(values['vehicle_id'])
+        sample.car_name = 'EA WRC car {}'.format(values['vehicle_id'])
+        location, route = values['location_id'], values['route_id']
+        sample.stage = 'eawrc:{}:{}'.format(location, route)
+        sample.track = 'location {}, route {}'.format(location, route)
+    else:
+        # The default structure names no car: the engine and gearbox tell
+        # cars apart, as in DiRT
+        idle = values['vehicle_engine_rpm_idle']
+        sample.car = 'eawrc-{:.0f}-{:.0f}-{}'.format(round(max_rpm, -1), round(idle, -1) if math.isfinite(idle) else 0,
+                                                    top)
+        sample.car_name = '{:.0f} rpm, {} gears'.format(round(max_rpm, -1), top)
+    return sample
 
 
 def decode_sample(data):
@@ -173,6 +289,17 @@ def decode_sample(data):
                       speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
                       throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake),
                       game='beamng' if name == 'beam' else 'lfs')
+    if n in (EAWRC_SIZE, EAWRC_DEFAULT_SIZE):
+        # Before the Codemasters catch-all, which would take any 4-aligned
+        # length from 256 bytes up
+        return _eawrc(data, n)
+    if data[:4] in EAWRC_PACKETS or data[:4][::-1] in EAWRC_PACKETS:
+        # Our 4CC, another length: a structure file from another version
+        if n not in _eawrc_mismatches:
+            _eawrc_mismatches.add(n)
+            logging.warning("telemetry: EA SPORTS WRC packet of %d bytes, Oversteer's structure makes %d: "
+                            "copy the structure file into the game again", n, EAWRC_SIZE)
+        return None
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
         floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
         game = 'dirt' if n == CODEMASTERS_DIRT else 'wrcg'

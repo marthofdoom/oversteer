@@ -326,6 +326,23 @@ the layout).**
   `readme/ids.json` (names only, with attribution; check the readme's
   terms before shipping it, and ship numbers if they forbid it). Vehicle
   names are left to the user's rename; unknown ids show as numbers.
+- *As built (Step A):* the channel list and types live in Python
+  (`EAWRC_DEFAULT_CHANNELS`, `EAWRC_CHANNELS`, `EAWRC_TYPES` in
+  `telemetry_formats.py`); `eawrc_structure()` generates the JSON, and the
+  shipped `data/telemetry/eawrc/oversteer.json` is that text (a test keeps
+  them equal), so decoding needs no data file at run time. Sizes check
+  out: 237 and 252 bytes. Still to **verify on a capture**: the 4CC byte
+  order (both orders are accepted), the structure file's shape (top-level
+  `header`, `versions.data` 2), `frequencyHz` for the event packets, and
+  that forward gears are indexed 1..`vehicle_gear_maximum` (neutral and
+  reverse come from the packet's sentinels). A 4CC packet of another
+  length is logged once and never reaches the Codemasters catch-all.
+  Car keys follow today's v1 form (`eawrc-<vehicle_id>`, or
+  `eawrc-<max>-<idle>-<gears>` from the default structure); D3's
+  `eawrc/<id>` comes with Step C. **Deferred: `ids.json`** (names for
+  classes, locations, routes): the game is not installed here, so its
+  `readme/ids.json` and its terms could not be read; ids show as numbers
+  (`location 4, route 12`) until it is.
 - Setup help (in the tab, Step A): **"Copy structure JSON"** and **"Copy
   config lines"** buttons, like the existing launch-options Copy, next to
   the exact target paths inside the prefix
@@ -1281,6 +1298,8 @@ checklist below.
   real data; the user splits by hand meanwhile.
 - AC1 UDP remote telemetry (port 9996): the bridge covers AC1 already.
 - EA WRC v1.8 channels: after a capture confirms them.
+- EA WRC id → name table (`data/telemetry/eawrc/ids.json`): needs the
+  game's `readme/ids.json` and a check of its terms; ids show as numbers.
 - Writing EA WRC's `config.json` for the user: the tab shows the lines
   instead.
 - Learning `BOOST_HOLD` per car and fitting drag per car (§8.1 items 3, 8):
@@ -1308,7 +1327,7 @@ Design revised after the independent review (§3.2): done.
 - [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
 - [x] UDP default port 5310 (D1) with the probe and hint (symmetric, see §3.1 D1); CHANGELOG entries for Step A. Bridge .c default left at 5300 until it is rebuilt
 - [x] GTK: snapshot cache (`load_snapshot()` keyed by (profile, key, `updated`); rename bumps `updated`), history on events only (`method_shifts()`), advice limited to 3 tips by size, 1 praise line, 1 re-tune line, 1 "still learning" line. The quiet "still:" lines and re-showing rules need `coach_state` (Step C)
-- [ ] `telemetry_formats.py` split (done, acb5ba0); EA SPORTS WRC decoder, id table, copy buttons
+- [x] `telemetry_formats.py` split (acb5ba0); EA SPORTS WRC decoder (both structures), shipped structure file, copy buttons with the target folder. **Deferred:** the id → name table (game's `ids.json` and its terms not available here, §5.3)
 
 ### Step B
 - [ ] Web server (read-only, limits, Host check, headers) over today's data, and page

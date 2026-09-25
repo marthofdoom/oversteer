@@ -100,3 +100,63 @@ def test_codemasters_nonsense():
     assert decode_sample(codemasters(float('nan'), 7500)) is None
     assert decode_sample(codemasters(3000, -7500)) is None
     assert math.isfinite(decode_sample(codemasters(3000, 7500)).rpm)
+
+
+def eawrc(fourcc=b'SESU', default=False, **values):
+    """An EA SPORTS WRC packet in Oversteer's structure, or the game's default one."""
+    from oversteer import telemetry_formats as f
+    channels = f.EAWRC_DEFAULT_CHANNELS if default else ['packet_4cc'] + f.EAWRC_CHANNELS
+    fmt = f.EAWRC_DEFAULT_FORMAT if default else f.EAWRC_FORMAT
+    base = dict(packet_4cc=fourcc, vehicle_engine_rpm_current=5200.0, vehicle_engine_rpm_max=7600.0,
+                vehicle_engine_rpm_idle=900.0, vehicle_speed=25.0, vehicle_gear_index=3,
+                vehicle_gear_index_neutral=0, vehicle_gear_index_reverse=10, vehicle_gear_maximum=6,
+                vehicle_throttle=0.8, vehicle_brake=0.0, vehicle_clutch=0.0, vehicle_id=17, location_id=4,
+                route_id=12)
+    base.update(values)
+    return struct.pack(fmt, *(base.get(c, 0) for c in channels))
+
+
+def test_eawrc_structure_and_sizes():
+    import json
+    import os
+    from oversteer import telemetry_formats as f
+    assert f.EAWRC_DEFAULT_SIZE == 237 and f.EAWRC_SIZE == 252
+    structure = json.loads(f.eawrc_structure())
+    assert structure['header']['channels'] == ['packet_4cc']
+    assert {p['id'] for p in structure['packets']} == {'session_start', 'session_update', 'session_end',
+                                                       'session_pause', 'session_resume'}
+    shipped = os.path.join(os.path.dirname(__file__), '..', 'data', 'telemetry', 'eawrc', 'oversteer.json')
+    with open(shipped) as fh:
+        assert fh.read() == f.eawrc_structure()                   # the file installed is the one copied
+    lines = json.loads('[' + f.eawrc_config_lines(5310) + ']')
+    assert {line['port'] for line in lines} == {5310} and all(line['structure'] == 'oversteer' for line in lines)
+
+
+def test_eawrc_oversteer_structure():
+    sample = decode_sample(eawrc())
+    assert (sample.game, sample.packet, sample.gear) == ('eawrc', 'update', 3)
+    assert sample.rpm == 5200.0 and sample.max_rpm == 7600.0 and sample.speed == 25.0
+    assert abs(sample.throttle - 0.8) < 1e-6 and sample.brake == 0.0
+    assert sample.car == 'eawrc-17' and sample.stage == 'eawrc:4:12'
+    assert decode_sample(eawrc(vehicle_gear_index=0)).gear == 0                  # the packet's neutral
+    assert decode_sample(eawrc(vehicle_gear_index=10)).gear == -1                # and reverse
+    assert decode_sample(eawrc(fourcc=b'SESP')).packet == 'pause'
+    assert decode_sample(eawrc(fourcc=b'SESS'[::-1])).packet == 'start'          # either byte order
+    assert decode_sample(eawrc(fourcc=b'XXXX')) is None
+    assert decode_sample(eawrc(vehicle_engine_rpm_current=float('nan'))) is None
+
+
+def test_eawrc_default_structure():
+    """The game's own "wrc" structure: 237 bytes, no header, no ids."""
+    packet = eawrc(default=True)
+    assert len(packet) == 237
+    sample = decode_sample(packet)
+    assert sample.game == 'eawrc' and sample.gear == 3 and sample.rpm == 5200.0
+    assert sample.car == 'eawrc-7600-900-6' and sample.stage is None
+
+
+def test_eawrc_other_lengths_are_not_dirt():
+    """An EA packet from another structure version must not reach the
+    Codemasters catch-all (any 4-aligned length from 256 bytes)."""
+    assert decode_sample(eawrc() + b'\0' * 12) is None                            # 264: DiRT's length
+    assert decode_sample(codemasters(5000, 7500)).game == 'dirt'                   # which still decodes

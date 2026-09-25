@@ -6,6 +6,8 @@ import math
 import os
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
+from .telemetry import DEFAULT_PORT
+from .telemetry_formats import eawrc_structure, eawrc_config_lines
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -851,6 +853,7 @@ class GtkUi:
         self.telemetry_settings = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.telemetry_settings.set_margin_top(8)
         self.telemetry_settings.pack_start(settings, False, False, 0)
+        self.telemetry_settings.pack_start(self._eawrc_setup(), False, False, 0)
         expander = Gtk.Expander()
         expander.set_label_widget(Gtk.Label(label=_("Settings: rev lights and telemetry")))
         expander.add(self.telemetry_settings)
@@ -863,6 +866,42 @@ class GtkUi:
         self._telemetry_rows = None
         self.main_notebook.connect('switch-page', lambda notebook, child, index:
                                    self.controller.telemetry_tab_selected() if child is scrolled else None)
+
+    EAWRC_FOLDER = ('…/steamapps/compatdata/1849250/pfx/drive_c/users/steamuser/Documents/'
+                    'My Games/WRC/telemetry/')
+
+    def _eawrc_setup(self):
+        """EA SPORTS WRC sends telemetry once its config says what and
+        where. Oversteer can't reach the game's Proton prefix from its
+        sandbox, so it hands over the text and says where it goes."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        heading = Gtk.Label(xalign=0)
+        heading.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(_("EA SPORTS WRC"))))
+        box.pack_start(heading, False, False, 0)
+        text = Gtk.Label(xalign=0)
+        text.set_line_wrap(True)
+        text.set_max_width_chars(80)
+        text.set_selectable(True)
+        text.set_markup(GLib.markup_escape_text(
+            _("Start the game once so it creates its telemetry folder, then quit it. In that folder, inside "
+              "the game's Proton prefix:\n{folder}\n• save the structure as udp/oversteer.json;\n"
+              "• in config.json, add the config lines to the \"packets\" list under \"udp\" (they send "
+              "to this computer on the port above; check that the game's own entries call the switch "
+              "\"bEnabled\" too).").format(folder=self.EAWRC_FOLDER)))
+        box.pack_start(text, False, False, 0)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        structure = Gtk.Button(label=_("Copy structure JSON"))
+        structure.connect('clicked', lambda w: self._copy_text(eawrc_structure()))
+        buttons.pack_start(structure, False, False, 0)
+        config = Gtk.Button(label=_("Copy config lines"))
+        config.connect('clicked', lambda w: self._copy_text(
+            eawrc_config_lines(self.rev_leds_port.get_value_as_int() or DEFAULT_PORT)))
+        buttons.pack_start(config, False, False, 0)
+        box.pack_start(buttons, False, False, 0)
+        return box
+
+    def _copy_text(self, text):
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
 
     def set_rev_leds_options(self, launch, learnt):
         for switch, value in ((self.rev_leds_launch, launch), (self.rev_leds_learnt, learnt)):
