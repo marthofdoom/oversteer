@@ -8,7 +8,7 @@ from .gtk_handlers import GtkHandlers
 from . import hotkeys
 from .telemetry import DEFAULT_PORT
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
-from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_lines
+from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_lines, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -1111,57 +1111,27 @@ class GtkUi:
         """`live`: the line about the telemetry arriving now. `snapshot`:
         the shown car's learner snapshot, or None."""
         self.telemetry_live.set_markup(live)
-        rows = None
         advice = list(snapshot['advice']) if snapshot is not None else []
         if advice != self._telemetry_advice_lines:
             self._telemetry_advice_lines = advice
             self._show_coaching()
-        if snapshot is not None:
-            methods = snapshot.get('methods') or {}
-            rows = (snapshot['limiter'], tuple(tuple(sorted(r.items())) for r in snapshot['gears']),
-                    tuple(snapshot['advice']), snapshot['power_bands'],
-                    tuple(sorted((g, tuple(sorted(m.items()))) for g, m in methods.items())))
-        if rows == self._telemetry_rows:
+        # Rebuilt only when what it shows changed, not every second
+        shown = (shift_summary(snapshot), shift_table(snapshot) if snapshot is not None else None)
+        if shown == self._telemetry_rows:
             return
-        self._telemetry_rows = rows
+        self._telemetry_rows = shown
         for child in self.telemetry_gears.get_children():
             child.destroy()
+        self.telemetry_summary.set_text(shown[0])
         if snapshot is None:
-            self.telemetry_summary.set_text(_("Nothing learnt yet: drive with the rev lights or \"Learn from game "
-                                              "telemetry\" on and Oversteer learns each car's gearing and power."))
             return
-        limiter = snapshot['limiter']
-        source = _("engine power from the game") if snapshot['power_source'] == 'game' else \
-            _("engine power estimated from acceleration")
-        self.telemetry_summary.set_text(_("Limiter {} rpm  ·  {} rev bands of power known ({})  ·  learnt from "
-                                          "your recent driving").format(
-            int(limiter) if limiter else '?', snapshot['power_bands'], source))
-        # A column per way of changing gear, once it has changes to show
-        methods = snapshot.get('methods') or {}
-        used = [m for m in ('h-pattern', 'sequential', 'paddles') if any(m in v for v in methods.values())]
-        method_names = {'h-pattern': _("H-pattern"), 'sequential': _("Sequential"), 'paddles': _("Paddles")}
-        headers = ((_("Gear"), _("rpm per km/h"), _("Best upshift"), _("of limiter"), _("You change up"))
-                   + tuple(method_names[m] for m in used) + (_("Samples"),))
+        headers, cells = shown[1]
         for column, text in enumerate(headers):
             label = Gtk.Label(xalign=0)
             label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(text)))
             self.telemetry_gears.attach(label, column, 0, 1, 1)
-        for index, row in enumerate(snapshot['gears'], start=1):
-            if row['last']:
-                best, share = _("top gear"), ''
-            elif row['best'] is None:
-                best, share = _("learning…"), ''
-            else:
-                best = '{:.0f} rpm'.format(row['best'])
-                share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
-            mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
-            per_method = []
-            for method in used:
-                average = methods.get(row['gear'], {}).get(method)
-                per_method.append('{:.0f} rpm ({})'.format(*average) if average else '—')
-            cells = ((str(row['gear']), '{:.1f}'.format(row['ratio'] / 3.6), best, share, mine)
-                     + tuple(per_method) + (str(row['ratio_samples']),))
-            for column, text in enumerate(cells):
+        for index, row in enumerate(cells, start=1):
+            for column, text in enumerate(row):
                 self.telemetry_gears.attach(Gtk.Label(label=text, xalign=0), column, index, 1, 1)
         self.telemetry_gears.show_all()
 

@@ -61,3 +61,25 @@ def test_gather_from_the_database(tmp_path):
     assert found['context'][0].startswith('discipline unknown') and len(found['sessions']) == 3
     assert found['tuning'][0].startswith('No setup recorded yet')
     assert view.gather(h.store, 'rally', 'nothing/1')['car_id'] is None
+
+
+def test_shift_table():
+    gears = [{'gear': 1, 'ratio': 360.0, 'ratio_samples': 80, 'best': 7100.0, 'best_low': 6950.0,
+              'best_high': 7200.0, 'average_shift': 6800.0, 'shifts': 12, 'last': False},
+             {'gear': 2, 'ratio': 252.0, 'ratio_samples': 60, 'best': None, 'best_low': None, 'best_high': None,
+              'average_shift': None, 'shifts': 0, 'last': False},
+             {'gear': 3, 'ratio': 190.0, 'ratio_samples': 5, 'best': None, 'best_low': None, 'best_high': None,
+              'average_shift': None, 'shifts': 0, 'last': True}]
+    snapshot = {'limiter': 7500.0, 'gears': gears, 'power_bands': 30, 'power_source': 'game',
+                'methods': {1: {'h-pattern': (6790.0, 10)}}}
+    headers, rows = view.shift_table(snapshot)
+    assert headers == ('Gear', 'rpm per km/h', 'Best upshift', 'of limiter', 'You change up', 'H-pattern', 'Samples')
+    assert rows[0] == ('1', '100.0', '7100 rpm (6950–7200)', '95 %', '6800 rpm (12)', '6790 rpm (10)', '80')
+    assert rows[1][2:5] == ('learning…', '', '—') and rows[2][2] == 'top gear'
+    # No band yet, no method used: the plain figure and no method columns
+    gears[0].update(best_low=None, best_high=None)
+    headers, rows = view.shift_table(dict(snapshot, methods={}))
+    assert 'H-pattern' not in headers and rows[0][2] == '7100 rpm'
+    assert view.shift_summary(snapshot).startswith('Limiter 7500 rpm  ·  30 rev bands of power known (engine power '
+                                                   'from the game)')
+    assert view.shift_summary(None).startswith('Nothing learnt yet')

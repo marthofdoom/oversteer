@@ -30,6 +30,56 @@ def _confidence(conf):
     return ' ({})'.format(conf) if conf else ''
 
 
+def shift_summary(snapshot):
+    """The line above the shift table: the limiter, how much of the
+    power curve is known and where it comes from."""
+    if snapshot is None:
+        return _("Nothing learnt yet: drive with the rev lights or \"Learn from game telemetry\" on and Oversteer "
+                 "learns each car's gearing and power.")
+    limiter = snapshot['limiter']
+    source = _("engine power from the game") if snapshot['power_source'] == 'game' else \
+        _("engine power estimated from acceleration")
+    return _("Limiter {} rpm  ·  {} rev bands of power known ({})  ·  learnt from your recent driving").format(
+        int(limiter) if limiter else '?', snapshot['power_bands'], source)
+
+
+SHIFT_METHODS = (('h-pattern', _("H-pattern")), ('sequential', _("Sequential")), ('paddles', _("Paddles")))
+
+
+def shift_table(snapshot):
+    """(headers, rows of cells) for the shift table: per gear its
+    gearing, the best change up with the range it is known to (the
+    bootstrap band), where you change up, per way of changing once that
+    way has been used, and the samples behind the gearing."""
+    limiter = snapshot['limiter']
+    methods = snapshot.get('methods') or {}
+    used = [(m, name) for m, name in SHIFT_METHODS if any(m in v for v in methods.values())]
+    headers = ((_("Gear"), _("rpm per km/h"), _("Best upshift"), _("of limiter"), _("You change up"))
+               + tuple(name for _m, name in used) + (_("Samples"),))
+    rows = []
+    for row in snapshot['gears']:
+        if row['last']:
+            best, share = _("top gear"), ''
+        elif row['best'] is None:
+            best, share = _("learning…"), ''
+        else:
+            best = '{:.0f} rpm'.format(row['best'])
+            # The range the best change up is known to: a narrow one
+            # means the power curve around it is well measured
+            low, high = row.get('best_low'), row.get('best_high')
+            if low is not None and high is not None and high - low >= 1.0:
+                best += ' ({:.0f}–{:.0f})'.format(low, high)
+            share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
+        mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
+        per_method = []
+        for method, _name in used:
+            average = methods.get(row['gear'], {}).get(method)
+            per_method.append('{:.0f} rpm ({})'.format(*average) if average else '—')
+        rows.append((str(row['gear']), '{:.1f}'.format(row['ratio'] / 3.6), best, share, mine)
+                    + tuple(per_method) + (str(row['ratio_samples']),))
+    return headers, rows
+
+
 def context_line(session, runs, stage):
     """(line, evidence) about the most recent session: discipline and
     surface with their confidence and the stage's prior, the stage, the
