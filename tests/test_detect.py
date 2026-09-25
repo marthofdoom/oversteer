@@ -83,7 +83,7 @@ def test_surface_from_the_route_table(monkeypatch):
     monte = classify_surface(game, [], location=drive_detect.location_name('eawrc', 'eawrc:1:3'))
     assert monte.value == 'unknown' and monte.prior == 'mixed:tarmac,snow'       # a prior, not an answer
     nothing = classify_surface(summary(game='dirt'), [])
-    assert nothing.value == 'unknown' and 'not calibrated for DiRT Rally' in nothing.missing[0]
+    assert nothing.value == 'unknown' and 'a calibration for DiRT Rally' in nothing.missing[0]
 
 
 def test_wet_only_where_the_game_says():

@@ -183,3 +183,31 @@ def test_a_pause_is_not_driving(tmp_path):
     learner, reader, session = drive_runs(tmp_path, samples[:half + 1], paused, rest)
     [run] = session['runs']
     assert run['finished'] == 1 and 150 < run['duration'] < 170
+
+
+def test_the_listener_stays_within_its_budget(tmp_path):
+    """Two minutes of EA SPORTS WRC through the live path with the drive-log
+    thread: a loose check (the bench, tests/bench_telemetry.py, measures)."""
+    from tests.bench_telemetry import measure
+    from tests.sim import stage_packets
+    mean, p99, worst, dropped = measure(stage_packets(2.0))
+    assert mean < 2.0 and dropped == 0
+
+
+def test_a_replay_writes_the_same_database_every_time(tmp_path):
+    from oversteer.telemetry_capture import CaptureWriter, read_capture, replay
+    from tests.sim import stage_packets
+    path = str(tmp_path / 'stages.ovcap.gz')
+    with CaptureWriter(path, port=5310) as writer:
+        for t, data in stage_packets(4.0):
+            writer.write(t, ('127.0.0.1', 5555), data)
+    dumps = []
+    for name in ('one.db', 'two.db'):
+        learner = ShiftLearner(str(tmp_path / name))
+        meta, records = read_capture(path)
+        replay(records, learner, started=meta['started'])
+        tables = ('cars', 'tunes', 'stages', 'sessions', 'runs', 'segments', 'corners', 'laps', 'shifts', 'traces')
+        dumps.append({t: learner.db.execute('SELECT * FROM ' + t).fetchall() for t in tables})
+        learner.close()
+    assert dumps[0] == dumps[1]
+    assert len(dumps[0]['runs']) >= 2 and len(dumps[0]['segments']) > 30 and dumps[0]['shifts']

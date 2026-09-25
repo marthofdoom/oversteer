@@ -670,7 +670,9 @@ CREATE INDEX corners_run ON corners (run);
 
 `TRACE_CHANNELS = ('t', 'distance', 'speed', 'rpm', 'gear', 'throttle',
 'brake', 'clutch', 'handbrake', 'steer', 'a_long', 'a_lat', 'yaw_rate',
-'slip_drive', 'susp_rms')`, NaN where not sent. Traces are capped at 200 MB
+'slip_drive', 'susp_rms', 'x', 'y', 'z')`, NaN where not sent. (*Fixed while
+building:* the first list had no position, yet topology, elevation and
+start cells are worked out from the trace and must re-run from it.) Traces are capped at 200 MB
 in total (**preference**); the oldest `traces` rows are dropped first, their
 runs, metrics and verdicts stay.
 
@@ -856,6 +858,12 @@ Advice sentences stay in `CarModel.advice` style but move to the coach
   `stage_time` or `lap_distance` going back to 0, Forza race time reset), a
   silence > 2 s followed by a position jump. A pause (EA `SESP`, DiRT
   repeated packets, Forza silence without a jump) suspends the run.
+  *As built:* `lap_distance` going back is a lap in DiRT's multi-lap
+  events, so only the stage clock going back without the lap counter
+  moving is a restart; a game with no position ends a run after 10 s of
+  silence. A run starts when the car first reaches 3 m/s (the stand
+  before it is the launch evidence), so menus make no runs, and runs
+  under 100 m are dropped.
 - **Distance**: the game's stage/lap distance when sent, else speed
   integrated.
 - **Segments** every 200 m (or 10 s if no distance): features in §8.6,
@@ -898,7 +906,11 @@ Tiers, in order; the first that fires with enough data decides:
 2. **Topology** (`high` with ≥ 2 closures, `medium` with one): positions
    hashed into 10 m cells; a loop closure is a revisit after ≥ 500 m of path
    with heading within ±45°; laps between closures within ±30 % (jokers).
-   Zero closures over ≥ 2 km → point-to-point family.
+   Zero closures over ≥ 2 km → point-to-point family. *Fixed while
+   building:* a closure is a return to the run's **start** (within one
+   cell, the same way round, ≥ 500 m after the last): with "any revisit",
+   every point of a second lap revisits the first and closures count
+   points, not laps.
 3. **Elevation** (`medium`): hillclimb when net grade ≥ 4 % over ≥ 2 km and
    the descending fraction < 10 %.
 4. **Dynamics**: dropped until labelled captures exist (§3.2 #6). Its
@@ -1320,7 +1332,16 @@ checklist below.
 - Every **calibrate** threshold stays a default until labelled captures
   exist; the first calibration pass needs the captures of §6.3.
 - The measured surface classifier and the dynamics discipline tier (§8.5
-  tier 4): until the captures exist to calibrate them (§3.2 #5, #6).
+  tier 4): until the captures exist to calibrate them (§3.2 #5, #6). The
+  classifier and `calibrate()` exist (run 2); what waits is labelled data,
+  the label dialog (tab), `telemetry-calibrate.py` and "Re-check old runs".
+- Route-table data for the surface game tier: EA SPORTS WRC's location
+  names are in `drive_detect.LOCATION_SURFACES` but its ids need
+  `ids.json`; DiRT Rally 2.0's stage table (dr2_logger's, MIT) could not
+  be fetched in run 2. Until then the surface game tier answers unknown.
+- The tab's "This is a different car" (fingerprint split, §5.4), the
+  "learnt from your recent driving" wording (§8.1 item 10) and learning
+  without LEDs (D4): with the tab work of Step C item 6.
 - Read access to the game's Proton prefix in the Flatpak manifest: not
   planned; copy buttons and a shipped id table instead (§3.2 #8).
 - Listening on 5300 and 5310 at once: rejected, 5300 is the port FH6 may
@@ -1349,7 +1370,7 @@ since they are self-contained and let the §6.3 captures start now.
 - [x] `Sample` v2 decoded for Forza, Codemasters, EA WRC (and OutGauge time/boost), one private function per format (`_ovst`, `_forza`, `_outgauge`, `_codemasters`, `_eawrc`); brought forward from Step C item 3. As built: `accel_kind` is `'kinematic'` for all three until a hill capture says otherwise; Codemasters' "pitch" vector (14–16) is taken as forward and the "roll" vector (11–13) as left, up = forward × left (verify handedness); suspension mm → m (verify); DiRT g × 9.80665, WRCG taken as m/s² (verify); steer negated to positive-left in every game (verify); Forza yaw rate = −ω_y (verify). Decode costs 8–13 µs a packet, `Telemetry.handle` with the learner 0.02 ms mean on this machine. Nothing reads the new fields yet (Step C)
 - [x] Capture format, writer, reader, replay through `Telemetry.handle`; `telemetry-capture.py --write`, `telemetry-replay.py` (brought forward from Step D; `tests/test_capture.py`)
 
-Run 2 (in progress): the build prompt's "Step B" is "database v2 +
+Run 2 (done, 112 tests green): the build prompt's "Step B" is "database v2 +
 sessions/segments + learners (shift, tune, discipline/surface scaffolding
 with calibration hooks) + tests", the order before the review re-cut the
 steps. That is this document's Step C items 1–5 and 7, so those are built
@@ -1374,7 +1395,7 @@ a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
 - [x] Calibration hooks, brought forward from Step D: `calibrate()` (diagonal Gaussians on standardised features present in ≥ 80 % of segments, leave-one-run-out holdout, deploy at ≥ 0.90 with ≥ 3 labelled runs of ≥ 2 surfaces), `classify_segment()` with the χ² 99 % reject and the ln 4 ambiguity (`loose-low` for snow/gravel), run votes with `mixed:` at ≥ 25 %, `calibrate_game(store, game)`; deployed calibrations classify segments at run end and set `detector_version`. Not yet: `telemetry-calibrate.py`, "Re-check old runs", the limit-gate thresholds' calibration (all need the §6.3 captures and labels from the tab)
 - [ ] Coach metrics, habits, growth, rate limiting; tuning rules
 - [ ] Web endpoints for sessions and coaching; tab sections, label dialog; learn without LEDs (D4)
-- [ ] `tests/sim.py`; tests; bench within budget
+- [x] `tests/sim.py`; tests; bench within budget. `tests/sim.py`: the simulated car, a `Road` with a grade profile and turbo lag, `Course` (stages and circuits every metre, corners with an optional slide), `course_samples()`, and `eawrc_packet()`, the one encoder so far (the bench and the determinism test go through the real decoder). `tests/bench_telemetry.py`: ten minutes of EA SPORTS WRC stages through `Telemetry.handle` with the drive-log thread: mean 0.041 ms, p99 0.065 ms, worst 5 ms per packet on this machine, nothing dropped (budget 0.3 / 2 ms); a loose pytest check and a replay-determinism test (same capture → same tables) in `tests/test_drive_log.py`. `telemetry-replay.py` prints runs, verdicts and evidence
 
 ### Step D
 - [ ] Capture switch and folder size in the tab (the drive-log thread writes); encoders in `tests/sim.py`. The format, reader, writer and scripts were done in Step A

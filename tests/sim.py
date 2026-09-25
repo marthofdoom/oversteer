@@ -253,3 +253,48 @@ def feed_course(learner, samples):
     for t, sample, throttle in samples:
         learner.feed(t, sample, LIMITER, throttle, 0.0)
     return samples[-1][0]
+
+
+def eawrc_packet(sample):
+    """The sample as EA SPORTS WRC would send it in Oversteer's structure
+    (the one format the bench and the end-to-end tests encode)."""
+    import struct
+    from oversteer.telemetry_formats import EAWRC_CHANNELS, EAWRC_FORMAT
+    forward = sample.forward or (1.0, 0.0, 0.0)
+    up = (0.0, 1.0, 0.0)
+    left = (up[1] * forward[2] - up[2] * forward[1], up[2] * forward[0] - up[0] * forward[2],
+            up[0] * forward[1] - up[1] * forward[0])
+    a_long, a_lat = (sample.accel or (0.0, 0.0, 0.0))[:2]
+    values = dict.fromkeys(EAWRC_CHANNELS, 0)
+    values.update({
+        'vehicle_gear_index': sample.gear if sample.gear and sample.gear > 0 else 0,
+        'vehicle_gear_index_neutral': 0, 'vehicle_gear_index_reverse': 9, 'vehicle_gear_maximum': 5,
+        'vehicle_speed': sample.speed, 'vehicle_transmission_speed': sample.speed,
+        'vehicle_engine_rpm_max': LIMITER, 'vehicle_engine_rpm_idle': 900.0, 'vehicle_engine_rpm_current': sample.rpm,
+        'vehicle_throttle': sample.throttle or 0.0, 'vehicle_brake': sample.brake or 0.0,
+        'vehicle_clutch': sample.clutch or 0.0, 'vehicle_steering': -(sample.steer or 0.0),
+        'vehicle_handbrake': sample.handbrake or 0.0, 'stage_current_time': sample.stage_time or 0.0,
+        'stage_current_distance': sample.distance or 0.0, 'stage_length': sample.stage_length or 0.0,
+        'vehicle_id': 17, 'location_id': 4, 'route_id': 12, 'shiftlights_rpm_end': 7000.0,
+    })
+    for axis, i in zip('xyz', range(3)):
+        values['vehicle_position_' + axis] = sample.pos[i] if sample.pos else 0.0
+        values['vehicle_forward_direction_' + axis] = forward[i]
+        values['vehicle_left_direction_' + axis] = left[i]
+        values['vehicle_up_direction_' + axis] = up[i]
+        values['vehicle_velocity_' + axis] = forward[i] * sample.speed
+        values['vehicle_acceleration_' + axis] = forward[i] * a_long + left[i] * a_lat
+    for wheel, i in (('fl', 0), ('fr', 1), ('bl', 2), ('br', 3)):
+        values['vehicle_cp_forward_speed_' + wheel] = sample.wheel_speed[i] if sample.wheel_speed else sample.speed
+    fourcc = {'start': b'SESS', 'end': b'SESE', 'pause': b'SESP', 'resume': b'SESR'}.get(sample.packet, b'SESU')
+    return struct.pack(EAWRC_FORMAT, fourcc, *[values[c] for c in EAWRC_CHANNELS])
+
+
+def stage_packets(minutes=10.0):
+    """(t, packet): EA SPORTS WRC stages back to back for about `minutes`."""
+    out, t = [], 0.0
+    while t < minutes * 60:
+        for t, sample, _ in course_samples(Course(STAGE), game='eawrc', car='eawrc/17', packets=True, t=t):
+            out.append((t, eawrc_packet(sample)))
+        t += 5.0
+    return out

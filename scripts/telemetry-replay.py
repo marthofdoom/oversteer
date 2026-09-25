@@ -44,10 +44,20 @@ def learn(records, db, profile, started=None):
                 row['gear'], row['ratio'] / 3.6, best, mine, '; ' + per_method if per_method else ''))
         for tip in snapshot['advice']:
             print("  - " + tip)
+        reader = learner._reader()
         for session in learner.history(key):
-            print("  session: %d shifts, mean error %s, methods %s" % (
+            print("  session: %d shifts, mean error %s, methods %s, shifter %s" % (
                 session['shifts'], '%.0f' % session['error'] if session['error'] is not None else '-',
-                ', '.join(session['methods']) or '-'))
+                ', '.join(session['methods']) or '-', session['shifter'] or '-'))
+            for run in reader.runs(session['id']):
+                print("    run %d: %s, %.1f km in %.0f s%s" % (
+                    run['n'], run['stage'] or 'no stage', (run['distance'] or 0) / 1000.0, run['duration'] or 0,
+                    {1: ', finished', 0: ', not finished'}.get(run['finished'], '')))
+                for name in ('discipline', 'surface', 'wet'):
+                    print("      %s: %s%s" % (name, run[name], ' (%s)' % run[name + '_conf']
+                                              if run.get(name + '_conf') else ''))
+                    for line in run[name + '_evidence'] or []:
+                        print("        - " + line)
 
 
 def send(records, target, realtime):

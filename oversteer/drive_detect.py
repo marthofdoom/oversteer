@@ -377,7 +377,7 @@ def classify_surface(summary, segments, calibration=None, location=None, prior=N
     if location:
         evidence.append('{} has more than one surface.'.format(location))
     if calibration is None or not calibration.get('deployed'):
-        reason = 'not calibrated for {} yet: label a few stages of each surface'.format(_game(summary))
+        reason = 'a calibration for {}: label a few stages of each surface'.format(_game(summary))
         if calibration is not None and calibration.get('holdout') is not None:
             reason += ' (held-out accuracy {:.0f} % so far)'.format(calibration['holdout'] * 100)
         return Verdict('unknown', None, evidence, [reason], shown_prior)
