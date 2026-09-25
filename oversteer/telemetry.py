@@ -1,27 +1,8 @@
 """Game telemetry -> wheel rev LEDs.
 
-A small UDP listener understands the telemetry formats that cross the
-Proton boundary and turns engine RPM into the wheel's five rev LEDs:
-
-- Forza Horizon / Motorsport "Data Out" (sled 232 bytes, FM7 dash 311,
-  FH4+ dash 324, FM 2023 dash 331): EngineMaxRpm at 8, EngineIdleRpm at 12,
-  CurrentEngineRpm at 16 as little-endian floats, IsRaceOn at 0. Enable it
-  in the game under Settings > HUD and gameplay > Data Out, pointing at this
-  machine's IP and the port set here.
-- OutGauge (BeamNG.drive, Live for Speed): 92/96 bytes, rpm as a float at
-  16, the shift-light flag (DL_SHIFT) in the ShowLights word at 44. There is
-  no max RPM in the packet, so the ceiling is learnt from the highest RPM
-  seen and forgotten when the telemetry stops.
-- Codemasters extradata=3 (DiRT Rally 2.0, DiRT 4) and the games that copy
-  its layout (WRC 10 / WRC Generations native telemetry): 64 or more
-  little-endian floats, engine rate at index 37 and max at 63, both in
-  rpm / 10. The packet length varies by game, so any 4-byte-aligned length
-  from 256 bytes up is accepted once the Forza sizes are excluded.
-
-- Oversteer's own "OVST" datagram (24 bytes) from oversteer-shm-bridge, the
-  helper that runs inside a Proton prefix and forwards shared-memory
-  telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
-  Rally): rpm, max rpm (0 = unknown), gear, speed.
+A small UDP listener decodes the telemetry formats that cross the Proton
+boundary (see :mod:`telemetry_formats`) and turns engine RPM into the
+wheel's five rev LEDs, the launch limiter and the shift learner's input.
 
 The listener runs in a daemon thread and writes the LED brightness files
 through :class:`RevLeds`; when no packet arrives for a while the LEDs go
@@ -30,12 +11,13 @@ out so a stale value never stays lit.
 
 import glob
 import logging
-import math
 import os
 import socket
-import struct
 import threading
 import time
+
+# Decoding lives in telemetry_formats; these stay importable from here
+from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 
 DEFAULT_PORT = 5300
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
@@ -44,13 +26,6 @@ FLASH_MARGIN = 0.03                                  # above the shift point: fl
 LEARNED_DECAY = 0.01                                 # OutGauge: learnt ceiling sags this much per second
 IDLE_TIMEOUT = 2.0                                   # seconds without telemetry -> LEDs off
 FLASH_PERIOD = 0.08                                  # limiter flash half-period (seconds)
-RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
-FORZA_SIZES = (232, 311, 324, 331)
-CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is 264, WRCG is longer
-CODEMASTERS_MAX = 512
-OVST_MAGIC = b'OVST'
-OVST_SIZE = 24
-OVST2_SIZE = 96                                      # + throttle, brake, car and track names
 
 # Launch mode: a rally stage starts with clutch in, handbrake up and the
 # throttle floored, which holds the engine on its limiter. That RPM is the
@@ -154,122 +129,6 @@ class RevLeds:
             time.sleep(step)
             self.off()
             time.sleep(step)
-
-
-def _plausible(x):
-    return math.isfinite(x) and -RPM_LIMIT < x < RPM_LIMIT
-
-
-class Sample:
-    """One decoded packet. Everything but rpm may be None (not in this
-    format): max_rpm, shift (the game's shift light), gear (1.. forward,
-    0 neutral, -1 reverse), speed (m/s), car (a key naming the car within
-    its game), car_name, throttle and clutch (0..1, the game's view),
-    power (W, Forza only)."""
-
-    __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
-                 'track')
-
-    def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
-                 throttle=None, clutch=None, power=None):
-        self.rpm, self.max_rpm, self.shift = rpm, max_rpm, shift
-        self.gear, self.speed, self.car, self.car_name = gear, speed, car, car_name
-        self.throttle, self.clutch, self.power = throttle, clutch, power
-        self.track = None                 # the track or stage, where the game says
-
-
-def _finite(x):
-    return x if math.isfinite(x) else None
-
-
-def _ascii(raw):
-    text = raw.split(b'\0', 1)[0].decode('ascii', 'replace').strip()
-    return text if text and all(0x20 <= ord(c) < 0x7f for c in text) else None
-
-
-def decode_sample(data):
-    """A Sample, or None if the packet isn't a telemetry format we know
-    (or carries nonsense)."""
-    n = len(data)
-    if n in (OVST_SIZE, OVST2_SIZE) and data[:4] == OVST_MAGIC:
-        version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
-        if version not in (1, 2) or (version == 2) != (n == OVST2_SIZE):
-            return None
-        if not (_plausible(rpm) and _plausible(max_rpm)):
-            return None
-        sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
-                        gear=gear if -1 <= gear <= 12 else None,
-                        speed=_finite(speed / 3.6), car='acpmf')
-        if version == 2:
-            gas, brake = struct.unpack_from('<ff', data, 24)
-            sample.throttle = _finite(gas)
-            name = _ascii(data[32:64])
-            if name:
-                sample.car, sample.car_name = 'acpmf-' + name, name
-            sample.track = _ascii(data[64:96])
-        return sample
-    if n in FORZA_SIZES:
-        race_on = struct.unpack_from('<i', data, 0)[0]
-        max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
-        if not (_plausible(max_rpm) and _plausible(rpm)):
-            return None
-        if race_on == 0 or max_rpm <= 0:
-            return Sample(0.0, max_rpm if max_rpm > 0 else None)
-        ordinal = struct.unpack_from('<i', data, 212)[0]
-        sample = Sample(max(0.0, rpm), max_rpm, car='forza-{}'.format(ordinal),
-                        car_name='Forza car {}'.format(ordinal))
-        if n == 232:
-            vx, vy, vz = struct.unpack_from('<fff', data, 32)
-            sample.speed = _finite(math.sqrt(vx * vx + vy * vy + vz * vz))
-        else:
-            # The dash block follows the sled; Horizon puts 12 more bytes first
-            base = 244 if n == 324 else 232
-            speed, power = struct.unpack_from('<ff', data, base + 12)
-            accel, brake, clutch, handbrake, gear = struct.unpack_from('<BBBBB', data, base + 71)
-            sample.speed, sample.power = _finite(speed), _finite(power)
-            sample.throttle, sample.clutch = accel / 255.0, clutch / 255.0
-            sample.gear = gear if 1 <= gear <= 10 else (-1 if gear == 0 else None)
-        return sample
-    if n in (92, 96):
-        car = data[4:8]
-        if any(b and not 0x20 <= b < 0x7f for b in car):     # Car[4]: short ASCII name
-            return None
-        rpm = struct.unpack_from('<f', data, 16)[0]
-        if not _plausible(rpm):
-            return None
-        dashlights, showlights = struct.unpack_from('<II', data, 40)
-        shift = bool(showlights & (1 << 0))          # DL_SHIFT
-        gear = data[10]                              # 0 reverse, 1 neutral, 2 first
-        speed = struct.unpack_from('<f', data, 12)[0]
-        throttle, brake, clutch = struct.unpack_from('<fff', data, 48)
-        name = _ascii(car)
-        return Sample(max(0.0, rpm), None, shift, gear=gear - 1 if gear >= 1 else -1,
-                      speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
-                      throttle=_finite(throttle), clutch=_finite(clutch))
-    if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
-        floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
-        rpm, max_rpm = floats[37] * 10.0, floats[63] * 10.0
-        if not (_plausible(max_rpm) and _plausible(rpm)) or max_rpm <= 0:
-            return None
-        idle = floats[64] * 10.0 if len(floats) > 64 else float('nan')
-        gears = floats[65] if len(floats) > 65 else float('nan')
-        gear = floats[33]
-        # No car name in this format: the engine and gearbox tell cars apart
-        key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(max_rpm, idle if math.isfinite(idle) else 0,
-                                                       gears if math.isfinite(gears) else 0)
-        name = '{:.0f} rpm, {:.0f} gears'.format(max_rpm, gears) if math.isfinite(gears) else None
-        return Sample(max(0.0, rpm), max_rpm,
-                      gear=int(gear) if math.isfinite(gear) and 0 <= gear <= 9 else None,
-                      speed=_finite(floats[7]), car=key, car_name=name,
-                      throttle=_finite(floats[29]), clutch=_finite(floats[32]))
-    return None
-
-
-def decode(data):
-    """Return (rpm, max_rpm or None, shift_light or None) or None if the
-    packet isn't a telemetry format we know (or carries nonsense)."""
-    sample = decode_sample(data)
-    return None if sample is None else (sample.rpm, sample.max_rpm, sample.shift)
 
 
 class Telemetry:
