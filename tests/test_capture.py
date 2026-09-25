@@ -109,3 +109,93 @@ def test_replay_script(tmp_path):
     assert out.returncode == 0, out.stderr
     times = [t for t, _, _ in read_capture(str(piece))[1]]
     assert 55 <= len(times) <= 65 and times[0] == 0.0
+
+
+def test_recorder_writes_a_file_per_stretch_of_driving(tmp_path):
+    from oversteer import telemetry_capture as tc
+    from oversteer.telemetry import Telemetry, NoLeds
+    wall = [1.7e9]
+    recorder = tc.Recorder(str(tmp_path), port=5310, version='test', threaded=False, clock=lambda: wall[0])
+    telemetry = Telemetry(NoLeds())
+    telemetry.recorder = recorder
+    packet = forza_dash(5000.0, 20.0, 2, 1.0, 1e5)
+    for i in range(10):
+        telemetry.handle(100.0 + i / 60.0, packet, ('192.168.1.5', 50000))
+    telemetry.handle(100.2, b'unknown', ('192.168.1.5', 50000))     # kept too: a capture is what arrived
+    recorder.check(130.0)                                           # a pause: the file stays open
+    first = recorder.path
+    assert first and first.endswith('.ovcap.gz')
+    recorder.check(161.0)                                           # a minute of nothing: closed
+    assert recorder.path is None
+    wall[0] += 3600.0
+    telemetry.handle(400.0, packet, ('192.168.1.5', 50000))
+    recorder.close()
+    names = [os.path.basename(p) for p, _size, _labelled in tc.list_captures(str(tmp_path))]
+    assert len(names) == 2 and os.path.basename(first) in names
+    meta, records = read_capture(first)
+    records = list(records)
+    assert meta['port'] == 5310 and meta['started'] == 1.7e9 and len(records) == 11
+    assert records[-1][2] == b'unknown' and records[0][1][0] == '192.168.1.5'
+
+
+def test_recorder_gives_up_quietly_when_it_cannot_write(tmp_path):
+    from oversteer import telemetry_capture as tc
+    blocked = tmp_path / 'file'
+    blocked.write_text('not a folder')
+    recorder = tc.Recorder(str(blocked / 'captures'), threaded=False)
+    recorder.packet(1.0, ('127.0.0.1', 0), b'x')
+    recorder.packet(2.0, ('127.0.0.1', 0), b'x')
+    assert recorder.error and recorder.path is None
+    recorder.close()
+
+
+def test_recorder_thread_and_a_full_queue(tmp_path, monkeypatch):
+    from oversteer import telemetry_capture as tc
+    recorder = tc.Recorder(str(tmp_path))
+    for i in range(50):
+        recorder.packet(float(i), ('127.0.0.1', 0), b'%d' % i)
+    recorder.close()
+    [(path, _size, _labelled)] = tc.list_captures(str(tmp_path))
+    assert [data for _t, _a, data in read_capture(path)[1]] == [b'%d' % i for i in range(50)]
+    # The listener never waits: a full queue drops and counts
+    monkeypatch.setattr(tc, 'RECORD_QUEUE', 2)
+    stuck = tc.Recorder(str(tmp_path), threaded=False)
+    stuck._thread = object()                                       # as if the writer thread were busy
+    for i in range(5):
+        stuck.packet(float(i), ('127.0.0.1', 0), b'x')
+    assert stuck.dropped == 3
+
+
+def test_prune_keeps_labelled_captures_and_the_newest(tmp_path):
+    from oversteer import telemetry_capture as tc
+    paths = []
+    for i in range(4):
+        path = tmp_path / '2026010{}-120000.ovcap.gz'.format(i + 1)
+        path.write_bytes(b'x' * 1000)
+        os.utime(path, (1.7e9 + i * 100, 1.7e9 + i * 100))
+        paths.append(str(path))
+    (tmp_path / 'other.txt').write_bytes(b'y' * 5000)             # not a capture: not counted, not touched
+    open(paths[0] + '.json', 'w').write('{}')                       # the oldest is labelled
+    assert tc.capture_summary(str(tmp_path)) == (4, 4000, 1)
+    assert tc.prune(str(tmp_path), 2500) == paths[1:3]
+    assert [p for p, _s, _l in tc.list_captures(str(tmp_path))] == [paths[0], paths[3]]
+    # Labelled captures alone over the cap: nothing more to delete
+    open(paths[3] + '.json', 'w').write('{}')
+    assert tc.prune(str(tmp_path), 0) == []
+
+
+def test_label_captures_writes_the_sidecar_of_overlapping_captures(tmp_path):
+    from oversteer import telemetry_capture as tc
+    spans = [(1000.0, 2000.0), (3000.0, 4000.0), (5000.0, 6000.0)]
+    for n, (started, ended) in enumerate(spans):
+        path = str(tmp_path / 'c{}.ovcap.gz'.format(n))
+        CaptureWriter(path, started=started).close()
+        os.utime(path, (ended, ended))
+    (tmp_path / 'broken.ovcap.gz').write_bytes(b'not gzip')
+    label = {'surface': 'gravel', 'discipline': 'rally-stage'}
+    assert tc.label_captures(str(tmp_path), 3500.0, 5200.0, label, {'game': 'eawrc'}) == 2
+    assert not os.path.exists(str(tmp_path / 'c0.ovcap.gz.json'))
+    with open(str(tmp_path / 'c1.ovcap.gz.json')) as f:
+        side = json.load(f)
+    assert side == {'label': label, 'session': {'game': 'eawrc', 'started': 3500.0, 'ended': 5200.0}}
+    assert tc.capture_summary(str(tmp_path))[2] == 2

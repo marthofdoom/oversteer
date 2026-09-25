@@ -178,6 +178,7 @@ class Telemetry:
         self.on_limiter = on_limiter
         self.learner = learner
         self.use_learnt = use_learnt
+        self.recorder = None              # a telemetry_capture.Recorder while "Record raw telemetry" is on
         self.live = None                  # the last Sample, for the GUI
         self.using_learnt = None          # the learnt shift point in use, or None
         self.launch_max = 0.0             # limiter from the last launch; 0 = none yet
@@ -361,6 +362,11 @@ class Telemetry:
     def handle(self, now, data, addr):
         """One datagram from `addr` received at `now` (monotonic seconds):
         the live path, also driven directly by tests and replays."""
+        recorder = self.recorder
+        if recorder is not None:
+            # Byte for byte, before anything is decided about it: a
+            # capture must show what arrived, unknown packets included
+            recorder.packet(now, addr, data)
         # A source that went quiet frees the lock even while another one
         # keeps sending (the socket then never times out)
         self.check_idle(now)
