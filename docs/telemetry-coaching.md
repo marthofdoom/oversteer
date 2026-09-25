@@ -1299,10 +1299,10 @@ Design revised after the independent review (§3.2): done.
 - [ ] Codemasters rpm units (three branches) and rescale of stored cars from the key's max
 - [ ] Ratios from low-slip samples; `top_seen` reset on re-tune; spin-first test
 - [ ] Shift-press wiring and method from the press; per-method columns
-- [ ] `Telemetry.handle()` refactor; source lock
+- [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
 - [ ] UDP default port 5310 (D1) with the 5300 probe and hint
 - [ ] GTK: snapshot cache, history on events only, praise/"still" limits
-- [ ] `telemetry_formats.py` split; EA SPORTS WRC decoder, id table, copy buttons
+- [ ] `telemetry_formats.py` split (done, acb5ba0); EA SPORTS WRC decoder, id table, copy buttons
 
 ### Step B
 - [ ] Web server (read-only, limits, Host check, headers) over today's data, and page

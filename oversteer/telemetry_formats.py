@@ -28,8 +28,10 @@ import struct
 
 RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
 FORZA_SIZES = (232, 311, 324, 331)
+FORZA_GAMES = {232: 'forza', 311: 'forza-fm', 324: 'forza-fh', 331: 'forza-fm'}
 CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is 264, WRCG is longer
 CODEMASTERS_MAX = 512
+CODEMASTERS_DIRT = 264                               # DiRT Rally 1/2 and DiRT 4; other lengths are WRCG (provisional)
 OVST_MAGIC = b'OVST'
 OVST_SIZE = 24
 OVST2_SIZE = 96                                      # + throttle, brake, car and track names
@@ -43,18 +45,23 @@ class Sample:
     """One decoded packet. Everything but rpm may be None (not in this
     format): max_rpm, shift (the game's shift light), gear (1.. forward,
     0 neutral, -1 reverse), speed (m/s), car (a key naming the car within
-    its game), car_name, throttle and clutch (0..1, the game's view),
-    power (W, Forza only)."""
+    its game), car_name, throttle, brake and clutch (0..1, the game's
+    view), power (W, Forza only), game (which game or family sent it:
+    'forza-fh', 'forza-fm', 'forza', 'dirt', 'wrcg', 'eawrc', 'acpmf',
+    'beamng', 'lfs'), track (as the game names it) and stage (a key for
+    the stage or route where the game identifies one)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
-                 'track')
+                 'track', 'game', 'brake', 'stage')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
-                 throttle=None, clutch=None, power=None):
+                 throttle=None, clutch=None, power=None, game=None, brake=None):
         self.rpm, self.max_rpm, self.shift = rpm, max_rpm, shift
         self.gear, self.speed, self.car, self.car_name = gear, speed, car, car_name
-        self.throttle, self.clutch, self.power = throttle, clutch, power
-        self.track = None                 # the track or stage, where the game says
+        self.throttle, self.clutch, self.power, self.brake = throttle, clutch, power, brake
+        self.game = game
+        self.track = None
+        self.stage = None
 
 
 def _finite(x):
@@ -78,10 +85,10 @@ def decode_sample(data):
             return None
         sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
                         gear=gear if -1 <= gear <= 12 else None,
-                        speed=_finite(speed / 3.6), car='acpmf')
+                        speed=_finite(speed / 3.6), car='acpmf', game='acpmf')
         if version == 2:
             gas, brake = struct.unpack_from('<ff', data, 24)
-            sample.throttle = _finite(gas)
+            sample.throttle, sample.brake = _finite(gas), _finite(brake)
             name = _ascii(data[32:64])
             if name:
                 sample.car, sample.car_name = 'acpmf-' + name, name
@@ -92,11 +99,12 @@ def decode_sample(data):
         max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
         if not (_plausible(max_rpm) and _plausible(rpm)):
             return None
+        game = FORZA_GAMES[n]
         if race_on == 0 or max_rpm <= 0:
-            return Sample(0.0, max_rpm if max_rpm > 0 else None)
+            return Sample(0.0, max_rpm if max_rpm > 0 else None, game=game)
         ordinal = struct.unpack_from('<i', data, 212)[0]
         sample = Sample(max(0.0, rpm), max_rpm, car='forza-{}'.format(ordinal),
-                        car_name='Forza car {}'.format(ordinal))
+                        car_name='Forza car {}'.format(ordinal), game=game)
         if n == 232:
             vx, vy, vz = struct.unpack_from('<fff', data, 32)
             sample.speed = _finite(math.sqrt(vx * vx + vy * vy + vz * vz))
@@ -106,7 +114,7 @@ def decode_sample(data):
             speed, power = struct.unpack_from('<ff', data, base + 12)
             accel, brake, clutch, handbrake, gear = struct.unpack_from('<BBBBB', data, base + 71)
             sample.speed, sample.power = _finite(speed), _finite(power)
-            sample.throttle, sample.clutch = accel / 255.0, clutch / 255.0
+            sample.throttle, sample.clutch, sample.brake = accel / 255.0, clutch / 255.0, brake / 255.0
             sample.gear = gear if 1 <= gear <= 10 else (-1 if gear == 0 else None)
         return sample
     if n in (92, 96):
@@ -124,7 +132,8 @@ def decode_sample(data):
         name = _ascii(car)
         return Sample(max(0.0, rpm), None, shift, gear=gear - 1 if gear >= 1 else -1,
                       speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
-                      throttle=_finite(throttle), clutch=_finite(clutch))
+                      throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake),
+                      game='beamng' if name == 'beam' else 'lfs')
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
         floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
         rpm, max_rpm = floats[37] * 10.0, floats[63] * 10.0
@@ -140,7 +149,8 @@ def decode_sample(data):
         return Sample(max(0.0, rpm), max_rpm,
                       gear=int(gear) if math.isfinite(gear) and 0 <= gear <= 9 else None,
                       speed=_finite(floats[7]), car=key, car_name=name,
-                      throttle=_finite(floats[29]), clutch=_finite(floats[32]))
+                      throttle=_finite(floats[29]), clutch=_finite(floats[32]), brake=_finite(floats[31]),
+                      game='dirt' if n == CODEMASTERS_DIRT else 'wrcg')
     return None
 
 

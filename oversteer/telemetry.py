@@ -165,6 +165,11 @@ class Telemetry:
         self._thread = None
         self._sock = None
         self._unknown_sizes = set()
+        self._source = None               # (address, game) the listener is locked to
+        self._ignored = set()             # other sources, logged once each
+        self._lit = None                  # LEDs lit as a bar; None = unknown, rewrite on next packet
+        self._flash = False
+        self._flash_at = 0.0
 
     def set_shift(self, shift=DEFAULT_SHIFT, shift_rpm=None, launch=False):
         """Change the shift point while running (plain attribute writes:
@@ -249,92 +254,114 @@ class Telemetry:
         self.leds.off()
 
     def _run(self):
-        lit_state = None            # LEDs lit as a bar; None = unknown, rewrite on next packet
-        flash = False
-        flash_at = 0.0
         while self.running:
             try:
                 data, addr = self._sock.recvfrom(2048)
             except socket.timeout:
-                if self.last_packet and time.monotonic() - self.last_packet > IDLE_TIMEOUT:
-                    self.leds.off()
-                    lit_state = None
-                    self.last_packet = 0.0
-                    self.last_source = None
-                    self.learned_max = 0.0
-                    self._learned_at = 0.0
-                    # Menus or a loading screen: the next stage may be
-                    # another car, and it starts with a launch anyway
-                    self.launch_max = 0.0
-                    self._launch_samples = []
-                    self.live = None
-                    if self.learner is not None:
-                        self.learner.idle()
-                    self._status(None)
+                self.check_idle(time.monotonic())
                 continue
             except OSError:
                 break
-            sample = decode_sample(data)
-            if sample is None:
-                if len(data) not in self._unknown_sizes:
-                    self._unknown_sizes.add(len(data))
-                    logging.info("telemetry: unknown %d-byte packet from %s", len(data), addr[0])
-                continue
-            rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
-            now = time.monotonic()
-            self.live = sample
-            self.last_packet = now
-            if self.last_source != addr[0]:
-                self.last_source = addr[0]
-                self._status(addr[0])
-            shift_rpm, shift_fraction = self.shift_rpm, self.shift
-            if self.launch:
-                self._learn_launch(now, rpm)
-                if self.launch_max and rpm > self.launch_max:
-                    # Past the launch figure on the move (a launch control
-                    # that caps the revs at the line): it was not the top
-                    report = rpm > self.launch_max * 1.01
-                    self.launch_max = rpm
-                    if report and self.on_limiter is not None:
-                        try:
-                            self.on_limiter(rpm)
-                        except Exception:
-                            pass
-            if max_rpm is None:
-                # OutGauge: learn the ceiling from the highest RPM seen. It
-                # sags slowly (per second, not per packet) so a change of
-                # car with a lower redline still fills the bar, but never
-                # below what keeps the current RPM at "all on": a steady
-                # cruise must not turn into a limiter flash (OutGauge has
-                # its own shift-light flag for that).
-                if self._learned_at:
-                    self.learned_max *= max(0.0, 1.0 - LEARNED_DECAY * (now - self._learned_at))
-                self._learned_at = now
-                self.learned_max = max(self.learned_max, rpm, rpm / shift_fraction if not shift_rpm else 0.0)
-                max_rpm = self.learned_max
-            else:
-                self.last_max_rpm = max_rpm
-            # Everything is relative to the shift point: the bar completes
-            # there and flashes above it.
-            if self.launch and self.launch_max:
-                max_rpm = self.launch_max
-            learnt = self._feed_learner(now, sample, max_rpm)
-            if learnt:
-                reference = learnt
-            else:
-                reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
-            fraction = rpm / reference if reference > 0 else 0.0
-            if shift or fraction >= 1.0 + FLASH_MARGIN:
-                if now - flash_at >= FLASH_PERIOD:
-                    flash = not flash
-                    flash_at = now
-                    self.leds.set_pattern((flash,) * len(self.leds.paths))
-                lit_state = None
-                continue
-            lit = sum(1 for t in LED_SPACING if fraction >= t)
-            if lit != lit_state:
-                self.leds.set_count(lit)
-                lit_state = lit
+            self.handle(time.monotonic(), data, addr)
+
+    def check_idle(self, now):
+        """Telemetry stopped for a while: LEDs off and forget the source."""
+        if not self.last_packet or now - self.last_packet <= IDLE_TIMEOUT:
+            return
+        self.leds.off()
+        self._lit = None
+        self.last_packet = 0.0
+        self.last_source = None
+        self._source = None
+        self.learned_max = 0.0
+        self._learned_at = 0.0
+        # Menus or a loading screen: the next stage may be another car,
+        # and it starts with a launch anyway
+        self.launch_max = 0.0
+        self._launch_samples = []
+        self.live = None
+        if self.learner is not None:
+            self.learner.idle()
+        self._status(None)
+
+    def handle(self, now, data, addr):
+        """One datagram from `addr` received at `now` (monotonic seconds):
+        the live path, also driven directly by tests and replays."""
+        # A source that went quiet frees the lock even while another one
+        # keeps sending (the socket then never times out)
+        self.check_idle(now)
+        sample = decode_sample(data)
+        if sample is None:
+            if len(data) not in self._unknown_sizes:
+                self._unknown_sizes.add(len(data))
+                logging.info("telemetry: unknown %d-byte packet from %s", len(data), addr[0])
+            return
+        # One source at a time: a stale bridge next to a game, or a replay
+        # sent while a game runs, would otherwise alternate cars packet by
+        # packet and end and start a learning session on each
+        source = (addr[0], sample.game)
+        if self._source is None:
+            self._source = source
+        elif source != self._source:
+            if source not in self._ignored:
+                self._ignored.add(source)
+                logging.info("telemetry: ignoring %s from %s while %s from %s is arriving",
+                             source[1] or 'telemetry', source[0], self._source[1] or 'telemetry', self._source[0])
+            return
+        rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
+        self.live = sample
+        self.last_packet = now
+        if self.last_source != addr[0]:
+            self.last_source = addr[0]
+            self._status(addr[0])
+        shift_rpm, shift_fraction = self.shift_rpm, self.shift
+        if self.launch:
+            self._learn_launch(now, rpm)
+            if self.launch_max and rpm > self.launch_max:
+                # Past the launch figure on the move (a launch control
+                # that caps the revs at the line): it was not the top
+                report = rpm > self.launch_max * 1.01
+                self.launch_max = rpm
+                if report and self.on_limiter is not None:
+                    try:
+                        self.on_limiter(rpm)
+                    except Exception:
+                        pass
+        if max_rpm is None:
+            # OutGauge: learn the ceiling from the highest RPM seen. It
+            # sags slowly (per second, not per packet) so a change of
+            # car with a lower redline still fills the bar, but never
+            # below what keeps the current RPM at "all on": a steady
+            # cruise must not turn into a limiter flash (OutGauge has
+            # its own shift-light flag for that).
+            if self._learned_at:
+                self.learned_max *= max(0.0, 1.0 - LEARNED_DECAY * (now - self._learned_at))
+            self._learned_at = now
+            self.learned_max = max(self.learned_max, rpm, rpm / shift_fraction if not shift_rpm else 0.0)
+            max_rpm = self.learned_max
+        else:
+            self.last_max_rpm = max_rpm
+        # Everything is relative to the shift point: the bar completes
+        # there and flashes above it.
+        if self.launch and self.launch_max:
+            max_rpm = self.launch_max
+        learnt = self._feed_learner(now, sample, max_rpm)
+        if learnt:
+            reference = learnt
+        else:
+            reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
+        fraction = rpm / reference if reference > 0 else 0.0
+        if shift or fraction >= 1.0 + FLASH_MARGIN:
+            if now - self._flash_at >= FLASH_PERIOD:
+                self._flash = not self._flash
+                self._flash_at = now
+                self.leds.set_pattern((self._flash,) * len(self.leds.paths))
+            self._lit = None
+            return
+        lit = sum(1 for t in LED_SPACING if fraction >= t)
+        if lit != self._lit:
+            self.leds.set_count(lit)
+            self._lit = lit
 
     def _feed_learner(self, now, sample, max_rpm):
         """Teach the learner; the learnt shift point for this gear when

@@ -197,3 +197,31 @@ def test_ovst_v2_names_the_car_and_track():
     assert sample.gear == 3 and abs(sample.speed - 30.0) < 0.01 and sample.throttle == 1.0
     assert decode(packet) == (6200.0, None, False)
     assert decode_sample(packet[:24]) is None                 # a v2 header on a v1-sized packet
+
+
+def test_handle_is_the_live_path():
+    """Tests and replays drive Telemetry.handle directly, with their own clock."""
+    leds = FakeLeds()
+    telemetry = Telemetry(leds, shift=0.90)
+    for i, rpm in enumerate((4000, 5300, 6500, 7200, 7400)):
+        telemetry.handle(100.0 + i * 0.01, forza(rpm, max_rpm=8000), ('127.0.0.1', 40000))
+    assert [w[1] for w in leds.writes if w[0] == 'count'] == [0, 1, 3, 5]
+    assert telemetry.live.rpm == 7400.0 and telemetry.last_source == '127.0.0.1'
+    telemetry.check_idle(100.1)                               # not quiet long enough
+    assert telemetry.live is not None
+    telemetry.check_idle(103.0)
+    assert telemetry.live is None and leds.writes[-1] == ('off',)
+
+
+def test_one_source_at_a_time():
+    telemetry = Telemetry(FakeLeds())
+    game, bridge, other = ('127.0.0.1', 40000), ('127.0.0.1', 40001), ('192.168.1.5', 40000)
+    telemetry.handle(100.00, forza(4000), game)
+    telemetry.handle(100.01, ovst(6000, 8500), bridge)       # a stale bridge next to the game
+    telemetry.handle(100.02, forza(4500), other)             # the same game on another machine
+    assert telemetry.live.game == 'forza-fh' and telemetry.live.rpm == 4000.0
+    telemetry.handle(100.03, forza(4100), game)
+    assert telemetry.live.rpm == 4100.0
+    for i in range(300):                                      # the bridge keeps sending; the game went quiet
+        telemetry.handle(100.04 + i * 0.01, ovst(6000, 8500), bridge)
+    assert telemetry.live.game == 'acpmf'                     # idle freed the lock for it
