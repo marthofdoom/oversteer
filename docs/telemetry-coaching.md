@@ -1331,16 +1331,21 @@ checklist below.
 Design revised after the independent review (§3.2): done.
 
 ### Step A
+Done (acb5ba0 … this commit), 65 tests green. The build prompt described
+Step A as "decoding + `Sample` fidelity + capture/replay tooling", the
+order before the review re-cut the steps; the re-cut Step A below was
+built, and the decoding fidelity (Step C item 3) and capture tooling
+(Step D item 1, minus recording from the app) were brought forward,
+since they are self-contained and let the §6.3 captures start now.
 - [x] Tab order (car bar, shift table, coaching, live line, then a collapsed "Settings: rev lights and telemetry" expander holding the rev light rows and the launch options); README fixed
 - [x] Forza gear 11, DiRT reverse; OutGauge reverse and Forza `IsRaceOn = 0` tests (`tests/test_formats.py`)
 - [x] Codemasters rpm units (three branches, `codemasters_unit()`) and rescale of stored cars from the key's max (`rescale_codemasters()`, `user_version` 1, `telemetry.db.v0.bak`)
-- [x] Ratios from low-slip samples (throttle < 0.5, brake ≤ 0.02 or a little throttle when no brake is sent, |a| ≤ 2 m/s²); `top_seen` reset on re-tune; spin-first test. Driven-wheel speed as the ratio source waits for `Sample` v2 wheel speeds (Step C)
+- [x] Ratios from low-slip samples (throttle < 0.5, brake ≤ 0.02 or a little throttle when no brake is sent, |a| ≤ 2 m/s²); `top_seen` reset on re-tune; spin-first test. Driven-wheel speed as the ratio source (the wheel speeds are decoded now) is left to the re-tune work of Step C, which needs the drivetrain to pick the driven wheels
 - [x] Shift-press wiring (`shift_button_kinds()` in `proxy/equipment.py`, `update_shift_buttons()` every 5 s with the handbrake check) and method from the press (`shift_method()`); per-method columns from `ShiftLearner.method_shifts()`, re-read on car change, session end (`sessions_ended`) and tab shown
 - [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
 - [x] UDP default port 5310 (D1) with the probe and hint (symmetric, see §3.1 D1); CHANGELOG entries for Step A. Bridge .c default left at 5300 until it is rebuilt
 - [x] GTK: snapshot cache (`load_snapshot()` keyed by (profile, key, `updated`); rename bumps `updated`), history on events only (`method_shifts()`), advice limited to 3 tips by size, 1 praise line, 1 re-tune line, 1 "still learning" line. The quiet "still:" lines and re-showing rules need `coach_state` (Step C)
 - [x] `telemetry_formats.py` split (acb5ba0); EA SPORTS WRC decoder (both structures), shipped structure file, copy buttons with the target folder. **Deferred:** the id → name table (game's `ids.json` and its terms not available here, §5.3)
-
 - [x] `Sample` v2 decoded for Forza, Codemasters, EA WRC (and OutGauge time/boost), one private function per format (`_ovst`, `_forza`, `_outgauge`, `_codemasters`, `_eawrc`); brought forward from Step C item 3. As built: `accel_kind` is `'kinematic'` for all three until a hill capture says otherwise; Codemasters' "pitch" vector (14–16) is taken as forward and the "roll" vector (11–13) as left, up = forward × left (verify handedness); suspension mm → m (verify); DiRT g × 9.80665, WRCG taken as m/s² (verify); steer negated to positive-left in every game (verify); Forza yaw rate = −ω_y (verify). Decode costs 8–13 µs a packet, `Telemetry.handle` with the learner 0.02 ms mean on this machine. Nothing reads the new fields yet (Step C)
 - [x] Capture format, writer, reader, replay through `Telemetry.handle`; `telemetry-capture.py --write`, `telemetry-replay.py` (brought forward from Step D; `tests/test_capture.py`)
 
