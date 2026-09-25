@@ -22,8 +22,25 @@
 - `scripts/telemetry-capture.py --write` records raw telemetry to a file;
   `scripts/telemetry-replay.py` plays it back through the shift learner,
   re-sends it over UDP, or cuts a piece out of it.
+- Telemetry history: every drive is kept as runs (a stage attempt, a lap
+  session, a stretch of free driving) with their corners, a 10 Hz trace
+  and every change of gear up or down, flagged when a gate was missed,
+  a gear skipped, the engine over-revved or a paddle double-tapped. Each
+  run is judged a discipline (rally stage, hillclimb, circuit,
+  rallycross, time attack, free roam) with the evidence that decided it,
+  or left unknown when there is none. Each gearing a car was driven with
+  is kept as a tune. The Telemetry tab does not show these yet.
 
 ### Changed
+- The shift learner compares each gear's own power curve where it knows
+  both, takes the slope out of the acceleration where the game says
+  which way is up, ignores turbo lag and wheelspin, and gives each best
+  change up a range. Its database moves to a new layout (a copy of the
+  old file is kept as `telemetry.db.v1.bak`), and writing it no longer
+  happens on the telemetry thread.
+- A driving session now ends after two minutes without telemetry, not
+  two seconds, so pausing mid-stage no longer splits it. Forgetting a car
+  starts its learning over but keeps its history.
 - The telemetry port is now **UDP 5310** for new profiles and
   `oversteer-run`. Forza Horizon 6 binds its own socket in 5200–5300 and
   asks Data Out to stay clear of that range. Profiles that saved 5300 keep
