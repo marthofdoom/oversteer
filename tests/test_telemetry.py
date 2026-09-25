@@ -193,7 +193,7 @@ def test_ovst_v2_names_the_car_and_track():
     body = struct.pack('<BBHffif', 2, 1, 0, 6200.0, 0.0, 3, 108.0) + struct.pack('<ff', 1.0, 0.0)
     packet = b'OVST' + body + b'ks_rally_car'.ljust(32, b'\0') + b'rally_stage_07'.ljust(32, b'\0')
     sample = decode_sample(packet)
-    assert (sample.car, sample.car_name, sample.track) == ('acpmf-ks_rally_car', 'ks_rally_car', 'rally_stage_07')
+    assert (sample.car, sample.car_name, sample.track) == ('acpmf/ks_rally_car', 'ks_rally_car', 'rally_stage_07')
     assert sample.gear == 3 and abs(sample.speed - 30.0) < 0.01 and sample.throttle == 1.0
     assert decode(packet) == (6200.0, None, False)
     assert decode_sample(packet[:24]) is None                 # a v2 header on a v1-sized packet

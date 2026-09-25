@@ -90,7 +90,7 @@ def test_replay_learns_the_same_every_time(tmp_path):
         assert telemetry.live is None and not telemetry._unknown_sizes
         row = learner.db.execute('SELECT key, model FROM cars').fetchone()
         models.append(row)
-        assert len(learner.history('forza-777')) == 2           # the gap ended the first session
+        assert len(learner.history('forza-fh/777')) == 2           # the gap ended the first session
     assert models[0] == models[1]
     model = json.loads(models[0][1])
     assert model['power_source'] == 'game' and abs(sorted(model['ratios']['3'])[15] - 250.0) < 0.5
@@ -102,7 +102,7 @@ def test_replay_script(tmp_path):
     script = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'telemetry-replay.py')
     out = subprocess.run([sys.executable, script, str(path)], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
-    assert 'every packet decoded' in out.stdout and 'forza-777' in out.stdout and 'gear 3:' in out.stdout
+    assert 'every packet decoded' in out.stdout and 'forza-fh/777' in out.stdout and 'gear 3:' in out.stdout
     piece = tmp_path / 'piece.ovcap.gz'
     out = subprocess.run([sys.executable, script, str(path), '--cut', '1:2', '--write', str(piece)],
                          capture_output=True, text=True, timeout=60)

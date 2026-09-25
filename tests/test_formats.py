@@ -71,7 +71,7 @@ def test_codemasters_rad_s():
     """DiRT Rally sends rad/s: 7500 rpm is 785.4, which rpm / 10 read as 7854."""
     sample = decode_sample(codemasters(6000, 7500, idle=800))
     assert abs(sample.rpm - 6000) < 0.01 and abs(sample.max_rpm - 7500) < 0.01
-    assert sample.car == 'codemasters-7500-800-6' and sample.car_name == '7500 rpm, 6 gears'
+    assert sample.car == 'dirt/7500-800-6' and sample.car_name == '7500 rpm, 6 gears'
     assert sample.game == 'dirt'
 
 
@@ -137,7 +137,7 @@ def test_eawrc_oversteer_structure():
     assert (sample.game, sample.packet, sample.gear) == ('eawrc', 'update', 3)
     assert sample.rpm == 5200.0 and sample.max_rpm == 7600.0 and sample.speed == 25.0
     assert abs(sample.throttle - 0.8) < 1e-6 and sample.brake == 0.0
-    assert sample.car == 'eawrc-17' and sample.stage == 'eawrc:4:12'
+    assert sample.car == 'eawrc/17' and sample.stage == 'eawrc:4:12'
     assert decode_sample(eawrc(vehicle_gear_index=0)).gear == 0                  # the packet's neutral
     assert decode_sample(eawrc(vehicle_gear_index=10)).gear == -1                # and reverse
     assert decode_sample(eawrc(fourcc=b'SESP')).packet == 'pause'
@@ -152,7 +152,7 @@ def test_eawrc_default_structure():
     assert len(packet) == 237
     sample = decode_sample(packet)
     assert sample.game == 'eawrc' and sample.gear == 3 and sample.rpm == 5200.0
-    assert sample.car == 'eawrc-7600-900-6' and sample.stage is None
+    assert sample.car == 'eawrc/7600-900-6' and sample.stage is None
 
 
 def test_eawrc_other_lengths_are_not_dirt():
@@ -227,3 +227,13 @@ def test_eawrc_motion_and_stage():
     assert sample.steer == -0.25 and sample.handbrake == 1.0 and sample.gears == 6
     assert sample.progress == 0.25 and sample.game_shift_rpm == 7100.0 and sample.running is True
     assert decode_sample(eawrc(fourcc=b'SESP')).running is False
+
+
+def test_car_keys_name_the_game():
+    """Car keys are '<game>/<id>' (the design's D3): the same ordinal in two
+    Forza games, or one engine in DiRT and WRC Generations, are two cars."""
+    assert decode_sample(forza(size=324, ordinal=77)).car == 'forza-fh/77'
+    assert decode_sample(forza(size=331, ordinal=77)).car == 'forza-fm/77'
+    assert decode_sample(outgauge(3, car=b'beam')).car == 'beamng/unknown'
+    assert decode_sample(outgauge(3)).car == 'lfs/XRG'
+    assert decode_sample(codemasters(5000, 7500, idle=800, size=280)).car == 'wrcg/7500-800-6'

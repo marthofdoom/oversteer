@@ -130,8 +130,8 @@ class Sample:
     - Engine and car: rpm, max_rpm, idle_rpm, shift (the game's shift
       light), gear (1.. forward, 0 neutral, -1 reverse), gears (forward
       gear count), power (W, Forza), boost, game_shift_rpm (where the
-      game's own shift lights end), car (a key naming the car within its
-      game), car_name, car_class, drivetrain ('fwd', 'rwd', 'awd').
+      game's own shift lights end), car ('<game>/<id>': a key naming the
+      car within its game), car_name, car_class, drivetrain ('fwd', 'rwd', 'awd').
     - Game: game ('forza-fh', 'forza-fm', 'forza', 'dirt', 'wrcg',
       'eawrc', 'acpmf', 'beamng', 'lfs'), track (as the game names it),
       stage (a key where the game identifies the stage or route),
@@ -248,13 +248,13 @@ def _ovst(data, n):
         return None
     sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
                     gear=gear if -1 <= gear <= 12 else None,
-                    speed=_finite(speed / 3.6), car='acpmf', game='acpmf')
+                    speed=_finite(speed / 3.6), car='acpmf/unknown', game='acpmf')
     if version == 2:
         gas, brake = struct.unpack_from('<ff', data, 24)
         sample.throttle, sample.brake = _finite(gas), _finite(brake)
         name = _ascii(data[32:64])
         if name:
-            sample.car, sample.car_name = 'acpmf-' + name, name
+            sample.car, sample.car_name = 'acpmf/' + name, name
         sample.track = _ascii(data[64:96])
     return sample
 
@@ -277,7 +277,7 @@ def _forza(data, n):
         sample.running = False
         return sample
     ordinal, car_class, pi, drivetrain = struct.unpack_from('<iiii', data, 212)
-    sample = Sample(max(0.0, rpm), max_rpm, car='forza-{}'.format(ordinal),
+    sample = Sample(max(0.0, rpm), max_rpm, car='{}/{}'.format(game, ordinal),
                     car_name='Forza car {}'.format(ordinal), game=game)
     sample.running = True
     sample.game_time = timestamp / 1000.0
@@ -340,12 +340,13 @@ def _outgauge(data, n):
     gear = data[10]                              # 0 reverse, 1 neutral, 2 first
     throttle, brake, clutch = struct.unpack_from('<fff', data, 48)
     name = _ascii(car)
-    # BeamNG always sends "beam": every BeamNG car is one car until the
-    # fingerprint split of Step C
+    # BeamNG always sends "beam": every BeamNG car is one car until a
+    # fingerprint can tell them apart
+    beamng = name == 'beam'
     sample = Sample(max(0.0, rpm), None, shift, gear=gear - 1 if gear >= 1 else -1,
-                    speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
+                    speed=_finite(speed), car='beamng/unknown' if beamng else 'lfs/' + (name or 'car'), car_name=name,
                     throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake),
-                    game='beamng' if name == 'beam' else 'lfs')
+                    game='beamng' if beamng else 'lfs')
     sample.game_time = struct.unpack_from('<I', data, 0)[0] / 1000.0
     sample.boost = _finite(boost)
     return sample
@@ -376,8 +377,8 @@ def _codemasters(data, n):
     # No car name in this format: the engine and gearbox tell cars apart.
     # Rounded to 10 rpm, so the key is the same whatever the float noise.
     top = round(max_rpm, -1)
-    key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(top, round(idle, -1) if math.isfinite(idle) else 0,
-                                                   gears if math.isfinite(gears) else 0)
+    key = '{}/{:.0f}-{:.0f}-{:.0f}'.format(game, top, round(idle, -1) if math.isfinite(idle) else 0,
+                                           gears if math.isfinite(gears) else 0)
     name = '{:.0f} rpm, {:.0f} gears'.format(top, gears) if math.isfinite(gears) else None
     sample = Sample(max(0.0, rpm), max_rpm, gear=gear,
                     speed=_finite(floats[7]), car=key, car_name=name,
@@ -470,7 +471,7 @@ def _eawrc(data, n):
     bl, br, fl, fr = (values['vehicle_cp_forward_speed_' + w] for w in EAWRC_WHEELS)
     sample.wheel_speed = _vector((fl, fr, bl, br))
     if 'vehicle_id' in values:
-        sample.car = 'eawrc-{}'.format(values['vehicle_id'])
+        sample.car = 'eawrc/{}'.format(values['vehicle_id'])
         sample.car_name = 'EA WRC car {}'.format(values['vehicle_id'])
         sample.car_class = 'class:{}'.format(values['vehicle_class_id'])
         location, route = values['location_id'], values['route_id']
@@ -480,8 +481,8 @@ def _eawrc(data, n):
         # The default structure names no car: the engine and gearbox tell
         # cars apart, as in DiRT
         idle = values['vehicle_engine_rpm_idle']
-        sample.car = 'eawrc-{:.0f}-{:.0f}-{}'.format(round(max_rpm, -1), round(idle, -1) if math.isfinite(idle) else 0,
-                                                    top)
+        sample.car = 'eawrc/{:.0f}-{:.0f}-{}'.format(round(max_rpm, -1), round(idle, -1) if math.isfinite(idle) else 0,
+                                                     top)
         sample.car_name = '{:.0f} rpm, {} gears'.format(round(max_rpm, -1), top)
     return sample
 
