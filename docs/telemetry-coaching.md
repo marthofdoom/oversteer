@@ -1298,7 +1298,7 @@ Design revised after the independent review (§3.2): done.
 - [x] Forza gear 11, DiRT reverse; OutGauge reverse and Forza `IsRaceOn = 0` tests (`tests/test_formats.py`)
 - [x] Codemasters rpm units (three branches, `codemasters_unit()`) and rescale of stored cars from the key's max (`rescale_codemasters()`, `user_version` 1, `telemetry.db.v0.bak`)
 - [x] Ratios from low-slip samples (throttle < 0.5, brake ≤ 0.02 or a little throttle when no brake is sent, |a| ≤ 2 m/s²); `top_seen` reset on re-tune; spin-first test. Driven-wheel speed as the ratio source waits for `Sample` v2 wheel speeds (Step C)
-- [ ] Shift-press wiring and method from the press; per-method columns
+- [x] Shift-press wiring (`shift_button_kinds()` in `proxy/equipment.py`, `update_shift_buttons()` every 5 s with the handbrake check) and method from the press (`shift_method()`); per-method columns from `ShiftLearner.method_shifts()`, re-read on car change, session end (`sessions_ended`) and tab shown
 - [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
 - [ ] UDP default port 5310 (D1) with the 5300 probe and hint
 - [ ] GTK: snapshot cache, history on events only, praise/"still" limits

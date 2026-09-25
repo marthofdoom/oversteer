@@ -365,6 +365,22 @@ def rescale_codemasters(db, path=None):
 
 
 SHIFT_PRESS_WINDOW = 0.6         # a shifter/wheel button this long before a change made it
+PRESS_METHODS = {'gear': 'h-pattern', 'sequential': 'sequential', 'paddle': 'paddles'}
+METHODS = ('h-pattern', 'sequential', 'paddles')
+
+
+def shift_method(press, left_at, engaged_at, via_neutral):
+    """How a change was made. The physical control pressed decides: a gear
+    of the H-pattern shifter, the sequential plate or a paddle, pressed
+    between SHIFT_PRESS_WINDOW before the old gear was left and the new
+    one engaging. Neutral between the gears only says H-pattern when no
+    press was seen, because whether a game shows it depends on its
+    gearbox model, not on the shifter. None when nothing tells."""
+    if press is not None and left_at - SHIFT_PRESS_WINDOW <= press[0] <= engaged_at + 0.05:
+        method = PRESS_METHODS.get(press[1])
+        if method is not None:
+            return method
+    return 'h-pattern' if via_neutral else None
 
 
 class ShiftLearner:
@@ -385,6 +401,7 @@ class ShiftLearner:
         self._saved_at = time.monotonic()
         self.session = None                      # sessions.id of the drive going on
         self.session_limiter_time = 0.0
+        self.sessions_ended = 0                  # counts up at each session end: history readers refresh
         self._shift_cache = {}
         self._shift_cache_at = 0.0
         if database is not None:
@@ -473,6 +490,7 @@ class ShiftLearner:
                             '(SELECT 1 FROM shifts WHERE session = ?)', (self.session, self.session))
             self.db.commit()
         self.session = None
+        self.sessions_ended += 1
 
     def save(self):
         with self.lock:
@@ -525,6 +543,26 @@ class ShiftLearner:
                 (self.profile, key, limit)).fetchall()
         return [{'id': r[0], 'started': r[1], 'track': r[2], 'limiter_time': r[3] or 0.0, 'shifts': r[4],
                  'error': r[5], 'methods': sorted((r[6] or '').split(',')) if r[6] else []} for r in rows]
+
+    def method_shifts(self, key):
+        """{gear: {method: (mean rpm, count)}} of the car's recent
+        flat-out changes up, per way of changing (the most recent
+        SHIFTS_KEEP of each). A history query: run it on events (car
+        change, session end, the tab shown), not on a timer."""
+        if self.db is None:
+            return {}
+        with self.lock:
+            rows = self.db.execute(
+                'SELECT h.gear, h.method, h.rpm FROM shifts h JOIN sessions s ON h.session = s.id '
+                'WHERE s.profile = ? AND s.car = ? AND h.method IS NOT NULL '
+                'ORDER BY h.at DESC LIMIT 5000', (self.profile, key)).fetchall()
+        recent = {}
+        for gear, method, rpm in rows:
+            values = recent.setdefault(gear, {}).setdefault(method, [])
+            if len(values) < SHIFTS_KEEP:
+                values.append(rpm)
+        return {gear: {m: (statistics.mean(v), len(v)) for m, v in methods.items()}
+                for gear, methods in recent.items()}
 
     def load_snapshot(self, key):
         """A saved car's snapshot without switching to it."""
@@ -582,8 +620,8 @@ class ShiftLearner:
     def feed(self, now, sample, limiter, throttle, clutch, press=None):
         """One telemetry packet. `limiter` is the best known ceiling;
         `throttle` and `clutch` are pressed fractions (None = unknown);
-        `press` is (monotonic time, 'shifter' or 'wheel') of the last
-        button that could have changed gear."""
+        `press` is (monotonic time, 'gear', 'sequential' or 'paddle') of
+        the last button that could have changed gear."""
         if not self.enabled or sample.car is None:
             return
         with self.lock:
@@ -700,12 +738,7 @@ class ShiftLearner:
         if self.db is None or self.session is None:
             return
         gear, rpm, throttle, left_at, via_neutral = left
-        if via_neutral:
-            method = 'h-pattern'
-        else:
-            press = getattr(self, '_press', None)
-            kind = press[1] if press and 0 <= left_at - press[0] <= SHIFT_PRESS_WINDOW else None
-            method = {'shifter': 'sequential', 'wheel': 'paddles'}.get(kind)
+        method = shift_method(getattr(self, '_press', None), left_at, now, via_neutral)
         best = car.best_shift(gear)
         try:
             self.db.execute('INSERT INTO shifts (session, at, gear, rpm, best, throttle, method) '

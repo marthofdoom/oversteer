@@ -854,6 +854,8 @@ class GtkUi:
         scrolled.add(page)
         self.main_notebook.insert_page(scrolled, Gtk.Label(label=_("Telemetry")), self.TELEMETRY_TAB_POSITION)
         self._telemetry_rows = None
+        self.main_notebook.connect('switch-page', lambda notebook, child, index:
+                                   self.controller.telemetry_tab_selected() if child is scrolled else None)
 
     def set_rev_leds_options(self, launch, learnt):
         for switch, value in ((self.rev_leds_launch, launch), (self.rev_leds_learnt, learnt)):
@@ -901,8 +903,10 @@ class GtkUi:
         self.telemetry_live.set_markup(live)
         rows = None
         if snapshot is not None:
+            methods = snapshot.get('methods') or {}
             rows = (snapshot['limiter'], tuple(tuple(sorted(r.items())) for r in snapshot['gears']),
-                    tuple(snapshot['advice']), snapshot['power_bands'])
+                    tuple(snapshot['advice']), snapshot['power_bands'],
+                    tuple(sorted((g, tuple(sorted(m.items()))) for g, m in methods.items())))
         if rows == self._telemetry_rows:
             return
         self._telemetry_rows = rows
@@ -918,7 +922,12 @@ class GtkUi:
             _("engine power estimated from acceleration")
         self.telemetry_summary.set_text(_("Limiter {} rpm  ·  {} rev bands of power known ({})").format(
             int(limiter) if limiter else '?', snapshot['power_bands'], source))
-        headers = (_("Gear"), _("rpm per km/h"), _("Best upshift"), _("of limiter"), _("You change up"), _("Samples"))
+        # A column per way of changing gear, once it has changes to show
+        methods = snapshot.get('methods') or {}
+        used = [m for m in ('h-pattern', 'sequential', 'paddles') if any(m in v for v in methods.values())]
+        method_names = {'h-pattern': _("H-pattern"), 'sequential': _("Sequential"), 'paddles': _("Paddles")}
+        headers = ((_("Gear"), _("rpm per km/h"), _("Best upshift"), _("of limiter"), _("You change up"))
+                   + tuple(method_names[m] for m in used) + (_("Samples"),))
         for column, text in enumerate(headers):
             label = Gtk.Label(xalign=0)
             label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(text)))
@@ -932,8 +941,12 @@ class GtkUi:
                 best = '{:.0f} rpm'.format(row['best'])
                 share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
             mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
-            cells = (str(row['gear']), '{:.1f}'.format(row['ratio'] / 3.6), best, share, mine,
-                     str(row['ratio_samples']))
+            per_method = []
+            for method in used:
+                average = methods.get(row['gear'], {}).get(method)
+                per_method.append('{:.0f} rpm ({})'.format(*average) if average else '—')
+            cells = ((str(row['gear']), '{:.1f}'.format(row['ratio'] / 3.6), best, share, mine)
+                     + tuple(per_method) + (str(row['ratio_samples']),))
             for column, text in enumerate(cells):
                 self.telemetry_gears.attach(Gtk.Label(label=text, xalign=0), column, index, 1, 1)
         self.telemetry_gears.show_all()

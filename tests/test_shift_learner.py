@@ -255,3 +255,38 @@ def test_dirt_cars_learnt_in_the_wrong_unit_are_rescaled(tmp_path):
     learner.db.close()
     again = ShiftLearner(path, profile='rally')                 # done once only
     assert 'codemasters-7500-800-6' in dict(again.known_cars())
+
+
+def test_the_press_says_how_a_change_was_made():
+    from oversteer.shift_learner import shift_method
+    assert shift_method((9.8, 'sequential'), 10.0, 10.05, False) == 'sequential'
+    assert shift_method((9.9, 'paddle'), 10.0, 10.3, True) == 'paddles'       # neutral shown, paddle pressed
+    assert shift_method((10.2, 'gear'), 10.0, 10.3, True) == 'h-pattern'      # the new gear's button, in neutral
+    assert shift_method((10.2, 'gear'), 10.0, 10.3, False) == 'h-pattern'     # an H-pattern with no neutral shown
+    assert shift_method((8.0, 'sequential'), 10.0, 10.05, True) == 'h-pattern'  # an old press: the fallback
+    assert shift_method(None, 10.0, 10.05, False) is None
+
+
+def test_shifts_per_method(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t = 0.0
+    for method, shift_rpm, press in (('sequential', 6000.0, 'sequential'), ('paddles', 6400.0, 'paddle'),
+                                     ('h-pattern', 5600.0, None)):
+        for _ in range(3):
+            speed = 5000.0 / RATIOS[2]
+            for rpm in (5000.0, 5600.0, shift_rpm):
+                t += 0.1
+                learner.feed(t, Sample(rpm, LIMITER, gear=2, speed=rpm / RATIOS[2], car='test-car'), LIMITER, 1.0, 0.0)
+            t += 0.05
+            if press is None:                                    # through neutral, nothing pressed
+                learner.feed(t, Sample(4000.0, LIMITER, gear=0, speed=speed, car='test-car'), LIMITER, 0.0, 1.0)
+                t += 0.2
+            learner.feed(t, Sample(4700.0, LIMITER, gear=3, speed=shift_rpm / RATIOS[2], car='test-car'),
+                         LIMITER, 1.0, 0.0, press=(t - 0.1, press) if press else None)
+            t += 1.0
+    methods = learner.method_shifts('test-car')
+    assert {m: (round(v[0]), v[1]) for m, v in methods[2].items()} == {
+        'sequential': (6000, 3), 'paddles': (6400, 3), 'h-pattern': (5600, 3)}
+    ended = learner.sessions_ended
+    learner.idle()
+    assert learner.sessions_ended == ended + 1

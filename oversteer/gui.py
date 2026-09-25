@@ -71,13 +71,18 @@ class Gui:
         self.telemetry = None
         self.telemetry_generation = 0
         # Pedals as pressed fractions for the rev lights' launch mode; the
-        # input thread writes, the telemetry thread reads (plain floats)
-        self.launch_inputs = {'clutch': None, 'throttle': None, 'handbrake': None}
+        # input thread writes, the telemetry thread reads (plain floats).
+        # shift_press: (monotonic time, 'gear'/'sequential'/'paddle') of the
+        # last press that could change gear, for how each change was made.
+        self.launch_inputs = {'clutch': None, 'throttle': None, 'handbrake': None, 'shift_press': None}
+        self.shift_buttons = {}           # evdev key code -> 'gear', 'sequential' or 'paddle'
         self.telemetry_status = lambda: None
         from .shift_learner import ShiftLearner
         self.shift_learner = ShiftLearner()
         self.telemetry_car_selected = None      # a saved car picked in the Telemetry tab; None = the live one
         self.telemetry_car_live = None
+        self.telemetry_tab_shown = 0            # counts the times the tab was opened: history is re-read then
+        self._methods_cache = None
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -649,6 +654,7 @@ class Gui:
         Re-checked as proxies come and go: the axis lives on the virtual
         device a proxy presents, which appears, changes and disappears
         while Oversteer runs."""
+        self.update_shift_buttons()
         axis = self.device.handbrake_axis() if self.device is not None else None
         proxied = self._proxied_handbrake()
         state = proxied[3] if proxied is not None else None
@@ -660,6 +666,20 @@ class Gui:
         self.handbrake_invert = state
         self.ui.set_handbrake_visible(axis is not None)
         self.ui.set_handbrake_invert(state)
+
+    def update_shift_buttons(self):
+        """Which key codes of the wheel Oversteer reads are shifter gears,
+        the sequential plate or paddles: from the combined device's spec,
+        re-read as proxies come and go."""
+        from .proxy.equipment import shift_button_kinds
+        from . import wheel_ids as wid
+        spec = self._load_combined_spec()
+        wheel = spec.sources.get('wheel') if spec is not None else None
+        if wheel is not None:
+            logitech = wheel.vendor == int(wid.VENDOR_LOGITECH, 16)
+        else:
+            logitech = self.device is not None and self.device.vendor_id == wid.VENDOR_LOGITECH
+        self.shift_buttons = shift_button_kinds(spec, logitech)
 
     def set_handbrake_invert(self, state):
         """Override the direction the proxy gives the handbrake. The spec
@@ -739,6 +759,7 @@ class Gui:
 
     def forget_telemetry_car(self, key):
         self.shift_learner.forget(key)
+        self._methods_cache = None
         if self.telemetry_car_selected == key:
             self.telemetry_car_selected = None
         self.refresh_telemetry_cars()
@@ -770,8 +791,24 @@ class Gui:
             snapshot = self.shift_learner.load_snapshot(self.telemetry_car_selected)
         else:
             snapshot = self.shift_learner.snapshot()
+        if snapshot is not None:
+            snapshot = dict(snapshot, methods=self._method_shifts(snapshot['key']))
         self.ui.set_telemetry_view(live, snapshot)
         return True
+
+    def _method_shifts(self, key):
+        """The car's changes up per way of changing, from the database:
+        queried again only when the car or the session changes or the tab
+        is shown, never just because a second went by."""
+        stamp = (key, self.shift_learner.profile, self.shift_learner.sessions_ended, self.telemetry_tab_shown)
+        if self._methods_cache is None or self._methods_cache[0] != stamp:
+            self._methods_cache = (stamp, self.shift_learner.method_shifts(key))
+        return self._methods_cache[1]
+
+    def telemetry_tab_selected(self):
+        self.telemetry_tab_shown += 1
+        if getattr(self, 'ui', None) is not None:          # not while the window is being built
+            self.refresh_telemetry_view()
 
     def _shift_kwargs(self):
         shift = self.model.get_rev_leds_shift()
@@ -1357,6 +1394,9 @@ class Gui:
             if event.type == ecodes.EV_KEY:
                 if event.value == 1:
                     self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
+                    kind = self.shift_buttons.get(event.code)
+                    if kind is not None:
+                        self.launch_inputs['shift_press'] = (time.monotonic(), kind)
                 if event.value:
                     delay = 0
                     if self.test and self.test.is_awaiting_action():

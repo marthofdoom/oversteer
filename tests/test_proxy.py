@@ -294,3 +294,11 @@ def test_shifter_sequential_buttons_are_mapped():
     assert targets['BTN_BASE4'] == 'BTN_TRIGGER_HAPPY12'      # 715, sequential up
     assert len(set(targets.values())) == len(targets)         # no two controls share a code
     assert 'sequential down' in spec['description'] and 'sequential up' in spec['description']
+
+    # Which control a press came from, as the shift learner needs it
+    from oversteer.proxy.equipment import shift_button_kinds
+    kinds = shift_button_kinds(ProxySpec.from_dict(spec))
+    assert kinds[714] == kinds[715] == 'sequential'
+    assert all(kinds[c] == 'gear' for c in (300, 301, 302, 303, 704, 705, 706, 713))   # 7 gears + R
+    assert kinds[e.BTN_TOP2] == kinds[e.BTN_PINKIE] == 'paddle'                       # the G29's own
+    assert shift_button_kinds(None, logitech=False) == {}
