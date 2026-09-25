@@ -452,8 +452,13 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
   records: struct '<dIH' (t since start as float64, source IPv4 as u32, length) + bytes
 ```
 
-- `CaptureWriter(path)`: `.write(t, addr, data)`, `.close()`; driven by the
-  drive-log thread from the raw-packet events (the listener only enqueues).
+- `CaptureWriter(path, port, note, version)`: `.write(now, addr, data)`
+  (any clock; stored from the first packet on), `.close()`; in the app it
+  is driven by the drive-log thread from the raw-packet events (the
+  listener only enqueues). Source addresses are IPv4; anything else is
+  stored as 0.0.0.0.
+- `replay(records, learner)`: the records through `Telemetry.handle` with
+  a `NullLeds`, on the capture's clock from t = 1000 s, then idle.
 - `read_capture(path) -> (meta, iterator of (t, addr, data))` tolerates a
   truncated tail (a crash mid-write): `EOFError` and a short record end
   the iterator quietly.
@@ -1250,6 +1255,13 @@ checklist below.
    first (no behaviour change), then the shipped structure file, the 4CC
    and default 237-byte decoders filling today's `Sample` fields plus
    `game` and `stage`, the id → name table, the copy buttons (§5.3).
+9. *Brought forward from Step D (done in Step A):* the capture format,
+   `CaptureWriter`/`read_capture()`/`replay()` in `telemetry_capture.py`,
+   `telemetry-capture.py --write` and `telemetry-replay.py` (learn,
+   `--send`, `--cut`), so the §6.3 captures can be recorded now, while
+   the rest is built, and settle the "verify" items early. Recording from
+   the app (the tab's switch, the drive-log thread writing) stays in
+   Step D.
 
 **Step B: the read-only web page over today's data.**
 1. `telemetry_web.py` (§11: limits, Host check, headers, a connection per
@@ -1329,6 +1341,8 @@ Design revised after the independent review (§3.2): done.
 - [x] GTK: snapshot cache (`load_snapshot()` keyed by (profile, key, `updated`); rename bumps `updated`), history on events only (`method_shifts()`), advice limited to 3 tips by size, 1 praise line, 1 re-tune line, 1 "still learning" line. The quiet "still:" lines and re-showing rules need `coach_state` (Step C)
 - [x] `telemetry_formats.py` split (acb5ba0); EA SPORTS WRC decoder (both structures), shipped structure file, copy buttons with the target folder. **Deferred:** the id → name table (game's `ids.json` and its terms not available here, §5.3)
 
+- [x] Capture format, writer, reader, replay through `Telemetry.handle`; `telemetry-capture.py --write`, `telemetry-replay.py` (brought forward from Step D; `tests/test_capture.py`)
+
 ### Step B
 - [ ] Web server (read-only, limits, Host check, headers) over today's data, and page
 - [ ] Web preferences and Settings controls, bound URLs
@@ -1348,7 +1362,7 @@ Design revised after the independent review (§3.2): done.
 - [ ] `tests/sim.py`; tests; bench within budget
 
 ### Step D
-- [ ] Capture format, writer, reader; capture and replay scripts; encoders
+- [ ] Capture switch and folder size in the tab (the drive-log thread writes); encoders in `tests/sim.py`. The format, reader, writer and scripts were done in Step A
 - [ ] OVST v3 bridge (C) built, and decoder
 - [ ] BeamNG MotionSim (optional)
 - [ ] Measured surface classifier, calibration, `telemetry-calibrate.py` (needs §6.3 captures)

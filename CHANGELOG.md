@@ -19,6 +19,9 @@
 - EA SPORTS WRC telemetry: the game's default structure, or Oversteer's own
   (car and stage ids, session start/end/pause), set up with two Copy
   buttons under the Telemetry tab's Settings.
+- `scripts/telemetry-capture.py --write` records raw telemetry to a file;
+  `scripts/telemetry-replay.py` plays it back through the shift learner,
+  re-sends it over UDP, or cuts a piece out of it.
 
 ### Changed
 - The telemetry port is now **UDP 5310** for new profiles and

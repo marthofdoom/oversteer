@@ -79,7 +79,9 @@ __Use at your own risk. Suggestions, bugs and pull requests welcome.__
 
 **Diagnostics**: `scripts/probe-device.py` names the raw events of any device,
 including one hidden or grabbed by the proxy; `scripts/telemetry-capture.py`
-shows what arrives on the telemetry port and how it decodes.
+shows what arrives on the telemetry port and how it decodes, and with
+`--write` records it; `scripts/telemetry-replay.py` plays a recording back
+through the learner or re-sends it to a running Oversteer.
 
 Pieces of this are being sent back upstream as separate pull requests.
 
