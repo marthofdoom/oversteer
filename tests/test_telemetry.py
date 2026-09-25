@@ -225,3 +225,45 @@ def test_one_source_at_a_time():
     for i in range(300):                                      # the bridge keeps sending; the game went quiet
         telemetry.handle(100.04 + i * 0.01, ovst(6000, 8500), bridge)
     assert telemetry.live.game == 'acpmf'                     # idle freed the lock for it
+
+
+def test_probe_finds_a_game_on_the_other_port(monkeypatch):
+    """Nothing on our port: a game still sending to the other default is
+    found by listening there for a moment, and let go again."""
+    import threading
+    from oversteer import telemetry as module
+
+    def free_port():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    ours, theirs = free_port(), free_port()
+    monkeypatch.setattr(module, 'DEFAULT_PORT', ours)
+    monkeypatch.setattr(module, 'LEGACY_PORT', theirs)
+    monkeypatch.setattr(module, 'PROBE_LISTEN', 0.5)
+    telemetry = Telemetry(FakeLeds(), port=ours)
+    assert telemetry.other_port == theirs
+    stop = threading.Event()
+
+    def game():
+        out = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        while not stop.is_set():
+            out.sendto(forza(4000), ('127.0.0.1', theirs))
+            time.sleep(0.02)
+
+    sender = threading.Thread(target=game, daemon=True)
+    sender.start()
+    try:
+        telemetry.probe_other_port()
+    finally:
+        stop.set()
+        sender.join()
+    assert telemetry.elsewhere is True
+    telemetry.probe_other_port()                               # the game was set right
+    assert telemetry.elsewhere is False
+    check = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    check.bind(('0.0.0.0', theirs))                            # let go again
+    check.close()

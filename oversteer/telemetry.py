@@ -19,7 +19,14 @@ import time
 # Decoding lives in telemetry_formats; these stay importable from here
 from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 
-DEFAULT_PORT = 5300
+# Forza Horizon 6 binds its own outgoing socket somewhere in 5200-5300 and
+# its documentation says to keep Data Out away from that range; the game
+# runs on this machine, so 5300 can collide.
+DEFAULT_PORT = 5310
+LEGACY_PORT = 5300                                   # the default before 0.14: games may still send there
+PROBE_AFTER = 10.0                                   # seconds of nothing before looking at the other port
+PROBE_EVERY = 60.0
+PROBE_LISTEN = 1.0                                   # seconds the other port is held: FH6 may want 5300
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
 LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point
 FLASH_MARGIN = 0.03                                  # above the shift point: flash (shift now)
@@ -165,6 +172,9 @@ class Telemetry:
         self._thread = None
         self._sock = None
         self._unknown_sizes = set()
+        self.heard = False                # anything decoded on our port since start()
+        self.elsewhere = None             # probe_other_port(): True something sends to other_port, False nothing
+        self._probe_at = 0.0
         self._source = None               # (address, game) the listener is locked to
         self._ignored = set()             # other sources, logged once each
         self._lit = None                  # LEDs lit as a bar; None = unknown, rewrite on next packet
@@ -239,6 +249,9 @@ class Telemetry:
             self._sock = None
             return False
         self.running = True
+        self.heard = False
+        self.elsewhere = None
+        self._probe_at = time.monotonic() + PROBE_AFTER
         self._thread = threading.Thread(target=self._run, name='telemetry', daemon=True)
         self._thread.start()
         return True
@@ -258,11 +271,50 @@ class Telemetry:
             try:
                 data, addr = self._sock.recvfrom(2048)
             except socket.timeout:
-                self.check_idle(time.monotonic())
+                now = time.monotonic()
+                self.check_idle(now)
+                if not self.heard and now >= self._probe_at:
+                    self._probe_at = now + PROBE_EVERY
+                    self.probe_other_port()
                 continue
             except OSError:
                 break
             self.handle(time.monotonic(), data, addr)
+
+    @property
+    def other_port(self):
+        """The default we are not on: games and oversteer-run set up before
+        the move to 5310 send to 5300, and a profile saved then listens
+        there while oversteer-run now sends to 5310."""
+        return DEFAULT_PORT if self.port == LEGACY_PORT else LEGACY_PORT
+
+    def probe_other_port(self):
+        """Nothing has arrived on our port: listen on other_port for a
+        moment, if it is free, to tell a game sending to the other default
+        from no game at all. It is let go again at once: 5300 is in the
+        range Forza Horizon 6 may need for its own socket. Sets
+        `elsewhere`: True (something sends there), False (nothing)."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        except OSError:
+            return
+        try:
+            sock.bind(('0.0.0.0', self.other_port))
+            sock.settimeout(PROBE_LISTEN)
+            data, addr = sock.recvfrom(2048)
+            found = decode_sample(data) is not None
+            if found:
+                logging.info("telemetry: %s sends to UDP %d, Oversteer listens on %d", addr[0], self.other_port,
+                             self.port)
+        except socket.timeout:
+            found = False
+        except OSError:
+            return                       # in use: someone else's port, nothing to learn from it
+        finally:
+            sock.close()
+        if found != self.elsewhere:
+            self.elsewhere = found
+            self._status(None)
 
     def check_idle(self, now):
         """Telemetry stopped for a while: LEDs off and forget the source."""
@@ -311,6 +363,9 @@ class Telemetry:
         rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
         self.live = sample
         self.last_packet = now
+        if not self.heard:
+            self.heard = True
+            self.elsewhere = None
         if self.last_source != addr[0]:
             self.last_source = addr[0]
             self._status(addr[0])

@@ -12,6 +12,32 @@
   revs past it (a launch control capping the revs at the line), and
   forgotten when the telemetry stops between stages. With no handbrake
   fitted, clutch in and throttle floored is the launch.
+- Telemetry tab: the shift table has a column per way of changing gear
+  (H-pattern, sequential, paddles) once you have used it. How each change
+  was made comes from the control you pressed: a shifter gear, the
+  sequential plate or a paddle.
+
+### Changed
+- The telemetry port is now **UDP 5310** for new profiles and
+  `oversteer-run`. Forza Horizon 6 binds its own socket in 5200–5300 and
+  asks Data Out to stay clear of that range. Profiles that saved 5300 keep
+  it. When nothing arrives, Oversteer listens on the other port for a
+  second now and then and says so if a game is sending there.
+- The listener takes telemetry from one source at a time (the first one
+  heard, until it goes quiet), so a bridge left running next to a game
+  no longer mixes two cars.
+
+### Fixed
+- DiRT Rally 2.0 (and DiRT Rally, DiRT 4): engine rpm was read 4.7 % too
+  high (the game sends rad/s, not rpm / 10), and with it the shift light
+  and everything learnt. Cars already learnt are corrected once when the
+  telemetry database opens (a backup is kept as `telemetry.db.v0.bak`).
+- Reverse in DiRT Rally and WRC Generations, and neutral in Forza, were
+  read as "unknown gear"; H-pattern changes through neutral are now seen
+  in Forza Horizon.
+- Gear ratios are learnt only at part throttle, where the tyres barely
+  slip: a first run spinning up gravel no longer leaves a car with wrong
+  ratios and a false "re-tuned" note.
 
 ## 0.13.1 — 2026-09-24
 

@@ -15,7 +15,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from oversteer.telemetry_formats import decode  # noqa: E402
 
-port = int(sys.argv[1]) if len(sys.argv) > 1 else 5300
+port = int(sys.argv[1]) if len(sys.argv) > 1 else 5310
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.bind(('0.0.0.0', port))
 sock.settimeout(1.0)

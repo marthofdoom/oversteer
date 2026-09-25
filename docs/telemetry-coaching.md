@@ -73,7 +73,13 @@ These are decided here so the work can go on; each is cheap to reverse.
   second (only if it is free); if packets arrive there the status says
   "your game sends to 5300: set it to 5310", otherwise "waiting for
   telemetry on 5310 (games set up for 5300 need the new port)". It does not
-  keep listening on 5300: that is the socket FH6 may need. The web
+  keep listening on 5300: that is the socket FH6 may need. *As built:* the
+  probe is symmetric (`Telemetry.other_port`): a profile that stored 5300
+  probes 5310, because `oversteer-run` now sends there; it runs 10 s after
+  start and then every 60 s until anything is heard. The bridge's own
+  compiled-in default stays 5300 until the .exe is rebuilt (Step D):
+  `oversteer-run` always passes `--port`, so only a bridge run by hand
+  sees it. The web
   page stays on **TCP 5301** as asked (TCP and UDP ports are separate; 5301
   TCP is not in FH6's way).
 - **D2. Codemasters RPM units.** DiRT Rally 1/2 send engine rates in rad/s,
@@ -1300,7 +1306,7 @@ Design revised after the independent review (§3.2): done.
 - [x] Ratios from low-slip samples (throttle < 0.5, brake ≤ 0.02 or a little throttle when no brake is sent, |a| ≤ 2 m/s²); `top_seen` reset on re-tune; spin-first test. Driven-wheel speed as the ratio source waits for `Sample` v2 wheel speeds (Step C)
 - [x] Shift-press wiring (`shift_button_kinds()` in `proxy/equipment.py`, `update_shift_buttons()` every 5 s with the handbrake check) and method from the press (`shift_method()`); per-method columns from `ShiftLearner.method_shifts()`, re-read on car change, session end (`sessions_ended`) and tab shown
 - [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
-- [ ] UDP default port 5310 (D1) with the 5300 probe and hint
+- [x] UDP default port 5310 (D1) with the probe and hint (symmetric, see §3.1 D1); CHANGELOG entries for Step A. Bridge .c default left at 5300 until it is rebuilt
 - [ ] GTK: snapshot cache, history on events only, praise/"still" limits
 - [ ] `telemetry_formats.py` split (done, acb5ba0); EA SPORTS WRC decoder, id table, copy buttons
 

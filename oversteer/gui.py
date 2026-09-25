@@ -510,7 +510,7 @@ class Gui:
 
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""
-        from .telemetry import Telemetry
+        from .telemetry import Telemetry, DEFAULT_PORT, LEGACY_PORT
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
@@ -530,9 +530,19 @@ class Gui:
         shown = {'source': None, 'limiter': 0.0}
 
         def show():
-            if self.telemetry is None or generation != self.telemetry_generation:
+            telemetry = self.telemetry
+            if telemetry is None or generation != self.telemetry_generation:
                 return
-            text = _("telemetry from {}").format(shown['source']) if shown['source'] else _("waiting for telemetry")
+            if shown['source']:
+                text = _("telemetry from {}").format(shown['source'])
+            elif telemetry.elsewhere:
+                text = _("telemetry arrives on UDP {0}, not {1}: set the port here to {0}, or the game to {1}").format(
+                    telemetry.other_port, telemetry.port)
+            elif telemetry.elsewhere is False and telemetry.port == DEFAULT_PORT:
+                text = _("waiting for telemetry on UDP {} (games set up for 5300 need the new port)").format(
+                    telemetry.port)
+            else:
+                text = _("waiting for telemetry on UDP {}").format(telemetry.port)
             if shown['source'] and self.model.get_rev_leds_launch() and self.model.get_rev_leds_shift_unit() != 'rpm':
                 text += '  ·  ' + (_("limiter {} rpm (from the launch)").format(int(round(shown['limiter'])))
                                    if shown['limiter'] else _("launch to learn the limiter"))
@@ -547,13 +557,18 @@ class Gui:
         def limiter(rpm):
             shown['limiter'] = rpm
             self.ui.safe_call(show)
-        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status,
+        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or DEFAULT_PORT, on_status=status,
                                    inputs=lambda: self.launch_inputs, on_limiter=limiter,
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry_status = show
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
+        elif self.telemetry.port == LEGACY_PORT:
+            # Forza Horizon 6 binds its own socket in 5200-5300
+            self.ui.set_rev_leds_status(_("port {} in use (Forza Horizon 6 may hold it): use {}").format(
+                LEGACY_PORT, DEFAULT_PORT))
+            self.telemetry = None
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None

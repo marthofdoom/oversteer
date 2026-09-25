@@ -116,7 +116,7 @@ class Model:
             'rumble_level': self.device.get_rumble_level(),
             'ffb_leds': self.device.get_ffb_leds(),
             'rev_leds': False if self.device.has_rev_leds() else None,
-            'rev_leds_port': 5300 if self.device.has_rev_leds() else None,
+            'rev_leds_port': 5310 if self.device.has_rev_leds() else None,   # telemetry.DEFAULT_PORT
             'rev_leds_shift': 95 if self.device.has_rev_leds() else None,
             'rev_leds_shift_unit': 'percent' if self.device.has_rev_leds() else None,
             'rev_leds_launch': True if self.device.has_rev_leds() else None,
