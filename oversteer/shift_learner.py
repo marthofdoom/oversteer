@@ -200,7 +200,56 @@ class CarModel:
         bands = sum(1 for v in self.power.values() if len(v) >= POWER_MIN)
         return {'key': self.key, 'name': self.name, 'limiter': self.ceiling(), 'gears': rows,
                 'power_bands': bands, 'limiter_time': self.limiter_time,
-                'power_source': self.power_source}
+                'power_source': self.power_source, 'retuned': dict(self.retuned)}
+
+    def advice(self, session_limiter_time=0.0):
+        """Coaching from what has been learnt: a list of sentences."""
+        tips = []
+        gears = self.gears()
+        ceiling = self.ceiling()
+        for gear in gears:
+            if gear + 1 not in gears:
+                continue
+            best = self.best_shift(gear)
+            average = self.average_upshift(gear)
+            if best is None or average is None or average[1] < 3:
+                continue
+            best_rpm, (shift_rpm, count) = best[0], average
+            step = self.ratio(gear + 1) / self.ratio(gear)
+            change = '{}→{}'.format(gear, gear + 1)
+            if shift_rpm < best_rpm - 200:
+                stay, after = self.power_at(shift_rpm), self.power_at(shift_rpm * step)
+                cost = ''
+                if stay and after and after < stay:
+                    cost = ' At that speed gear {} gives {:.0f} % less drive than staying in {}.'.format(
+                        gear + 1, (1 - after / stay) * 100, gear)
+                tips.append('{}: you change up around {:.0f} rpm, {:.0f} early; hold it to about {:.0f}.{}'.format(
+                    change, shift_rpm, best_rpm - shift_rpm, best_rpm, cost))
+            elif shift_rpm > best_rpm + 200:
+                if best_rpm >= ceiling * 0.99:
+                    tips.append('{}: you change up around {:.0f} rpm, on the limiter; this car pulls to the '
+                                'limiter in {}, so change as the lights flash.'.format(change, shift_rpm, gear))
+                else:
+                    stay, after = self.power_at(shift_rpm), self.power_at(shift_rpm * step)
+                    cost = ''
+                    if stay and after and stay < after:
+                        cost = ' By then gear {} would give {:.0f} % more drive.'.format(
+                            gear + 1, (after / stay - 1) * 100)
+                    tips.append('{}: you change up around {:.0f} rpm, {:.0f} late; change at about {:.0f}.{}'.format(
+                        change, shift_rpm, shift_rpm - best_rpm, best_rpm, cost))
+            else:
+                tips.append('{}: spot on, around {:.0f} rpm ({} changes).'.format(change, shift_rpm, count))
+        if session_limiter_time > 3:
+            tips.append('{:.0f} s on the limiter at full throttle this session: the engine makes nothing '
+                        'there. Change up when the lights flash.'.format(session_limiter_time))
+        for gear in sorted(self.retuned):
+            tips.append('Gear {} was re-tuned; its shift points are being learnt again.'.format(gear))
+        needed = int(ceiling * 0.5 / POWER_BIN) if ceiling else 0
+        bands = sum(1 for v in self.power.values() if len(v) >= POWER_MIN)
+        if needed and bands < needed * 0.8:
+            tips.append('Still learning the engine ({} of about {} rev bands known): full-throttle pulls from '
+                        'low revs, out of slow corners, fill it in fastest.'.format(bands, needed))
+        return tips
 
 
 class ShiftLearner:
@@ -325,9 +374,13 @@ class ShiftLearner:
             path = self._path(key)
         try:
             with open(path) as f:
-                return CarModel.from_dict(json.load(f)).snapshot()
+                car = CarModel.from_dict(json.load(f))
         except (OSError, ValueError, KeyError, TypeError):
             return None
+        data = car.snapshot()
+        data['session_limiter_time'] = 0.0
+        data['advice'] = car.advice()
+        return data
 
     # -- live --
 
@@ -337,6 +390,7 @@ class ShiftLearner:
                 return None
             data = self.car.snapshot()
             data['session_limiter_time'] = self.session_limiter_time
+            data['advice'] = self.car.advice(self.session_limiter_time)
             return data
 
     def shift_rpm(self, gear):

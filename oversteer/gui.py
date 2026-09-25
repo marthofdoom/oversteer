@@ -74,6 +74,10 @@ class Gui:
         # input thread writes, the telemetry thread reads (plain floats)
         self.launch_inputs = {'clutch': None, 'throttle': None, 'handbrake': None}
         self.telemetry_status = lambda: None
+        from .shift_learner import ShiftLearner
+        self.shift_learner = ShiftLearner()
+        self.telemetry_car_selected = None      # a saved car picked in the Telemetry tab; None = the live one
+        self.telemetry_car_live = None
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -134,6 +138,7 @@ class Gui:
                 self.start_app()
 
         Thread(target=self.input_thread, daemon = True).start()
+        GLib.timeout_add(1000, self.refresh_telemetry_view)
 
         self.ui.main()
 
@@ -444,6 +449,7 @@ class Gui:
         self.update_handbrake()
         self.update_driver_status()
         self.ui.set_launch_options(self.launch_options())
+        self.update_learner_directory()
         self.apply_rev_leds()
 
         if self.model.get_profile():
@@ -522,7 +528,7 @@ class Gui:
             if self.telemetry is None or generation != self.telemetry_generation:
                 return
             text = _("telemetry from {}").format(shown['source']) if shown['source'] else _("waiting for telemetry")
-            if shown['source'] and self.model.get_rev_leds_shift_unit() == 'launch':
+            if shown['source'] and self.model.get_rev_leds_launch() and self.model.get_rev_leds_shift_unit() != 'rpm':
                 text += '  ·  ' + (_("limiter {} rpm (from the launch)").format(int(round(shown['limiter'])))
                                    if shown['limiter'] else _("launch to learn the limiter"))
             self.ui.set_rev_leds_status(text)
@@ -538,6 +544,7 @@ class Gui:
             self.ui.safe_call(show)
         self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status,
                                    inputs=lambda: self.launch_inputs, on_limiter=limiter,
+                                   learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry_status = show
         if self.telemetry.start():
@@ -690,12 +697,84 @@ class Gui:
 
         Thread(target=work, daemon=True).start()
 
+    def update_learner_directory(self):
+        """Cars are learnt per Oversteer profile: a rally profile and a
+        circuit one each keep their own."""
+        profile = self.model.get_profile()
+        name = os.path.splitext(os.path.basename(profile))[0] if profile else '_no_profile'
+        from .shift_learner import safe_name
+        directory = os.path.join(self.config_path, 'cars', safe_name(name))
+        if directory != self.shift_learner.directory:
+            self.shift_learner.set_directory(directory)
+            self.ui.safe_call(self.refresh_telemetry_cars)
+
+    def on_quit(self):
+        self.shift_learner.save()
+
+    # -- Telemetry tab --
+
+    def refresh_telemetry_cars(self):
+        cars = dict(self.shift_learner.known_cars())
+        snapshot = self.shift_learner.snapshot()
+        if snapshot is not None:
+            cars[snapshot['key']] = snapshot['name']
+        active = self.telemetry_car_selected or (snapshot['key'] if snapshot else None)
+        if active is None and cars:
+            active = sorted(cars.items(), key=lambda kv: kv[1])[0][0]
+        self.ui.set_telemetry_cars(sorted(cars.items(), key=lambda kv: kv[1].lower()), active)
+        return False
+
+    def select_telemetry_car(self, key):
+        live = self.shift_learner.car.key if self.shift_learner.car else None
+        self.telemetry_car_selected = None if key == live else key
+        self.refresh_telemetry_view()
+
+    def rename_telemetry_car(self, key, name):
+        self.shift_learner.rename(key, name)
+        self.refresh_telemetry_cars()
+
+    def forget_telemetry_car(self, key):
+        self.shift_learner.forget(key)
+        if self.telemetry_car_selected == key:
+            self.telemetry_car_selected = None
+        self.refresh_telemetry_cars()
+        self.refresh_telemetry_view()
+
+    def refresh_telemetry_view(self):
+        """Once a second: the live line, and the shown car's learning."""
+        telemetry = self.telemetry
+        sample = telemetry.live if telemetry is not None else None
+        if telemetry is None:
+            live = _("Turn on the rev lights to read game telemetry (and learn from it).")
+        elif sample is None:
+            live = _("Waiting for telemetry on UDP {}.").format(telemetry.port)
+        else:
+            parts = [GLib.markup_escape_text(sample.car_name or sample.car or _("unknown car"))]
+            if sample.gear is not None:
+                parts.append(_("gear {}").format({-1: 'R', 0: 'N'}.get(sample.gear, sample.gear)))
+            parts.append('{:.0f} rpm'.format(sample.rpm))
+            if sample.speed is not None:
+                parts.append('{:.0f} km/h'.format(sample.speed * 3.6))
+            if telemetry.using_learnt:
+                parts.append(_("lights at the learnt {:.0f} rpm").format(telemetry.using_learnt))
+            live = '<b>{}</b>'.format('  ·  '.join(parts))
+        key = self.shift_learner.car.key if self.shift_learner.car else None
+        if key != self.telemetry_car_live:
+            self.telemetry_car_live = key
+            self.refresh_telemetry_cars()
+        if self.telemetry_car_selected is not None:
+            snapshot = self.shift_learner.load_snapshot(self.telemetry_car_selected)
+        else:
+            snapshot = self.shift_learner.snapshot()
+        self.ui.set_telemetry_view(live, snapshot)
+        return True
+
     def _shift_kwargs(self):
         shift = self.model.get_rev_leds_shift()
         unit = self.model.get_rev_leds_shift_unit()
         if unit == 'rpm':
             return {'shift_rpm': shift or 7000}
-        return {'shift': (shift or 97) / 100.0, 'launch': unit == 'launch'}
+        return {'shift': (shift or 95) / 100.0, 'launch': self.model.get_rev_leds_launch()}
 
     def update_rev_leds_shift(self):
         """Push a changed shift point to the running listener without
@@ -704,6 +783,7 @@ class Gui:
         if self.telemetry is None:
             return
         self.telemetry.set_shift(**self._shift_kwargs())
+        self.telemetry.use_learnt = self.model.get_rev_leds_learnt()
         self.telemetry_status()
 
     def change_rev_leds_shift_unit(self, unit):
@@ -712,9 +792,7 @@ class Gui:
         value = None
         max_rpm = self.telemetry.reference_max() if self.telemetry is not None else 0.0
         current = self.model.get_rev_leds_shift()
-        if current and 'rpm' not in (unit, self.model.get_rev_leds_shift_unit()):
-            value = current                 # % of max <-> % of the launch limiter: same figure
-        elif max_rpm and current:
+        if max_rpm and current:
             if unit == 'rpm' and self.model.get_rev_leds_shift_unit() != 'rpm':
                 value = int(round(current / 100.0 * max_rpm / 50.0) * 50)
             elif unit != 'rpm' and self.model.get_rev_leds_shift_unit() == 'rpm':
@@ -793,6 +871,7 @@ class Gui:
         self.model.flush_device()
         self.model.flush_ui()
         self.update_pedals()
+        self.update_learner_directory()
         self.apply_rev_leds()
 
     def save_profile(self, profile_name, check_exists = False):

@@ -53,6 +53,7 @@ class GtkUi:
         self.set_range_overlay('never')
         self.disable_save_profile()
         self._build_hotkeys_page()
+        self._build_telemetry_page()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -758,7 +759,188 @@ class GtkUi:
         visual = screen.get_rgba_visual()
         self.overlay_window.set_visual(visual)
 
-    HOTKEYS_TAB_POSITION = 3        # after Tools
+    HOTKEYS_TAB_POSITION = 3        # after Tools (Telemetry then goes in front of it)
+    TELEMETRY_TAB_POSITION = 3
+
+    @staticmethod
+    def _row_of(widget):
+        while widget is not None and not isinstance(widget, Gtk.ListBoxRow):
+            widget = widget.get_parent()
+        return widget
+
+    def _switch_row(self, text, tooltip, handler):
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        row.set_size_request(-1, 56)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_tooltip_text(tooltip)
+        label = Gtk.Label(label=text, xalign=0)
+        label.set_line_wrap(True)
+        box.pack_start(label, True, True, 0)
+        switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        switch.connect('state-set', lambda w, state: handler(state) or False)
+        box.pack_end(switch, False, False, 0)
+        row.add(box)
+        return row, switch
+
+    def _build_telemetry_page(self):
+        """The Telemetry tab: the rev lights (moved from Tools), what is
+        being learnt about the car being driven, and coaching."""
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        page.set_border_width(12)
+
+        settings = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        settings.get_style_context().add_class('frame')
+        for widget in (self.rev_leds, self.launch_options):
+            row = self._row_of(widget)
+            if row is not None:
+                row.get_parent().remove(row)
+                settings.add(row)
+        row, self.rev_leds_launch = self._switch_row(
+            _("Learn the limiter at each launch"),
+            _("A rally stage starts with the clutch in, handbrake up and throttle floored, which holds "
+              "the engine on its limiter. Held for a second, that RPM becomes the car's maximum for "
+              "the % shift point, whatever the game reports. Learnt again at every start."),
+            lambda state: self.controller.model.set_rev_leds_launch(state))
+        settings.insert(row, 1)
+        row, self.rev_leds_learnt = self._switch_row(
+            _("Shift lights at the learnt best upshift for each gear"),
+            _("Once Oversteer has learnt the car's power curve and gearing, the lights complete at the "
+              "rpm where the next gear starts pulling harder, gear by gear. Until then, and for gears "
+              "it doesn't know yet, the shift point above is used."),
+            lambda state: self.controller.model.set_rev_leds_learnt(state))
+        settings.insert(row, 2)
+        page.pack_start(settings, False, False, 0)
+
+        self.telemetry_live = Gtk.Label(xalign=0)
+        self.telemetry_live.set_selectable(True)
+        page.pack_start(self.telemetry_live, False, False, 0)
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bar.pack_start(Gtk.Label(label=_("Car")), False, False, 0)
+        self.telemetry_car = Gtk.ComboBoxText()
+        self.telemetry_car.set_tooltip_text(_("Cars learnt in this profile. The car being driven is shown "
+                                              "unless you pick another."))
+        self.telemetry_car_handler = self.telemetry_car.connect(
+            'changed', lambda w: self.controller.select_telemetry_car(w.get_active_id()))
+        bar.pack_start(self.telemetry_car, True, True, 0)
+        rename = Gtk.Button(label=_("Rename…"))
+        rename.connect('clicked', lambda w: self._rename_car())
+        bar.pack_start(rename, False, False, 0)
+        forget = Gtk.Button(label=_("Forget"))
+        forget.set_tooltip_text(_("Throw away what has been learnt about this car and start again"))
+        forget.connect('clicked', lambda w: self._forget_car())
+        bar.pack_start(forget, False, False, 0)
+        page.pack_start(bar, False, False, 0)
+
+        self.telemetry_summary = Gtk.Label(xalign=0)
+        self.telemetry_summary.get_style_context().add_class('dim-label')
+        self.telemetry_summary.set_line_wrap(True)
+        page.pack_start(self.telemetry_summary, False, False, 0)
+
+        self.telemetry_gears = Gtk.Grid(column_spacing=24, row_spacing=4)
+        page.pack_start(self.telemetry_gears, False, False, 0)
+
+        heading = Gtk.Label(xalign=0)
+        heading.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(_("Coaching"))))
+        page.pack_start(heading, False, False, 0)
+        self.telemetry_advice = Gtk.Label(xalign=0, yalign=0)
+        self.telemetry_advice.set_line_wrap(True)
+        self.telemetry_advice.set_selectable(True)
+        page.pack_start(self.telemetry_advice, False, False, 0)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.add(page)
+        self.main_notebook.insert_page(scrolled, Gtk.Label(label=_("Telemetry")), self.TELEMETRY_TAB_POSITION)
+        self._telemetry_rows = None
+
+    def set_rev_leds_options(self, launch, learnt):
+        for switch, value in ((self.rev_leds_launch, launch), (self.rev_leds_learnt, learnt)):
+            switch.set_sensitive(value is not None)
+            if value is not None and switch.get_active() != bool(value):
+                switch.set_active(bool(value))
+
+    def set_telemetry_cars(self, cars, active):
+        """[(key, name)] and the key to show."""
+        self.telemetry_car.handler_block(self.telemetry_car_handler)
+        try:
+            self.telemetry_car.remove_all()
+            for key, name in cars:
+                self.telemetry_car.append(key, name)
+            if active is not None:
+                self.telemetry_car.set_active_id(active)
+        finally:
+            self.telemetry_car.handler_unblock(self.telemetry_car_handler)
+
+    def _rename_car(self):
+        key = self.telemetry_car.get_active_id()
+        if key is None:
+            return
+        dialog = Gtk.Dialog(title=_("Rename car"), transient_for=self.window, modal=True)
+        dialog.add_buttons(_("Cancel"), Gtk.ResponseType.CANCEL, _("Rename"), Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        entry = Gtk.Entry(text=self.telemetry_car.get_active_text() or '', activates_default=True)
+        dialog.get_content_area().set_border_width(12)
+        dialog.get_content_area().add(entry)
+        dialog.show_all()
+        response = dialog.run()
+        name = entry.get_text().strip()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK and name:
+            self.controller.rename_telemetry_car(key, name)
+
+    def _forget_car(self):
+        key = self.telemetry_car.get_active_id()
+        if key is not None and self.confirmation_dialog(_("Forget everything learnt about this car?")):
+            self.controller.forget_telemetry_car(key)
+
+    def set_telemetry_view(self, live, snapshot):
+        """`live`: the line about the telemetry arriving now. `snapshot`:
+        the shown car's learner snapshot, or None."""
+        self.telemetry_live.set_markup(live)
+        rows = None
+        if snapshot is not None:
+            rows = (snapshot['limiter'], tuple(tuple(sorted(r.items())) for r in snapshot['gears']),
+                    tuple(snapshot['advice']), snapshot['power_bands'])
+        if rows == self._telemetry_rows:
+            return
+        self._telemetry_rows = rows
+        for child in self.telemetry_gears.get_children():
+            child.destroy()
+        if snapshot is None:
+            self.telemetry_summary.set_text(_("Nothing learnt yet: drive with the rev lights on and "
+                                              "Oversteer learns each car's gearing and power."))
+            self.telemetry_advice.set_text('')
+            return
+        limiter = snapshot['limiter']
+        source = _("engine power from the game") if snapshot['power_source'] == 'game' else \
+            _("engine power estimated from acceleration")
+        self.telemetry_summary.set_text(_("Limiter {} rpm  ·  {} rev bands of power known ({})").format(
+            int(limiter) if limiter else '?', snapshot['power_bands'], source))
+        headers = (_("Gear"), _("rpm per km/h"), _("Best upshift"), _("of limiter"), _("You change up"), _("Samples"))
+        for column, text in enumerate(headers):
+            label = Gtk.Label(xalign=0)
+            label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(text)))
+            self.telemetry_gears.attach(label, column, 0, 1, 1)
+        for index, row in enumerate(snapshot['gears'], start=1):
+            if row['last']:
+                best, share = _("top gear"), ''
+            elif row['best'] is None:
+                best, share = _("learning…"), ''
+            else:
+                best = '{:.0f} rpm'.format(row['best'])
+                share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
+            mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
+            cells = (str(row['gear']), '{:.1f}'.format(row['ratio'] / 3.6), best, share, mine,
+                     str(row['ratio_samples']))
+            for column, text in enumerate(cells):
+                self.telemetry_gears.attach(Gtk.Label(label=text, xalign=0), column, index, 1, 1)
+        self.telemetry_gears.show_all()
+        advice = snapshot['advice']
+        self.telemetry_advice.set_text('\n'.join('•  ' + tip for tip in advice) if advice else
+                                       _("Drive some full-throttle pulls through the gears: the advice "
+                                         "appears as Oversteer learns the car and how you drive it."))
 
     def _build_hotkeys_page(self):
         """The Hotkeys tab: one row per action, with its wheel button (saved

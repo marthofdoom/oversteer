@@ -125,6 +125,18 @@ def test_a_retuned_gear_is_relearnt(tmp_path):
     assert abs(learner.car.ratio(3) - 230.0) < 1 and 3 in learner.car.retuned
 
 
+def test_coaching_says_early_or_late(tmp_path):
+    learner = ShiftLearner(str(tmp_path))
+    exits(learner)
+    drive(learner, shift_at=5200, runs=3)            # well short of ~6700
+    tips = learner.snapshot()['advice']
+    assert any(t.startswith('2→3') and 'early' in t and '% less drive' in t for t in tips), tips
+    learner.car.upshifts = {}
+    drive(learner, shift_at=LIMITER, runs=3)         # on the limiter every time
+    tips = learner.snapshot()['advice']
+    assert any(t.startswith('2→3') and 'late' in t for t in tips), tips
+
+
 def test_shift_point_needs_confidence(tmp_path):
     car = CarModel('x')
     assert car.best_shift(1) is None
