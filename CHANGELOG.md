@@ -29,7 +29,31 @@
   run is judged a discipline (rally stage, hillclimb, circuit,
   rallycross, time attack, free roam) with the evidence that decided it,
   or left unknown when there is none. Each gearing a car was driven with
-  is kept as a tune. The Telemetry tab does not show these yet.
+  is kept as a tune.
+- Coaching from that history in the Telemetry tab: what the last session
+  was and why Oversteer thinks so, the habit to work on first, up to
+  three tips with their numbers (changing up early or late per gear and
+  way of changing, the limiter, missed gates and double taps, bogged
+  launches, both pedals at once on tarmac, coasting and corners against
+  your best run of a stage) and praise when a habit improves. A tip
+  shown twice goes quiet until it gets worse. Changing up early waits
+  until the surface is known, since short-shifting on gravel can be
+  right.
+- Tuning advice from the runs on the car's current setup: a final drive
+  too short or too long for a stage, a gear too long out of corners, and
+  oversteer or understeer fitted to how you drive, always "if the setup
+  allows" and with the driving alternative first.
+- "Label last session…" in the Telemetry tab: say what a session was
+  (discipline, surface, wet, shifter), for Oversteer to learn surfaces
+  from.
+- A read-only web page for a phone or another computer (off by default,
+  TCP 5301, under the Telemetry tab's Settings): the live gear and revs
+  against the shift point, the shift tables, coaching, setup advice and
+  recent sessions with their evidence. Nothing can be changed from it;
+  anyone on the same network can read it, so it can be limited to this
+  computer.
+- "Learn from game telemetry": learn shift points and keep the history
+  with the rev lights off, or with a wheel that has none.
 
 ### Changed
 - The shift learner compares each gear's own power curve where it knows

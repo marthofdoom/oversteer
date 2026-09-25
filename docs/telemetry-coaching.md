@@ -1062,6 +1062,9 @@ Labels come from the tab (Step C) and the web page never writes them.
 `Coach(reader).tips(profile, car_id=None, limit=3) -> list[Tip]` with
 `Tip(id, kind ('focus', 'tip', 'praise', 'still'), text, evidence,
 value)`; `Coach.seen(tips)` updates `coach_state` (drive-log thread).
+*As built:* `coach.seen(store, profile, car_id, tips)`, a function, since
+it writes through the drive log's store while `Coach` only reads; kind
+`note` for the surface gate (said once).
 
 ## 10. Tuning advice (`oversteer/tuning.py`)
 
@@ -1344,9 +1347,14 @@ checklist below.
   names are in `drive_detect.LOCATION_SURFACES` but its ids need
   `ids.json`; DiRT Rally 2.0's stage table (dr2_logger's, MIT) could not
   be fetched in run 2. Until then the surface game tier answers unknown.
-- The tab's "This is a different car" (fingerprint split, §5.4), the
-  "learnt from your recent driving" wording (§8.1 item 10) and learning
-  without LEDs (D4): with the tab work of Step C item 6.
+- The tab's "This is a different car" (§12 item 5): it needs the
+  fingerprint split of colliding cars (§5.4), deferred above for want of
+  real data. The "learnt from your recent driving" wording and learning
+  without LEDs (D4) were done in run 3.
+- The coach's thresholds and time costs (§9.2) and the tuning thresholds
+  (§10) are starting values, **calibrate**; the balance fit's unit
+  depends on the wheel's rotation setting, so only its sign and its
+  change between tunes are used.
 - Read access to the game's Proton prefix in the Flatpak manifest: not
   planned; copy buttons and a shipped id table instead (§3.2 #8).
 - Listening on 5300 and 5310 at once: rejected, 5300 is the port FH6 may
@@ -1382,16 +1390,19 @@ steps. That is this document's Step C items 1–5 and 7, so those are built
 now and ticked under Step C below; the web page (Step B here) is left for
 a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
 
-Run 3 (in progress): the build prompt's "Step C" is "coaching engine +
-tuning advice + web server/page + tests": Step C item 6 here, and Step B
-(the web page), which run 2 left for later, since the coaching endpoints
-need the server. Order: metrics written at run end, the coach, tuning
-advice, the web server and page, then the tab. Items are ticked below as
-they are committed.
+Run 3 (done, 150 tests green): the build prompt's "Step C" is "coaching
+engine + tuning advice + web server/page + tests": Step C item 6 here,
+and Step B (the web page), which run 2 left for later, since the
+coaching endpoints need the server. Built in that order: metrics written
+at run end, the coach, tuning advice, the web server and page, then the
+tab. Steps B and C are complete; what they leave is listed in §15 and
+under Step D. The GTK code was exercised off-screen (the tab built with
+a stub controller under GDK's broadway backend, the gui's web methods on
+a stub), never by running the app.
 
 ### Step B
 - [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
-- [ ] Web preferences and Settings controls, bound URLs
+- [x] Web preferences and Settings controls, bound URLs (`telemetry_web`, `telemetry_web_port`, `telemetry_web_bind` in `config.ini`; "Every network" / "This computer only"; the addresses from `/proc/net/fib_trie`; the notes of §11 and the firewall hint until the page has been opened from another device, `telemetry_view.web_status()`)
 - [x] Web tests (`tests/test_web.py`: every endpoint, another profile's data refused, 405 with `Allow`, 421 and the IPv6 literal, the 9th request → 503 and the slots given back, headers, a taken port, no database yet, the bound URLs)
 
 ### Step C
@@ -1407,7 +1418,7 @@ they are committed.
 - [x] Calibration hooks, brought forward from Step D: `calibrate()` (diagonal Gaussians on standardised features present in ≥ 80 % of segments, leave-one-run-out holdout, deploy at ≥ 0.90 with ≥ 3 labelled runs of ≥ 2 surfaces), `classify_segment()` with the χ² 99 % reject and the ln 4 ambiguity (`loose-low` for snow/gravel), run votes with `mixed:` at ≥ 25 %, `calibrate_game(store, game)`; deployed calibrations classify segments at run end and set `detector_version`. Not yet: `telemetry-calibrate.py`, "Re-check old runs", the limit-gate thresholds' calibration (all need the §6.3 captures and labels from the tab)
 - [x] Coach metrics, habits, growth, rate limiting (`coach.py`, `tests/test_coach.py`; run 3). Metrics are written at run end (`RunTracker._write_metrics`), after the run's pending changes of gear are flushed. As built: counts are changes for the shift metrics, kilometres for the per-km ones (so a long stage weighs more), 1 for per-run ones; `launch.t50` is timed from moving off (the run starts at 3 m/s, so the tracker keeps when the car began to roll); the top gear is the game's gear count (`Sample.gears`), not the highest gear learnt, and without it `limiter.top` is not measured. **Added to §9.1:** `shift.slip` (driven-wheel slip at the change, which lets an early change on an unknown surface be coached when the wheels did not spin), `top.share` and `top.peak` (for the final-drive rules of §10), `exit.low` per gear (exits whose revs 1 s after the throttle went back on were below the power band: 85 % of peak power) and `balance.gradient` (the fit steer = a·curvature + K·lateral g; K > 0 understeer). Pedal overlap on tarmac is gated on the stage's `corner.loss` (> 0.5 s against the best run) standing in for "a slower exit than the driver's best there". Time cost (to pick the focus) is a rough s per 10 km per family, **calibrate**. Kinds gain `note` (the surface gate, said once). Praise re-shows only when it grew 20 % more
 - [x] Tuning rules (§10; `tuning.py`, `tests/test_tuning.py`): final drive short (`limiter.top` > 1 s on ≥ 3 runs of the stage) and long (`top.share` > 5 % with `top.peak` < 85 %), a gear too long out of corners (`exit.low` > 50 % of ≥ 10 exits; the driving alternative first), balance fitted to the driver (tarmac counter-steer > 30 % with the fit saying oversteer → setup; with a balanced car → driving; understeer from the fit alone; the change against the tune before). Only the current tune's runs count (sessions not closed yet count from the tune's first sight). `tune_summary()` gives the tune for display with "not sent by this game" / "not measured yet". **Deferred:** bottoming and spring/damper balance (suspension travel is not in the trace, and DiRT/WRCG units are unverified), open differential and brake balance (they need each wheel's speed in the trace: a trace version 2); see §15
-- [ ] Web endpoints for sessions and coaching; tab sections, label dialog; learn without LEDs (D4)
+- [x] Web endpoints for sessions and coaching (with Step B above); tab sections, label dialog; learn without LEDs (D4). As built: `telemetry_view.py` builds every string of the context line (with a "Why" expander of the runs' evidence), coaching (quiet lines under "Show all"; the car's own live advice stands in until the coach has something new), setup (the tune and up to 2 notes) and recent sessions, and `gather()` reads them on events only (car change, `history_changed`, the tab shown, a label or a forget). Tips are marked seen (`coach.seen()` posted to the drive-log thread) only when the tab is on screen and the window active. "Label last session…" labels every run of the shown car's last session (`Store.label_session()`), preset from the detections. D4: "Learn from game telemetry" (app-wide, off by default) runs the listener with `telemetry.NoLeds`, also with no wheel. Forget's confirmation says what it keeps; the summary says "learnt from your recent driving" (§8.1 item 10)
 - [x] `tests/sim.py`; tests; bench within budget. `tests/sim.py`: the simulated car, a `Road` with a grade profile and turbo lag, `Course` (stages and circuits every metre, corners with an optional slide), `course_samples()`, and `eawrc_packet()`, the one encoder so far (the bench and the determinism test go through the real decoder). `tests/bench_telemetry.py`: ten minutes of EA SPORTS WRC stages through `Telemetry.handle` with the drive-log thread: mean 0.041 ms, p99 0.065 ms, worst 5 ms per packet on this machine, nothing dropped (budget 0.3 / 2 ms); a loose pytest check and a replay-determinism test (same capture → same tables) in `tests/test_drive_log.py`. `telemetry-replay.py` prints runs, verdicts and evidence
 
 ### Step D
