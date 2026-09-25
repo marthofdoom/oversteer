@@ -491,6 +491,8 @@ class RunTracker:
         metrics = coach.run_metrics(summary, trace, TRACE_CHANNELS, store.run_shifts(run), corners, context)
         metrics += coach.stage_metrics(store, run, summary.get('stage'), trace, TRACE_CHANNELS, corners,
                                        verdicts.get('finished'))
+        # A value the trace could not give (NaN) is no measurement
+        metrics = [m for m in metrics if m['value'] is not None and math.isfinite(m['value'])]
         for m in metrics:
             m['discipline'], m['surface'] = verdicts.get('discipline'), verdicts.get('surface')
         session = store.run_session(run)

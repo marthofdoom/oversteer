@@ -505,6 +505,11 @@ class Reader:
         return [(k, n or k) for k, n in self._rows(
             'SELECT key, name FROM cars WHERE profile = ? ORDER BY name', (profile,))]
 
+    def car_list(self, profile):
+        """The profile's cars as dicts (id, key, name, game, updated), by name."""
+        return [{'id': r[0], 'key': r[1], 'name': r[2] or r[1], 'game': r[3], 'updated': r[4]} for r in self._rows(
+            'SELECT id, key, name, game, updated FROM cars WHERE profile = ? ORDER BY name', (profile,))]
+
     def car(self, profile, key):
         """The car's row as a dict (with its model parsed), or None. A key
         the car had before its game could be told apart is found too."""

@@ -50,6 +50,11 @@ install_data('telemetry/oversteer-shm-bridge.exe', 'telemetry/oversteer-shm-brid
 install_data('telemetry/eawrc/oversteer.json',
   install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry', 'eawrc')
 )
+# The read-only telemetry web page (served by oversteer/telemetry_web.py
+# when the Telemetry tab turns it on)
+install_data('telemetry/web/index.html',
+  install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry', 'web')
+)
 
 # ---- Tests ----
 

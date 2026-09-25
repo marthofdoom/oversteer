@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Oversteer telemetry</title>
+<style>
+:root {
+  --bg: #f6f6f4; --card: #ffffff; --text: #1d1f21; --dim: #62666b; --line: #dcdcd8;
+  --accent: #2f6fdb; --good: #1f8a4c; --warn: #b8660b; --bad: #c0392b; --bar: #e7e7e3;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151618; --card: #1f2124; --text: #e8e8e6; --dim: #9a9ea3; --line: #33363a;
+    --accent: #6aa0ff; --good: #4cc37e; --warn: #e3a044; --bad: #ff6b5b; --bar: #2c2f33;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
+}
+main { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+h1 { font-size: 18px; margin: 4px 0; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 8px; }
+.status { color: var(--dim); font-size: 13px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 12px; }
+.live { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 14px; align-items: center; }
+.gear { font-size: 56px; font-weight: 700; line-height: 1; min-width: 1.2ch; text-align: center; font-variant-numeric: tabular-nums; }
+.rpm { font-variant-numeric: tabular-nums; }
+.speed { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.speed small { font-size: 13px; color: var(--dim); font-weight: 400; }
+.meter { position: relative; height: 14px; background: var(--bar); border-radius: 7px; overflow: hidden; margin-top: 4px; }
+.meter .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
+.meter .fill.hot { background: var(--bad); }
+.meter .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); display: none; }
+.progress { grid-column: 1 / -1; color: var(--dim); font-size: 13px; }
+select { width: 100%; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 600; color: var(--dim); font-size: 13px; }
+td .band { color: var(--dim); font-size: 12px; }
+ul.tips { list-style: none; margin: 0; padding: 0; }
+ul.tips li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+ul.tips li:last-child { border-bottom: 0; }
+.badge { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 6px; border-radius: 4px; margin-right: 6px; border: 1px solid currentColor; vertical-align: 1px; }
+.k-focus { color: var(--bad); } .k-tip { color: var(--accent); } .k-praise { color: var(--good); }
+.k-still, .k-note, .k-driving { color: var(--dim); } .k-setup { color: var(--warn); }
+.still { color: var(--dim); }
+details { margin-top: 4px; }
+summary { cursor: pointer; color: var(--dim); font-size: 13px; }
+details ul { margin: 4px 0 0; padding-left: 18px; color: var(--dim); font-size: 13px; }
+.session { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.session:last-child { border-bottom: 0; }
+.session .when { font-weight: 600; }
+.session .facts { color: var(--dim); font-size: 13px; }
+.empty { color: var(--dim); }
+footer { color: var(--dim); font-size: 12px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Oversteer telemetry</h1>
+    <span class="status" id="status">Connecting…</span>
+  </header>
+
+  <section aria-label="Live">
+    <div class="live">
+      <div class="gear" id="gear">–</div>
+      <div>
+        <div class="rpm" id="rpm">No telemetry arriving</div>
+        <div class="meter"><div class="fill" id="fill"></div><div class="mark" id="mark"></div></div>
+      </div>
+      <div class="speed" id="speed">–<small> km/h</small></div>
+      <div class="progress" id="progress"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Car</h2>
+    <select id="car" aria-label="Car"></select>
+    <div class="scroll"><table id="shifts"></table></div>
+    <p class="empty" id="shifts-empty"></p>
+  </section>
+
+  <section>
+    <h2>Coaching</h2>
+    <ul class="tips" id="coach"></ul>
+  </section>
+
+  <section>
+    <h2>Setup</h2>
+    <p id="tune" class="facts"></p>
+    <ul class="tips" id="tuning"></ul>
+  </section>
+
+  <section>
+    <h2>Recent sessions</h2>
+    <div id="sessions"></div>
+  </section>
+
+  <footer>Read-only: nothing here can change Oversteer. Plain HTTP on your network: anyone on it can read this page.</footer>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const METHODS = {"h-pattern": "H-pattern", "sequential": "Sequential", "paddles": "Paddles"};
+let carId = null, sessionSeen = null, carFollowsLive = true;
+
+function el(tag, text, cls) {
+  const e = document.createElement(tag);
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+function rpm(x) { return x == null ? "–" : Math.round(x).toString(); }
+function words(x) { return (x || "").replace(/-/g, " "); }
+async function get(path) {
+  const r = await fetch(path, {cache: "no-store", credentials: "omit"});
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+async function live() {
+  if (document.hidden) return;
+  let s = null;
+  try { s = await get("/api/v1/live"); } catch (e) { s = null; }
+  if (!s) {
+    $("gear").textContent = "–"; $("rpm").textContent = "No telemetry arriving";
+    $("speed").firstChild.textContent = "–"; $("fill").style.width = "0"; $("mark").style.display = "none";
+    $("progress").textContent = "";
+    return;
+  }
+  $("gear").textContent = s.gear == null ? "–" : s.gear < 0 ? "R" : s.gear === 0 ? "N" : String(s.gear);
+  const top = s.limiter || Math.max(s.rpm || 0, 1);
+  $("rpm").textContent = rpm(s.rpm) + " rpm" + (s.shift_rpm ? " · change up at " + rpm(s.shift_rpm) + (s.learnt ? " (learnt)" : "") : "");
+  $("speed").firstChild.textContent = s.speed == null ? "–" : Math.round(s.speed * 3.6);
+  const fill = $("fill");
+  fill.style.width = Math.min(100, 100 * (s.rpm || 0) / top) + "%";
+  fill.className = "fill" + (s.shift_rpm && s.rpm >= s.shift_rpm ? " hot" : "");
+  const mark = $("mark");
+  if (s.shift_rpm && top) { mark.style.display = "block"; mark.style.left = Math.min(100, 100 * s.shift_rpm / top) + "%"; }
+  else mark.style.display = "none";
+  let p = "";
+  if (s.distance != null && s.stage_length) p = (s.distance / 1000).toFixed(2) + " of " + (s.stage_length / 1000).toFixed(2) + " km";
+  else if (s.distance != null) p = (s.distance / 1000).toFixed(2) + " km";
+  $("progress").textContent = p;
+  if (carFollowsLive && s.car) followCar(s.car);
+}
+
+let cars = [];
+function followCar(key) {
+  const found = cars.find((c) => c.key === key);
+  if (found && found.id !== carId) { carId = found.id; $("car").value = String(carId); loadCar(); }
+}
+
+async function status() {
+  try {
+    const s = await get("/api/v1/status");
+    const parts = [];
+    if (s.profile) parts.push("profile " + s.profile);
+    parts.push(s.receiving ? "receiving" + (s.game ? " from " + s.game : "") : "waiting for telemetry" + (s.udp_port ? " on UDP " + s.udp_port : ""));
+    $("status").textContent = parts.join(" · ");
+    if (s.session !== sessionSeen) { sessionSeen = s.session; await loadCars(); }
+  } catch (e) {
+    $("status").textContent = "Oversteer is not answering";
+  }
+}
+
+async function loadCars() {
+  try { cars = await get("/api/v1/cars"); } catch (e) { cars = []; }
+  const select = $("car");
+  clear(select);
+  for (const c of cars) {
+    const o = el("option", c.name);
+    o.value = String(c.id);
+    select.appendChild(o);
+  }
+  if (!cars.length) { select.appendChild(el("option", "No cars learnt yet")); carId = null; }
+  else if (!cars.some((c) => c.id === carId)) carId = cars[0].id;
+  if (carId != null) select.value = String(carId);
+  await loadCar();
+}
+
+function evidence(list, label) {
+  if (!list || !list.length) return null;
+  const d = el("details");
+  d.appendChild(el("summary", label || "Why"));
+  const ul = el("ul");
+  for (const line of list) ul.appendChild(el("li", line));
+  d.appendChild(ul);
+  return d;
+}
+
+function tipItem(t, kind) {
+  const li = el("li", null, t.kind === "still" ? "still" : "");
+  li.appendChild(el("span", kind, "badge k-" + (t.kind || "tip")));
+  li.appendChild(document.createTextNode(t.text));
+  const why = evidence(t.evidence);
+  if (why) li.appendChild(why);
+  return li;
+}
+
+let shown = null;
+async function loadCar() {
+  const table = $("shifts"), empty = $("shifts-empty"), coach = $("coach"), tuningList = $("tuning");
+  let car = null, c = null, list = null;
+  if (carId != null) {
+    [car, c, list] = await Promise.all([
+      get("/api/v1/cars/" + carId).catch(() => null),
+      get("/api/v1/coach?car=" + carId).catch(() => null),
+      get("/api/v1/cars/" + carId + "/sessions?limit=10").catch(() => null)]);
+  }
+  // Rebuilt only when something changed, so an open "Why" stays open
+  const key = JSON.stringify([carId, car, c, list]);
+  if (key === shown) return;
+  shown = key;
+  clear(table); clear(coach); clear(tuningList); clear($("sessions"));
+  empty.textContent = ""; $("tune").textContent = "";
+  if (carId == null) { empty.textContent = "Drive with telemetry on and Oversteer learns each car's shift points."; return; }
+  if (car) { shiftTable(car, table, empty); tune(car); }
+  else empty.textContent = "Could not read this car.";
+  if (c) {
+    const names = {focus: "Focus", tip: "Tip", praise: "Better", still: "Still", note: "Note"};
+    for (const t of c.tips) coach.appendChild(tipItem(t, names[t.kind] || t.kind));
+    if (!c.tips.length) coach.appendChild(el("li", "Nothing to say yet: coaching starts once a run ends.", "empty"));
+  } else coach.appendChild(el("li", "Could not read the coaching.", "empty"));
+  if (list) sessions(list);
+  else $("sessions").appendChild(el("p", "Could not read the sessions.", "empty"));
+}
+
+function shiftTable(car, table, empty) {
+  const gears = car.gears || [];
+  if (!gears.length) { empty.textContent = "Nothing learnt yet about this car's gears."; return; }
+  const methods = Object.keys(METHODS).filter((m) => gears.some((g) => g.methods && g.methods[m]));
+  const head = el("tr");
+  for (const h of ["Gear", "Best", "You"].concat(methods.map((m) => METHODS[m]))) head.appendChild(el("th", h));
+  table.appendChild(head);
+  for (const g of gears) {
+    const tr = el("tr");
+    tr.appendChild(el("td", g.last ? g.gear + " (top)" : g.gear + "→" + (g.gear + 1)));
+    const best = el("td", g.last ? "" : rpm(g.best));
+    if (g.best_low != null && g.best_high != null) best.appendChild(el("div", rpm(g.best_low) + "–" + rpm(g.best_high), "band"));
+    tr.appendChild(best);
+    tr.appendChild(el("td", g.shifts ? rpm(g.average_shift) + " (" + g.shifts + ")" : ""));
+    for (const m of methods) {
+      const v = g.methods && g.methods[m];
+      tr.appendChild(el("td", v ? rpm(v.rpm) + " (" + v.count + ")" : ""));
+    }
+    table.appendChild(tr);
+  }
+  if (car.limiter) empty.textContent = "Limiter " + rpm(car.limiter) + " rpm" + (car.limiter_source ? " (" + car.limiter_source + ")" : "") + ". Learnt from your recent driving.";
+}
+
+function tune(car) {
+  const t = car.tune;
+  const parts = [];
+  if (t) {
+    const ratios = Object.keys(t.ratios).sort((a, b) => a - b).map((g) => g + ": " + Number(t.ratios[g]).toFixed(0));
+    parts.push("Gearing (rpm per m/s) " + ratios.join(", "));
+    parts.push(t.change === "first" ? "first seen " + new Date(t.first_seen * 1000).toLocaleDateString() : "changed: " + t.change.replace("gears:", "gears ") + ", " + new Date(t.first_seen * 1000).toLocaleDateString());
+    parts.push("ride height " + (typeof t.ride_height_f === "number" ? t.ride_height_f.toFixed(3) + " m" : t.ride_height_f));
+    parts.push("brake bias " + (typeof t.brake_bias === "number" ? (t.brake_bias * 100).toFixed(0) + " %" : t.brake_bias));
+  } else parts.push("No setup seen yet.");
+  $("tune").textContent = parts.join(" · ");
+  const list = $("tuning");
+  for (const n of car.tuning || []) {
+    const li = tipItem({kind: n.kind, text: n.text, evidence: n.evidence}, n.kind === "setup" ? "Setup" : "Driving");
+    list.appendChild(li);
+  }
+}
+
+function verdict(value, conf) {
+  if (!value || value === "unknown") return "unknown";
+  return words(value) + (conf ? " (" + conf + ")" : "");
+}
+
+function sessions(list) {
+  const box = $("sessions");
+  if (!list.length) { box.appendChild(el("p", "No sessions yet.", "empty")); return; }
+  for (const s of list) {
+    const div = el("div", null, "session");
+    const when = new Date(s.started * 1000);
+    div.appendChild(el("div", when.toLocaleDateString() + " " + when.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) + (s.stage ? " · " + s.stage : s.track ? " · " + s.track : ""), "when"));
+    const facts = [verdict(s.discipline, s.discipline_conf), verdict(s.surface, s.surface_conf)];
+    if (s.shifter) facts.push(METHODS[s.shifter] || s.shifter);
+    if (s.distance) facts.push((s.distance / 1000).toFixed(1) + " km");
+    if (s.limiter_time) facts.push(s.limiter_time.toFixed(0) + " s on the limiter");
+    div.appendChild(el("div", facts.join(" · "), "facts"));
+    for (const r of s.runs || []) {
+      const lines = [].concat(r.discipline_evidence || [], r.surface_evidence || [], r.wet_evidence || []);
+      const label = "Run " + r.n + ": " + verdict(r.discipline, r.discipline_conf) + ", " + verdict(r.surface, r.surface_conf) +
+        (r.distance ? ", " + (r.distance / 1000).toFixed(1) + " km" : "") + (r.finished === 1 ? ", finished" : r.finished === 0 ? ", not finished" : "");
+      const d = evidence(lines, label);
+      if (d) div.appendChild(d);
+    }
+    box.appendChild(div);
+  }
+}
+
+$("car").addEventListener("change", (e) => {
+  const id = parseInt(e.target.value, 10);
+  if (!isNaN(id)) { carId = id; carFollowsLive = false; loadCar(); }
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { status(); live(); } });
+
+status();
+live();
+setInterval(live, 1000);
+setInterval(status, 5000);
+setInterval(() => { if (!document.hidden && carId != null) loadCar(); }, 30000);
+</script>
+</body>
+</html>
