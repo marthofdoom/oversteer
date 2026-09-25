@@ -1,0 +1,2598 @@
+{
+ "game": "wrcg",
+ "title": "WRC Generations stages",
+ "keys": "WRC Generations sends neither a stage nor, it seems, its length: a run is matched by its distance to the finish within 1 % of length_m, and by where earlier runs of a stage started when two stages are that close.",
+ "notes": "WRC Generations (KT Racing / Nacon, Nov 2022): 21 rallies, 165 special stages, no post-launch rallies and no free-roam or Rally Hub location. 13 rallies of the 2022 calendar plus 8 bonus rallies (Argentina, Chile, Germany, Mexico, Sanremo, Corsica, Turkey, Wales). The stages are fictional cut-downs, not copies of the real stages, so real itinerary lengths do not apply and were not used. Stage names follow the in-game spelling from wrcsetups.com and TechBriefly; accents are kept where those lists keep them. Lengths come from the WRC Generations fandom wiki (in-game data) where it covers a rally. For the others they come from WRC 8 (2019) or WRC 9/10 figures for the same stages, which may differ slightly in WRCG. Where both exist, WRC 8 figures are within about 0.1 km of the WRCG wiki for most stages, but the super specials Lousada and Barcelona changed by about 0.2 km. Counts per rally reconcile to the official 165: 109 on the calendar rallies and 56 on the bonus rallies, including one shakedown per rally. The Monte-Carlo snow share is the wiki's figure for snow patches on tarmac.",
+ "stages": [
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Shakedown",
+   "length_m": 1970,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.9,
+    "snow": 0.1
+   },
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Agnieres en Devoluy",
+   "length_m": 7470,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 7.53 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Agnieres en Devoluy reverse",
+   "length_m": 7440,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Agnieres en Devoluy",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 7.48 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Luceram",
+   "length_m": 5940,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.9,
+    "snow": 0.1
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 5.99 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Luceram reverse",
+   "length_m": 6030,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.9,
+    "snow": 0.1
+   },
+   "reverse_of": "Luceram",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 6.07 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Col de Braus",
+   "length_m": 7200,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.64,
+    "snow": 0.36
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 7.28 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "Col de Braus reverse",
+   "length_m": 7240,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.64,
+    "snow": 0.36
+   },
+   "reverse_of": "Col de Braus",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 7.30 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "La Bollene-Vesubie",
+   "length_m": 20970,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.91,
+    "snow": 0.09
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 21.06 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rallye Monte-Carlo",
+   "stage": "La Bollene-Vesubie reverse",
+   "length_m": 20970,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.91,
+    "snow": 0.09
+   },
+   "reverse_of": "La Bollene-Vesubie",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Monte_Carlo",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 21.02 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Shakedown",
+   "length_m": 3180,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Sävar",
+   "length_m": 7890,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Sävar reverse",
+   "length_m": 7890,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": "Sävar",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Brattby",
+   "length_m": 7360,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Brattby reverse",
+   "length_m": 7360,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": "Brattby",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Kroksjö",
+   "length_m": 8300,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Kroksjö reverse",
+   "length_m": 8300,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": "Kroksjö",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Örträsk",
+   "length_m": 25900,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": "Used as the Epic stage in the wiki's Long-season time card"
+  },
+  {
+   "location": "Rally Sweden",
+   "stage": "Örträsk reverse",
+   "length_m": 25900,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": "Örträsk",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sweden",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Shakedown",
+   "length_m": 3220,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Grdancji",
+   "length_m": 6020,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": "Wiki spells it Grdanjci"
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Grdancji reverse",
+   "length_m": 6100,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Grdancji",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Jaskovo",
+   "length_m": 5530,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": "Wiki spells it Jaškovo"
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Jaskovo reverse",
+   "length_m": 5540,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Jaskovo",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Rude",
+   "length_m": 7090,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Rude reverse",
+   "length_m": 7090,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Rude",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Kostanjavec",
+   "length_m": 19880,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": "Wiki spells it Kostanjevac"
+  },
+  {
+   "location": "Croatia Rally",
+   "stage": "Kostanjavec reverse",
+   "length_m": 19960,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Kostanjavec",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Croatia",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Shakedown",
+   "length_m": 2730,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.98,
+    "tarmac": 0.02
+   },
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Felgueiras",
+   "length_m": 8460,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Felgueiras reverse",
+   "length_m": 8460,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Felgueiras",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Arganil",
+   "length_m": 9660,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.98,
+    "tarmac": 0.02
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Arganil reverse",
+   "length_m": 9670,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.98,
+    "tarmac": 0.02
+   },
+   "reverse_of": "Arganil",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Cabeceiras de Basto",
+   "length_m": 20070,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.99,
+    "tarmac": 0.01
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Cabeceiras de Basto reverse",
+   "length_m": 20070,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.99,
+    "tarmac": 0.01
+   },
+   "reverse_of": "Cabeceiras de Basto",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de Portugal",
+   "stage": "Lousada",
+   "length_m": 3580,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.62,
+    "gravel": 0.38
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Portugal",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. WRC 8 listed Lousada SSS at 3.34 km, so the layout was likely revised; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Shakedown",
+   "length_m": 1810,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Baranta",
+   "length_m": 5170,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 5.18 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Baranta reverse",
+   "length_m": 5260,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Baranta",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "high",
+   "note": "Matches WRC 8 (5.26 km)"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Lerno",
+   "length_m": 4130,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "high",
+   "note": "Matches WRC 8 (4.13 km)"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Lerno reverse",
+   "length_m": 4150,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Lerno",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "high",
+   "note": "Matches WRC 8 (4.15 km)"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Monti di Ala",
+   "length_m": 13210,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "high",
+   "note": "Matches WRC 8 (13.21 km)"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Monti di Ala reverse",
+   "length_m": 13210,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Monti di Ala",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "WRC 8 (2019) listed this stage at 13.22 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rally Italia Sardegna",
+   "stage": "Ittiri Arena",
+   "length_m": 2080,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sardegna",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. WRC 8 (2019) listed this stage at 2.12 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Shakedown",
+   "length_m": 2650,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Psatha",
+   "length_m": 6930,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Psatha reverse",
+   "length_m": 6940,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Psatha",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Amfissa",
+   "length_m": 6910,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Amfissa reverse",
+   "length_m": 6910,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Amfissa",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Paleohori",
+   "length_m": 4870,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Paleohori reverse",
+   "length_m": 4870,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Paleohori",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Mendenitsa",
+   "length_m": 19010,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Acropolis Rally of Gods",
+   "stage": "Mendenitsa reverse",
+   "length_m": 19020,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Mendenitsa",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Acropolis_Rally",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Shakedown",
+   "length_m": 2840,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.96,
+    "tarmac": 0.04
+   },
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Te Hutewai",
+   "length_m": 8350,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.96,
+    "tarmac": 0.04
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Te Hutewai reverse",
+   "length_m": 8350,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.96,
+    "tarmac": 0.04
+   },
+   "reverse_of": "Te Hutewai",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Batley",
+   "length_m": 6830,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.98,
+    "tarmac": 0.02
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Batley reverse",
+   "length_m": 6830,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.98,
+    "tarmac": 0.02
+   },
+   "reverse_of": "Batley",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Brooks",
+   "length_m": 6920,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.9,
+    "tarmac": 0.1
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Brooks reverse",
+   "length_m": 6930,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.9,
+    "tarmac": 0.1
+   },
+   "reverse_of": "Brooks",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Te Akau South",
+   "length_m": 22000,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.95,
+    "tarmac": 0.05
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally New Zealand",
+   "stage": "Te Akau South reverse",
+   "length_m": 21990,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.95,
+    "tarmac": 0.05
+   },
+   "reverse_of": "Te Akau South",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/New_Zealand",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Shakedown",
+   "length_m": 2670,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Riudecanyes",
+   "length_m": 7040,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Riudecanyes reverse",
+   "length_m": 7040,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Riudecanyes",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Savalla",
+   "length_m": 5740,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": "Wiki spells it Savallà"
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Savalla reverse",
+   "length_m": 5740,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Savalla",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Querol",
+   "length_m": 14390,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Querol reverse",
+   "length_m": 14380,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Querol",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally de España",
+   "stage": "Barcelona",
+   "length_m": 3380,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Spain",
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. WRC 8 listed Barcelona SSS at 3.20 km; WRCG wiki figure preferred"
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Shakedown",
+   "length_m": 2870,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Okazaki",
+   "length_m": 8080,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Okazaki reverse",
+   "length_m": 7910,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Okazaki",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Nagakute",
+   "length_m": 7140,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Nagakute reverse",
+   "length_m": 7160,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Nagakute",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Shinshiro",
+   "length_m": 7320,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Shinshiro reverse",
+   "length_m": 7320,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Shinshiro",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Shitara",
+   "length_m": 22600,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Japan",
+   "stage": "Shitara reverse",
+   "length_m": 22590,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Shitara",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Japan",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Kasarani",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "Super special (no reverse). No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Ngema",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Ngema reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Ngema",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Ntulele",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Ntulele reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Ntulele",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Seyabei",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Safari Rally Kenya",
+   "stage": "Seyabei reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Seyabei",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Elva",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Elva reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Elva",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Kanepi",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Kanepi reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Kanepi",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Otepää",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Otepää reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Otepää",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Estonia",
+   "stage": "Tartu",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "Super special (no reverse). Surface assumed gravel. No published in-game length found"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Arvaja",
+   "length_m": 9640,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://rallysportmag.com/paddon-included-in-wrc9-game-update/"
+   ],
+   "confidence": "medium",
+   "note": "Length from the WRC 9 Finland update announcement (9.64 km); not confirmed for WRCG"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Arvaja reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Arvaja",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://rallysportmag.com/paddon-included-in-wrc9-game-update/"
+   ],
+   "confidence": "low",
+   "note": "Reverse length not published"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Pihlajakoski",
+   "length_m": 9780,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://rallysportmag.com/paddon-included-in-wrc9-game-update/"
+   ],
+   "confidence": "medium",
+   "note": "Length from the WRC 9 Finland update announcement (9.78 km); not confirmed for WRCG"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Pihlajakoski reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Pihlajakoski",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://rallysportmag.com/paddon-included-in-wrc9-game-update/"
+   ],
+   "confidence": "low",
+   "note": "Reverse length not published"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Laukaa",
+   "length_m": 21120,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://rallysportmag.com/paddon-included-in-wrc9-game-update/"
+   ],
+   "confidence": "medium",
+   "note": "Length from the WRC 9 Finland update announcement (21.12 km); not confirmed for WRCG"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Laukaa reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Laukaa",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://rallysportmag.com/paddon-included-in-wrc9-game-update/"
+   ],
+   "confidence": "low",
+   "note": "Reverse length not published"
+  },
+  {
+   "location": "Rally Finland",
+   "stage": "Harju",
+   "length_m": 2270,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3",
+    "https://www.gtplanet.net/wrc-9-october-update-20201027/"
+   ],
+   "confidence": "low",
+   "note": "Super special, one direction. 2.27 km is the WRC 8 figure; WRC 10 patched this stage, so WRCG may differ. GTPlanet calls it asphalt; the real Harju stage is mixed tarmac/gravel"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "Dikkebus",
+   "length_m": 5260,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://traxion.gg/watch-wrc-10-ypres-rally-belgium-gameplay/"
+   ],
+   "confidence": "medium",
+   "note": "5.26 km from WRC 10 gameplay article (Traxion); stage carried into WRCG"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "Dikkebus reverse",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Dikkebus",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://traxion.gg/watch-wrc-10-ypres-rally-belgium-gameplay/"
+   ],
+   "confidence": "low",
+   "note": "Reverse length not published"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "Kemmelberg",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "Kemmelberg reverse",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Kemmelberg",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "ZonneBeke",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Ypres Rally Belgium",
+   "stage": "ZonneBeke reverse",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "ZonneBeke",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "El Condor",
+   "length_m": 7140,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "El Condor reverse",
+   "length_m": 7110,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "El Condor",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "Chuchilla Nevada",
+   "length_m": 6880,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "In-game spelling per stage lists; WRC 8 spelled it Cuchilla Nevada. Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "Chuchilla Nevada reverse",
+   "length_m": 6690,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Chuchilla Nevada",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "Cantera",
+   "length_m": 14740,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "Cantera reverse",
+   "length_m": 14710,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Cantera",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Argentina",
+   "stage": "Parque Tematico",
+   "length_m": 6040,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "El Puma",
+   "length_m": 21010,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "El Puma reverse",
+   "length_m": 21010,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "El Puma",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Lircay",
+   "length_m": 6380,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Lircay reverse",
+   "length_m": 6400,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Lircay",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Biobio",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found (added in WRC 10; possibly a renamed WRC 8 stage, San Nicolás 6.28 or Espigado 8.10, unverified)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Biobio reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Biobio",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Pelun",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found (added in WRC 10)"
+  },
+  {
+   "location": "Rally Chile",
+   "stage": "Pelun reverse",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Pelun",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Moselland",
+   "length_m": 7870,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Moselland reverse",
+   "length_m": 7880,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Moselland",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Freisen",
+   "length_m": 6880,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Freisen reverse",
+   "length_m": 6860,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Freisen",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Mittelmosel",
+   "length_m": 15610,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Mittelmosel reverse",
+   "length_m": 15630,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Mittelmosel",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rallye Deutschland",
+   "stage": "Arena Panzerplatte",
+   "length_m": 2870,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally México",
+   "stage": "Media Luna",
+   "length_m": 4010,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "Media Luna reverse",
+   "length_m": 3980,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Media Luna",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "Ibarrilla",
+   "length_m": 8270,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "Ibarrilla reverse",
+   "length_m": 8310,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Ibarrilla",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "El Chocolate",
+   "length_m": 18350,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "El Chocolate reverse",
+   "length_m": 18380,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "El Chocolate",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally México",
+   "stage": "Autodromo de Leon",
+   "length_m": 2300,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Sanremo",
+   "stage": "Shakedown",
+   "length_m": 2010,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sanremo"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sanremo",
+   "stage": "Ronde",
+   "length_m": 7240,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sanremo",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Rally Sanremo",
+   "stage": "Ronde reverse",
+   "length_m": 7240,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Ronde",
+   "shakedown": false,
+   "sources": [
+    "https://wrc-generations.fandom.com/wiki/Sanremo",
+    "https://wrcsetups.com/wrc-generations/stages"
+   ],
+   "confidence": "medium",
+   "note": null
+  },
+  {
+   "location": "Tour de Corse",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Tour de Corse",
+   "stage": "Pietrosella",
+   "length_m": 7770,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Tour de Corse",
+   "stage": "Pietrosella reverse",
+   "length_m": 7730,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Pietrosella",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Datca",
+   "length_m": 6680,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Datca reverse",
+   "length_m": 6600,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Datca",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Cicekli",
+   "length_m": 6630,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Cicekli reverse",
+   "length_m": 6600,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Cicekli",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Yesilbelde",
+   "length_m": 14650,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Yesilbelde reverse",
+   "length_m": 14610,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Yesilbelde",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Rally Turkey",
+   "stage": "Marmaris",
+   "length_m": 2000,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Super special. Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Shakedown",
+   "length_m": null,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": true,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/"
+   ],
+   "confidence": "low",
+   "note": "No published in-game length found"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Hafren",
+   "length_m": 6010,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Hafren reverse",
+   "length_m": 6070,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Hafren",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Great Orme",
+   "length_m": 4580,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km). Surface unverified: the real Great Orme stage is on tarmac Surface unverified: the real Great Orme stage is tarmac."
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Great Orme reverse",
+   "length_m": 4520,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Great Orme",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km). Surface unverified Surface unverified: the real Great Orme stage is tarmac."
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Brenig",
+   "length_m": 6400,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Brenig reverse",
+   "length_m": 6410,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Brenig",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Dyfi",
+   "length_m": 17500,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  },
+  {
+   "location": "Wales Rally GB",
+   "stage": "Dyfi reverse",
+   "length_m": 17430,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Dyfi",
+   "shakedown": false,
+   "sources": [
+    "https://wrcsetups.com/wrc-generations/stages",
+    "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+   ],
+   "confidence": "medium",
+   "note": "Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
+  }
+ ]
+}

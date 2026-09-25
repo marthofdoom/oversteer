@@ -1,0 +1,987 @@
+{
+ "game": "acr",
+ "title": "Assetto Corsa Rally stages (early access, update 0.6, 2026-09-10)",
+ "keys": "track is the name the game puts in its shared memory (static page 'track'), '<location> <short name>' in the game's language, here English, as PacenotePal builds it; the bridge sends it as ASCII (other characters as '_') cut to 31 characters. The game's trackSplineLength is not the published length (Cwmbiga - Afon Biga: 12077.95 m against 11.3 km), so lengths here are for the driver, not for matching.",
+ "notes": "46 selectable variants across 5 locations (Alsace, Wales, Monte Carlo, Greece = rally stages; Livigno = ice circuit) and 9 'special stages'. Lengths are the game's own per-variant Length (km, 0.1 km precision) from the DT_TracksVariants DataTable, extracted independently by two community tools (PacenotePal, dump committed 2026-06-29 with Greece; acr-live-timing, 2026-09-12) which agree on every value; press lists (Traxion, simracer.es, gamer.org) round the same figures to whole km, and official news gives Turini 18 km, Sisteron 13 km, Greece 22 km total (unique road), launch 33 km. length_m is that km value * 1000, NOT metre-precise. track = the string ACR puts in acpmf_static 'track' (wchar[33]) per PacenotePal's stage auto-detection (generate_stage_names.py): '<localized location name> <localized variant short name>', truncated to 32 chars. Values given are for the ENGLISH game language; the string changes with the UI language (e.g. 'Gales Cwmbiga', 'Griechenland Elatia - Zeli', 'Monte-Carlo ...'). It is NOT a stable id. Not independently verified from a live capture by me. config: acpmf_static trackConfiguration contents for ACR are undocumented in every tool found -> null. game_variant_id is the internal DataTable row id (also sent as wireId in ACR multiplayer UDP; note the 'Weles' typo for Wales rows); it is NOT exposed in shared memory as far as found. trackSplineLength is exposed but differs from the stage length (only one observed value: Hafren North Cwmbiga-Afon Biga 12077.95 m vs 11.3 km). No shakedown stages exist. Snow on Alsace/Wales (0.4) and Monte Carlo dynamic snow are weather conditions, not separate variants. Surface: from game SurfaceTypes; only Elatia full (85% gravel/15% tarmac) and Zeli cuts (65/35) are mixed. reverse_of pairs follow the game's Forward/Reverse row naming; some pairs differ slightly in length (e.g. Luttenbach 7.0 vs Foret de Munster 6.8).",
+ "stages": [
+  {
+   "location": "Alsace",
+   "stage": "Vallée de Munster Descente",
+   "track": "Alsace Descente",
+   "config": null,
+   "length_m": 10300,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Vallée de Munster Montée",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Vallée de Munster. Game DataTable row / multiplayer wireId: AlsaceS2MunsterFullReverse (Track row Munster). Sector lengths km: [1.9, 2.6, 2.0, 1.8, 2.0]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS2MunsterFullReverse",
+   "length_km_published": 10.3
+  },
+  {
+   "location": "Alsace",
+   "stage": "Vallée de Munster Montée",
+   "track": "Alsace Montée",
+   "config": null,
+   "length_m": 10300,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Vallée de Munster. Game DataTable row / multiplayer wireId: AlsaceS2MunsterFullForward (Track row Munster). Sector lengths km: [2.2, 1.8, 2.0, 2.6, 1.7]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS2MunsterFullForward",
+   "length_km_published": 10.3
+  },
+  {
+   "location": "Alsace",
+   "stage": "Forêt de Munster",
+   "track": "Alsace Forêt",
+   "config": null,
+   "length_m": 6800,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Luttenbach près Munster",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Vallée de Munster. Game DataTable row / multiplayer wireId: AlsaceS2MunsterShort1Reverse (Track row Munster). Sector lengths km: [3.0, 1.8, 2.0]. Shared-memory track string 'Alsace Forêt' is AMBIGUOUS: both Forêt de Munster (AlsaceS2MunsterShort1Reverse, 6.8 km) and Forêt de Saverne (AlsaceS4SaverneFullForward, 9.1 km) produce it; disambiguate with trackSplineLength. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS2MunsterShort1Reverse",
+   "length_km_published": 6.8
+  },
+  {
+   "location": "Alsace",
+   "stage": "Luttenbach près Munster",
+   "track": "Alsace Luttenbach",
+   "config": null,
+   "length_m": 7000,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Vallée de Munster. Game DataTable row / multiplayer wireId: AlsaceS2MunsterShort1Forward (Track row Munster). Sector lengths km: [2.2, 1.8, 3.0]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS2MunsterShort1Forward",
+   "length_km_published": 7.0
+  },
+  {
+   "location": "Alsace",
+   "stage": "Col du petit Ballon",
+   "track": "Alsace Petit Ballon",
+   "config": null,
+   "length_m": 5600,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Sommet de Munster",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Vallée de Munster. Game DataTable row / multiplayer wireId: AlsaceS2MunsterShort2Reverse (Track row Munster). Sector lengths km: [1.9, 2.6, 1.0]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS2MunsterShort2Reverse",
+   "length_km_published": 5.6
+  },
+  {
+   "location": "Alsace",
+   "stage": "Sommet de Munster",
+   "track": "Alsace Sommet",
+   "config": null,
+   "length_m": 5300,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Vallée de Munster. Game DataTable row / multiplayer wireId: AlsaceS2MunsterShort2Forward (Track row Munster). Sector lengths km: [1.0, 2.6, 1.7]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS2MunsterShort2Forward",
+   "length_km_published": 5.3
+  },
+  {
+   "location": "Alsace",
+   "stage": "Forêt de Saverne",
+   "track": "Alsace Forêt",
+   "config": null,
+   "length_m": 9100,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Saverne. Game DataTable row / multiplayer wireId: AlsaceS4SaverneFullForward (Track row Saverne). Sector lengths km: [2.7, 4.6, 1.8]. Shared-memory track string 'Alsace Forêt' is AMBIGUOUS: both Forêt de Munster (AlsaceS2MunsterShort1Reverse, 6.8 km) and Forêt de Saverne (AlsaceS4SaverneFullForward, 9.1 km) produce it; disambiguate with trackSplineLength. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS4SaverneFullForward",
+   "length_km_published": 9.1
+  },
+  {
+   "location": "Alsace",
+   "stage": "Steigenbach",
+   "track": "Alsace Steigenbach",
+   "config": null,
+   "length_m": 8900,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Forêt de Saverne",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Saverne. Game DataTable row / multiplayer wireId: AlsaceS4SaverneFullReverse (Track row Saverne). Sector lengths km: [1.9, 4.6, 2.5]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS4SaverneFullReverse",
+   "length_km_published": 8.9
+  },
+  {
+   "location": "Alsace",
+   "stage": "Obersteigen",
+   "track": "Alsace Obersteigen",
+   "config": null,
+   "length_m": 4600,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Saverne. Game DataTable row / multiplayer wireId: AlsaceS4SaverneShort1Forward (Track row Saverne). Sector lengths km: [2.7, 1.8]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS4SaverneShort1Forward",
+   "length_km_published": 4.6
+  },
+  {
+   "location": "Alsace",
+   "stage": "La traversée de La Mossig",
+   "track": "Alsace La Mossig",
+   "config": null,
+   "length_m": 4600,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Obersteigen",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Saverne. Game DataTable row / multiplayer wireId: AlsaceS4SaverneShort1Reverse (Track row Saverne). Sector lengths km: [1.8, 2.7]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "AlsaceS4SaverneShort1Reverse",
+   "length_km_published": 4.6
+  },
+  {
+   "location": "Wales",
+   "stage": "Afon Bidno - Severn",
+   "track": "Wales Afon Bidno",
+   "config": null,
+   "length_m": 4800,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren South. Game DataTable row / multiplayer wireId: WelesS4HafrenSouthFullForward (Track row WalesS4HafrenSouth). Sector lengths km: [1.8, 1.7, 1.6]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS4HafrenSouthFullForward",
+   "length_km_published": 4.8
+  },
+  {
+   "location": "Wales",
+   "stage": "Severn - Afon Bidno",
+   "track": "Wales Severn",
+   "config": null,
+   "length_m": 4800,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Afon Bidno - Severn",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren South. Game DataTable row / multiplayer wireId: WelesS4HafrenSouthFullReverse (Track row WalesS4HafrenSouth). Sector lengths km: [1.7, 1.7, 1.7]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS4HafrenSouthFullReverse",
+   "length_km_published": 4.8
+  },
+  {
+   "location": "Wales",
+   "stage": "Cwmbiga - Afon Biga",
+   "track": "Wales Cwmbiga",
+   "config": null,
+   "length_m": 11300,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)",
+    "https://github.com/decnet100/acr_telemetry/blob/master/timing/track_spline_lengths.toml"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren North. Game DataTable row / multiplayer wireId: WelesS3HafrenNorthFullForward (Track row WalesS3HafrenNorth). Sector lengths km: [2.5, 3.4, 3.2, 2.2]. Observed acpmf_static trackSplineLength for this variant: 12077.95 m (decnet100/acr_telemetry), i.e. the spline is ~0.8 km longer than the published 11.3 km stage length. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS3HafrenNorthFullForward",
+   "length_km_published": 11.3
+  },
+  {
+   "location": "Wales",
+   "stage": "Afon Biga - Cwmbiga",
+   "track": "Wales Afon Biga",
+   "config": null,
+   "length_m": 11000,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Cwmbiga - Afon Biga",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren North. Game DataTable row / multiplayer wireId: WelesS3HafrenNorthFullReverse (Track row WalesS3HafrenNorth). Sector lengths km: [2.2, 3.2, 3.4, 2.3]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS3HafrenNorthFullReverse",
+   "length_km_published": 11.0
+  },
+  {
+   "location": "Wales",
+   "stage": "Cwmbiga - Fedw Fain",
+   "track": "Wales Hafren Forest",
+   "config": null,
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren North. Game DataTable row / multiplayer wireId: WelesS3HafrenNorthCut1Forward (Track row WalesS3HafrenNorth). Sector lengths km: [1.7, 2.0, 2.3]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS3HafrenNorthCut1Forward",
+   "length_km_published": 6.1
+  },
+  {
+   "location": "Wales",
+   "stage": "Fedw Fain - Cwmbiga",
+   "track": "Wales Fedw Fain",
+   "config": null,
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Cwmbiga - Fedw Fain",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren North. Game DataTable row / multiplayer wireId: WelesS3HafrenNorthCut1Reverse (Track row WalesS3HafrenNorth). Sector lengths km: [2.1, 1.7, 1.6]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS3HafrenNorthCut1Reverse",
+   "length_km_published": 6.1
+  },
+  {
+   "location": "Wales",
+   "stage": "Banc Gwyn - Afon Biga",
+   "track": "Wales Banc Gwyn",
+   "config": null,
+   "length_m": 5400,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren North. Game DataTable row / multiplayer wireId: WelesS3HafrenNorthCut2Forward (Track row WalesS3HafrenNorth). Sector lengths km: [2.3, 2.0, 1.7]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS3HafrenNorthCut2Forward",
+   "length_km_published": 5.4
+  },
+  {
+   "location": "Wales",
+   "stage": "Afon Biga - Banc Gwyn",
+   "track": "Wales Ospreys",
+   "config": null,
+   "length_m": 5400,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Banc Gwyn - Afon Biga",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (EA launch: 4 stages, 18 variants, 33 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in EA launch 0.1 (2025-11-13). Special stage: Hafren North. Game DataTable row / multiplayer wireId: WelesS3HafrenNorthCut2Reverse (Track row WalesS3HafrenNorth). Sector lengths km: [1.6, 1.7, 2.1]. Snow weather added in 0.4 (2026-04-30) as a condition, not a separate variant.",
+   "game_variant_id": "WelesS3HafrenNorthCut2Reverse",
+   "length_km_published": 5.4
+  },
+  {
+   "location": "Livigno Circuit",
+   "stage": "Main Circuit",
+   "track": "Livigno Circuit Main Circuit",
+   "config": null,
+   "length_m": 900,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.2, 2025-12-18: Ghiacciodromo Livigno ice circuit)"
+   ],
+   "confidence": "medium",
+   "note": "Added in 0.2 (2025-12-18). Special stage: Ice Track. Game DataTable row / multiplayer wireId: LivignoTestTrack01FullForward (Track row LivignoTestTrack01). Sector lengths km: [0.3, 0.3, 0.4]. Closed ice circuit (Ghiacciodromo Livigno), time attack/free practice only, not a point-to-point stage; surface in game data is 'Snow' (packed snow/ice). Shared-memory track string is extrapolated from the pattern and NOT confirmed by any tool (PacenotePal has no Livigno entry).",
+   "game_variant_id": "LivignoTestTrack01FullForward",
+   "length_km_published": 0.9
+  },
+  {
+   "location": "Livigno Circuit",
+   "stage": "Main Circuit Reverse",
+   "track": "Livigno Circuit Main Reverse",
+   "config": null,
+   "length_m": 900,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": "Main Circuit",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.2, 2025-12-18: Ghiacciodromo Livigno ice circuit)"
+   ],
+   "confidence": "medium",
+   "note": "Added in 0.2 (2025-12-18). Special stage: Ice Track. Game DataTable row / multiplayer wireId: LivignoTestTrack01FullReverse (Track row LivignoTestTrack01). Sector lengths km: [0.4, 0.3, 0.3]. Closed ice circuit (Ghiacciodromo Livigno), time attack/free practice only, not a point-to-point stage; surface in game data is 'Snow' (packed snow/ice). Shared-memory track string is extrapolated from the pattern and NOT confirmed by any tool (PacenotePal has no Livigno entry).",
+   "game_variant_id": "LivignoTestTrack01FullReverse",
+   "length_km_published": 0.9
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "La Bollène-Vésubie - Peïra Cava",
+   "track": "Monte Carlo La Bollène",
+   "config": null,
+   "length_m": 18200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneFullForward (Track row MonteCarloS1Bollene). Sector lengths km: [1.6, 2.8, 4.9, 2.5, 3.1, 3.2]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneFullForward",
+   "length_km_published": 18.2
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Peïra Cava - La Bollène-Vésubie",
+   "track": "Monte Carlo Peïra Cava",
+   "config": null,
+   "length_m": 18200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "La Bollène-Vésubie - Peïra Cava",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneFullReverse (Track row MonteCarloS1Bollene). Sector lengths km: [3.2, 3.1, 2.5, 4.9, 2.8, 1.6]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneFullReverse",
+   "length_km_published": 18.2
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "La Bollène-Vésubie - Turini",
+   "track": "Monte Carlo Turini Montée",
+   "config": null,
+   "length_m": 11800,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneCut1Forward (Track row MonteCarloS1Bollene). Sector lengths km: [1.8, 2.8, 4.9, 2.5]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneCut1Forward",
+   "length_km_published": 11.8
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Turini - La Bollène-Vésubie",
+   "track": "Monte Carlo Turini Descente",
+   "config": null,
+   "length_m": 11800,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "La Bollène-Vésubie - Turini",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneCut1Reverse (Track row MonteCarloS1Bollene). Sector lengths km: [2.5, 4.9, 2.8, 1.6]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneCut1Reverse",
+   "length_km_published": 11.8
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Turini - Peïra Cava",
+   "track": "Monte Carlo Turini - Peïra Cava",
+   "config": null,
+   "length_m": 6300,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneCut2Forward (Track row MonteCarloS1Bollene). Sector lengths km: [3.1, 3.2]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneCut2Forward",
+   "length_km_published": 6.3
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Peïra Cava - Turini",
+   "track": "Monte Carlo Peïra Cava - Turini",
+   "config": null,
+   "length_m": 6300,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Turini - Peïra Cava",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneCut2Reverse (Track row MonteCarloS1Bollene). Sector lengths km: [3.2, 3.1]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneCut2Reverse",
+   "length_km_published": 6.3
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Pra d'Alart",
+   "track": "Monte Carlo Pra d'Alart",
+   "config": null,
+   "length_m": 5200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneCut3Forward (Track row MonteCarloS1Bollene). Sector lengths km: [2.4, 1.4, 1.5]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneCut3Forward",
+   "length_km_published": 5.2
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Sommet de Turini",
+   "track": "Monte Carlo Sommet de Turini",
+   "config": null,
+   "length_m": 5300,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Pra d'Alart",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Col de Turini. Game DataTable row / multiplayer wireId: MonteCarloS1BolleneCut3Reverse (Track row MonteCarloS1Bollene). Sector lengths km: [1.5, 1.4, 2.4]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS1BolleneCut3Reverse",
+   "length_km_published": 5.3
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Sisteron - St. Geniez",
+   "track": "Monte Carlo Sisteron - St. Genie",
+   "config": null,
+   "length_m": 13100,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Sisteron. Game DataTable row / multiplayer wireId: MonteCarloS2SisteronFullForward (Track row MonteCarloS2Sisteron). Sector lengths km: [3.1, 3.0, 3.7, 3.2]. Untruncated string would be 'Monte Carlo Sisteron - St. Geniez' (33 chars); the acpmf_static track field is wchar[33] so it is cut to 32 chars. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS2SisteronFullForward",
+   "length_km_published": 13.1
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "St. Geniez - Sisteron",
+   "track": "Monte Carlo St. Geniez - Sistero",
+   "config": null,
+   "length_m": 13100,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Sisteron - St. Geniez",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Sisteron. Game DataTable row / multiplayer wireId: MonteCarloS2SisteronFullReverse (Track row MonteCarloS2Sisteron). Sector lengths km: [3.2, 3.7, 3.1, 3.2]. Untruncated string would be 'Monte Carlo St. Geniez - Sisteron' (33 chars); the acpmf_static track field is wchar[33] so it is cut to 32 chars. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS2SisteronFullReverse",
+   "length_km_published": 13.1
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Sisteron - Mézien",
+   "track": "Monte Carlo Sisteron - Mézien",
+   "config": null,
+   "length_m": 7200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Sisteron. Game DataTable row / multiplayer wireId: MonteCarloS2SisteronCut1Forward (Track row MonteCarloS2Sisteron). Sector lengths km: [1.8, 2.7, 2.7]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS2SisteronCut1Forward",
+   "length_km_published": 7.2
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Mézien - Sisteron",
+   "track": "Monte Carlo Mézien - Sisteron",
+   "config": null,
+   "length_m": 7200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Sisteron - Mézien",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Sisteron. Game DataTable row / multiplayer wireId: MonteCarloS2SisteronCut1Reverse (Track row MonteCarloS2Sisteron). Sector lengths km: [2.8, 2.6, 1.8]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS2SisteronCut1Reverse",
+   "length_km_published": 7.2
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Mézien - St. Geniez",
+   "track": "Monte Carlo Mézien - St. Geniez",
+   "config": null,
+   "length_m": 5200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Sisteron. Game DataTable row / multiplayer wireId: MonteCarloS2SisteronCut2Forward (Track row MonteCarloS2Sisteron). Sector lengths km: [1.7, 2.2, 1.4]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS2SisteronCut2Forward",
+   "length_km_published": 5.2
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "St. Geniez - Mézien",
+   "track": "Monte Carlo St. Geniez - Mézien",
+   "config": null,
+   "length_m": 5200,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Mézien - St. Geniez",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.3, 2026-02-26: Col de Turini 18 km, Sisteron 13 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.3 (2026-02-26). Special stage: Sisteron. Game DataTable row / multiplayer wireId: MonteCarloS2SisteronCut2Reverse (Track row MonteCarloS2Sisteron). Sector lengths km: [1.4, 2.2, 1.7]. Tarmac base; dynamic weather can lay snow/ice on it (weather, not a separate variant).",
+   "game_variant_id": "MonteCarloS2SisteronCut2Reverse",
+   "length_km_published": 5.2
+  },
+  {
+   "location": "Greece",
+   "stage": "Loutraki - Aghii Theodori",
+   "track": "Greece Loutraki - Aghii Theodori",
+   "config": null,
+   "length_m": 10200,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Loutraki. Game DataTable row / multiplayer wireId: GreeceS4LoutrakiFullForward (Track row GreeceS4Loutraki). Sector lengths km: [2.9, 3.5, 3.8].",
+   "game_variant_id": "GreeceS4LoutrakiFullForward",
+   "length_km_published": 10.2
+  },
+  {
+   "location": "Greece",
+   "stage": "Aghii Theodori - Loutraki",
+   "track": "Greece Aghii Theodori - Loutraki",
+   "config": null,
+   "length_m": 10200,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Loutraki - Aghii Theodori",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Loutraki. Game DataTable row / multiplayer wireId: GreeceS4LoutrakiFullReverse (Track row GreeceS4Loutraki). Sector lengths km: [3.8, 3.5, 2.8].",
+   "game_variant_id": "GreeceS4LoutrakiFullReverse",
+   "length_km_published": 10.2
+  },
+  {
+   "location": "Greece",
+   "stage": "New Loutraki",
+   "track": "Greece New Loutraki",
+   "config": null,
+   "length_m": 4900,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Loutraki. Game DataTable row / multiplayer wireId: GreeceS4LoutrakiCut1Forward (Track row GreeceS4Loutraki). Sector lengths km: [2.5, 2.4].",
+   "game_variant_id": "GreeceS4LoutrakiCut1Forward",
+   "length_km_published": 4.9
+  },
+  {
+   "location": "Greece",
+   "stage": "New Loutraki Reverse",
+   "track": "Greece New Loutraki Reverse",
+   "config": null,
+   "length_m": 4900,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "New Loutraki",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Loutraki. Game DataTable row / multiplayer wireId: GreeceS4LoutrakiCut1Reverse (Track row GreeceS4Loutraki). Sector lengths km: [2.5, 2.4].",
+   "game_variant_id": "GreeceS4LoutrakiCut1Reverse",
+   "length_km_published": 4.9
+  },
+  {
+   "location": "Greece",
+   "stage": "Aghii Theodori",
+   "track": "Greece Aghii Theodori",
+   "config": null,
+   "length_m": 5800,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Loutraki. Game DataTable row / multiplayer wireId: GreeceS4LoutrakiCut2Forward (Track row GreeceS4Loutraki). Sector lengths km: [3.0, 2.8].",
+   "game_variant_id": "GreeceS4LoutrakiCut2Forward",
+   "length_km_published": 5.8
+  },
+  {
+   "location": "Greece",
+   "stage": "Aghii Theodori Reverse",
+   "track": "Greece Aghii Theodori Reverse",
+   "config": null,
+   "length_m": 5700,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Aghii Theodori",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Loutraki. Game DataTable row / multiplayer wireId: GreeceS4LoutrakiCut2Reverse (Track row GreeceS4Loutraki). Sector lengths km: [2.8, 2.9].",
+   "game_variant_id": "GreeceS4LoutrakiCut2Reverse",
+   "length_km_published": 5.7
+  },
+  {
+   "location": "Greece",
+   "stage": "Elatia - Zeli",
+   "track": "Greece Elatia - Zeli",
+   "config": null,
+   "length_m": 11600,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.85,
+    "tarmac": 0.15
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Elatia. Game DataTable row / multiplayer wireId: GreeceS3ElatiaFullForward (Track row GreeceS3Elatia). Sector lengths km: [3.8, 3.4, 2.9, 1.6]. Game data SurfaceTypes percentages; the in-game default setup surface and tyre set are Gravel.",
+   "game_variant_id": "GreeceS3ElatiaFullForward",
+   "length_km_published": 11.6
+  },
+  {
+   "location": "Greece",
+   "stage": "Zeli - Elatia",
+   "track": "Greece Zeli - Elatia",
+   "config": null,
+   "length_m": 11700,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.85,
+    "tarmac": 0.15
+   },
+   "reverse_of": "Elatia - Zeli",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Elatia. Game DataTable row / multiplayer wireId: GreeceS3ElatiaFullReverse (Track row GreeceS3Elatia). Sector lengths km: [1.5, 3.1, 2.8, 4.1]. Game data SurfaceTypes percentages; the in-game default setup surface and tyre set are Gravel.",
+   "game_variant_id": "GreeceS3ElatiaFullReverse",
+   "length_km_published": 11.7
+  },
+  {
+   "location": "Greece",
+   "stage": "Elatia",
+   "track": "Greece Elatia",
+   "config": null,
+   "length_m": 4900,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Elatia. Game DataTable row / multiplayer wireId: GreeceS3ElatiaCut1Forward (Track row GreeceS3Elatia). Sector lengths km: [3.8, 2.5].",
+   "game_variant_id": "GreeceS3ElatiaCut1Forward",
+   "length_km_published": 4.9
+  },
+  {
+   "location": "Greece",
+   "stage": "Elatia Reverse",
+   "track": "Greece Elatia Reverse",
+   "config": null,
+   "length_m": 6200,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Elatia",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "medium",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Elatia. Game DataTable row / multiplayer wireId: GreeceS3ElatiaCut1Reverse (Track row GreeceS3Elatia). Sector lengths km: [2.0, 4.2]. Game length 6.2 km vs 4.9 km for its 'forward' Elatia counterpart, so the two do not cover identical road; reverse_of follows the game's naming only.",
+   "game_variant_id": "GreeceS3ElatiaCut1Reverse",
+   "length_km_published": 6.2
+  },
+  {
+   "location": "Greece",
+   "stage": "Zeli",
+   "track": "Greece Zeli",
+   "config": null,
+   "length_m": 5500,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.65,
+    "tarmac": 0.35
+   },
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Elatia. Game DataTable row / multiplayer wireId: GreeceS3ElatiaCut2Forward (Track row GreeceS3Elatia). Sector lengths km: [3.9, 1.6]. Game data SurfaceTypes percentages; the in-game default setup surface and tyre set are Gravel.",
+   "game_variant_id": "GreeceS3ElatiaCut2Forward",
+   "length_km_published": 5.5
+  },
+  {
+   "location": "Greece",
+   "stage": "Zeli Reverse",
+   "track": "Greece Zeli Reverse",
+   "config": null,
+   "length_m": 5500,
+   "surface": "mixed",
+   "surface_parts": {
+    "gravel": 0.65,
+    "tarmac": 0.35
+   },
+   "reverse_of": "Zeli",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/Koenvh1/PacenotePal/blob/master/pacenote_generation/DT_TracksVariants.json",
+    "https://github.com/FlorentDChamps/acr-live-timing/blob/master/src/Content/acr-content.json",
+    "https://traxion.gg/assetto-corsa-rally-stage-list/",
+    "https://store.steampowered.com/news/app/3917090 (Update 0.5, 2026-06-29: 2 stages, 12 variants, 22 km)"
+   ],
+   "confidence": "high",
+   "note": "Added in 0.5 (2026-06-29). Special stage: Elatia. Game DataTable row / multiplayer wireId: GreeceS3ElatiaCut2Reverse (Track row GreeceS3Elatia). Sector lengths km: [1.4, 4.1]. Game data SurfaceTypes percentages; the in-game default setup surface and tyre set are Gravel.",
+   "game_variant_id": "GreeceS3ElatiaCut2Reverse",
+   "length_km_published": 5.5
+  }
+ ]
+}
