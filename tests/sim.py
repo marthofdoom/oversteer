@@ -257,7 +257,7 @@ def feed_course(learner, samples):
 
 def eawrc_packet(sample):
     """The sample as EA SPORTS WRC would send it in Oversteer's structure
-    (the one format the bench and the end-to-end tests encode)."""
+    (the format the bench and the stage end-to-end tests encode)."""
     import struct
     from oversteer.telemetry_formats import EAWRC_CHANNELS, EAWRC_FORMAT
     forward = sample.forward or (1.0, 0.0, 0.0)
@@ -288,6 +288,49 @@ def eawrc_packet(sample):
         values['vehicle_cp_forward_speed_' + wheel] = sample.wheel_speed[i] if sample.wheel_speed else sample.speed
     fourcc = {'start': b'SESS', 'end': b'SESE', 'pause': b'SESP', 'resume': b'SESR'}.get(sample.packet, b'SESU')
     return struct.pack(EAWRC_FORMAT, fourcc, *[values[c] for c in EAWRC_CHANNELS])
+
+
+def forza_packet(sample, t, race_time=0.0, distance=0.0, size=331, ordinal=777, track=512, tyre_radius=0.33):
+    """The sample as Forza sends it ("Data Out", Motorsport 2023's 331
+    bytes by default, Horizon's 324 with `size`), at `t` seconds. Forza's
+    clock and distance run over the whole race, not per lap. Car axes are
+    x right, y up, z forward; the wheels turn at the car's speed over
+    `tyre_radius`."""
+    import struct
+    data = bytearray(size)
+    a_long, a_lat = (sample.accel or (0.0, 0.0, 0.0))[:2]
+    speed = sample.speed or 0.0
+    struct.pack_into('<iI', data, 0, 1, int(t * 1000) & 0xffffffff)
+    struct.pack_into('<fff', data, 8, LIMITER, 900.0, sample.rpm)
+    struct.pack_into('<9f', data, 20, -a_lat, 0.0, a_long, 0.0, 0.0, speed, 0.0, -(sample.yaw_rate or 0.0), 0.0)
+    wheels = sample.wheel_speed or (speed,) * 4
+    struct.pack_into('<4f', data, 100, *[w / tyre_radius for w in wheels])
+    struct.pack_into('<iiii', data, 212, ordinal, 3, 700, 1)
+    base = 244 if size == 324 else 232
+    gear = {-1: 0, 0: 11}.get(sample.gear, sample.gear or 11)
+    throttle = sample.throttle or 0.0
+    x, y, z = sample.pos or (0.0, 0.0, 0.0)
+    struct.pack_into('<5f', data, base, x, y, z, speed, power(sample.rpm) * 1200.0 * throttle)
+    struct.pack_into('<f4xf', data, base + 40, 0.0, distance)
+    struct.pack_into('<fHB', data, base + 64, race_time, sample.lap or 0, 1)
+    struct.pack_into('<BBBBBb', data, base + 71, int(throttle * 255), int((sample.brake or 0.0) * 255),
+                     int((sample.clutch or 0.0) * 255), 0, gear, int(round(-(sample.steer or 0.0) * 127)))
+    if size == 331:
+        struct.pack_into('<i', data, 327, track)
+    return bytes(data)
+
+
+def forza_packets(samples, **options):
+    """(t, packet) for course_samples(): Forza's race clock starts when
+    the car first moves, and its distance is the distance driven."""
+    out, race_time, distance, last = [], 0.0, 0.0, None
+    for t, sample, _ in samples:
+        if last is not None and (race_time or sample.speed > 0.5):
+            race_time += t - last
+            distance += (sample.speed or 0.0) * (t - last)
+        last = t
+        out.append((t, forza_packet(sample, t, race_time, distance, **options)))
+    return out
 
 
 def stage_packets(minutes=10.0):

@@ -211,3 +211,31 @@ def test_a_replay_writes_the_same_database_every_time(tmp_path):
         learner.close()
     assert dumps[0] == dumps[1]
     assert len(dumps[0]['runs']) >= 2 and len(dumps[0]['segments']) > 30 and dumps[0]['shifts']
+
+
+def test_forza_motorsport_laps_through_the_live_path(tmp_path):
+    """Three laps sent as Forza Motorsport's packets, through the decoder
+    and the listener as a game would send them: one circuit run with its
+    laps, the gearing and the tyre radius learnt."""
+    from oversteer.telemetry_capture import replay
+    from tests.sim import RATIOS, forza_packets
+    course = Course(CIRCUIT)
+    samples = course_samples(course, laps=3, game='forza-fm', car='forza-fm/777')
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'), threaded=False)
+    replay([(t, ('127.0.0.1', 0), data) for t, data in forza_packets(samples)], learner, started=1.7e9)
+    reader = learner._reader()
+    [car] = reader.db.execute('SELECT id, key, game FROM cars').fetchall()
+    assert car[1:] == ('forza-fm/777', 'forza-fm')
+    [session] = reader.sessions(car[0])
+    assert (session['discipline'], session['discipline_conf'], session['stage']) == ('circuit', 'game', 'fm:512')
+    assert abs(session['distance'] - course.length * 3) < 60
+    [run] = reader.session(session['id'])['runs']
+    laps = reader.db.execute('SELECT n, distance FROM laps WHERE run = ?', (run['id'],)).fetchall()
+    assert [n for n, _ in laps] == [1, 2] and all(abs(d - course.length) < 30 for _, d in laps)
+    corners = reader.db.execute('SELECT direction FROM corners WHERE run = ?', (run['id'],)).fetchall()
+    assert len(corners) >= 8 and {d for d, in corners} == {1}          # every corner of this circuit is a left
+    learnt = {row['gear']: row['ratio'] for row in learner.snapshot()['gears']}
+    assert all(abs(learnt[g] - RATIOS[g]) / RATIOS[g] < 0.01 for g in learnt) and len(learnt) >= 3
+    [tune] = reader.db.execute('SELECT tyre_radius FROM tunes').fetchall()
+    assert tune[0] is not None and abs(tune[0] - 0.33) < 0.005
+    learner.close()
