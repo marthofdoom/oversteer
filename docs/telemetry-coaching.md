@@ -860,7 +860,8 @@ Advice sentences stay in `CarModel.advice` style but move to the coach
   limiter; it no longer ends the session, so a Forza pause does not split a
   stage.)
 - **Run boundaries**: a teleport (> 50 m between consecutive positions, or
-  an implied speed > 100 m/s), the game's own signals (EA `SESS`/`SESE`,
+  an implied speed > 100 m/s; *run 5:* both beyond what the car's own
+  speed explains, since Forza passes 100 m/s), the game's own signals (EA `SESS`/`SESE`,
   `stage_time` or `lap_distance` going back to 0, Forza race time reset), a
   silence > 2 s followed by a position jump. A pause (EA `SESP`, DiRT
   repeated packets, Forza silence without a jump) suspends the run.
@@ -1049,7 +1050,8 @@ Labels come from the tab (Step C) and the web page never writes them.
 - **Rate limiting** (`coach_state`): at most 3 tips and 1 praise per view;
   a tip is re-shown when its value got worse by ≥ 20 %, after 14 days, or
   when the user asks ("Show all"); after two showings without change it
-  becomes a quiet "still:" line at the bottom, at most 3 of those, oldest
+  becomes a quiet "still:" line (*run 5:* a showing is a sitting: views
+  within 6 h of the last counted one are the same showing) at the bottom, at most 3 of those, oldest
   dropped. The same limits apply to praise and to "Still learning the
   engine"; today's per-gear "spot on" on every refresh goes.
 - **Phrasing**: observation + number + consequence + one action, in the
@@ -1438,7 +1440,7 @@ off-screen: the tab built under GDK's broadway backend with a stub
 controller and rendered to an image, and the gui's recording and
 preference methods on a stub, never by running the app.
 
-Run 5 (in progress): two independent reviews (Opus, Fable) of
+Run 5 (done, 180 tests green; bench mean 0.042 ms, p99 0.065 ms, worst 4.5 ms): two independent reviews (Opus, Fable) of
 `v0.13.1..HEAD`. Every finding is checked against the code; the ones
 found real are fixed with a test where one makes sense, the others are
 listed with the reason. The checklist is the recovery point:
@@ -1446,16 +1448,22 @@ listed with the reason. The checklist is the recovery point:
 - [x] O2 one over-rev packet raises the launch limiter for good; launch at speed; `set_limiter` never lowers a launch figure: fixed (544adc2): raised on the move only when held flat out, clutch out, in gear for LAUNCH_RAISE_HOLD (0.5 s) without climbing; a launch needs speed ≤ LAUNCH_SPEED; `set_limiter` lets a launch replace a launch either way
 - [x] O3 `ceiling()` falls back to `top_seen`: early shifters locked in, false limiter coaching: fixed (0d69860): `CarModel.known_limiter()` (launch or game); `ceiling()` falls back to `top_seen` only when no limiter is known, and then "pulls to the limiter" is never answered; `car_context` passes the known limiter; limiter time and the over-rev/skip flags use it too. A game that over-reports its maximum (WRCG) now needs a launch for its pull-to-the-limiter gears; the percentage rule stands in meanwhile
 - [x] O4 tips go quiet after two tab refreshes, not two sessions: fixed (0d69860): `coach.SHOWING` (6 h): views within it of the last counted showing change nothing
-- [ ] O5 / F-low web slots held by idle keep-alive connections
-- [ ] O6 / F-low migration drops a merged car's sessions and shifts
+- [x] O5 / F-low web slots held by idle keep-alive connections: fixed (1998e69): `Connection: close` on every answer; clients with a global address are refused too (`verify_request`, Fable's LAN hardening; CGNAT tailnets pass)
+- [x] O6 / F-low migration drops a merged car's sessions and shifts: fixed (1998e69): the longest model is kept, the other key's sessions and shifts go to it, logged
 - [x] O7 a rolled-back commit leaves stale row ids in memory: fixed: `DriveLog.batch` and `on_rollback`; the learner forgets the session and run rows written in the rolled-back batch and starts the session again (`_session_lost`)
 - [x] O8 `*/unknown` cars (BeamNG, AC pmf) share one model and drive the lights: fixed (0d69860): `shared_car()`: `*/unknown` keys learn nothing about the car (limiter, ratios, power) and give no learnt shift point; sessions, runs and shifts are still written
 - [x] F1 Forza above 100 m/s restarts the run every packet: fixed: `jump > TELEPORT + speed × gap` or implied speed above max(100 m/s, 3 × the car's speed)
 - [x] F2 `shift.error` measured against a best the lights would not trust: fixed (0d69860): `SHIFT_COVERAGE` (0.6) gates the stored best, the coach's best and the live advice
 - [x] F3 limiter below top gear counts top gear when the game sends no gear count: fixed (0d69860): the highest gear learnt stands in for top in `limiter.per_km` only; `limiter.top`, `top.share`, `top.peak` still need the game's count; with neither, no limiter metric
-- [ ] F4 / O-low migration backups miss the WAL
+- [x] F4 / O-low migration backups miss the WAL: fixed (1998e69): `_backup()` through `Connection.backup()`
 - [x] F5 / O-low segment rows grow while paused or parked: fixed: paused or frozen packets add no segment or trace row; a segment closes at `SEGMENT_ROWS` (3600) rows however short. The design's "10 s if no distance" cut is this row cap
-- [ ] Lows and nits (listed with their outcome when done)
+- [x] Lows and nits, fixed: `DriveLog.call` sets `done` in a `finally`; `DriveLog.close()` and `Recorder.close()` leave the connection or file to a thread that outlived the join; Forza's car-less menu packets call `learner.idle()` once and `learner.tick()` each (the socket never times out); pedals read once a packet; no `'launch'` source once the option is off; a failing learner logs once a minute; `open_reader` quotes the path; the unit cache starts over when full; `SHIFT_THROTTLE` for the literal 0.8; `_corner.at()` by bisection; run rows dropped once their run ended; old profiles with no shift point keep 97 %; CHANGELOG (the launch switch; both switches on for old profiles); `SCHEMA_V1`'s comment; the label tooltips no longer claim learning today; EA WRC logs a gear index it does not understand (once each, 25d6567)
+- Rejected or deferred, with the reason:
+  - Port probe racing FH6's bind (O-low): kept as designed (§3.1 D1, review item 17, agreed with the user): the probe holds 5300 for one second in sixty and only while nothing has been heard; a game sending to 5310 stops it at its first packet. Worth a look if FH6 ever fails to start its Data Out with Oversteer open.
+  - Codemasters rpm / 10 maxima read as rad/s (O-low): deferred to a WRC Generations capture (§6.3). Tightening the rad/s tolerance would fix the 4 % of rpm / 10 maxima that also land within 1 rpm of a round figure in rad/s, but the migration (`rescale_codemasters`) reads keys rounded to 0.1 and relies on the loose tolerance, and nothing says WRCG sends rpm / 10 at all.
+  - Recorder takes datagrams from any sender (F-low): rejected. A capture shows everything that arrived by design (a second source is what the source lock has to be debugged against); the size cap bounds it, recording is off by default, and a host that can reach the UDP port can already drive the listener.
+  - "Learn from labels" (O-nit): the tooltips were reworded rather than wiring `calibrate_game()` in: its thresholds wait for the §6.3 captures (§15).
+- Still open after run 5: Codemasters and OutGauge encoders for end-to-end tests; the GTK pedal→launch wiring checked by reading only; the EA WRC gear convention (a capture); a game that over-reports its maximum (WRCG) learns its pull-to-the-limiter gears only from a launch now that the highest rpm seen is not taken for the limiter.
 
 ### Step B
 - [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
