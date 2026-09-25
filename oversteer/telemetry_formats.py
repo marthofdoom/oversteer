@@ -454,6 +454,15 @@ def _codemasters(data, n):
         sample.lap = int(floats[36]) if math.isfinite(floats[36]) else None
         sample.laps = int(floats[60]) if math.isfinite(floats[60]) and 0 <= floats[60] < 1000 else None
         sample.stage_length = _finite(floats[61])
+    if game == 'wrcg':
+        # WRC Generations leaves 61 at 0 and puts the stage's length, in
+        # km, where DiRT has its progress (seen on a capture of Mexico's
+        # Media Luna reverse: 3.98 all the way, lap distance 0 to 3979 m)
+        km = floats[3]
+        sample.stage_length = km * 1000.0 if math.isfinite(km) and 0.1 < km < 100.0 else None
+        sample.progress = None
+        if sample.stage_length and sample.lap_distance is not None:
+            sample.progress = max(0.0, min(1.0, sample.lap_distance / sample.stage_length))
     return sample
 
 

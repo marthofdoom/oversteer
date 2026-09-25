@@ -179,6 +179,7 @@ SEGMENT_MIN = 50.0               # m: a shorter tail is not kept
 SEGMENT_ROWS = 3600              # rows (a minute at 60 Hz): a segment closes then however short (a parked car)
 TRACE_EVERY = 0.1                # s between trace rows
 RUN_MIN = 100.0                  # m moving: a shorter run (menus, a car parked) is not kept
+SENT_LENGTH_TOLERANCE = 15.0     # m: a length the game sends against the published one
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
@@ -287,7 +288,11 @@ class RunTracker:
             jump = math.sqrt(sum((a - b) ** 2 for a, b in zip(pos, last)))
             speed = max(sample.speed or 0.0, self._last_speed or 0.0)
             implied = max(TELEPORT_SPEED, TELEPORT_FACTOR * speed)
-            if jump > TELEPORT + speed * gap or (gap > 0 and jump / gap > implied):
+            # At least TELEPORT metres either way: packets arriving in a
+            # burst have near-zero gaps, and half a metre over half a
+            # millisecond is not 1000 m/s; nor is a reset after a crash
+            # (a few metres) the end of the stage
+            if jump > TELEPORT and (jump > TELEPORT + speed * gap or (gap > 0 and jump / gap > implied)):
                 return 'teleport'
         elif pos is None and gap > NO_POSITION_GAP:
             return 'silence'
@@ -499,8 +504,10 @@ class RunTracker:
             if stage is not None:
                 game = 'acr'
         if stage is None and game == 'wrcg' and stage_length:
-            # Should WRC Generations send its length after all: against the published ones
-            stage = store.match_distance(game, stage_length, start_pos)[0]
+            # WRC Generations sends the length it shows in game, which is
+            # the published figure: close enough to tell a stage from its
+            # reverse, which a 1 % distance window often can't
+            stage = store.match_distance(game, stage_length, start_pos, within=SENT_LENGTH_TOLERANCE)[0]
         if stage is None and game in ('dirt', 'wrcg') and stage_length and start_pos is not None:
             # DiRT names no stage: its length and where it starts do
             stage = store.match_stage(game, stage_length, start_pos[2])

@@ -405,3 +405,35 @@ def test_two_stages_of_one_length_on_one_surface(tmp_path, monkeypatch):
     assert run['stage'].startswith('cell:wrcg:') and (run['surface'], run['surface_conf']) == ('gravel', 'game')
     assert 'Felgueiras (Rally de Portugal) or Felgueiras reverse (Rally de Portugal): all gravel' in \
         run['surface_evidence'][0]
+
+
+def test_a_burst_of_packets_or_a_reset_is_no_teleport(tmp_path):
+    # Packets arriving together (gap ~0.5 ms) with the car's usual half
+    # metre between them implied 1000 m/s and split a WRCG stage in four;
+    # a reset after a crash moves the car a few metres
+    from oversteer.drive_log import RunTracker
+    tracker = RunTracker.__new__(RunTracker)
+    tracker._session, tracker._last_pos, tracker._last_speed = 1, (0.0, 0.0, 0.0), 25.0
+    tracker._last_t, tracker._last_stage_time, tracker._last_lap = 10.0, 50.0, None
+    from oversteer.telemetry import Sample
+    burst = Sample(5000.0, speed=25.0)
+    burst.pos, burst.stage_time = (0.5, 0.0, 0.0), 50.0
+    assert tracker._boundary(10.0005, burst, 1) is None
+    reset = Sample(0.0, speed=0.0)
+    reset.pos, reset.stage_time = (8.0, 0.0, 6.0), 50.2
+    assert tracker._boundary(10.02, reset, 1) is None
+    restart = Sample(0.0, speed=0.0)
+    restart.pos, restart.stage_time = (2000.0, 0.0, 0.0), 50.2
+    assert tracker._boundary(10.02, restart, 1) == 'teleport'
+
+
+def test_a_sent_length_tells_a_stage_from_its_reverse(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    from oversteer.telemetry_store import open_store
+    from tests.test_store import _tables
+    monkeypatch.setattr(stage_tables, '_tables', _tables(
+        'wrcg', {'location': 'Rally México', 'stage': 'Media Luna', 'length_m': 4010.0, 'surface': 'gravel'},
+        {'location': 'Rally México', 'stage': 'Media Luna reverse', 'length_m': 3980.0, 'surface': 'gravel'}))
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    assert store.match_distance('wrcg', 3979.6)[0] is None                         # 1 %: both fit
+    assert store.match_distance('wrcg', 3979.6, within=15.0)[0] == 'wrcg:rally-mexico:media-luna-reverse'

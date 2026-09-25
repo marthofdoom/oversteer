@@ -907,7 +907,7 @@ class Store(Reader):
                 continue
         return starts
 
-    def match_distance(self, game, distance, start=None):
+    def match_distance(self, game, distance, start=None, within=None):
         """(key, candidates): the shipped stage of `game` whose published
         length a run to the finish (or a length the game sent) is within
         1 % of, and every stage that close. Where two or more are, the
@@ -917,7 +917,8 @@ class Store(Reader):
         if not distance:
             return None, []
         candidates = [e for e in stage_tables.tables().get(game, {}).values() if e.get('length_m')
-                      and abs(e['length_m'] - distance) <= STAGE_DISTANCE_TOLERANCE * e['length_m']]
+                      and abs(e['length_m'] - distance) <= (within if within is not None
+                                                             else STAGE_DISTANCE_TOLERANCE * e['length_m'])]
         if start is not None and candidates:
             near, unknown = [], []
             for entry in candidates:

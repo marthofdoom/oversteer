@@ -2222,7 +2222,7 @@
   {
    "location": "Rally México",
    "stage": "Autodromo de Leon",
-   "length_m": 2300,
+   "length_m": 2581,
    "surface": "gravel",
    "surface_parts": null,
    "reverse_of": null,
@@ -2230,9 +2230,10 @@
    "sources": [
     "https://wrcsetups.com/wrc-generations/stages",
     "https://techbriefly.com/2022/11/08/wrc-generations-stage-list-revealed/",
-    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3"
+    "https://steamcommunity.com/app/1004750/discussions/0/1739980540123667568/?ctp=3",
+    "Oversteer capture, 2026-09-25: WRC Generations sends 2.581 km for this stage (published figure was 2.30 km)"
    ],
-   "confidence": "medium",
+   "confidence": "high",
    "note": "Super special. Length from WRC 8 (2019), where the stage debuted; WRCG may differ slightly (shared stages elsewhere changed by 0.05-0.25 km)"
   },
   {

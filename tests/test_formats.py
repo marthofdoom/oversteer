@@ -237,3 +237,18 @@ def test_car_keys_name_the_game():
     assert decode_sample(outgauge(3, car=b'beam')).car == 'beamng/unknown'
     assert decode_sample(outgauge(3)).car == 'lfs/XRG'
     assert decode_sample(codemasters(5000, 7500, idle=800, size=280)).car == 'wrcg/7500-800-6'
+
+
+def test_wrc_generations_sends_its_stage_length_in_km():
+    # Seen on a capture of Mexico's Media Luna reverse: field 3 held 3.98
+    # the whole stage (DiRT's progress field), field 61 stayed 0
+    import struct as st
+    packet = bytearray(codemasters(5000.0, 7900.0, size=280))
+    st.pack_into('<f', packet, 2 * 4, 1990.0)                     # lap distance
+    st.pack_into('<f', packet, 3 * 4, 3.98)
+    sample = decode_sample(bytes(packet))
+    assert sample.game == 'wrcg' and abs(sample.stage_length - 3980.0) < 0.5
+    assert abs(sample.progress - 0.5) < 1e-3
+    st.pack_into('<f', packet, 3 * 4, 0.0)                         # a menu: no length, no progress
+    sample = decode_sample(bytes(packet))
+    assert sample.stage_length is None and sample.progress is None
