@@ -144,11 +144,13 @@ class History:
         self.t = T0
 
     def session(self, metrics, discipline='rally-stage', surface='tarmac', stage='eawrc:4:12', distance=10000.0,
-                days=1.0):
+                days=1.0, tune=None):
         store = self.store
         self.t += days * DAY
         store.begin()
         session = store.start_session(self.profile, self.car, 'eawrc', self.t, stage=stage)
+        if tune is not None:
+            store.update_session(session, tune=tune)
         run = store.start_run(session, 1, self.t, stage)
         store.end_run(run, ended=self.t + 600, distance=distance, finished=1, result_time=600.0)
         store.add_metrics(session, run, [dict(m, discipline=discipline, surface=surface) for m in metrics])
