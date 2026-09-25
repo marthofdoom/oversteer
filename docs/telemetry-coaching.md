@@ -1307,7 +1307,7 @@ Design revised after the independent review (§3.2): done.
 - [x] Shift-press wiring (`shift_button_kinds()` in `proxy/equipment.py`, `update_shift_buttons()` every 5 s with the handbrake check) and method from the press (`shift_method()`); per-method columns from `ShiftLearner.method_shifts()`, re-read on car change, session end (`sessions_ended`) and tab shown
 - [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
 - [x] UDP default port 5310 (D1) with the probe and hint (symmetric, see §3.1 D1); CHANGELOG entries for Step A. Bridge .c default left at 5300 until it is rebuilt
-- [ ] GTK: snapshot cache, history on events only, praise/"still" limits
+- [x] GTK: snapshot cache (`load_snapshot()` keyed by (profile, key, `updated`); rename bumps `updated`), history on events only (`method_shifts()`), advice limited to 3 tips by size, 1 praise line, 1 re-tune line, 1 "still learning" line. The quiet "still:" lines and re-showing rules need `coach_state` (Step C)
 - [ ] `telemetry_formats.py` split (done, acb5ba0); EA SPORTS WRC decoder, id table, copy buttons
 
 ### Step B

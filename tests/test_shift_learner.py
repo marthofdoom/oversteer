@@ -290,3 +290,31 @@ def test_shifts_per_method(tmp_path):
     ended = learner.sessions_ended
     learner.idle()
     assert learner.sessions_ended == ended + 1
+
+
+def test_coaching_is_short():
+    """At most three tips, the biggest first, and one line of praise."""
+    car = CarModel('x')
+    car.limiter = LIMITER
+    car.ratios = {g: [r] * 30 for g, r in {1: 480.0, 2: 330.0, 3: 250.0, 4: 200.0, 5: 165.0, 6: 140.0}.items()}
+    for band in range(20, 80):
+        car.power[band] = [power(band * 100 + 50)] * 5
+    early = {g: analytic_shift(g) - 300 - 200 * g for g in (1, 2, 3, 4)}   # 4→5 the most early
+    car.upshifts = {g: [rpm] * 3 for g, rpm in early.items()}
+    car.upshifts[5] = [car.best_shift(5)[0]] * 4                             # and one spot on
+    tips = car.advice(session_limiter_time=1.0)
+    assert [t[:3] for t in tips[:3]] == ['4→5', '3→4', '2→3'], tips
+    assert tips[3] == 'Spot on: 5→6 within 200 rpm of the best (4 changes).'
+    assert len(tips) == 4
+
+
+def test_saved_snapshot_is_cached_until_the_car_changes(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)
+    learner.feed(9999.0, Sample(3000, LIMITER, gear=1, speed=10, car='other'), LIMITER, 0.0, 0.0)
+    first = learner.load_snapshot('test-car')
+    assert first['advice'] is not None and learner.load_snapshot('test-car') is first
+    learner.rename('test-car', 'Rally car')
+    assert learner.load_snapshot('test-car')['name'] == 'Rally car'
+    live = learner.load_snapshot('other')                     # the car being driven: always fresh
+    assert live['key'] == 'other' and 'advice' in live

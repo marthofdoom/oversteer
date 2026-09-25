@@ -63,6 +63,7 @@ LIMITER_BAND = 0.985             # within this of the limiter counts as on it
 DRAG_C0 = 0.15                   # m/s^2: rolling resistance, typical car
 DRAG_C2 = 3.5e-4                 # 1/m: aerodynamic drag / mass, typical car
 SAVE_EVERY = 20.0                # seconds between saves while learning
+TIPS_SHOWN = 3                   # coaching tips at a time, the biggest first
 
 
 def _median(values):
@@ -212,8 +213,12 @@ class CarModel:
                 'power_source': self.power_source, 'retuned': dict(self.retuned)}
 
     def advice(self, session_limiter_time=0.0):
-        """Coaching from what has been learnt: a list of sentences."""
-        tips = []
+        """Coaching from what has been learnt: a list of sentences. At most
+        TIPS_SHOWN tips (the largest rpm errors first), one line of praise
+        and one line each about re-tuned gears and what is still being
+        learnt, so the same list is not repeated gear by gear."""
+        tips = []                        # (weight, sentence): the biggest first
+        spot_on = []
         gears = self.gears()
         ceiling = self.ceiling()
         for gear in gears:
@@ -232,33 +237,45 @@ class CarModel:
                 if stay and after and after < stay:
                     cost = ' At that speed gear {} gives {:.0f} % less drive than staying in {}.'.format(
                         gear + 1, (1 - after / stay) * 100, gear)
-                tips.append('{}: you change up around {:.0f} rpm, {:.0f} early; hold it to about {:.0f}.{}'.format(
-                    change, shift_rpm, best_rpm - shift_rpm, best_rpm, cost))
+                tips.append((best_rpm - shift_rpm, '{}: you change up around {:.0f} rpm, {:.0f} early; hold it to '
+                             'about {:.0f}.{}'.format(change, shift_rpm, best_rpm - shift_rpm, best_rpm, cost)))
             elif shift_rpm > best_rpm + 200:
                 if best_rpm >= ceiling * 0.99:
-                    tips.append('{}: you change up around {:.0f} rpm, on the limiter; this car pulls to the '
-                                'limiter in {}, so change as the lights flash.'.format(change, shift_rpm, gear))
+                    tips.append((shift_rpm - best_rpm, '{}: you change up around {:.0f} rpm, on the limiter; this car '
+                                 'pulls to the limiter in {}, so change as the lights flash.'.format(
+                                     change, shift_rpm, gear)))
                 else:
                     stay, after = self.power_at(shift_rpm), self.power_at(shift_rpm * step)
                     cost = ''
                     if stay and after and stay < after:
                         cost = ' By then gear {} would give {:.0f} % more drive.'.format(
                             gear + 1, (after / stay - 1) * 100)
-                    tips.append('{}: you change up around {:.0f} rpm, {:.0f} late; change at about {:.0f}.{}'.format(
-                        change, shift_rpm, shift_rpm - best_rpm, best_rpm, cost))
+                    tips.append((shift_rpm - best_rpm, '{}: you change up around {:.0f} rpm, {:.0f} late; change at '
+                                 'about {:.0f}.{}'.format(change, shift_rpm, shift_rpm - best_rpm, best_rpm, cost)))
             else:
-                tips.append('{}: spot on, around {:.0f} rpm ({} changes).'.format(change, shift_rpm, count))
+                spot_on.append((change, count))
         if session_limiter_time > 3:
-            tips.append('{:.0f} s on the limiter at full throttle this session: the engine makes nothing '
-                        'there. Change up when the lights flash.'.format(session_limiter_time))
-        for gear in sorted(self.retuned):
-            tips.append('Gear {} was re-tuned; its shift points are being learnt again.'.format(gear))
+            # Seconds on the limiter weigh like a few hundred rpm of error
+            tips.append((session_limiter_time * 100, '{:.0f} s on the limiter at full throttle this session: the '
+                         'engine makes nothing there. Change up when the lights flash.'.format(session_limiter_time)))
+        lines = [text for _, text in sorted(tips, key=lambda tip: -tip[0])[:TIPS_SHOWN]]
+        if spot_on:
+            names = [change for change, _ in spot_on]
+            listed = names[0] if len(names) == 1 else '{} and {}'.format(', '.join(names[:-1]), names[-1])
+            lines.append('Spot on: {} within 200 rpm of the best ({} changes).'.format(
+                listed, sum(count for _, count in spot_on)))
+        if self.retuned:
+            retuned = sorted(self.retuned)
+            lines.append('{} re-tuned; {} shift points are being learnt again.'.format(
+                'Gear {} was'.format(retuned[0]) if len(retuned) == 1 else
+                'Gears {} were'.format(', '.join(str(g) for g in retuned)),
+                'its' if len(retuned) == 1 else 'their'))
         needed = int(ceiling * 0.5 / POWER_BIN) if ceiling else 0
         bands = sum(1 for v in self.power.values() if len(v) >= POWER_MIN)
         if needed and bands < needed * 0.8:
-            tips.append('Still learning the engine ({} of about {} rev bands known): full-throttle pulls from '
-                        'low revs, out of slow corners, fill it in fastest.'.format(bands, needed))
-        return tips
+            lines.append('Still learning the engine ({} of about {} rev bands known): full-throttle pulls from '
+                         'low revs, out of slow corners, fill it in fastest.'.format(bands, needed))
+        return lines
 
 
 SCHEMA = """
@@ -402,6 +419,7 @@ class ShiftLearner:
         self.session = None                      # sessions.id of the drive going on
         self.session_limiter_time = 0.0
         self.sessions_ended = 0                  # counts up at each session end: history readers refresh
+        self._loaded = None                      # load_snapshot(): ((profile, key, updated), snapshot)
         self._shift_cache = {}
         self._shift_cache_at = 0.0
         if database is not None:
@@ -512,7 +530,8 @@ class ShiftLearner:
                 self._dirty = True
                 self._save_locked()
             elif self.db is not None:
-                self.db.execute('UPDATE cars SET name = ? WHERE profile = ? AND key = ?', (name, self.profile, key))
+                self.db.execute('UPDATE cars SET name = ?, updated = ? WHERE profile = ? AND key = ?',
+                                (name, time.time(), self.profile, key))
                 self.db.commit()
 
     def forget(self, key):
@@ -565,12 +584,24 @@ class ShiftLearner:
                 for gear, methods in recent.items()}
 
     def load_snapshot(self, key):
-        """A saved car's snapshot without switching to it."""
+        """A car's snapshot without switching to it. A saved car's is kept
+        until its `updated` time changes: the tab asks every second, and
+        parsing the model and working out its advice each time is not
+        free."""
         with self.lock:
             if self.car is not None and self.car.key == key:
-                return self.car.snapshot()
+                return self._snapshot_locked()
+            if self.db is None:
+                return None
+            row = self.db.execute('SELECT updated FROM cars WHERE profile = ? AND key = ?',
+                                  (self.profile, key)).fetchone()
+            if row is None:
+                return None
+            stamp = (self.profile, key, row[0])
+            if self._loaded is not None and self._loaded[0] == stamp:
+                return self._loaded[1]
             row = self.db.execute('SELECT model, name FROM cars WHERE profile = ? AND key = ?',
-                                  (self.profile, key)).fetchone() if self.db is not None else None
+                                  (self.profile, key)).fetchone()
         if row is None:
             return None
         try:
@@ -581,18 +612,22 @@ class ShiftLearner:
         data = car.snapshot()
         data['session_limiter_time'] = 0.0
         data['advice'] = car.advice()
+        self._loaded = (stamp, data)
         return data
 
     # -- live --
 
     def snapshot(self):
         with self.lock:
-            if self.car is None:
-                return None
-            data = self.car.snapshot()
-            data['session_limiter_time'] = self.session_limiter_time
-            data['advice'] = self.car.advice(self.session_limiter_time)
-            return data
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self):
+        if self.car is None:
+            return None
+        data = self.car.snapshot()
+        data['session_limiter_time'] = self.session_limiter_time
+        data['advice'] = self.car.advice(self.session_limiter_time)
+        return data
 
     def shift_rpm(self, gear):
         """The learnt upshift for `gear`, for the rev lights; None to fall
