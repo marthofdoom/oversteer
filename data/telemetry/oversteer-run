@@ -28,7 +28,9 @@
 # and exits when the game's process is no longer there (--watch).
 #
 # Environment: OVERSTEER_TELEMETRY_PORT (default 5310, must match the port
-# in Oversteer's Rev lights row), OVERSTEER_SHM_BRIDGE (path to the .exe).
+# in Oversteer's Rev lights row), OVERSTEER_SHM_BRIDGE (path to the .exe),
+# OVERSTEER_BRIDGE_VERBOSE=1 (log every packet and, once a second, the
+# stage and motion fields: for checking a game's layout).
 # Logs: <compatdata>/oversteer-run.log (launcher and Proton output) and
 # <compatdata>/oversteer-shm-bridge.log (what the bridge found and sent).
 #
@@ -73,6 +75,7 @@ bridge_cmd=("${!proton_index}" run "$bridge" --port "$port" --exit-when-gone --l
 case "$game_exe" in
     *.exe|*.EXE) bridge_cmd+=(--watch "$game_exe") ;;
 esac
+[ "${OVERSTEER_BRIDGE_VERBOSE:-0}" = 1 ] && bridge_cmd+=(--verbose)
 
 "$@" &
 game=$!

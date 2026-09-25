@@ -539,8 +539,10 @@ def decode_sample(data):
     """A Sample, or None if the packet isn't a telemetry format we know
     (or carries nonsense)."""
     n = len(data)
-    if n in (OVST_SIZE, OVST2_SIZE, OVST3_SIZE) and data[:4] == OVST_MAGIC:
-        return _ovst(data, n)
+    if data[:4] == OVST_MAGIC:
+        # Ours whatever its length: a cut-short one must not pass for a
+        # Codemasters packet, whose sizes it falls among
+        return _ovst(data, n) if n in (OVST_SIZE, OVST2_SIZE, OVST3_SIZE) else None
     if n in FORZA_SIZES:
         return _forza(data, n)
     if n in (92, 96):

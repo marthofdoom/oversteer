@@ -375,3 +375,34 @@ def test_forza_menus_are_a_pause_to_the_learner():
     now = _handle(telemetry, [forza(5000.0)] * 2, 1.0, rate=60.0)
     _handle(telemetry, [forza(0.0, race_on=0)] * 3, now, rate=60.0)
     assert calls == ['feed', 'feed', 'idle', 'tick', 'menu', 'tick', 'menu', 'tick', 'menu']
+
+
+def _ovst3(game=3, travel=(0.05, 0.05, 0.06, 0.06), spline=0.25, track_length=8123.0, radius=0.32, name=b'rally_car'):
+    import struct as st
+    from oversteer.telemetry_formats import OVST3_FORMAT
+    nan = float('nan')
+    prefix = b'OVST' + st.pack('<BBHffif', 3, 1, 0, 6100.0, 7800.0, 3, 90.0) + st.pack('<ff', 1.0, 0.0)
+    prefix += name.ljust(32, b'\0') + b''.ljust(32, b'\0')
+    fields = ([game, 0, 0, 1.0, 0.1] + [0.1, 1.0, 0.2] + [0.0, 0.0, 25.0] + [0.0, 0.3, 0.0]
+              + [0.02] * 4 + [78.0] * 4 + list(travel) + [3000.0] * 4 + [nan, nan]
+              + [radius] * 4 + [0.12] * 4 + [100.0] * 4 + [200.0] * 4
+              + [7650.0, track_length, spline, 2030.0, 0.97, 0.58, 0, 5, 120.0, 30.0, -450.0])
+    return prefix + st.pack(OVST3_FORMAT, *fields)
+
+
+def test_ovst_v3_stage_and_wheels():
+    from oversteer.telemetry_formats import decode_sample, OVST3_SIZE
+    packet = _ovst3()
+    assert len(packet) == OVST3_SIZE == 324
+    sample = decode_sample(packet)
+    assert sample.game == 'acr' and sample.car == 'acr/rally_car'
+    assert sample.stage_length == 8123.0 and sample.progress == 0.25 and sample.distance == 2030.0
+    assert sample.max_rpm == 7650.0                       # the game's current limit beats the static figure
+    assert all(abs(w - 78.0 * 0.32) < 1e-4 for w in sample.wheel_speed)
+    assert abs(sample.susp_norm[2] - 0.5) < 1e-6 and sample.pos == (120.0, 30.0, -450.0)
+    # waiting for a capture to confirm their signs: not decoded
+    assert sample.steer is None and sample.accel is None and sample.yaw_rate is None
+    # an AC1 page without the stage length, or a wrong size, still decodes sensibly
+    ac1 = decode_sample(_ovst3(game=1, track_length=float('nan'), spline=float('nan')))
+    assert ac1.game == 'ac' and ac1.stage_length is None and ac1.progress is None
+    assert decode_sample(packet[:-4]) is None
