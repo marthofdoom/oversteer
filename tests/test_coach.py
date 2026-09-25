@@ -123,3 +123,173 @@ def test_runs_write_their_metrics(tmp_path):
     series = reader.metric_series('_no_profile', 'corner.loss', discipline='rally-stage')
     assert [m['run'] for m in series] == [runs[2][0], runs[1][0]]
     learner.close()
+
+
+# -- the coach over time --
+
+from oversteer.coach import Coach, DAY, seen          # noqa: E402
+from oversteer.telemetry_store import open_store      # noqa: E402
+
+T0 = 1.7e9
+
+
+class History:
+    """A telemetry database filled with sessions of chosen metrics, one run
+    of 10 km each, a day apart."""
+
+    def __init__(self, path, profile='rally'):
+        self.store = open_store(str(path))
+        self.profile = profile
+        self.car = self.store.car_id(profile, 'eawrc/17', 'eawrc', 'Test car', {})
+        self.t = T0
+
+    def session(self, metrics, discipline='rally-stage', surface='tarmac', stage='eawrc:4:12', distance=10000.0,
+                days=1.0):
+        store = self.store
+        self.t += days * DAY
+        store.begin()
+        session = store.start_session(self.profile, self.car, 'eawrc', self.t, stage=stage)
+        run = store.start_run(session, 1, self.t, stage)
+        store.end_run(run, ended=self.t + 600, distance=distance, finished=1, result_time=600.0)
+        store.add_metrics(session, run, [dict(m, discipline=discipline, surface=surface) for m in metrics])
+        store.commit()
+        return session
+
+    def coach(self, days=0.0):
+        return Coach(self.store, now=self.t + days * DAY)
+
+    def tips(self, days=0.0, **kwargs):
+        return self.coach(days).tips(self.profile, self.car, **kwargs)
+
+    def show(self, tips, days=0.0):
+        """What the GTK tab does after showing them."""
+        self.store.begin()
+        seen(self.store, self.profile, self.car, tips, at=self.t + days * DAY)
+        self.store.commit()
+
+
+def error(gear, value, count=8, method='h-pattern'):
+    return {'name': 'shift.error', 'value': value, 'count': count, 'gear': gear, 'method': method}
+
+
+def test_a_late_change_every_session_is_the_focus(tmp_path):
+    h = History(tmp_path / 't.db')
+    for _ in range(6):
+        h.session([error(2, 450.0), error(3, 20.0), {'name': 'limiter.per_km', 'value': 0.1, 'count': 10}])
+    tips = h.tips()
+    assert [t.kind for t in tips] == ['focus']
+    assert tips[0].id == 'shift.late:2:h-pattern:rally-stage:tarmac'
+    assert tips[0].text == '2→3 with the H-pattern: you change up about 450 rpm late; change a little sooner.'
+    assert tips[0].evidence == ['8 changes up flat out in 1 session (rally stage, tarmac).',
+                                'More than 200 rpm late in 6 of your last 6 sessions.']
+
+
+def test_changing_up_early_depends_on_the_surface(tmp_path):
+    """Short-shifting can be right on a loose surface: silent on gravel,
+    a note once when the surface is unknown, a tip on tarmac or when the
+    wheels were seen not to spin."""
+    for surface, slip, expected in (('gravel', None, []), ('unknown', None, ['note']), ('tarmac', None, ['tip']),
+                                    ('unknown', 0.02, ['tip'])):
+        h = History(tmp_path / '{}-{}.db'.format(surface, slip))
+        metrics = [error(2, -500.0)]
+        if slip is not None:
+            metrics.append({'name': 'shift.slip', 'value': slip, 'count': 8, 'gear': 2, 'method': 'h-pattern'})
+        h.session(metrics, surface=surface)
+        tips = h.tips()
+        assert [t.kind for t in tips] == expected, surface
+        if expected == ['note']:
+            assert tips[0].id == 'gate.surface' and 'wait until the surface is known' in tips[0].text
+            h.show(tips)
+            assert h.tips() == []                                   # said once
+
+
+def test_progress_is_praised_with_its_numbers(tmp_path):
+    h = History(tmp_path / 't.db')
+    for _ in range(3):
+        h.session([error(2, -500.0)])
+    for _ in range(3):
+        h.session([error(2, -60.0)])
+    [praise] = [t for t in h.tips() if t.kind == 'praise']
+    assert praise.text == ('Better: 2→3 with the H-pattern is 60 rpm from the best over your last 3 sessions; '
+                           '3 days ago you were 500 early.')
+
+
+def test_growth_needs_twenty_events_a_side(tmp_path):
+    h = History(tmp_path / 't.db')
+    h.session([error(2, -500.0, count=10)])
+    for _ in range(3):
+        h.session([error(2, -60.0)])
+    assert not [t for t in h.tips() if t.kind == 'praise']
+
+
+def test_tips_go_quiet_and_come_back(tmp_path):
+    """Shown twice without change, a tip becomes a quiet "still:" line; it
+    comes back when it gets 20 % worse or after two weeks. At most three
+    tips at a time, the costliest first."""
+    h = History(tmp_path / 't.db')
+    rates = [{'name': 'hpattern.missed', 'value': 10.0, 'count': 40, 'method': 'h-pattern'},
+             {'name': 'hpattern.skip', 'value': 8.0, 'count': 40, 'method': 'h-pattern'},
+             {'name': 'downshift.over_rev', 'value': 20.0, 'count': 40, 'method': 'h-pattern'},
+             {'name': 'limiter.per_km', 'value': 2.0, 'count': 10}]
+    h.session(rates)
+    tips = h.tips()
+    assert [t.kind for t in tips] == ['tip', 'tip', 'tip']
+    assert [t.id for t in tips] == ['limiter', 'hpattern.missed:h-pattern', 'hpattern.skip:h-pattern']
+    h.show(tips)
+    h.show(h.tips())
+    tips = h.tips()
+    assert [t.id for t in tips] == ['downshift.over_rev:h-pattern', 'limiter', 'hpattern.missed:h-pattern',
+                                    'hpattern.skip:h-pattern']
+    assert [t.kind for t in tips] == ['tip', 'still', 'still', 'still']
+    assert tips[1].text.startswith('Still: 2.0 s per km on the limiter')
+    h.session([dict(rates[3], value=2.5)])                          # worse: back as a tip
+    assert [t.id for t in h.tips() if t.kind == 'tip'][0] == 'limiter'
+    assert 'limiter' in [t.id for t in h.tips(days=15) if t.kind == 'tip']
+    assert len([t for t in h.tips(show_all=True) if t.kind == 'tip']) == 4
+
+
+def test_the_way_of_changing_is_compared_with_itself(tmp_path):
+    h = History(tmp_path / 't.db')
+    h.session([error(2, -400.0, count=12, method='h-pattern'), error(2, 0.0, count=12, method='paddles')])
+    [tip] = [t for t in h.tips() if t.id.startswith('shift.method')]
+    assert tip.text == 'With the H-pattern you change up 400 rpm earlier than with the paddles.'
+
+
+def test_both_pedals_only_matter_on_tarmac_when_the_corners_are_slower(tmp_path):
+    for surface, loss, expected in (('gravel', 2.0, False), ('tarmac', 0.0, False), ('tarmac', 2.0, True)):
+        h = History(tmp_path / '{}-{}.db'.format(surface, loss))
+        h.session([{'name': 'pedal.overlap', 'value': 0.12, 'count': 10},
+                   {'name': 'corner.loss', 'value': loss, 'count': 1}], surface=surface)
+        found = [t for t in h.tips() if t.id.startswith('pedal.overlap')]
+        assert bool(found) == expected, (surface, loss)
+
+
+def test_stage_tips_compare_with_the_same_stage(tmp_path):
+    h = History(tmp_path / 't.db')
+    for value in (2.0, 2.2, 1.9):
+        h.session([{'name': 'pedal.coast', 'value': value, 'count': 10}])
+    h.session([{'name': 'pedal.coast', 'value': 4.0, 'count': 10}], stage='eawrc:5:3')   # another stage
+    assert not [t for t in h.tips() if t.id.startswith('pedal.coast')]
+    h.session([{'name': 'pedal.coast', 'value': 3.5, 'count': 10}])
+    [tip] = [t for t in h.tips() if t.id.startswith('pedal.coast')]
+    assert tip.text == ('On stage eawrc:4:12 you coasted 3.5 s per km, 1.6 more than your best run there: stay on '
+                        'one pedal or the other.')
+
+
+def test_the_coach_uses_the_cars_model(tmp_path):
+    """With the car's learnt model, a tip names the rpm and what the next
+    gear gives there."""
+    from tests.sim import drive, exits, analytic_shift
+    learner = ShiftLearner(str(tmp_path / 't.db'), profile='rally')
+    exits(learner)
+    drive(learner, shift_at=6000, runs=3)
+    learner.close()
+    h = History(tmp_path / 't.db')
+    h.car = h.store.car_id('rally', 'test-car', 'unknown')
+    h.session([error(2, -800.0)])
+    [tip] = h.tips()
+    best = learner.car.best_shift(2)[0]
+    assert abs(best - analytic_shift(2)) < 150
+    assert tip.text.startswith('2→3 with the H-pattern: you change up at {:.0f} rpm, 800 early. Gear 3 gives '.format(
+        best - 800))
+    assert tip.text.endswith('% less drive there. Hold it to about {:.0f}.'.format(best))
