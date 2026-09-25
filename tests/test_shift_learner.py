@@ -50,12 +50,23 @@ def drive(learner, shift_at=LIMITER, car='test-car', runs=3, jitter=0.0):
         t += 5
 
 
+def cruise(learner, t, gear, speed, car='test-car', seconds=1.0, slip=0.0):
+    """Part throttle at a steady speed: where the ratios are learnt."""
+    for _ in range(int(seconds * 60)):
+        t += 1 / 60
+        learner.feed(t, Sample(RATIOS[gear] * speed * (1 + slip), LIMITER, gear=gear, speed=speed, car=car),
+                     LIMITER, 0.3, 0.0)
+    return t
+
+
 def exits(learner, car='test-car', runs=2):
-    """Full-throttle pulls from low revs in every gear, as out of corners."""
+    """Full-throttle pulls from low revs in every gear, as out of corners,
+    each after a stretch of part throttle."""
     t = 1000.0
     for run in range(runs):
         for gear in RATIOS:
             speed = 2500.0 / RATIOS[gear]
+            t = cruise(learner, t, gear, speed, car)
             while RATIOS[gear] * speed < LIMITER and speed < 70:
                 speed += (power(RATIOS[gear] * speed) / speed - DRAG_C0 - DRAG_C2 * speed * speed) / 60
                 t += 1 / 60
@@ -123,6 +134,40 @@ def test_a_retuned_gear_is_relearnt(tmp_path):
         t += 1 / 60
         learner.feed(t, Sample(230.0 * 25, LIMITER, gear=3, speed=25.0, car='test-car'), LIMITER, 0.3, 0.0)
     assert abs(learner.car.ratio(3) - 230.0) < 1 and 3 in learner.car.retuned
+    assert learner.car.top_seen == 0.0                 # where the data ended belonged to the old gearing
+
+
+def test_spin_first_on_gravel(tmp_path):
+    """400 full-throttle samples of 2nd at a steady 6 % wheelspin before any
+    clean one: the ratio is still learnt right and no re-tune fires."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t, speed = 0.0, 12.0
+    learner.feed(t, Sample(RATIOS[2] * speed, LIMITER, gear=2, speed=speed, car='test-car'), LIMITER, 1.0, 0.0)
+    for _ in range(400):
+        t += 1 / 60
+        speed += 2.0 / 60
+        learner.feed(t, Sample(RATIOS[2] * speed * 1.06, LIMITER, gear=2, speed=speed, car='test-car'),
+                     LIMITER, 1.0, 0.0)
+    assert learner.car.ratio(2) is None and learner.car.power == {}
+    t = cruise(learner, t, 2, speed)                   # then part throttle, clean
+    assert abs(learner.car.ratio(2) - RATIOS[2]) < RATIOS[2] * 0.01
+    for _ in range(400):                               # and spinning again, flat out
+        t += 1 / 60
+        learner.feed(t, Sample(RATIOS[2] * speed * 1.06, LIMITER, gear=2, speed=speed, car='test-car'),
+                     LIMITER, 1.0, 0.0)
+    assert abs(learner.car.ratio(2) - RATIOS[2]) < RATIOS[2] * 0.01
+    assert learner.car.retuned == {} and learner.car.power == {}
+
+
+def test_braking_teaches_no_ratio(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t, speed = 0.0, 25.0
+    for _ in range(120):                               # locking the wheels: engine slower than the road says
+        t += 1 / 60
+        sample = Sample(RATIOS[3] * speed * 0.8, LIMITER, gear=3, speed=speed, car='test-car')
+        sample.brake = 0.7
+        learner.feed(t, sample, LIMITER, 0.0, 0.0)
+    assert learner.car.ratio(3) is None
 
 
 def test_coaching_says_early_or_late(tmp_path):

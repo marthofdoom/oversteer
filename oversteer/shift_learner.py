@@ -10,9 +10,10 @@ is the engine's power curve and each gear's ratio:
   its speed is proportional to engine power, whatever the gear. Forza
   sends the power itself. Samples are kept per 100 rpm band; the median
   of each band makes slopes, bumps and the odd slide wash out.
-- Ratios: engine rpm per m/s in each gear, from the samples themselves.
-  A sample whose ratio is off its gear's (wheelspin, a jump) is not used
-  for power.
+- Ratios: engine rpm per m/s in each gear, from part-throttle samples
+  at a steady speed off the brake, where the tyres barely slip. A
+  full-throttle sample whose ratio is off its gear's (wheelspin, a jump)
+  is not used for power.
 
 For each gear the best shift is then the lowest rpm from which the next
 gear's power at the same speed (rpm x next ratio / this ratio) is higher
@@ -47,6 +48,10 @@ RETUNE_SAMPLES = 90              # part-throttle samples agreeing on a new ratio
 RETUNE_SPREAD = 0.015
 SHIFTS_KEEP = 40
 FULL_THROTTLE = 0.95
+LOW_SLIP_THROTTLE = 0.5          # below this the tyres barely slip: ratios are learnt here only
+BRAKE_OFF = 0.02
+COASTING = 0.05                  # with no brake reading, a little throttle says the brake is off
+STEADY_ACCEL = 2.0               # m/s^2: steady enough for a ratio sample
 CLUTCH_OUT = 0.1
 MIN_SPEED = 5.0                  # m/s
 SETTLED = 0.25                   # seconds in a gear before its samples count
@@ -641,17 +646,30 @@ class ShiftLearner:
 
         ratio = rpm / speed
         known = car.ratio(gear)
-        if known is None or abs(ratio - known) <= known * RATIO_TOLERANCE:
+        # A ratio is learnt only where the tyres barely slip: part throttle,
+        # off the brake, at a steady speed. Full throttle on gravel spins
+        # the wheels a steady few percent, which would look like a ratio of
+        # its own and then reject every clean sample as off-ratio for good.
+        brake = sample.brake
+        low_slip = (throttle is not None and throttle < LOW_SLIP_THROTTLE
+                    and (brake <= BRAKE_OFF if brake is not None else throttle >= COASTING))
+        if low_slip:
+            accel = self._acceleration()
+            low_slip = accel is not None and abs(accel) <= STEADY_ACCEL
+        on_ratio = known is not None and abs(ratio - known) <= known * RATIO_TOLERANCE
+        if low_slip and (known is None or on_ratio):
             samples = car.ratios.setdefault(gear, [])
             samples.append(ratio)
             del samples[:-RATIO_KEEP]
             self._dirty = True
             self._off_ratio.pop(gear, None)
-        else:
-            # Off the gear's ratio: wheelspin or a jump, which must not move
-            # it; or the gear was re-tuned, which shows at part throttle
-            # too, steadily, where a car rarely spins
-            self._check_retune(car, gear, ratio, throttle)
+        elif low_slip:
+            # Off the gear's ratio without spin to blame: the gear was
+            # re-tuned, if it stays that way
+            self._check_retune(car, gear, ratio)
+            return
+        if not on_ratio:
+            # Wheelspin or a jump, or a gear not learnt yet: no power from it
             return
         if not flat_out:
             return
@@ -696,9 +714,7 @@ class ShiftLearner:
         except sqlite3.Error as e:
             logging.warning("shift learner: %s", e)
 
-    def _check_retune(self, car, gear, ratio, throttle):
-        if throttle is None or throttle > 0.5:
-            return
+    def _check_retune(self, car, gear, ratio):
         off = self._off_ratio.setdefault(gear, [])
         off.append(ratio)
         del off[:-RETUNE_SAMPLES]
@@ -710,6 +726,7 @@ class ShiftLearner:
             car.upshifts.pop(gear, None)             # shifts with the old gearing
             car.upshifts.pop(gear - 1, None)
             car.retuned[gear] = time.time()
+            car.top_seen = 0.0                       # where the data ends, with the old gearing
             self._off_ratio.pop(gear, None)
             self._dirty = True
             logging.info("shift learner: %s gear %d re-tuned (%.1f rpm per m/s)", car.key, gear, middle)
