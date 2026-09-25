@@ -41,6 +41,9 @@ CODEMASTERS_DIRT = 264                               # DiRT Rally 1/2 and DiRT 4
 OVST_MAGIC = b'OVST'
 OVST_SIZE = 24
 OVST2_SIZE = 96                                      # + throttle, brake, car and track names
+OVST3_FORMAT = '<BBH' + 'f' * 2 + 'f' * 9 + 'f' * 16 + 'f' * 2 + 'f' * 16 + 'f' * 2 + 'f' * 4 + 'ii' + 'fff'
+OVST3_SIZE = OVST2_SIZE + struct.calcsize(OVST3_FORMAT)   # + wheels, suspension, the stage (324)
+OVST3_GAMES = {1: 'ac', 2: 'acc', 3: 'acr'}
 
 # EA SPORTS WRC: the game sends whatever a packet structure file (JSON, in
 # its Documents/My Games/WRC/telemetry/udp folder) lists, channel by
@@ -244,21 +247,58 @@ def _ascii(raw):
 def _ovst(data, n):
     """Oversteer's own datagram from oversteer-shm-bridge (AC, ACC, ACR)."""
     version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
-    if version not in (1, 2) or (version == 2) != (n == OVST2_SIZE):
+    if version not in (1, 2, 3) or {1: OVST_SIZE, 2: OVST2_SIZE, 3: OVST3_SIZE}[version] != n:
         return None
     if not (_plausible(rpm) and _plausible(max_rpm)):
         return None
     sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
                     gear=gear if -1 <= gear <= 12 else None,
                     speed=_finite(speed / 3.6), car='acpmf/unknown', game='acpmf')
-    if version == 2:
+    if version >= 2:
         gas, brake = struct.unpack_from('<ff', data, 24)
         sample.throttle, sample.brake = _finite(gas), _finite(brake)
         name = _ascii(data[32:64])
         if name:
             sample.car, sample.car_name = 'acpmf/' + name, name
         sample.track = _ascii(data[64:96])
+    if version == 3:
+        _ovst3(sample, struct.unpack_from(OVST3_FORMAT, data, OVST2_SIZE))
     return sample
+
+
+def _ovst3(sample, v):
+    """The bridge's version 3 fields. Taken here: what has one meaning in
+    every AC game (the wheels' speeds and suspension, the stage's length,
+    the progress along it). Left for a capture to confirm (the design's
+    rule): the signs of steer, accG, local velocity and angular velocity,
+    the clutch's direction, and ride height, which ACR leaves empty."""
+    game = OVST3_GAMES.get(v[0])
+    if game is not None:
+        sample.game = game
+        if sample.car and sample.car.startswith('acpmf/') and sample.car != 'acpmf/unknown':
+            sample.car = '{}/{}'.format(game, sample.car_name)
+    at = 3 + 2 + 9                                   # past game, flags2, reserved, clutch/steer, three vectors
+    slip, rot, travel = v[at:at + 4], v[at + 4:at + 8], v[at + 8:at + 12]
+    at += 16                                         # and the wheel loads
+    radius, travel_max = v[at + 2:at + 6], v[at + 6:at + 10]
+    at += 10 + 8                                     # past ride height, radius, max travel, fx, fy
+    current_max_rpm, track_length, spline_pos, distance, grip, bias, laps, session = v[at:at + 8]
+    world = v[at + 8:at + 11]
+    sample.wheel_rot = _vector(rot)
+    if sample.wheel_rot is not None and all(math.isfinite(r) and r > 0 for r in radius):
+        sample.wheel_speed = tuple(w * r for w, r in zip(sample.wheel_rot, radius))
+    sample.susp = _vector(travel)
+    if sample.susp is not None and all(math.isfinite(m) and m > 0 for m in travel_max):
+        sample.susp_norm = tuple(t / m for t, m in zip(sample.susp, travel_max))
+    if math.isfinite(current_max_rpm) and current_max_rpm > 0 and _plausible(current_max_rpm):
+        sample.max_rpm = current_max_rpm
+    if math.isfinite(track_length) and track_length > 100:
+        sample.stage_length = track_length
+    if math.isfinite(spline_pos) and 0.0 <= spline_pos <= 1.0:
+        sample.progress = spline_pos
+    sample.distance = _finite(distance)
+    sample.laps = laps if laps >= 0 else None
+    sample.pos = _vector(world)
 
 
 FORZA_DRIVETRAINS = {0: 'fwd', 1: 'rwd', 2: 'awd'}
@@ -499,7 +539,7 @@ def decode_sample(data):
     """A Sample, or None if the packet isn't a telemetry format we know
     (or carries nonsense)."""
     n = len(data)
-    if n in (OVST_SIZE, OVST2_SIZE) and data[:4] == OVST_MAGIC:
+    if n in (OVST_SIZE, OVST2_SIZE, OVST3_SIZE) and data[:4] == OVST_MAGIC:
         return _ovst(data, n)
     if n in FORZA_SIZES:
         return _forza(data, n)
