@@ -16,10 +16,10 @@ import logging
 import math
 import os
 import re
-import shutil
 import sqlite3
 import threading
 import time
+import urllib.parse
 import zlib
 from array import array
 
@@ -183,8 +183,9 @@ CREATE INDEX segments_run ON segments (run);
 CREATE INDEX corners_run ON corners (run);
 """
 
-# The first schema, as Oversteer 0.13 created it: kept to migrate from (and
-# for the tests that build such a file)
+# The first schema, as development builds after Oversteer 0.13.1 created it
+# (no release had a database): kept to migrate from, and for the tests that
+# build such a file
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS cars (
     profile TEXT NOT NULL,
@@ -296,8 +297,8 @@ def rescale_codemasters(db, path=None):
         todo.append((profile, key, name, model, key_max, key_idle, gears))
     if todo and path is not None and not os.path.exists(path + '.v0.bak'):
         try:
-            shutil.copy2(path, path + '.v0.bak')
-        except OSError as e:
+            _backup(db, path + '.v0.bak')
+        except (OSError, sqlite3.Error) as e:
             logging.warning("telemetry store: no backup before the DiRT rpm fix: %s", e)
     factor = 3.0 / math.pi               # stored = raw x 10; true = raw x 30/pi
     db.execute('BEGIN')
@@ -359,13 +360,24 @@ def legacy_keys(key):
     return ['{}/{}'.format(old, rest)] if old and rest else []
 
 
+def _backup(db, dest):
+    """A consistent copy of the database at `dest`: through SQLite, since a
+    copy of the file misses what is still in its write-ahead log (the
+    last writes before a crash)."""
+    copy = sqlite3.connect(dest)
+    try:
+        db.backup(copy)
+    finally:
+        copy.close()
+
+
 def _migrate_v1(db, path):
     """The first schema (user_version 1) to this one, in one transaction,
-    after copying the file to `<path>.v1.bak` once."""
+    after copying the database to `<path>.v1.bak` once."""
     if path is not None and not os.path.exists(path + '.v1.bak'):
         try:
-            shutil.copy2(path, path + '.v1.bak')
-        except OSError as e:
+            _backup(db, path + '.v1.bak')
+        except (OSError, sqlite3.Error) as e:
             logging.warning("telemetry store: no backup before the upgrade: %s", e)
     # Tables are renamed and rebuilt: references must not be checked or
     # rewritten half way (the pragma only works outside a transaction)
@@ -378,9 +390,13 @@ def _migrate_v1(db, path):
             db.execute('DROP INDEX IF EXISTS ' + index)
         for statement in _split(SCHEMA):
             db.execute(statement)
-        ids, seen = {}, set()
-        for profile, key, name, model, updated in db.execute(
-                'SELECT profile, key, name, model, updated FROM cars_v1').fetchall():
+        ids, kept = {}, {}
+        # Two old keys may become one ('acpmf' and 'acpmf-unknown'): the car
+        # that has learnt the most (the longest model) is kept, and the
+        # other's sessions and shifts go to it
+        cars = db.execute('SELECT profile, key, name, model, updated FROM cars_v1 '
+                          'ORDER BY length(model) DESC, key').fetchall()
+        for profile, key, name, model, updated in cars:
             game, new_key = v1_key(key)
             try:
                 data = json.loads(model)
@@ -388,14 +404,16 @@ def _migrate_v1(db, path):
                 model = json.dumps(data)
             except (ValueError, TypeError):
                 pass
-            if (profile, new_key) in seen:
-                continue                              # 'acpmf' and 'acpmf-unknown': keep the first
-            seen.add((profile, new_key))
+            if (profile, new_key) in kept:
+                logging.info("telemetry store: %s joins %s as %s", key, kept[(profile, new_key)][0], new_key)
+                ids[(profile, key)] = kept[(profile, new_key)][1]
+                continue
             user_named = int(bool(name) and name != key and not CODEMASTERS_NAME.match(name)
                              and not name.startswith('Forza car ') and not name.startswith('EA WRC car '))
             ids[(profile, key)] = db.execute(
                 'INSERT INTO cars (profile, game, key, name, user_named, model, updated) VALUES (?, ?, ?, ?, ?, ?, ?)',
                 (profile, game, new_key, name, user_named, model, updated)).lastrowid
+            kept[(profile, new_key)] = (key, ids[(profile, key)])
         sessions = {}
         for sid, profile, car, track, started, ended, limiter_time in db.execute(
                 'SELECT id, profile, car, track, started, ended, limiter_time FROM sessions_v1').fetchall():
@@ -422,7 +440,7 @@ def _migrate_v1(db, path):
         raise
     finally:
         db.execute('PRAGMA foreign_keys = ON')
-    logging.info("telemetry store: upgraded to version %d (%d cars, %d sessions)", VERSION, len(ids), len(sessions))
+    logging.info("telemetry store: upgraded to version %d (%d cars, %d sessions)", VERSION, len(kept), len(sessions))
 
 
 def _connect(path):
@@ -460,7 +478,9 @@ def open_store(path):
 def open_reader(path):
     """A read-only connection, for any thread that only reads (WAL lets it
     run alongside the writer)."""
-    db = sqlite3.connect('file:{}?mode=ro'.format(path), uri=True, check_same_thread=False, timeout=10.0)
+    # Quoted: a '?', '#' or '%' in the data folder's path would break the URI
+    db = sqlite3.connect('file:{}?mode=ro'.format(urllib.parse.quote(path)), uri=True, check_same_thread=False,
+                         timeout=10.0)
     return Reader(db)
 
 

@@ -7,7 +7,10 @@ database holds: the live gear and revs, the learnt shift tables,
 sessions with their verdicts and evidence, coaching and tuning advice.
 Nothing can be changed through it: GET and HEAD only, no cookies, no
 CORS headers (a page from elsewhere cannot read the JSON), a Host check
-against DNS rebinding, at most MAX_REQUESTS in flight. There is no
+against DNS rebinding, at most MAX_REQUESTS in flight, one request per
+connection (an open page's idle keep-alive connections would otherwise
+hold every slot), and clients on this computer's own networks only (a
+public address, as on a VPN or public Wi-Fi, is refused). There is no
 authentication: anyone on the same network can read it, which the tab
 says next to the switch.
 
@@ -208,6 +211,15 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             self._thread.join(2.0)
             self._thread = None
 
+    def verify_request(self, request, client_address):
+        # "Every network" means the networks this computer is on: a
+        # laptop on public Wi-Fi, or a VPN handing out public addresses,
+        # must not serve the page to whoever is there
+        try:
+            return not ipaddress.ip_address(client_address[0]).is_global
+        except ValueError:
+            return False
+
     def process_request(self, request, client_address):
         if not self._slots.acquire(blocking=False):
             try:
@@ -397,6 +409,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Security-Policy', self.server._csp)
         for name, value in (extra or {}).items():
             self.send_header(name, value)
+        # One request per connection: the slot is held for as long as the
+        # connection stays open, and the page polls every second
+        self.send_header('Connection', 'close')
+        self.close_connection = True
         self.end_headers()
         if not head and data:
             self.wfile.write(data)

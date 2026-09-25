@@ -169,3 +169,30 @@ def test_live_from_the_listener():
     telemetry.live = sample
     live = telemetry_web.live_dict(telemetry)
     assert live['gear'] == 3 and live['distance'] == 1200.0 and live['shift_rpm'] > 0 and live['car'] == 'eawrc/17'
+
+
+def test_open_pages_do_not_hold_the_slots(served):
+    """Browsers keep connections open between the page's polls: each
+    request closes its connection, so eight open pages leave room."""
+    web = served[0]
+    idle = []
+    for _ in range(telemetry_web.MAX_REQUESTS):
+        conn = http.client.HTTPConnection('127.0.0.1', web.port, timeout=5)
+        conn.request('GET', '/api/v1/status')
+        response = conn.getresponse()
+        response.read()
+        assert response.getheader('Connection') == 'close'
+        idle.append(conn)
+    time.sleep(0.1)
+    try:
+        assert request(web, '/api/v1/status')[0].status == 200
+    finally:
+        for conn in idle:
+            conn.close()
+
+
+def test_public_addresses_are_refused(served):
+    web = served[0]
+    assert web.verify_request(None, ('127.0.0.1', 1)) and web.verify_request(None, ('192.168.1.20', 1))
+    assert web.verify_request(None, ('100.101.102.103', 1))        # a tailnet's shared addresses
+    assert not web.verify_request(None, ('8.8.8.8', 1)) and not web.verify_request(None, ('not an address', 1))

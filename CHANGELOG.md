@@ -3,15 +3,19 @@
 ## Unreleased
 
 ### Added
-- Rev lights: a third shift point unit, **% of launch limiter**. A rally
-  stage starts with clutch in, handbrake up and the throttle floored,
-  which holds the engine on its limiter; Oversteer learns that RPM at
-  every launch and puts the shift point at the chosen percentage of it,
-  so each car on each stage gets its own shift light even when the game
-  reports no maximum or the wrong one. It is raised if the car later
-  revs past it (a launch control capping the revs at the line), and
-  forgotten when the telemetry stops between stages. With no handbrake
-  fitted, clutch in and throttle floored is the launch.
+- Rev lights: **Learn the limiter at each launch**. A rally stage starts
+  with clutch in, handbrake up and the throttle floored, which holds the
+  engine on its limiter; Oversteer learns that RPM at every standing
+  launch and the % shift point applies to it, so each car on each stage
+  gets its own shift light even when the game reports no maximum or the
+  wrong one. It is raised if the car is later held on a higher limiter
+  flat out (a launch control capping the revs at the line), never by a
+  moment past it, and forgotten when the telemetry stops between stages.
+  With no handbrake fitted, clutch in and throttle floored is the launch.
+- Rev lights: **Shift lights at the learnt best upshift for each gear**:
+  once Oversteer knows the car's power curve and gearing, the lights
+  complete where the next gear starts pulling harder; a gear that pulls
+  to the limiter still flashes as it gets there.
 - Telemetry tab: the shift table has a column per way of changing gear
   (H-pattern, sequential, paddles) once you have used it. How each change
   was made comes from the control you pressed: a shifter gear, the
@@ -36,7 +40,7 @@
   way of changing, the limiter, missed gates and double taps, bogged
   launches, both pedals at once on tarmac, coasting and corners against
   your best run of a stage) and praise when a habit improves. A tip
-  shown twice goes quiet until it gets worse. Changing up early waits
+  shown on two occasions (hours apart) goes quiet until it gets worse. Changing up early waits
   until the surface is known, since short-shifting on gravel can be
   right.
 - Tuning advice from the runs on the car's current setup: a final drive
@@ -51,7 +55,7 @@
   against the shift point, the shift tables, coaching, setup advice and
   recent sessions with their evidence. Nothing can be changed from it;
   anyone on the same network can read it, so it can be limited to this
-  computer.
+  computer. Clients with a public address are refused.
 - "Learn from game telemetry": learn shift points and keep the history
   with the rev lights off, or with a wheel that has none.
 - "Record raw telemetry" under the Telemetry tab's Settings (off by
@@ -63,6 +67,12 @@
   known to.
 
 ### Changed
+- Profiles saved before this version get both new rev light switches
+  (the launch limiter, the learnt upshifts) turned on, as new profiles
+  do: the lights then follow the car rather than the fixed percentage.
+  Untick them under the Telemetry tab's Settings for the old behaviour.
+  A profile that never stored a shift point keeps 97 %; new ones start
+  at 95 %.
 - The shift learner compares each gear's own power curve where it knows
   both, takes the slope out of the acceleration where the game says
   which way is up, ignores turbo lag and wheelspin, and gives each best

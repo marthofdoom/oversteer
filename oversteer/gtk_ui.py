@@ -809,8 +809,8 @@ class GtkUi:
         forget.connect('clicked', lambda w: self._forget_car())
         bar.pack_start(forget, False, False, 0)
         label = Gtk.Button(label=_("Label last session…"))
-        label.set_tooltip_text(_("Say what the last session was (discipline, surface, wet, shifter): Oversteer "
-                                 "learns to tell surfaces apart from your labels"))
+        label.set_tooltip_text(_("Say what the last session was (discipline, surface, wet, shifter): your labels "
+                                 "are kept for Oversteer to learn to tell surfaces apart from"))
         label.connect('clicked', lambda w: self._label_session())
         bar.pack_start(label, False, False, 0)
         page.pack_start(bar, False, False, 0)
@@ -877,7 +877,7 @@ class GtkUi:
         row, self.rev_leds_launch = self._switch_row(
             _("Learn the limiter at each launch"),
             _("A rally stage starts with the clutch in, handbrake up and throttle floored, which holds "
-              "the engine on its limiter. Held for a second, that RPM becomes the car's maximum for "
+              "the engine on its limiter. Held for a second standing, that RPM becomes the car's maximum for "
               "the % shift point, whatever the game reports. Learnt again at every start."),
             lambda state: self.controller.model.set_rev_leds_launch(state))
         settings.insert(row, 1)
@@ -928,7 +928,7 @@ class GtkUi:
             _("Record raw telemetry"),
             _("Keep everything the game sends, as it arrived, in capture files: Oversteer can learn from them "
               "again when it improves, and one attached to a bug report shows what happened. Labelled "
-              "sessions are what it learns to tell surfaces apart from. Off by default."),
+              "sessions are kept for it to learn to tell surfaces apart from. Off by default."),
             lambda state: self.controller.set_telemetry_capture(on=state))
         settings.add(row)
         row = Gtk.ListBoxRow(activatable=False, selectable=False)
@@ -1060,8 +1060,8 @@ class GtkUi:
         area = dialog.get_content_area()
         area.set_border_width(12)
         area.set_spacing(8)
-        area.add(Gtk.Label(label=_("What was the last session? Your labels are what Oversteer learns to tell "
-                                   "surfaces apart from."), xalign=0, wrap=True, max_width_chars=50))
+        area.add(Gtk.Label(label=_("What was the last session? Your labels are kept for Oversteer to learn "
+                                   "to tell surfaces apart from."), xalign=0, wrap=True, max_width_chars=50))
         area.add(grid)
         dialog.show_all()
         response = dialog.run()

@@ -167,13 +167,16 @@ class Model:
         # greying the boxes out.
         if data['invert_pedals'] is None:
             data['invert_pedals'] = self.device.get_invert_pedals()
-        # Profiles from before the shift point: keep the old fixed 97 %
         if data['rev_leds'] is not None:
             if data['rev_leds_shift_unit'] == 'launch':
                 # a development build had the launch limiter as a unit
                 data['rev_leds_shift_unit'], data['rev_leds_launch'] = 'percent', True
             if data['rev_leds_shift_unit'] not in ('percent', 'rpm'):
                 data['rev_leds_shift_unit'] = 'percent'
+            # Profiles from before the shift point: keep the old fixed 97 %
+            # (a new profile starts at 95)
+            if data['rev_leds_shift'] is None and data['rev_leds_shift_unit'] == 'percent':
+                data['rev_leds_shift'] = 97
             # Profiles from before these existed: both on, as for a new one
             if data['rev_leds_launch'] is None:
                 data['rev_leds_launch'] = True

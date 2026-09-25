@@ -238,7 +238,9 @@ class Recorder:
             except queue.Full:
                 pass
             self._thread.join(timeout)
-            self._thread = None
+            alive, self._thread = self._thread.is_alive(), None
+            if alive:
+                return                    # still writing: it closes the file itself when it gets to the end
         self._close_file()
 
     def _run(self):
@@ -249,6 +251,7 @@ class Recorder:
                 self.check(time.monotonic())
                 continue
             if item is None:
+                self._close_file()
                 return
             self._write(*item)
 

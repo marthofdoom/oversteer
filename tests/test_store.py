@@ -186,3 +186,49 @@ def test_a_session_is_labelled_run_by_run(tmp_path):
     assert store.label_session(session, surface='gravel', shifter='h-pattern', at=5.0) == 2
     store.commit()
     assert [label['surface'] for _, label in store.labels_for('eawrc')] == ['gravel', 'gravel']
+
+
+def test_two_old_keys_that_become_one(tmp_path):
+    """'acpmf' and 'acpmf-unknown' are both acpmf/unknown now: the car that
+    learnt more is kept and the other's sessions and shifts go to it."""
+    path = str(tmp_path / 'telemetry.db')
+    db = sqlite3.connect(path)
+    db.executescript(SCHEMA_V1)
+    db.execute('INSERT INTO cars VALUES (?, ?, ?, ?, ?)', ('p', 'acpmf', None, json.dumps({'key': 'acpmf'}), 1.0))
+    db.execute('INSERT INTO cars VALUES (?, ?, ?, ?, ?)',
+               ('p', 'acpmf-unknown', None, json.dumps({'key': 'acpmf-unknown', 'ratios': {'1': [1.0] * 30}}), 1.0))
+    for i, key in enumerate(('acpmf', 'acpmf-unknown', 'acpmf-unknown')):
+        db.execute('INSERT INTO sessions (id, profile, car, started) VALUES (?, ?, ?, ?)', (i + 1, 'p', key, float(i)))
+        db.execute('INSERT INTO shifts (session, at, gear, rpm) VALUES (?, ?, ?, ?)', (i + 1, float(i), 2, 6000.0))
+    db.execute('PRAGMA user_version = 1')
+    db.commit()
+    db.close()
+    store = open_store(path)
+    [(car, model)] = store.db.execute('SELECT id, model FROM cars').fetchall()
+    assert json.loads(model)['ratios'] == {'1': [1.0] * 30}
+    assert store.db.execute('SELECT COUNT(*) FROM sessions WHERE car = ?', (car,)).fetchone()[0] == 3
+    assert store.db.execute('SELECT COUNT(*) FROM shifts').fetchone()[0] == 3
+
+
+def test_the_backup_has_what_is_still_in_the_log(tmp_path):
+    """The last writes before a crash may be in the write-ahead log only: a
+    copy of the file would miss them, the backup must not."""
+    path = str(tmp_path / 'telemetry.db')
+    v1_database(path)
+    writer = sqlite3.connect(path)
+    writer.execute('PRAGMA journal_mode = WAL')
+    writer.execute('PRAGMA wal_autocheckpoint = 0')
+    writer.execute("INSERT INTO cars (profile, key, name, model, updated) VALUES ('rally', 'forza-9', 'late', '{}', 6)")
+    writer.commit()                                              # in the log, not in the file; left open
+    open_store(path).db.close()
+    backup = sqlite3.connect(str(tmp_path / 'telemetry.db.v1.bak'))
+    assert backup.execute("SELECT name FROM cars WHERE key = 'forza-9'").fetchone() == ('late',)
+    writer.close()
+
+
+def test_a_reader_on_an_awkward_path(tmp_path):
+    folder = tmp_path / 'odd?#%name'
+    folder.mkdir()
+    path = str(folder / 'telemetry.db')
+    open_store(path).db.close()
+    assert open_reader(path).db.execute('SELECT COUNT(*) FROM cars').fetchone() == (0,)

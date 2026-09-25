@@ -203,8 +203,9 @@ def _codemasters_unit(game, raw_max):
     unit = _codemasters_units.get((game, raw_max))
     if unit is None:
         unit = codemasters_unit(raw_max)
-        if len(_codemasters_units) < 1000:
-            _codemasters_units[(game, raw_max)] = unit
+        if len(_codemasters_units) >= 1000:
+            _codemasters_units.clear()   # a maximum that jitters: start over rather than log every packet
+        _codemasters_units[(game, raw_max)] = unit
         logging.info("telemetry: %s engine max %.3f read as %s (%.0f rpm)", game, raw_max,
                      {1.0: 'rpm', 10.0: 'rpm / 10'}.get(unit, 'rad/s'), raw_max * unit)
     return unit
