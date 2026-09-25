@@ -83,3 +83,43 @@ def test_shift_table():
     assert view.shift_summary(snapshot).startswith('Limiter 7500 rpm  ·  30 rev bands of power known (engine power '
                                                    'from the game)')
     assert view.shift_summary(None).startswith('Nothing learnt yet')
+
+
+def test_capture_status():
+    text = view.capture_status(False, False, '/data/captures', (0, 0, 0), 1)
+    assert text.startswith('Off.') and '/data/captures (no captures yet)' in text
+    text = view.capture_status(True, True, '/data/captures', (3, 45e6, 1), 2)
+    assert text.startswith('Recording to /data/captures (3 captures, 45 MB of 2 GB, 1 labelled).')
+    assert 'Nothing is listening' in view.capture_status(True, False, '/c', (0, 0, 0), 1)
+    assert '7 packets were lost' in view.capture_status(True, True, '/c', (0, 0, 0), 1, dropped=7)
+    assert view.capture_status(True, True, '/c', (0, 0, 0), 1, error='No space left').startswith(
+        'Recording stopped: No space left.')
+
+
+def test_preferences_round_trip():
+    defaults = view.read_preferences({})
+    assert defaults == {'telemetry_learn': False, 'telemetry_web_on': False, 'telemetry_web_port': 5301,
+                        'telemetry_web_bind': 'lan', 'telemetry_capture_on': False, 'telemetry_capture_cap': 1}
+    chosen = dict(defaults, telemetry_learn=True, telemetry_web_on=True, telemetry_web_port=8080,
+                  telemetry_web_bind='local', telemetry_capture_on=True, telemetry_capture_cap=5)
+    written = view.write_preferences(chosen)
+    assert written['telemetry_web'] == '1' and written['telemetry_capture_cap'] == '5'
+    assert view.read_preferences(written) == chosen
+    # Written by hand or by another version: kept in range, else the default
+    odd = view.read_preferences({'telemetry_web_port': '80', 'telemetry_capture_cap': 'lots',
+                                 'telemetry_web_bind': 'everywhere', 'telemetry_learn': 'yes'})
+    assert odd['telemetry_web_port'] == 1024 and odd['telemetry_capture_cap'] == 1
+    assert odd['telemetry_web_bind'] == 'lan' and odd['telemetry_learn'] is False
+
+
+def test_preferences_through_configparser(tmp_path):
+    import configparser
+    config = configparser.ConfigParser()
+    config['DEFAULT'] = dict(view.write_preferences(dict(view.read_preferences({}), telemetry_web_port=6000)),
+                             locale='')
+    path = tmp_path / 'config.ini'
+    with open(str(path), 'w') as f:
+        config.write(f)
+    again = configparser.ConfigParser()
+    again.read(str(path))
+    assert view.read_preferences(again['DEFAULT'])['telemetry_web_port'] == 6000

@@ -916,15 +916,40 @@ class GtkUi:
         box.pack_end(self.telemetry_web_bind, False, False, 0)
         row.add(box)
         settings.add(row)
-        self.telemetry_web_status = Gtk.Label(xalign=0)
-        self.telemetry_web_status.set_line_wrap(True)
-        self.telemetry_web_status.set_selectable(True)
-        self.telemetry_web_status.set_max_width_chars(80)
-        self.telemetry_web_status.get_style_context().add_class('dim-label')
+        self.telemetry_web_status = self._status_label()
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        self.telemetry_web_status.set_margin_start(8)
+        self.telemetry_web_status.set_margin_end(8)
+        self.telemetry_web_status.set_margin_bottom(8)
+        row.add(self.telemetry_web_status)
+        settings.add(row)
+
+        row, self.telemetry_capture = self._switch_row(
+            _("Record raw telemetry"),
+            _("Keep everything the game sends, as it arrived, in capture files: Oversteer can learn from them "
+              "again when it improves, and one attached to a bug report shows what happened. Labelled "
+              "sessions are what it learns to tell surfaces apart from. Off by default."),
+            lambda state: self.controller.set_telemetry_capture(on=state))
+        settings.add(row)
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        column.set_border_width(8)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.pack_start(Gtk.Label(label=_("Keep at most"), xalign=0), False, False, 0)
+        self.telemetry_capture_cap = Gtk.SpinButton.new_with_range(1, 100, 1)
+        self.telemetry_capture_cap.connect('value-changed', lambda w: self.controller.set_telemetry_capture(
+            cap=w.get_value_as_int()))
+        box.pack_start(self.telemetry_capture_cap, False, False, 0)
+        box.pack_start(Gtk.Label(label=_("GB of captures"), xalign=0), False, False, 0)
+        column.pack_start(box, False, False, 0)
+        self.telemetry_capture_status = self._status_label()
+        column.pack_start(self.telemetry_capture_status, False, False, 0)
+        row.add(column)
+        settings.add(row)
+
         self.telemetry_settings = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.telemetry_settings.set_margin_top(8)
         self.telemetry_settings.pack_start(settings, False, False, 0)
-        self.telemetry_settings.pack_start(self.telemetry_web_status, False, False, 0)
         self.telemetry_settings.pack_start(self._eawrc_setup(), False, False, 0)
         expander = Gtk.Expander()
         expander.set_label_widget(Gtk.Label(label=_("Settings: rev lights and telemetry")))
@@ -940,20 +965,36 @@ class GtkUi:
                                    self.controller.telemetry_tab_selected() if child is scrolled else None)
         self._telemetry_page = scrolled
 
+    @staticmethod
+    def _status_label():
+        """A dim, wrapping, selectable line of text under a setting."""
+        label = Gtk.Label(xalign=0)
+        label.set_line_wrap(True)
+        label.set_selectable(True)
+        label.set_max_width_chars(80)
+        label.get_style_context().add_class('dim-label')
+        return label
+
     def telemetry_tab_visible(self):
         page = self.main_notebook.get_nth_page(self.main_notebook.get_current_page())
         return page is self._telemetry_page and self.window.is_active()
 
-    def set_telemetry_preferences(self, learn, web, port, bind):
-        """The app-wide telemetry settings, shown without writing them back."""
+    def set_telemetry_preferences(self, prefs):
+        """The app-wide telemetry settings (telemetry_view.PREFERENCES),
+        shown without writing them back."""
         # The handlers see the values the controller already has: no write
-        self.telemetry_learn.set_active(learn)
-        self.telemetry_web.set_active(web)
-        self.telemetry_web_port.set_value(port)
-        self.telemetry_web_bind.set_active_id(bind)
+        self.telemetry_learn.set_active(prefs['telemetry_learn'])
+        self.telemetry_web.set_active(prefs['telemetry_web_on'])
+        self.telemetry_web_port.set_value(prefs['telemetry_web_port'])
+        self.telemetry_web_bind.set_active_id(prefs['telemetry_web_bind'])
+        self.telemetry_capture.set_active(prefs['telemetry_capture_on'])
+        self.telemetry_capture_cap.set_value(prefs['telemetry_capture_cap'])
 
     def set_telemetry_web_status(self, text):
         self.telemetry_web_status.set_text(text)
+
+    def set_telemetry_capture_status(self, text):
+        self.telemetry_capture_status.set_text(text)
 
     def set_telemetry_history(self, history):
         """The sections read from the database (telemetry_view.gather())."""

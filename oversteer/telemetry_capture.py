@@ -56,6 +56,9 @@ class CaptureWriter:
         meta = {'started': time.time() if started is None else started, 'port': port, 'oversteer': version,
                 'note': note}
         self._file.write(json.dumps(meta).encode() + b'\n')
+        # Readable at once: labelling a session reads when a capture still
+        # being written started
+        self._file.flush()
         self._first = None
         self.packets = 0
 

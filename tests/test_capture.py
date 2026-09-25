@@ -199,3 +199,13 @@ def test_label_captures_writes_the_sidecar_of_overlapping_captures(tmp_path):
         side = json.load(f)
     assert side == {'label': label, 'session': {'game': 'eawrc', 'started': 3500.0, 'ended': 5200.0}}
     assert tc.capture_summary(str(tmp_path))[2] == 2
+
+
+def test_a_capture_being_written_can_be_labelled(tmp_path):
+    from oversteer import telemetry_capture as tc
+    recorder = tc.Recorder(str(tmp_path), threaded=False, clock=lambda: 1000.0)
+    recorder.packet(5.0, ('127.0.0.1', 0), b'x' * 100)
+    assert tc.capture_span(recorder.path)[0] == 1000.0
+    assert tc.label_captures(str(tmp_path), 900.0, 1e12, {'surface': 'snow'}) == 1
+    recorder.close()
+    assert tc.capture_summary(str(tmp_path))[2] == 1

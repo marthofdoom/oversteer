@@ -40,6 +40,8 @@ class Gui:
         _("Press button for -90°"),
     ]
 
+    CAPTURE_STATUS_EVERY = 5.0      # seconds between re-reading the capture folder's size while the tab is shown
+
     languages = [
         ('', _('System default')),
         ('en_US', _('English')),
@@ -86,12 +88,13 @@ class Gui:
         self._history_stamp = None              # what the tab's history sections were last read for
         self._history = None                    # and what they showed (telemetry_view.gather())
         self.telemetry_web = None               # the read-only web page's server, when on
-        # App preferences (config.ini): learn with the rev lights off (D4)
-        # and the web page, both off by default
-        self.telemetry_learn = False
-        self.telemetry_web_on = False
-        self.telemetry_web_port = 5301
-        self.telemetry_web_bind = 'lan'
+        self.telemetry_recorder = None          # telemetry_capture.Recorder, while recording
+        self._capture_shown_at = 0.0
+        # App preferences (config.ini): learn with the rev lights off (D4),
+        # the web page and recording, all off by default
+        from .telemetry_view import read_preferences
+        for name, value in read_preferences({}).items():
+            setattr(self, name, value)
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -153,8 +156,8 @@ class Gui:
 
         Thread(target=self.input_thread, daemon = True).start()
         GLib.timeout_add(1000, self.refresh_telemetry_view)
-        self.ui.set_telemetry_preferences(self.telemetry_learn, self.telemetry_web_on, self.telemetry_web_port,
-                                          self.telemetry_web_bind)
+        self.ui.set_telemetry_preferences(self._telemetry_preferences())
+        self.apply_telemetry_capture()
         if self.device is None and self.telemetry_learn:
             self.apply_rev_leds()               # learning needs no wheel
         self.apply_telemetry_web()
@@ -542,6 +545,7 @@ class Gui:
             if not self.telemetry_learn:
                 if self.device is None or not self.model.get_rev_leds():
                     self.ui.set_rev_leds_status('')
+                self.refresh_capture_status()
                 return
             # "Learn from game telemetry": the listener runs for the learner alone
             leds = NoLeds()
@@ -584,6 +588,9 @@ class Gui:
                                    inputs=lambda: self.launch_inputs, on_limiter=limiter,
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
+        self.telemetry.recorder = self.telemetry_recorder
+        if self.telemetry_recorder is not None:
+            self.telemetry_recorder.port = self.telemetry.port
         self.telemetry_status = show
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
@@ -595,6 +602,7 @@ class Gui:
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
+        self.refresh_capture_status()
 
     PEDAL_BOX = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'accelerator', ecodes.ABS_RZ: 'brakes'}
 
@@ -774,9 +782,18 @@ class Gui:
         if self.telemetry_web is not None:
             self.telemetry_web.stop()
             self.telemetry_web = None
+        if self.telemetry_recorder is not None:
+            if self.telemetry is not None:
+                self.telemetry.recorder = None
+            self.telemetry_recorder.close()
+            self.telemetry_recorder = None
         self.shift_learner.save()
 
-    # -- learning without rev lights, and the web page (app preferences) --
+    # -- learning without rev lights, the web page and recording (app preferences) --
+
+    def _telemetry_preferences(self):
+        from .telemetry_view import PREFERENCES
+        return {name: getattr(self, name) for name, _key, _default in PREFERENCES}
 
     def set_telemetry_learn(self, state):
         if bool(state) != self.telemetry_learn:
@@ -816,6 +833,54 @@ class Gui:
             else:
                 error = web.error
         self.refresh_web_status(error)
+
+    def capture_folder(self):
+        from xdg.BaseDirectory import save_data_path
+        return os.path.join(save_data_path('oversteer'), 'captures')
+
+    def set_telemetry_capture(self, on=None, cap=None):
+        changed = False
+        for name, value in (('telemetry_capture_on', on), ('telemetry_capture_cap', cap)):
+            if value is not None and getattr(self, name) != value:
+                setattr(self, name, value)
+                changed = True
+        if changed:
+            self.save_preferences()
+            self.apply_telemetry_capture()
+
+    def apply_telemetry_capture(self):
+        """Start or stop recording raw telemetry to match the preferences.
+        The recorder outlives the listener (a change of port or wheel
+        restarts that), so a stretch of driving stays one file."""
+        from .telemetry_capture import Recorder
+        recorder = self.telemetry_recorder
+        if recorder is not None and (not self.telemetry_capture_on or recorder.error):
+            if self.telemetry is not None:
+                self.telemetry.recorder = None
+            recorder.close()
+            recorder = self.telemetry_recorder = None
+        if self.telemetry_capture_on and recorder is None:
+            recorder = self.telemetry_recorder = Recorder(
+                self.capture_folder(), port=self.telemetry.port if self.telemetry is not None else None,
+                version=self.app.version)
+        if recorder is not None:
+            recorder.cap = self.telemetry_capture_cap << 30
+        if self.telemetry is not None:
+            self.telemetry.recorder = recorder
+        self.refresh_capture_status()
+
+    def refresh_capture_status(self):
+        from .telemetry_capture import capture_summary
+        from .telemetry_view import capture_status
+        if getattr(self, 'ui', None) is None:
+            return
+        self._capture_shown_at = time.monotonic()
+        recorder = self.telemetry_recorder
+        folder = self.capture_folder()
+        self.ui.set_telemetry_capture_status(capture_status(
+            self.telemetry_capture_on, self.telemetry is not None, folder, capture_summary(folder),
+            self.telemetry_capture_cap, recorder.error if recorder is not None else None,
+            recorder.dropped if recorder is not None else 0))
 
     def _web_status(self):
         """Web threads: what the page's status line says. Never the
@@ -898,6 +963,9 @@ class Gui:
         self._refresh_history(snapshot['key'] if snapshot is not None else None)
         if self.telemetry_web is not None and not self.telemetry_web.remote_seen:
             self.refresh_web_status()                 # until the page is opened from another device
+        if self.telemetry_recorder is not None and self.ui.telemetry_tab_visible() and \
+                time.monotonic() - self._capture_shown_at >= self.CAPTURE_STATUS_EVERY:
+            self.refresh_capture_status()             # the folder grows while you drive
         return True
 
     def _refresh_history(self, key, force=False):
@@ -935,6 +1003,18 @@ class Gui:
         count = learner.log.call(learner.log.store.label_session, session['id'], label.get('discipline'),
                                  label.get('surface'), label.get('wet'), label.get('shifter'), label.get('note'))
         self._history_stamp = None                  # read again: the labels are part of it now
+        # The raw captures of that session keep the label too, and are
+        # kept when the folder is pruned: they are what calibration needs
+        folder = self.capture_folder()
+        if count and os.path.isdir(folder):
+            from .telemetry_capture import label_captures
+            about = {'profile': learner.profile, 'car': self.telemetry_car_selected or
+                     (learner.car.key if learner.car else None), 'stage': session.get('stage') or session.get('track')}
+            try:
+                label_captures(folder, session['started'], session['ended'] or time.time(), label, about)
+            except OSError as e:
+                logging.warning("capture labels: %s", e)
+            self.refresh_capture_status()
         return count or 0
 
     def _method_shifts(self, key):
@@ -950,6 +1030,7 @@ class Gui:
         self.telemetry_tab_shown += 1
         if getattr(self, 'ui', None) is not None:          # not while the window is being built
             self.refresh_telemetry_view()
+            self.refresh_capture_status()
 
     def _shift_kwargs(self):
         shift = self.model.get_rev_leds_shift()
@@ -1111,15 +1192,9 @@ class Gui:
                 Locale.setlocale(Locale.LC_ALL, (self.locale, 'UTF-8'))
             if 'check_permissions' in config['DEFAULT']:
                 self.check_permissions = config['DEFAULT']['check_permissions'] == '1'
-            defaults = config['DEFAULT']
-            self.telemetry_learn = defaults.get('telemetry_learn', '0') == '1'
-            self.telemetry_web_on = defaults.get('telemetry_web', '0') == '1'
-            try:
-                self.telemetry_web_port = max(1024, min(65535, int(defaults.get('telemetry_web_port', '5301'))))
-            except ValueError:
-                self.telemetry_web_port = 5301
-            if defaults.get('telemetry_web_bind') in ('lan', 'local'):
-                self.telemetry_web_bind = defaults['telemetry_web_bind']
+            from .telemetry_view import read_preferences
+            for name, value in read_preferences(config['DEFAULT']).items():
+                setattr(self, name, value)
             if 'hotkeys' in config['DEFAULT']:
                 self.global_hotkeys = {a: i for a, i in hotkeys.parse(config['DEFAULT']['hotkeys']).items()
                                        if a in hotkeys.GLOBAL_ACTIONS}
@@ -1157,11 +1232,9 @@ class Gui:
             'button_toggle': ','.join(map(str, self.button_config[0])),
             'button_config': ','.join(map(str, self.button_config[1:])),
             'hotkeys': hotkeys.serialize(self.global_hotkeys),
-            'telemetry_learn': '1' if self.telemetry_learn else '0',
-            'telemetry_web': '1' if self.telemetry_web_on else '0',
-            'telemetry_web_port': str(self.telemetry_web_port),
-            'telemetry_web_bind': self.telemetry_web_bind,
         }
+        from .telemetry_view import write_preferences
+        config['DEFAULT'].update(write_preferences(self._telemetry_preferences()))
         config_file = os.path.join(self.config_path, 'config.ini')
         with open(config_file, 'w') as file:
             config.write(file)

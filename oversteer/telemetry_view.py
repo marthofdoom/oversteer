@@ -1,6 +1,7 @@
 """What the Telemetry tab shows, as strings: built here from snapshots and
 database rows so it can be tested without a display; gtk_ui only places
-them (docs/telemetry-coaching.md, section 12)."""
+them (docs/telemetry-coaching.md, section 12). The tab's app-wide
+settings are read from and written to config.ini here too."""
 
 import time
 from locale import gettext as _
@@ -202,6 +203,79 @@ def web_status(running, error, addresses, remote_seen, bind, port):
         lines.append(_("Not opened from another device yet: if it does not load there, the firewall "
                        "(firewalld, ufw) may need TCP port {} opened.").format(port))
     return '\n'.join(lines)
+
+
+def capture_status(on, listening, folder, summary, cap_gb, error=None, dropped=0):
+    """The line under "Record raw telemetry": where the captures go and
+    how much they take, or why nothing is being recorded. `summary` is
+    telemetry_capture.capture_summary() of the folder."""
+    count, size, labelled = summary
+    if not count:
+        kept = _("no captures yet")
+    else:
+        kept = (_("1 capture") if count == 1 else _("{} captures").format(count)) + \
+            _(", {:.0f} MB of {} GB").format(size / 1e6, cap_gb)
+    if labelled:
+        kept += _(", {} labelled").format(labelled)
+    if error:
+        return _("Recording stopped: {}. Turn it off and on again to retry.").format(error)
+    if not on:
+        return _("Off. When on, everything the game sends is kept as it arrived (some 20–40 MB an hour), to "
+                 "replay when Oversteer learns more or to attach to a bug report. Folder: {} ({}).").format(
+            folder, kept)
+    lines = [_("Recording to {} ({}). The oldest go first when the folder is full; the ones of a session you "
+               "labelled are kept.").format(folder, kept)]
+    if not listening:
+        lines.append(_("Nothing is listening: turn on the rev lights or \"Learn from game telemetry\"."))
+    if dropped:
+        lines.append(_("{} packets were lost: the disk was too slow.").format(dropped))
+    return '\n'.join(lines)
+
+
+# The app-wide telemetry settings: (the controller's attribute, the
+# config.ini key, its default). Off unless asked for.
+PREFERENCES = (
+    ('telemetry_learn', 'telemetry_learn', False),
+    ('telemetry_web_on', 'telemetry_web', False),
+    ('telemetry_web_port', 'telemetry_web_port', 5301),
+    ('telemetry_web_bind', 'telemetry_web_bind', 'lan'),
+    ('telemetry_capture_on', 'telemetry_capture', False),
+    ('telemetry_capture_cap', 'telemetry_capture_cap', 1),       # GB
+)
+LIMITS = {'telemetry_web_port': (1024, 65535), 'telemetry_capture_cap': (1, 100)}
+CHOICES = {'telemetry_web_bind': ('lan', 'local')}
+
+
+def read_preferences(section):
+    """{attribute: value} from config.ini's DEFAULT section (a mapping of
+    strings): a missing or unreadable value keeps its default, a number
+    out of range is brought into it."""
+    values = {}
+    for name, key, default in PREFERENCES:
+        text = section.get(key)
+        value = default
+        if text is not None:
+            if isinstance(default, bool):
+                value = text == '1'
+            elif isinstance(default, int):
+                low, high = LIMITS[name]
+                try:
+                    value = max(low, min(high, int(text)))
+                except ValueError:
+                    pass
+            elif text in CHOICES[name]:
+                value = text
+        values[name] = value
+    return values
+
+
+def write_preferences(values):
+    """{config key: text} for config.ini from {attribute: value}."""
+    out = {}
+    for name, key, default in PREFERENCES:
+        value = values[name]
+        out[key] = ('1' if value else '0') if isinstance(default, bool) else str(value)
+    return out
 
 
 def gather(reader, profile, key, show_all=False):
