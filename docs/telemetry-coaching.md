@@ -1349,6 +1349,13 @@ since they are self-contained and let the §6.3 captures start now.
 - [x] `Sample` v2 decoded for Forza, Codemasters, EA WRC (and OutGauge time/boost), one private function per format (`_ovst`, `_forza`, `_outgauge`, `_codemasters`, `_eawrc`); brought forward from Step C item 3. As built: `accel_kind` is `'kinematic'` for all three until a hill capture says otherwise; Codemasters' "pitch" vector (14–16) is taken as forward and the "roll" vector (11–13) as left, up = forward × left (verify handedness); suspension mm → m (verify); DiRT g × 9.80665, WRCG taken as m/s² (verify); steer negated to positive-left in every game (verify); Forza yaw rate = −ω_y (verify). Decode costs 8–13 µs a packet, `Telemetry.handle` with the learner 0.02 ms mean on this machine. Nothing reads the new fields yet (Step C)
 - [x] Capture format, writer, reader, replay through `Telemetry.handle`; `telemetry-capture.py --write`, `telemetry-replay.py` (brought forward from Step D; `tests/test_capture.py`)
 
+Run 2 (in progress): the build prompt's "Step B" is "database v2 +
+sessions/segments + learners (shift, tune, discipline/surface scaffolding
+with calibration hooks) + tests", the order before the review re-cut the
+steps. That is this document's Step C items 1–5 and 7, so those are built
+now and ticked under Step C below; the web page (Step B here) is left for
+a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
+
 ### Step B
 - [ ] Web server (read-only, limits, Host check, headers) over today's data, and page
 - [ ] Web preferences and Settings controls, bound URLs
