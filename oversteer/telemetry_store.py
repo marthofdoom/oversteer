@@ -234,6 +234,15 @@ STAGE_LENGTH_TOLERANCE = {'dirt': 2.0, 'wrcg': 2.0, 'acr': 10.0}     # m, a meas
 STAGE_START_TOLERANCE = 15.0                                         # m of start z (DiRT)
 STAGE_DISTANCE_TOLERANCE = 0.01      # of a published length: a run to the finish, or a length the game sent
 STAGE_START_NEAR = 50.0              # m between two starts of one stage (x and z)
+SENT_LENGTH_SLACK = 0.005            # m: a sent length this much nearer one stage than another is that stage
+
+
+def _length_miss(entry, distance):
+    """How far `distance` is from the nearest length of a table entry (its
+    own, or an alt_codes layout's), or None when it has none."""
+    lengths = [entry.get('length_m')] + [alt.get('length_m') for alt in entry.get('alt_codes') or ()]
+    lengths = [length for length in lengths if length]
+    return min(abs(length - distance) for length in lengths) if lengths else None
 
 
 def _split(script):
@@ -908,18 +917,29 @@ class Store(Reader):
         return starts
 
     def match_distance(self, game, distance, start=None, within=None):
-        """(key, candidates): the shipped stage of `game` whose published
-        length a run to the finish (or a length the game sent) is within
-        1 % of, and every stage that close. Where two or more are, the
-        start ((x, y, z)) decides: a stage with earlier runs from within
-        50 m of it wins, one whose runs all started elsewhere is out.
-        None for the key when it stays open."""
+        """(key, candidates): the shipped stage of `game` whose length a
+        run to the finish is within 1 % of, or a length the game sent is
+        within `within` m of (WRC Generations sends the float of its own
+        data, so a sent length names the stage exactly: of those that
+        close, only the nearest few mm stay), and every stage that close.
+        An entry's lengths are length_m and its alt_codes' (another layout
+        of the stage). The start ((x, y, z)) then decides (for a sent
+        length only between two or more): a stage with earlier runs from
+        within 50 m of it wins, one whose runs all started elsewhere is
+        out. None for the key when it stays open."""
         if not distance:
             return None, []
-        candidates = [e for e in stage_tables.tables().get(game, {}).values() if e.get('length_m')
-                      and abs(e['length_m'] - distance) <= (within if within is not None
-                                                             else STAGE_DISTANCE_TOLERANCE * e['length_m'])]
-        if start is not None and candidates:
+        candidates = []
+        for entry in stage_tables.tables().get(game, {}).values():
+            miss = _length_miss(entry, distance)
+            if miss is not None and miss <= (within if within is not None
+                                             else STAGE_DISTANCE_TOLERANCE * entry['length_m']):
+                candidates.append((miss, entry))
+        if within is not None and candidates:
+            best = min(miss for miss, _ in candidates)
+            candidates = [(miss, e) for miss, e in candidates if miss <= best + SENT_LENGTH_SLACK]
+        candidates = [e for _, e in sorted(candidates, key=lambda c: c[0])]
+        if start is not None and candidates and (within is None or len(candidates) > 1):
             near, unknown = [], []
             for entry in candidates:
                 starts = self._starts(entry['key'])
@@ -928,7 +948,6 @@ class Store(Reader):
                 elif any(math.hypot(x - start[0], z - start[2]) <= STAGE_START_NEAR for x, _, z in starts):
                     near.append(entry)
             candidates = near or unknown
-        candidates.sort(key=lambda e: abs(e['length_m'] - distance))
         return (candidates[0]['key'] if len(candidates) == 1 else None), candidates
 
     def match_track(self, track, length=None, game='acr'):

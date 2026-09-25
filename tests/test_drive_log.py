@@ -5,7 +5,7 @@ import threading
 import time
 
 from oversteer import drive_log
-from oversteer.drive_log import DriveLog
+from oversteer.drive_log import DriveLog, SENT_LENGTH_TOLERANCE
 from oversteer.shift_learner import ShiftLearner
 from tests.sim import drive, exits
 
@@ -432,8 +432,37 @@ def test_a_sent_length_tells_a_stage_from_its_reverse(tmp_path, monkeypatch):
     from oversteer.telemetry_store import open_store
     from tests.test_store import _tables
     monkeypatch.setattr(stage_tables, '_tables', _tables(
-        'wrcg', {'location': 'Rally México', 'stage': 'Media Luna', 'length_m': 4010.0, 'surface': 'gravel'},
-        {'location': 'Rally México', 'stage': 'Media Luna reverse', 'length_m': 3980.0, 'surface': 'gravel'}))
+        'wrcg', {'location': 'Rally México', 'stage': 'Media Luna', 'length_m': 3979.648829, 'surface': 'gravel'},
+        {'location': 'Rally México', 'stage': 'Media Luna reverse', 'length_m': 3932.115078, 'surface': 'gravel'},
+        {'location': 'Rally Sweden', 'stage': 'Sävar', 'length_m': 7885.974407, 'surface': 'snow'},
+        {'location': 'Rally Sweden', 'stage': 'Sävar reverse', 'length_m': 7885.979652, 'surface': 'snow'},
+        {'location': 'Rally México', 'stage': 'Autódromo de León', 'length_m': 2581.312418, 'surface': 'tarmac',
+         'alt_codes': [{'code': 'VersusRaceTrack', 'length_m': 2581.109047}]}))
     store = open_store(str(tmp_path / 'telemetry.db'))
-    assert store.match_distance('wrcg', 3979.6)[0] is None                         # 1 %: both fit
-    assert store.match_distance('wrcg', 3979.6, within=15.0)[0] == 'wrcg:rally-mexico:media-luna-reverse'
+    assert store.match_distance('wrcg', 3979.6488285064697, within=SENT_LENGTH_TOLERANCE)[0] == \
+        'wrcg:rally-mexico:media-luna'                                               # the float the game sent
+    assert store.match_distance('wrcg', 3960.0, within=SENT_LENGTH_TOLERANCE) == (None, [])
+    # 5 mm apart: the float names one; an unknown start does not undo it
+    assert store.match_distance('wrcg', 7885.9796524, (1.0, 0.0, 1.0), within=SENT_LENGTH_TOLERANCE)[0] == \
+        'wrcg:rally-sweden:savar-reverse'
+    assert store.match_distance('wrcg', 7885.977, within=SENT_LENGTH_TOLERANCE)[0] is None     # between them
+    assert store.match_distance('wrcg', 2581.1090469, within=SENT_LENGTH_TOLERANCE)[0] == \
+        'wrcg:rally-mexico:autodromo-de-leon'                                        # its versus layout
+    assert [e['stage'] for e in store.match_distance('wrcg', 3960.0)[1]] == ['Media Luna', 'Media Luna reverse']
+
+
+def test_the_shipped_wrc_generations_table_names_marths_mexico_stages(tmp_path):
+    """The lengths WRC Generations sent on the first recorded run
+    (20260925-145356.ovcap.gz), against the shipped table."""
+    from oversteer import stage_tables
+    from oversteer.telemetry_store import open_store
+    stage_tables.set_tables(None)
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    key = store.match_distance('wrcg', 3979.6488285064697, (0.0, 0.0, 0.0), within=SENT_LENGTH_TOLERANCE)[0]
+    assert key == 'wrcg:rally-mexico:media-luna'
+    assert stage_tables.entry(key)['code'] == 'SS1_RaceTrack' and not stage_tables.entry(key)['reverse_of']
+    key = store.match_distance('wrcg', 2581.312417984009, within=SENT_LENGTH_TOLERANCE)[0]
+    assert stage_tables.entry(key)['stage'] == 'Autódromo de León'
+    # every stage its own length: no two within 5 mm
+    lengths = sorted(e['length_m'] for e in stage_tables.tables()['wrcg'].values())
+    assert all(b - a > 0.005 for a, b in zip(lengths, lengths[1:]))

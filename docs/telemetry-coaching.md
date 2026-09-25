@@ -454,20 +454,27 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
   ASCII lower-case words. Matching, in order:
   - **DiRT**: the length it sends and the start z against the table (±2 m,
     ±15 m), before the stored stages.
-  - **WRC Generations** sends no stage and, on the one real run so far, no
-    length (it was keyed by its start cell). At the run's end, when it
-    finished (progress ≥ 0.99) or the game sends no progress at all, the
-    distance to the finish is matched against the published lengths
-    within 1 %. The finish is where progress crossed 0.99, else where the
-    stage clock stopped while the car rolled on for 1 s (after 500 m),
-    else the run's last distance. Two or more stages that close (a stage
-    and its reverse are often one length) are told apart by where
-    earlier runs of each started (within 50 m in x and z; a stage whose
-    runs all started elsewhere is out). Still open, the run keeps a start
-    cell key, with the location when the candidates share one, and the
-    surface when they share one (the game tier, with the candidates as
-    evidence). Should WRCG send a length after all, it is matched the
-    same way at the start.
+  - **WRC Generations** names no stage but sends its length (field 3, in
+    km, where DiRT has progress; field 61 stays 0): the Length of the
+    route in the game's `RALLIESMETRICS.CFG`, to the float (Media Luna
+    3.9796488285065 km was sent as 3979.6488285064697 m). At the start of
+    a run it is matched against `length_m` and `alt_codes` within 0.5 m;
+    of those, only the ones within 5 mm of the nearest stay (the closest
+    two stages, Sävar and its reverse, are 5.2 mm apart), so a stage and
+    its reverse are told apart by the float alone. Should two ever stay,
+    the start decides as below (the table has no start positions, and
+    only the elevation range of each route, which cannot place a start).
+    Where no length is sent, at the run's end, when it finished (progress
+    ≥ 0.99) or the game sends no progress at all, the distance to the
+    finish is matched against the lengths within 1 %. The finish is where
+    progress crossed 0.99, else where the stage clock stopped while the
+    car rolled on for 1 s (after 500 m), else the run's last distance.
+    Two or more stages that close (a stage and its reverse are often
+    within 1 %) are told apart by where earlier runs of each started
+    (within 50 m in x and z; a stage whose runs all started elsewhere is
+    out). Still open, the run keeps a start cell key, with the location
+    when the candidates share one, and the surface when they share one
+    (the game tier, with the candidates as evidence).
   - **Assetto Corsa Rally**: the shared memory's `track` name as the bridge
     sends it (ASCII, others `_`, 31 characters) against the table's
     `track`; two of one name (`Alsace For_t`) by the nearer published
@@ -1551,15 +1558,49 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   no per-stage shares published), Sweden snow, Spain and Germany tarmac,
   the rest gravel, rallycross mixed. `reverse_of` is set only where the
   name says so (29); many other stages are reverses in the game.
-- `wrcg.json`: WRC Generations, 165 entries (the official count: 21
-  rallies with one shakedown each; the game has no Rally Hub, free roam
-  or DLC rallies), 128 with a length. Lengths to 0.01 km from the WRC
-  Generations fandom wiki (in-game figures, Monte-Carlo, Sweden,
-  Croatia, Portugal, Sardegna, Greece, New Zealand, Spain, Japan,
-  Sanremo) and, for the bonus rallies, WRC 8's figures for the same
-  stages (a Steam thread), which agree with the wiki within about 0.1 km
-  where both exist (0.2 km on two super specials). Mostly medium; high
-  only where both agree exactly (4 in Sardegna); low where missing.
+- `wrcg.json`: WRC Generations, 165 entries (21 rallies: 21 shakedowns,
+  96 specials, 38 long stages and 10 super specials), built from the
+  installed game by `scripts/stage-tables.py wrcg` (plain text files
+  under `Common/`, identical to the vanilla files):
+  - `Tuning/RALLIESMETRICS.CFG`: every route of every level
+    (`LEVELS/<level>/<level>.PLM`): `SSn_RaceTrack`, its reverse
+    `SSnR_RaceTrack`, long stages `ES…`, the shakedown `<cc>_Short_01`
+    (`IsShakedown`), a super special's `RaceTrack` and `VersusRaceTrack`
+    (its head-to-head layout, kept as `alt_codes`), each with `Length`
+    (km, the float the game sends), `ElevationMin/Max`, `SlopeUp/Down`
+    (total climb and descent, m; `Elevation` is their sum) and `LoadId`.
+  - `Tuning/FACTORIES/RALLIES.CFG`, `BONUS_RALLIES.CFG`: the rallies and
+    their specials: name key (`LocalesId.STAGENAME_…`), `SelectiveLoadId`
+    (the route whose `LoadId` is `1 << SelectiveLoadId` in the rally's
+    level; a super special names its own `Level`), `Reverse`, the rounded
+    length the menus show (`menu_length_m`; not what is driven: Media
+    Luna says 4.007 km and is 3.980 km), and the surface: `Surface`,
+    `SurfaceRatio` (% of it) and `Surface2`.
+  - Names: `SCRIPTS/LOCALISATION.LUA` gives each `LocalesId` its index;
+    `LOCALISATION/LOCALISATION_EN.PLOC` is a 4-byte header and then the
+    strings in index order (UTF-16LE, NUL-ended). So every special's name
+    is exact, accents included (Autódromo de León, Agnières-en-Devoluy).
+    A shakedown has no name key in the rally data: its name is the
+    string of `STAGENAME_<country>_SHK_01` (by the convention of the
+    other keys; `name_source` says which).
+  - Surfaces: the game's own for every special (`surface_source: game`);
+    it changed 13 from the earlier web table: Autódromo de León 80 %
+    tarmac, Harju 79 % tarmac, Marmaris and Great Orme tarmac, Elva,
+    Kanepi, Brenig and Dyfi part tarmac. Shakedowns have none in the game
+    files and keep the earlier table's (WRC Generations fandom wiki,
+    TechBriefly), `confidence: medium`; everything else is `high`.
+  - The earlier table's lengths (fandom wiki, WRC 8) were off by up to
+    0.56 km (Parque Tematico) and swapped some forward and reverse
+    figures (Media Luna 4010/3980 m; the game has 3979.65/3932.12 m); 37
+    stages had none. Names corrected: Grdanjci, Kostanjevac, Cuchilla
+    Nevada; shakedowns are "<country> shakedown" as in the game (their
+    keys changed). Rally Sweden is the Umeå map (Sävar, Brattby,
+    Kroksjö, Örträsk). Routes in no rally are listed in the table's
+    notes (Sarsjöliden, Japan's and New Zealand's ES1, Karlstad, three
+    Estonia onboarding routes, two short Mexico routes; a second
+    Ibarrilla reverse route, 0.5 m shorter, is kept as `alt_codes`).
+  - Location names stay the earlier table's (the keys); the game's full
+    rally name is `rally`.
 - `acr.json`: Assetto Corsa Rally to update 0.6 (2026-09-10), 46 stages
   in Alsace, Wales, Monte Carlo, Greece and the Livigno ice circuit, the
   game's own lengths (0.1 km) as two community dumps of its data table
@@ -1568,26 +1609,23 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   builds it, in English.
 
 Matching: DiRT by length and start z against the table first; WRCG by
+the length it sends, to the float (0.5 m, nearest within 5 mm), else by
 the distance to the finish within 1 % (start positions of earlier runs
 to tell apart stages of one length; the location and surface when they
 stay open); ACR by its shared-memory track name. Tests in
 `tests/test_store.py` and `tests/test_drive_log.py`.
 
 Unverified (needs the §6.3 captures):
-- [ ] WRCG: that it really sends no length (field 61) and no progress
-  (field 3); whether its stage clock (field 1) stops at the finish line,
-  which is what finds the finish when it sends no progress; that its
-  lap distance (field 2) is the distance along the stage.
-- [ ] WRCG: no length for Kenya, Estonia, most of Belgium, the Finland
-  reverses, Chile's Biobio and Pelun, and most shakedowns (37 entries);
-  those stages are never matched, only named. Surfaces of Kenya, Estonia
-  and Belgium follow the real rallies; Great Orme (gravel) and Harju
-  (tarmac, WRC 8 length) are doubtful. In-game lengths may differ from
-  the wiki and WRC 8 by more than 1 %; a run that stays unmatched keeps
-  its start cell.
-- [ ] WRCG: a stage and its reverse of one length never get their name
-  until a run is matched otherwise (nothing records which start is
-  which); the surface is known when they share it.
+- [x] WRCG sends the stage length (field 3, km, the table's float);
+  field 61 stays 0. Verified on marth's capture 20260925-145356: Media
+  Luna (forward, SS1_RaceTrack) and Autódromo de León (RaceTrack).
+- [ ] WRCG: whether its stage clock (field 1) stops at the finish line
+  and whether it sends progress anywhere (only needed where no length
+  is sent); that its lap distance (field 2) is the distance along the
+  stage.
+- [ ] WRCG: that every other route sends its Length the same way (two
+  routes seen); whether a head-to-head super special sends its
+  `VersusRaceTrack` length; the shakedown surfaces (web, not the game).
 - [ ] ACR: the `track` strings (only English; the game localises them;
   the Livigno ones are extrapolated), what `trackConfiguration` holds,
   and how the spline length compares with the published lengths (one

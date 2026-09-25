@@ -11,6 +11,11 @@ share}, or a list, larger part first, where the shares are not known),
 `reverse_of`, `shakedown`, `sources` and `confidence`; DiRT's also
 `start_z` (its stages are told apart by the length the game sends and
 where they start), Assetto Corsa Rally's `track` and `config` where known.
+WRC Generations' come from the game's files (scripts/stage-tables.py):
+`code` and `level` (its route), `length_m` (the float it sends),
+`alt_codes` (other layouts of the stage, [{code, length_m}]),
+`menu_length_m`, `elevation_min_m`, `elevation_max_m`, `climb_m`,
+`descent_m`, `kind`, `rally`, `surface_source` and `name_source`.
 
 Each entry gets a stage key: DiRT's is the key a measured run would get
 (`dirt:<length>:<start z>`), so a run matches it by tolerance; the others
