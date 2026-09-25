@@ -160,10 +160,15 @@ def test_recorder_thread_and_a_full_queue(tmp_path, monkeypatch):
     # The listener never waits: a full queue drops and counts
     monkeypatch.setattr(tc, 'RECORD_QUEUE', 2)
     stuck = tc.Recorder(str(tmp_path), threaded=False)
-    stuck._thread = object()                                       # as if the writer thread were busy
+    stuck._threaded = True                                         # as if the writer thread were busy
     for i in range(5):
         stuck.packet(float(i), ('127.0.0.1', 0), b'x')
     assert stuck.dropped == 3
+    # A packet the listener hands over after the recorder was closed is
+    # not written (nor does it open a file nobody would close)
+    before = tc.list_captures(str(tmp_path))
+    recorder.packet(99.0, ('127.0.0.1', 0), b'late')
+    assert tc.list_captures(str(tmp_path)) == before
 
 
 def test_prune_keeps_labelled_captures_and_the_newest(tmp_path):

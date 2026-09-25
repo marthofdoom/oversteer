@@ -207,13 +207,17 @@ class Recorder:
         self._last = 0.0
         self._queue = queue.Queue(maxsize=RECORD_QUEUE)
         self._thread = None
+        self._threaded = threaded
+        self._closed = False
         if threaded:
             self._thread = threading.Thread(target=self._run, name='telemetry-capture', daemon=True)
             self._thread.start()
 
     def packet(self, now, addr, data):
         """The listener: one datagram as it arrived, at `now` (monotonic)."""
-        if self._thread is None:
+        if self._closed:
+            return                        # the listener read its recorder just before it was switched off
+        if not self._threaded:
             self._write(now, addr, data)
             return
         try:
@@ -227,6 +231,7 @@ class Recorder:
             self._close_file()
 
     def close(self, timeout=5.0):
+        self._closed = True
         if self._thread is not None:
             try:
                 self._queue.put(None, timeout=timeout)
