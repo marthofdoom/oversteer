@@ -115,16 +115,22 @@ class NullLeds:
         pass
 
 
-def replay(records, learner=None, start=1000.0, **options):
+def replay(records, learner=None, start=1000.0, started=None, **options):
     """Feed capture records through Telemetry.handle on the capture's own
     clock (from `start`, so no packet lands on the listener's "never"
     time 0), with a NullLeds; the learner, if given, learns as it would
-    live. Returns the Telemetry, idle at the end."""
+    live, with its wall clock from `started` (the capture's epoch time,
+    so the same capture writes the same database) and its session ended
+    at the end. Returns the Telemetry, idle at the end."""
     from .telemetry import Telemetry, IDLE_TIMEOUT
     telemetry = Telemetry(NullLeds(), learner=learner, **options)
+    if learner is not None and started is not None:
+        learner.clock = lambda now: started + (now - start)
     t = start
     for t_rel, addr, data in records:
         t = start + t_rel
         telemetry.handle(t, data, addr)
     telemetry.check_idle(t + IDLE_TIMEOUT + 1.0)
+    if learner is not None:
+        learner.save()
     return telemetry

@@ -695,13 +695,33 @@ class Store(Reader):
         return self._do('INSERT INTO cars (profile, game, key, name, model, updated) VALUES (?, ?, ?, ?, ?, ?)',
                         (profile, game or 'unknown', key, name, json.dumps(model or {}), time.time())).lastrowid
 
-    def save_model(self, profile, key, game, name, model, car_class=None, drivetrain=None, updated=None):
-        """Write the car's model (a dict); returns the car's id."""
+    def save_model(self, profile, key, game, name, model, car_class=None, drivetrain=None, updated=None,
+                   create=True):
+        """Write the car's model (a dict); returns the car's id (None when
+        the car has no row and `create` is False)."""
+        if not create and self._do('SELECT 1 FROM cars WHERE profile = ? AND key IN ({})'.format(
+                ', '.join('?' * (1 + len(legacy_keys(key))))), (profile, key, *legacy_keys(key))).fetchone() is None:
+            return None
         car = self.car_id(profile, key, game, name, model)
         self._do('UPDATE cars SET model = ?, name = CASE WHEN user_named THEN name ELSE COALESCE(?, name) END, '
                  'car_class = COALESCE(?, car_class), drivetrain = COALESCE(?, drivetrain), updated = ? '
                  'WHERE id = ?', (json.dumps(model), name, car_class, drivetrain, updated or time.time(), car))
         return car
+
+    def drop_car_if_empty(self, car):
+        """A car driven for a moment that taught nothing (no session left,
+        no gear learnt) is not worth listing."""
+        row = self._do('SELECT model FROM cars WHERE id = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE car = ?)',
+                       (car, car)).fetchone()
+        if row is None:
+            return False
+        try:
+            learnt = bool(json.loads(row[0]).get('ratios'))
+        except (ValueError, AttributeError):
+            learnt = True
+        if not learnt:
+            self._do('DELETE FROM cars WHERE id = ?', (car,))
+        return not learnt
 
     def rename_car(self, profile, key, name):
         self._do('UPDATE cars SET name = ?, user_named = 1, updated = ? WHERE profile = ? AND key = ?',

@@ -44,7 +44,7 @@ def stage():
                 speed += engine(rpm) / 1200.0 / speed / 60
                 t += 1 / 60
                 out.append((t, forza_dash(rpm, speed, gear, 1.0, engine(rpm))))
-        t += 5.0                                             # a gap: the session ends, as between stages
+        t += 130.0                                           # a gap: the session ends, as between stages
     return out
 
 

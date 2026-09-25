@@ -1,81 +1,7 @@
 import math
-from oversteer.shift_learner import ShiftLearner, CarModel, DRAG_C0, DRAG_C2
+from oversteer.shift_learner import ShiftLearner, CarModel
 from oversteer.telemetry import Sample
-
-LIMITER = 7500.0
-RATIOS = {1: 480.0, 2: 330.0, 3: 250.0, 4: 200.0, 5: 165.0}  # rpm per m/s: 1st tops out near 56 km/h
-
-
-def power(rpm):
-    """W/kg: peaks at 6500 and fades towards the limiter."""
-    if rpm <= 6500:
-        return 150.0 * math.sin(math.pi / 2 * rpm / 6500)
-    return 150.0 * (1 - (rpm - 6500) / 4000)
-
-
-def analytic_shift(gear):
-    step = RATIOS[gear + 1] / RATIOS[gear]
-    rpm = LIMITER * 0.5
-    while rpm <= LIMITER:
-        if power(rpm * step) > power(rpm):
-            return rpm
-        rpm += 5
-    return LIMITER
-
-
-def drive(learner, shift_at=LIMITER, car='test-car', runs=3, jitter=0.0):
-    """Full-throttle pulls through the gears, changing up at `shift_at`."""
-    t = 0.0
-    dt = 1 / 60
-    for run in range(runs):
-        gear, speed = 1, 3000.0 / RATIOS[1]
-        start = t
-        while gear <= 5 and t - start < 90:       # top gear may never reach the limiter
-            rpm = RATIOS[gear] * speed
-            if rpm >= min(shift_at, LIMITER) and gear < 5:
-                # through neutral for a moment, like an H-pattern box
-                for _ in range(6):
-                    t += dt
-                    learner.feed(t, Sample(rpm * 0.9, LIMITER, gear=0, speed=speed, car=car), LIMITER, 0.0, 1.0)
-                gear += 1
-                continue
-            if rpm >= LIMITER:
-                break
-            accel = power(rpm) / speed - DRAG_C0 - DRAG_C2 * speed * speed
-            speed += accel * dt
-            t += dt
-            wobble = 1 + jitter * math.sin(t * 37)
-            learner.feed(t, Sample(RATIOS[gear] * speed * wobble, LIMITER, gear=gear, speed=speed, car=car),
-                         LIMITER, 1.0, 0.0)
-        t += 5
-
-
-def cruise(learner, t, gear, speed, car='test-car', seconds=1.0, slip=0.0):
-    """Part throttle at a steady speed: where the ratios are learnt."""
-    for _ in range(int(seconds * 60)):
-        t += 1 / 60
-        learner.feed(t, Sample(RATIOS[gear] * speed * (1 + slip), LIMITER, gear=gear, speed=speed, car=car),
-                     LIMITER, 0.3, 0.0)
-    return t
-
-
-def exits(learner, car='test-car', runs=2):
-    """Full-throttle pulls from low revs in every gear, as out of corners,
-    each after a stretch of part throttle."""
-    t = 1000.0
-    for run in range(runs):
-        for gear in RATIOS:
-            speed = 2500.0 / RATIOS[gear]
-            t = cruise(learner, t, gear, speed, car)
-            while RATIOS[gear] * speed < LIMITER and speed < 70:
-                speed += (power(RATIOS[gear] * speed) / speed - DRAG_C0 - DRAG_C2 * speed * speed) / 60
-                t += 1 / 60
-                learner.feed(t, Sample(RATIOS[gear] * speed, LIMITER, gear=gear, speed=speed, car=car), LIMITER, 1.0, 0.0)
-            for _ in range(30):                      # braking for the next corner
-                t += 1 / 60
-                speed *= 0.99
-                learner.feed(t, Sample(RATIOS[gear] * speed, LIMITER, gear=gear, speed=speed, car=car), LIMITER, 0.0, 0.0)
-
+from tests.sim import LIMITER, RATIOS, power, analytic_shift, drive, cruise, exits
 
 def test_learns_the_best_shift_per_gear(tmp_path):
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
@@ -107,9 +33,12 @@ def test_car_profiles_persist_and_switch(tmp_path):
     assert again.car.best_shift(2) is not None     # picked up where it left off
     again.feed(1.0, Sample(3000, LIMITER, gear=1, speed=30, car='other'), LIMITER, 0.0, 0.0)
     assert again.car.key == 'other' and again.car.best_shift(2) is None
+    again.save()                                   # a moment in a car that taught nothing: not kept
     assert {k for k, _ in again.known_cars()} == {'test-car'}
-    again.forget('test-car')
-    assert again.known_cars() == []
+    again.forget('test-car')                       # learning starts over; the history stays
+    assert {k for k, _ in again.known_cars()} == {'test-car'}
+    # (two sessions: the pulls and the corner exits are 15 minutes apart)
+    assert again.load_snapshot('test-car')['gears'] == [] and len(again.history('test-car')) == 2
 
 
 def test_wheelspin_does_not_teach_power(tmp_path):
@@ -217,7 +146,7 @@ def test_dirt_cars_learnt_in_the_wrong_unit_are_rescaled(tmp_path):
     a 7500 rpm max was keyed 7854 and everything learnt was 30/pi too high."""
     import json
     import sqlite3
-    from oversteer.shift_learner import SCHEMA
+    from oversteer.telemetry_store import SCHEMA_V1 as SCHEMA
     path = str(tmp_path / 'telemetry.db')
     db = sqlite3.connect(path)
     db.executescript(SCHEMA)
@@ -239,22 +168,27 @@ def test_dirt_cars_learnt_in_the_wrong_unit_are_rescaled(tmp_path):
     db.close()
 
     learner = ShiftLearner(path, profile='rally')
-    assert dict(learner.known_cars()) == {'codemasters-7500-800-6': '7500 rpm, 6 gears',
-                                          'codemasters-7000-900-5': 'my WRCG car'}
-    snapshot = learner.load_snapshot('codemasters-7500-800-6')
+    assert dict(learner.known_cars()) == {'codemasters/7500-800-6': '7500 rpm, 6 gears',
+                                          'codemasters/7000-900-5': 'my WRCG car'}
+    snapshot = learner.load_snapshot('codemasters/7500-800-6')
     assert abs(snapshot['gears'][0]['ratio'] - 330.0) < 0.01
-    fixed = learner.load_snapshot('codemasters-7000-900-5')
+    fixed = learner.load_snapshot('codemasters/7000-900-5')
     assert fixed['limiter'] == 7000.0
-    row = learner.db.execute('SELECT model FROM cars WHERE key = ?', ('codemasters-7500-800-6',)).fetchone()
+    row = learner.db.execute('SELECT model FROM cars WHERE key = ?', ('codemasters/7500-800-6',)).fetchone()
     model = CarModel.from_dict(json.loads(row[0]))
     assert abs(model.limiter - 7215.0 / f) < 0.01 and abs(model.upshifts[2][0] - 6800.0) < 0.01
     assert list(model.power) in ([59], [60])                     # around 6000 rpm, not 6283
-    assert abs(learner.history('codemasters-7500-800-6')[0]['error'] + 200.0) < 0.01
-    assert learner.db.execute('PRAGMA user_version').fetchone()[0] == 1
+    assert abs(learner.history('codemasters/7500-800-6')[0]['error'] + 200.0) < 0.01
+    assert learner.db.execute('PRAGMA user_version').fetchone()[0] == 2
     assert (tmp_path / 'telemetry.db.v0.bak').exists()
-    learner.db.close()
+    learner.close()
     again = ShiftLearner(path, profile='rally')                 # done once only
-    assert 'codemasters-7500-800-6' in dict(again.known_cars())
+    assert 'codemasters/7500-800-6' in dict(again.known_cars())
+    # DiRT sends the car again: the old row is adopted, history and all
+    again.feed(1.0, Sample(3000, 7500.0, gear=2, speed=10, car='dirt/7500-800-6', game='dirt'), 7500.0, 0.0, 0.0)
+    assert abs(again.car.ratio(2) - 330.0) < 0.01
+    again.save()
+    assert 'dirt/7500-800-6' in dict(again.known_cars()) and len(again.history('dirt/7500-800-6')) == 1
 
 
 def test_the_press_says_how_a_change_was_made():
@@ -287,9 +221,9 @@ def test_shifts_per_method(tmp_path):
     methods = learner.method_shifts('test-car')
     assert {m: (round(v[0]), v[1]) for m, v in methods[2].items()} == {
         'sequential': (6000, 3), 'paddles': (6400, 3), 'h-pattern': (5600, 3)}
-    ended = learner.sessions_ended
+    changed = learner.history_changed
     learner.idle()
-    assert learner.sessions_ended == ended + 1
+    assert learner.history_changed == changed + 1
 
 
 def test_coaching_is_short():
@@ -318,3 +252,21 @@ def test_saved_snapshot_is_cached_until_the_car_changes(tmp_path):
     assert learner.load_snapshot('test-car')['name'] == 'Rally car'
     live = learner.load_snapshot('other')                     # the car being driven: always fresh
     assert live['key'] == 'other' and 'advice' in live
+
+
+def test_a_pause_does_not_split_a_session(tmp_path):
+    """Telemetry stopping for a moment (a pause, a loading screen) keeps the
+    session; SESSION_GAP without any ends it, fed or ticked."""
+    from oversteer.shift_learner import SESSION_GAP
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive(learner, shift_at=6000, runs=2)          # 5 s between the pulls: one session
+    learner.idle()
+    first = learner.session
+    t = 5000.0
+    learner.feed(t, Sample(3000, LIMITER, gear=1, speed=10, car='test-car'), LIMITER, 0.3, 0.0)
+    assert learner.session != first                 # the gap ended it
+    learner.tick(t + SESSION_GAP / 2)
+    assert learner.session is not None
+    learner.tick(t + SESSION_GAP + 1)
+    assert learner.session is None
+    assert [h['shifts'] for h in learner.history('test-car')] == [8]    # the second one taught nothing

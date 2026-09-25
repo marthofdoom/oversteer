@@ -78,7 +78,7 @@ class Gui:
         self.shift_buttons = {}           # evdev key code -> 'gear', 'sequential' or 'paddle'
         self.telemetry_status = lambda: None
         from .shift_learner import ShiftLearner
-        self.shift_learner = ShiftLearner()
+        self.shift_learner = ShiftLearner(threaded=True)
         self.telemetry_car_selected = None      # a saved car picked in the Telemetry tab; None = the live one
         self.telemetry_car_live = None
         self.telemetry_tab_shown = 0            # counts the times the tab was opened: history is re-read then
@@ -815,7 +815,7 @@ class Gui:
         """The car's changes up per way of changing, from the database:
         queried again only when the car or the session changes or the tab
         is shown, never just because a second went by."""
-        stamp = (key, self.shift_learner.profile, self.shift_learner.sessions_ended, self.telemetry_tab_shown)
+        stamp = (key, self.shift_learner.profile, self.shift_learner.history_changed, self.telemetry_tab_shown)
         if self._methods_cache is None or self._methods_cache[0] != stamp:
             self._methods_cache = (stamp, self.shift_learner.method_shifts(key))
         return self._methods_cache[1]

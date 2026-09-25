@@ -1362,9 +1362,9 @@ a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
 - [ ] Web tests
 
 ### Step C
-- [ ] Drive-log thread; SQLite writes off the listener lock
-- [ ] Schema v2, migration with backup, reader/writer APIs, `forget_model`
-- [ ] Car keys `<game>/<id>` with adoption; stage keys with tolerance
+- [x] Drive-log thread; SQLite writes off the listener lock (`drive_log.DriveLog`: events are a function and its arguments run on the thread with the only writer; batches committed every 5 s or when an event asks; `threaded=False` runs them inline for tests and replays, and a test checks both write the same). The learner lock is an `RLock` held only for in-memory work and model copies; the listener reads a car's model once when it first sees it (read-only connection), never writes. Sessions end after `SESSION_GAP` without telemetry (`ShiftLearner.tick()` from the listener's idle loop), not at the 2 s idle; the GUI's refresh counter is `history_changed`. `snapshot()` returns what the drive-log thread published (`publish()` once a second) or works it out from a copy
+- [x] Schema v2, migration with backup, reader/writer APIs, `forget_model` (`telemetry_store.py`, `tests/test_store.py`). As built: the Codemasters rescale moved here and works on the model JSON; the migration rebuilds `cars`, `sessions`, `shifts` with `foreign_keys` off in one transaction; `TRACE_CHANNELS` gains `x, y, z` (topology and elevation re-run from traces); a car only glimpsed (no gear learnt, no session left) gets no row
+- [x] Car keys `<game>/<id>` with adoption; stage keys with tolerance (`legacy_keys()`: `forza/…` → `forza-fh|fm/…`, `codemasters/…` → `dirt|wrcg/…`, found by the reader and renamed by the writer on first save; `match_stage()` for measured (length, start z) keys, `match_cell()` for start cells)
 - [x] `Sample` v2 fields for Forza, Codemasters, EA WRC (done in Step A with the decoders; see the Step A note)
 - [ ] Sessions, runs, segment features, corners, traces
 - [ ] Shift learner §8.1 items 1–7, 10; shifts with downshifts and flags

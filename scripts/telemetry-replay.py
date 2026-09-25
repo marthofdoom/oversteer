@@ -26,9 +26,9 @@ from oversteer.telemetry_capture import CaptureWriter, read_capture, replay  # n
 from oversteer.shift_learner import ShiftLearner  # noqa: E402
 
 
-def learn(records, db, profile):
+def learn(records, db, profile, started=None):
     learner = ShiftLearner(db, profile=profile)
-    telemetry = replay(records, learner)
+    telemetry = replay(records, learner, started=started)
     print("%d packets of unknown sizes: %s" % (len(telemetry._unknown_sizes), sorted(telemetry._unknown_sizes))
           if telemetry._unknown_sizes else "every packet decoded")
     for key, name in learner.known_cars():
@@ -93,10 +93,10 @@ def main():
     elif args.send:
         send(records, args.send, args.realtime)
     elif args.db:
-        learn(records, args.db, args.profile)
+        learn(records, args.db, args.profile, meta.get('started'))
     else:
         with tempfile.TemporaryDirectory() as folder:
-            learn(records, os.path.join(folder, 'telemetry.db'), args.profile)
+            learn(records, os.path.join(folder, 'telemetry.db'), args.profile, meta.get('started'))
 
 
 main()

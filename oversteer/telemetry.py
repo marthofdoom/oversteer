@@ -273,6 +273,8 @@ class Telemetry:
             except socket.timeout:
                 now = time.monotonic()
                 self.check_idle(now)
+                if self.learner is not None:
+                    self.learner.tick(now)
                 if not self.heard and now >= self._probe_at:
                     self._probe_at = now + PROBE_EVERY
                     self.probe_other_port()
