@@ -1400,6 +1400,19 @@ under Step D. The GTK code was exercised off-screen (the tab built with
 a stub controller under GDK's broadway backend, the gui's web methods on
 a stub), never by running the app.
 
+Run 4 (in progress): the build prompt's "Step D" is "GTK Telemetry tab
+integration, preferences (web on/off, port), docs/README/CHANGELOG +
+tests", the order before the review re-cut the steps. Most of it came
+with run 3 (the tab sections, the web preferences); what §12 still
+lacks is built now: the shift table's best-change range (± band) with
+its rows built in `telemetry_view` (tested), recording raw telemetry
+from the app (this document's Step D item 1: the switch, the folder,
+its size and cap, the labels' sidecar), the telemetry preferences read
+and written by one tested function, a second encoder in `tests/sim.py`
+with an end-to-end test, and the README section. Bridge v3, BeamNG
+MotionSim and the measured detectors (Step D items 2–5) are not part of
+this run: they need a Windows toolchain run or the §6.3 captures.
+
 ### Step B
 - [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
 - [x] Web preferences and Settings controls, bound URLs (`telemetry_web`, `telemetry_web_port`, `telemetry_web_bind` in `config.ini`; "Every network" / "This computer only"; the addresses from `/proc/net/fib_trie`; the notes of §11 and the firewall hint until the page has been opened from another device, `telemetry_view.web_status()`)
