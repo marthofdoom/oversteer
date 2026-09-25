@@ -48,6 +48,9 @@ RATIO_MIN = 20
 RATIO_TOLERANCE = 0.04           # a sample off its gear's ratio by more is spin or a jump
 RETUNE_SAMPLES = 90              # part-throttle samples agreeing on a new ratio: the gear was re-tuned
 RETUNE_SPREAD = 0.015
+RETUNE_WINDOW = 60.0             # seconds on the move into a session in which a new ratio is believed...
+RETUNE_DISTANCE = 2000.0         # ...or metres: setups change in menus, which end sessions
+RETUNE_SPEED_BIN = 5.0           # m/s; a new ratio must be seen at two speeds at least
 SHIFTS_KEEP = 40
 FULL_THROTTLE = 0.95
 BRAKE_POWER = 0.05               # braking at least this much: no power sample
@@ -163,7 +166,12 @@ class CarModel:
         self.drag = (DRAG_C0, DRAG_C2)
         self.game = None                 # Sample.game
         self.car_class = None
-        self.drivetrain = None           # 'fwd', 'rwd', 'awd' where the game says
+        self.drivetrain = None           # 'fwd', 'rwd', 'awd': the game's word, or learnt (DrivenWheels)
+        self.drivetrain_votes = {}       # DrivenWheels: which axle stayed locked to the engine in wheelspin
+        self.wheel_check = []            # wheel speed / car speed at low slip: are the wheel speeds right?
+        self.wheels_ok = None
+        self.tyre_radius = {}            # wheel index -> [m], Forza: speed / wheel rotation at low slip
+        self.radii = None                # their medians, once each has enough
 
     # -- persistence --
 
@@ -185,11 +193,15 @@ class CarModel:
             'retuned': {str(g): v for g, v in self.retuned.items()},
             'boost_hold': self.boost_hold,
             'drag': list(self.drag),
+            'drivetrain': self.drivetrain,
+            'drivetrain_votes': dict(self.drivetrain_votes),
+            'wheel_check': list(self.wheel_check),
+            'tyre_radius': {str(i): list(v) for i, v in self.tyre_radius.items()},
         }
 
     def copy(self):
         car = CarModel.from_dict(self.to_dict())
-        car.car_class, car.drivetrain = self.car_class, self.drivetrain
+        car.car_class = self.car_class
         return car
 
     @classmethod
@@ -216,6 +228,12 @@ class CarModel:
         drag = data.get('drag')
         car.drag = (float(drag[0]), float(drag[1])) if drag else (DRAG_C0, DRAG_C2)
         car.game = data.get('game')
+        car.drivetrain = data.get('drivetrain')
+        car.drivetrain_votes = {k: int(v) for k, v in (data.get('drivetrain_votes') or {}).items()}
+        car.wheel_check = [float(x) for x in data.get('wheel_check') or []][-WHEEL_CHECK:]
+        car.tyre_radius = {int(i): [float(x) for x in v][-WHEEL_CHECK:] for i, v in (data.get('tyre_radius') or {}).items()}
+        if len(car.tyre_radius) == 4 and all(len(v) >= WHEEL_CHECK for v in car.tyre_radius.values()):
+            car.radii = tuple(_median(car.tyre_radius[i]) for i in range(4))
         return car
 
     def set_limiter(self, rpm, source):
@@ -429,6 +447,16 @@ class CarModel:
         return lines
 
 
+def classify_tune(old, new, changed):
+    """What changed between two gearings ({gear: rpm per m/s}), given the
+    gears seen to change: 'final-drive' when two or more changed by the
+    same factor (within 1 %), else 'gears:<list>'."""
+    factors = [new[g] / old[g] for g in changed if g in old and old[g]]
+    if len(factors) >= 2 and max(factors) / min(factors) <= 1.01:
+        return 'final-drive'
+    return 'gears:' + ','.join(str(g) for g in changed)
+
+
 SHIFT_PRESS_WINDOW = 0.6         # a shifter/wheel button this long before a change made it
 PRESS_METHODS = {'gear': 'h-pattern', 'sequential': 'sequential', 'paddle': 'paddles'}
 METHODS = ('h-pattern', 'sequential', 'paddles')
@@ -446,6 +474,98 @@ def shift_method(press, left_at, engaged_at, via_neutral):
         if method is not None:
             return method
     return 'h-pattern' if via_neutral else None
+
+
+WHEEL_CHECK = 60                 # clean samples of wheel against car speed before wheel speeds are believed
+WHEEL_AGREE = 0.02               # the wheels' median within this of the car's speed at low slip
+WHEEL_EVERY = 20                 # samples between working the medians out again
+SPIN_EVIDENCE = 0.03             # a wheel this much faster than the car: which ones drive shows
+DRIVETRAIN_VOTES = 60            # such samples before the driven wheels are decided
+DRIVETRAIN_SHARE = 0.8
+
+
+class DrivenWheels:
+    """The driven wheels' speed, where the game sends wheel speeds (or
+    Forza's wheel rotation, once each tyre's radius is learnt) and they
+    agree with the car's own speed when nothing slips: a unit or sign
+    the research could not confirm must not become a ratio. Which wheels
+    drive comes from the game, or from which axle's speed stays locked to
+    the engine while the wheels spin. What it learns lives in the
+    CarModel, so it carries over sessions."""
+
+    def __init__(self):
+        self._count = 0
+
+    def feed(self, car, sample, gear, rpm, speed, known, low_slip, flat_out):
+        """The driven wheels' mean speed (m/s), or None."""
+        speeds = self._speeds(car, sample, speed, low_slip)
+        if speeds is None:
+            return None
+        if low_slip:
+            self._count += 1
+            car.wheel_check.append(sorted(speeds)[1] / speed)       # a middle wheel: corners spread them
+            del car.wheel_check[:-WHEEL_CHECK]
+        if car.wheels_ok is None or (low_slip and self._count % WHEEL_EVERY == 0):
+            car.wheels_ok = (len(car.wheel_check) >= WHEEL_CHECK
+                             and abs(_median(car.wheel_check) - 1.0) <= WHEEL_AGREE)
+        if not car.wheels_ok:
+            return None
+        drivetrain = car.drivetrain
+        if drivetrain is None:
+            drivetrain = self._vote(car, speeds, rpm, speed, known, flat_out)
+            if drivetrain is None:
+                return None
+        wheels = DRIVEN[drivetrain]
+        return sum(speeds[i] for i in wheels) / len(wheels)
+
+    def _speeds(self, car, sample, speed, low_slip):
+        if sample.wheel_speed is not None:
+            return [abs(v) for v in sample.wheel_speed]
+        if sample.wheel_rot is None:
+            return None
+        rot = [abs(w) for w in sample.wheel_rot]
+        if low_slip and min(rot) > 1.0:
+            for i, w in enumerate(rot):
+                radii = car.tyre_radius.setdefault(i, [])
+                radii.append(speed / w)
+                del radii[:-WHEEL_CHECK]
+            if car.radii is None or len(car.tyre_radius[0]) % WHEEL_EVERY == 0:
+                if all(len(car.tyre_radius.get(i, ())) >= WHEEL_CHECK for i in range(4)):
+                    car.radii = tuple(_median(car.tyre_radius[i]) for i in range(4))
+        if car.radii is None:
+            return None
+        return [w * r for w, r in zip(rot, car.radii)]
+
+    @staticmethod
+    def _vote(car, speeds, rpm, speed, known, flat_out):
+        """Wheels spinning at full throttle: the axle whose speed still
+        matches the engine's through the gear ratio is the driven one."""
+        if known is None or not flat_out or max(speeds) / speed - 1.0 < SPIN_EVIDENCE:
+            return None
+        votes = car.drivetrain_votes
+        for name, wheels in DRIVEN.items():
+            axle = sum(speeds[i] for i in wheels) / len(wheels)
+            if axle > 0 and abs(rpm / axle - known) <= known * 0.01:
+                votes[name] = votes.get(name, 0) + 1
+        votes['n'] = votes.get('n', 0) + 1
+        if votes['n'] < DRIVETRAIN_VOTES:
+            return None
+        share = {name: votes.get(name, 0) / votes['n'] for name in DRIVEN}
+        front, rear = share['fwd'] >= DRIVETRAIN_SHARE, share['rwd'] >= DRIVETRAIN_SHARE
+        if share['awd'] >= DRIVETRAIN_SHARE and front == rear:
+            found = 'awd'
+        elif front and not rear:
+            found = 'fwd'
+        elif rear and not front:
+            found = 'rwd'
+        else:
+            if votes['n'] >= DRIVETRAIN_VOTES * 4:
+                car.drivetrain_votes = {}            # no answer: start the count again
+            return None
+        logging.info("shift learner: %s drives its %s wheels (%d samples of wheelspin)", car.key,
+                     {'fwd': 'front', 'rwd': 'rear', 'awd': 'four'}[found], votes['n'])
+        car.drivetrain = found
+        return found
 
 
 class ShiftLearner:
@@ -478,6 +598,10 @@ class ShiftLearner:
         self._session_rows = {}             # session number -> (sessions.id, cars.id); drive-log thread only
         self._last_feed = None              # monotonic time of the last packet fed
         self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
+        self._wheels = DrivenWheels()
+        self._session_moving = 0.0          # s on the move this session, for the re-tune window
+        self._session_distance = 0.0        # m
+        self._retuned = set()               # gears re-tuned this session
         self.session_limiter_time = 0.0
         self.history_changed = 0            # counts up when history readers should query again
         self._loaded = None                 # load_snapshot(): ((profile, key, updated), snapshot)
@@ -593,6 +717,7 @@ class ShiftLearner:
         self._sessions += 1
         self.session = self._sessions
         self.session_limiter_time = 0.0
+        self._session_moving, self._session_distance, self._retuned = 0.0, 0.0, set()
         if self.log is not None:
             self.log.post(self._write_session_start, self.session, self.profile, self.car, self.wall(now),
                           sample.track, sample.stage)
@@ -614,20 +739,44 @@ class ShiftLearner:
             self.history_changed += 1
             return
         self._save_locked(force=True)
-        self.log.post(self._write_session_end, number, self.wall(self._last_feed), self.session_limiter_time)
+        car = self.car
+        ratios = {g: car.ratio(g) for g in car.gears()} if car is not None else {}
+        radius = sum(car.radii) / 4 if car is not None and car.radii else None
+        self.log.post(self._write_session_end, number, self.wall(self._last_feed), self.session_limiter_time,
+                      ratios, set(self._retuned), radius)
 
-    def _write_session_end(self, number, ended, limiter_time):
+    def _write_session_end(self, number, ended, limiter_time, ratios, retuned, radius):
         row = self._session_rows.pop(number, None)
         if row is not None:
             store = self.log.store
-            session = row[0]
+            session, car = row
+            tune = self._write_tune(car, ended, ratios, retuned, radius)
             store.update_session(session, ended=ended, limiter_time=limiter_time,
-                                 shifter=store.session_shifter(session))
+                                 shifter=store.session_shifter(session), tune=tune)
             if store.drop_session_if_empty(session):
                 store.drop_car_if_empty(row[1])
             store.commit()
         self.history_changed += 1
         return True
+
+    def _write_tune(self, car, at, ratios, retuned, radius):
+        """Drive-log thread: the tune (one gearing) this session was driven
+        on. A gear re-tuned in the session opens a new one; otherwise the
+        current one is touched and takes gears learnt since."""
+        if len(ratios) < 2:
+            return None
+        store = self.log.store
+        current = store.current_tune(car)
+        if current is None:
+            return store.add_tune(car, at, ratios, 'first', radius)
+        tune, known = current
+        changed = sorted(g for g in retuned if g in ratios)
+        if changed:
+            return store.add_tune(car, at, ratios, classify_tune(known, ratios, changed), radius)
+        merged = dict(known)
+        merged.update({g: r for g, r in ratios.items() if g not in known})
+        store.touch_tune(tune, at, merged, radius)
+        return tune
 
     def save(self):
         """End the session and write everything (quitting, a profile
@@ -848,6 +997,10 @@ class ShiftLearner:
             self._flat_since = now
         if gear is None or speed is None:
             return
+        if previous is not None and speed > MIN_SPEED:
+            dt = min(0.2, max(0.0, now - previous[0]))
+            self._session_distance += speed * dt
+            self._session_moving += dt
         recent = self._recent
         if gear != self._gear:
             # Where a change happened: the peak rpm and the most throttle
@@ -904,23 +1057,31 @@ class ShiftLearner:
         # off the brake, at a steady speed. Full throttle on gravel spins
         # the wheels a steady few percent, which would look like a ratio of
         # its own and then reject every clean sample as off-ratio for good.
+        # Where the driven wheels' speed is known (and checked against the
+        # car's), rpm over it is the gearing itself, which spin cannot
+        # distort: any throttle will do.
         brake = sample.brake
-        low_slip = (throttle is not None and throttle < LOW_SLIP_THROTTLE
-                    and (brake <= BRAKE_OFF if brake is not None else throttle >= COASTING))
+        brake_off = brake <= BRAKE_OFF if brake is not None else (throttle is not None and throttle >= COASTING)
+        low_slip = throttle is not None and throttle < LOW_SLIP_THROTTLE and brake_off
         if low_slip:
             accel = self._acceleration()
             low_slip = accel is not None and abs(accel) <= STEADY_ACCEL
+        wheels = self._wheels.feed(car, sample, gear, rpm, speed, known, low_slip, flat_out)
+        if wheels is not None and brake_off:
+            learnt, clean = rpm / wheels, True
+        else:
+            learnt, clean = ratio, low_slip
         on_ratio = known is not None and abs(ratio - known) <= known * RATIO_TOLERANCE
-        if low_slip and (known is None or on_ratio):
+        if clean and (known is None or abs(learnt - known) <= known * RATIO_TOLERANCE):
             samples = car.ratios.setdefault(gear, [])
-            samples.append(ratio)
+            samples.append(learnt)
             del samples[:-RATIO_KEEP]
             self._dirty = True
             self._off_ratio.pop(gear, None)
-        elif low_slip:
+        elif clean:
             # Off the gear's ratio without spin to blame: the gear was
             # re-tuned, if it stays that way
-            self._check_retune(car, gear, ratio)
+            self._check_retune(car, gear, learnt, speed, now, wheels is not None)
             return
         if not on_ratio:
             # Wheelspin or a jump, or a gear not learnt yet: no power from it
@@ -1024,20 +1185,36 @@ class ShiftLearner:
         if row is not None:
             self.log.store.add_shift(row[0], None, shift)
 
-    def _check_retune(self, car, gear, ratio):
-        off = self._off_ratio.setdefault(gear, [])
-        off.append(ratio)
-        del off[:-RETUNE_SAMPLES]
-        if len(off) < RETUNE_SAMPLES:
+    def _check_retune(self, car, gear, ratio, speed, now, from_wheels):
+        """A clean sample off the gear's ratio. Setups change in menus, which
+        end sessions in every game, so a new ratio is only believed in
+        the first RETUNE_WINDOW seconds on the move or RETUNE_DISTANCE
+        metres of a session, whichever ends first, from samples agreeing within RETUNE_SPREAD over at least
+        two speeds RETUNE_SPEED_BIN apart. A shorter ratio (more rpm per
+        m/s) is what steady wheelspin also looks like, so it needs twice
+        the samples unless the driven wheels' speed gave them."""
+        if self._session_moving > RETUNE_WINDOW or self._session_distance > RETUNE_DISTANCE:
             return
-        middle = _median(off)
-        if all(abs(r - middle) <= middle * RETUNE_SPREAD for r in off):
-            car.ratios[gear] = list(off)
+        needed = RETUNE_SAMPLES
+        if ratio > car.ratio(gear) and not from_wheels:
+            needed *= 2
+        off = self._off_ratio.setdefault(gear, [])
+        off.append((ratio, speed))
+        del off[:-RETUNE_SAMPLES * 2]
+        recent = off[-needed:]
+        if len(recent) < needed:
+            return
+        ratios = [r for r, _ in recent]
+        middle = _median(ratios)
+        speeds = {int(v // RETUNE_SPEED_BIN) for _, v in recent}
+        if len(speeds) >= 2 and all(abs(r - middle) <= middle * RETUNE_SPREAD for r in ratios):
+            car.ratios[gear] = ratios
             car.upshifts.pop(gear, None)             # shifts with the old gearing
             car.upshifts.pop(gear - 1, None)
-            car.retuned[gear] = time.time()
+            car.retuned[gear] = self.wall(now)
             car.top_seen = 0.0                       # where the data ends, with the old gearing
             self._off_ratio.pop(gear, None)
+            self._retuned.add(gear)
             self._dirty = True
             logging.info("shift learner: %s gear %d re-tuned (%.1f rpm per m/s)", car.key, gear, middle)
 

@@ -55,15 +55,82 @@ def test_wheelspin_does_not_teach_power(tmp_path):
     assert learner.car.power == {}
 
 
+def steady(learner, t, gear, ratio, speeds, count, throttle=0.3, wheels=None):
+    """Part throttle at steady speeds (spread over `speeds`), revs at `ratio`."""
+    for i in range(count):
+        t += 1 / 60
+        speed = speeds[i * len(speeds) // count]
+        sample = Sample(ratio * speed, LIMITER, gear=gear, speed=speed, car='test-car')
+        if wheels is not None:
+            sample.wheel_speed = wheels(speed)
+        learner.feed(t, sample, LIMITER, throttle, 0.0)
+    return t
+
+
 def test_a_retuned_gear_is_relearnt(tmp_path):
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     exits(learner)
-    t = 9000.0
-    for i in range(120):                             # cruising in a longer 3rd
-        t += 1 / 60
-        learner.feed(t, Sample(230.0 * 25, LIMITER, gear=3, speed=25.0, car='test-car'), LIMITER, 0.3, 0.0)
+    t = steady(learner, 9000.0, 3, 230.0, [22.0], 120)        # a longer 3rd, at one speed only
+    assert 3 not in learner.car.retuned
+    steady(learner, t, 3, 230.0, [22.0, 28.0], 120)            # and at another
     assert abs(learner.car.ratio(3) - 230.0) < 1 and 3 in learner.car.retuned
     assert learner.car.top_seen == 0.0                 # where the data ended belonged to the old gearing
+
+
+def test_a_steady_spin_is_not_a_retune(tmp_path):
+    """Part throttle on snow spins the wheels a steady 6 %: that looks like a
+    shorter gear, which needs twice the samples, and only early in a
+    session (setups change in menus)."""
+    from oversteer.shift_learner import RETUNE_SAMPLES, RETUNE_WINDOW
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)
+    t = steady(learner, 9000.0, 3, RATIOS[3] * 1.06, [22.0, 28.0], RETUNE_SAMPLES * 2 - 10)
+    assert learner.car.retuned == {}
+    t = steady(learner, t, 3, RATIOS[3], [22.0, 28.0], int(RETUNE_WINDOW * 60))        # a minute's driving
+    t = steady(learner, t, 3, RATIOS[3] * 1.06, [22.0, 28.0], RETUNE_SAMPLES * 4)
+    assert learner.car.retuned == {} and abs(learner.car.ratio(3) - RATIOS[3]) < 1
+
+
+def test_driven_wheels_see_through_spin(tmp_path):
+    """DiRT sends wheel speeds: once they agree with the car's speed, and
+    full-throttle spin shows the rear axle stays locked to the engine,
+    the ratio comes from the rear wheels at any throttle."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)                                             # ratios from part throttle
+    same = lambda v: (v, v, v, v)                              # noqa: E731
+    t = steady(learner, 9000.0, 3, RATIOS[3], [22.0, 28.0], 120, wheels=same)
+    assert learner.car.wheels_ok and learner.car.drivetrain is None
+    learner.car.ratios[3] = learner.car.ratios[3][:30]
+    power = {k: len(v) for k, v in learner.car.power_g.items()}
+    # flat out, the rears 8 % ahead of the car: the revs follow the rears
+    spin = lambda v: (v, v, v * 1.08, v * 1.08)                # noqa: E731
+    steady(learner, t, 3, RATIOS[3] * 1.08, [22.0, 23.0, 24.0], 200, throttle=1.0, wheels=spin)
+    assert learner.car.drivetrain == 'rwd'
+    assert len(learner.car.ratios[3]) > 100 and abs(learner.car.ratio(3) - RATIOS[3]) < 0.5
+    assert learner.car.retuned == {}
+    assert {k: len(v) for k, v in learner.car.power_g.items()} == power                # spin: still no power
+
+
+def test_tunes(tmp_path):
+    """A tune is one gearing: the first, then a new one when gears change;
+    two gears changed by the same factor are the final drive."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner, runs=1)
+    learner.save()
+    car = learner._reader().car('_no_profile', 'test-car')['id']
+    tunes = learner._reader().tunes(car)
+    assert [t['change'] for t in tunes] == ['first'] and abs(tunes[0]['ratios'][3] - RATIOS[3]) < 0.5
+    t = steady(learner, 5000.0, 3, RATIOS[3] * 0.9, [22.0, 28.0], 150)
+    t = steady(learner, t, 4, RATIOS[4] * 0.9, [22.0, 28.0], 150)
+    learner.save()
+    tunes = learner._reader().tunes(car)
+    assert [t['change'] for t in tunes] == ['first', 'final-drive']
+    assert abs(tunes[1]['ratios'][4] - RATIOS[4] * 0.9) < 0.5
+    session = learner.history('test-car')[0]
+    assert learner._reader().session(session['id'])['tune'] == tunes[1]['id']
+    steady(learner, t + 1000.0, 2, RATIOS[2] * 1.1, [12.0, 18.0], 260)      # shorter: twice the samples
+    learner.save()
+    assert [t['change'] for t in learner._reader().tunes(car)] == ['first', 'final-drive', 'gears:2']
 
 
 def test_spin_first_on_gravel(tmp_path):
@@ -409,3 +476,33 @@ def test_flat_out_near_the_limiter_and_down_a_gear_is_a_miss(tmp_path):
     gears(learner, t, [(0.1, 2)] * 5, rpm=LIMITER * 0.7)
     assert written(learner) == [(3, 2, 'down', 'skip')]
     assert learner.car.upshifts == {}                        # not a change up to learn from
+
+
+def test_wheel_speeds_in_the_wrong_unit_are_not_believed(tmp_path):
+    """Wheel speeds that disagree with the car's at low slip (km/h, say) are
+    never used for a ratio."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)
+    kmh = lambda v: (v * 3.6,) * 4                             # noqa: E731
+    steady(learner, 9000.0, 3, RATIOS[3], [22.0, 28.0], 300, wheels=kmh)
+    assert learner.car.wheels_ok is False and abs(learner.car.ratio(3) - RATIOS[3]) < 0.5
+
+
+def test_forza_tyre_radius(tmp_path):
+    """Forza sends wheel rotation (rad/s): the radius is learnt from speed at
+    low slip, and the tune shows it."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t = 0.0
+    for gear in (2, 3):
+        for i in range(300):
+            t += 1 / 60
+            speed = 15.0 + 10.0 * (i // 150)
+            sample = Sample(RATIOS[gear] * speed, LIMITER, gear=gear, speed=speed, car='test-car')
+            sample.drivetrain = 'awd'
+            sample.wheel_rot = (speed / 0.33,) * 4
+            learner.feed(t, sample, LIMITER, 0.3, 0.0)
+    assert learner.car.radii is not None and abs(learner.car.radii[0] - 0.33) < 1e-6
+    learner.save()
+    reader = learner._reader()
+    tune = reader.tunes(reader.car('_no_profile', 'test-car')['id'])[0]
+    assert abs(tune['tyre_radius'] - 0.33) < 1e-6
