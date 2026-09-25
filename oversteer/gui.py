@@ -785,7 +785,7 @@ class Gui:
         telemetry = self.telemetry
         sample = telemetry.live if telemetry is not None else None
         if telemetry is None:
-            live = _("Turn on the rev lights to read game telemetry (and learn from it).")
+            live = _("Turn on the rev lights (in Settings below) to read game telemetry and learn from it.")
         elif sample is None:
             live = _("Waiting for telemetry on UDP {}.").format(telemetry.port)
         else:

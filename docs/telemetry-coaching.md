@@ -1300,7 +1300,7 @@ checklist below.
 Design revised after the independent review (§3.2): done.
 
 ### Step A
-- [ ] Tab order (shift table first, Settings expander); README fixed
+- [x] Tab order (car bar, shift table, coaching, live line, then a collapsed "Settings: rev lights and telemetry" expander holding the rev light rows and the launch options); README fixed
 - [x] Forza gear 11, DiRT reverse; OutGauge reverse and Forza `IsRaceOn = 0` tests (`tests/test_formats.py`)
 - [x] Codemasters rpm units (three branches, `codemasters_unit()`) and rescale of stored cars from the key's max (`rescale_codemasters()`, `user_version` 1, `telemetry.db.v0.bak`)
 - [x] Ratios from low-slip samples (throttle < 0.5, brake ≤ 0.02 or a little throttle when no brake is sent, |a| ≤ 2 m/s²); `top_seen` reset on re-tune; spin-first test. Driven-wheel speed as the ratio source waits for `Sample` v2 wheel speeds (Step C)

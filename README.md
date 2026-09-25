@@ -48,17 +48,23 @@ __Use at your own risk. Suggestions, bugs and pull requests welcome.__
   <img src="data/readme-devices.png">
 </p>
 
-**Rev lights from game telemetry** (Tools tab):
+**Rev lights and shift coaching from game telemetry** (Telemetry tab):
 
 - The wheel's LEDs fill with engine RPM and flash at the shift point, which is
-  set as a percentage of the redline or as an RPM figure, per profile.
+  set as a percentage of the redline, of the limiter learnt at each launch, or
+  as an RPM figure, per profile. The switches are under the tab's Settings.
+- Oversteer learns each car's gearing and power curve as you drive and shows
+  the best upshift for every gear next to where you change up (per way of
+  changing: H-pattern, sequential, paddles), with coaching; the rev lights can
+  use the learnt shift points. Telemetry arrives on UDP 5310.
 - Reads Forza Horizon / Motorsport "Data Out", BeamNG / Live for Speed
   OutGauge, and the Codemasters layout used by DiRT Rally 2.0, DiRT 4 and
   WRC Generations.
 - Games with no UDP telemetry at all — Assetto Corsa, Competizione and Rally —
   are covered by `oversteer-run`, a Steam launch-options wrapper that runs a
   small helper inside the game's Proton prefix and forwards its shared-memory
-  telemetry. The Tools tab shows the exact launch options with a Copy button.
+  telemetry. The Telemetry tab's Settings show the exact launch options with a
+  Copy button.
 
 **Hotkeys while you drive** (Hotkeys tab):
 
@@ -343,10 +349,11 @@ lights work anyway:
 `oversteer-run %command%`
 
 It runs the game untouched and starts a small helper next to it, inside the
-same prefix, that forwards the engine RPM to Oversteer over UDP. The Tools tab
-shows the exact string for your installation with a Copy button. Games that
-send UDP telemetry themselves (Forza, BeamNG, DiRT, WRC) need nothing but the
-port set in the same place.
+same prefix, that forwards the engine RPM to Oversteer over UDP. The Telemetry
+tab's Settings show the exact string for your installation with a Copy button.
+Games that send UDP telemetry themselves (Forza, BeamNG, DiRT, WRC) need
+nothing but the port set in the same place: 5310 by default (Forza Horizon 6
+keeps 5200–5300 for itself).
 
 ## Known issues
 

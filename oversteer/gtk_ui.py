@@ -784,37 +784,11 @@ class GtkUi:
         return row, switch
 
     def _build_telemetry_page(self):
-        """The Telemetry tab: the rev lights (moved from Tools), what is
-        being learnt about the car being driven, and coaching."""
+        """The Telemetry tab: what has been learnt about the car (its shift
+        table first), coaching, the telemetry arriving now, and the rev
+        light settings (moved from Tools) in an expander at the bottom."""
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         page.set_border_width(12)
-
-        settings = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        settings.get_style_context().add_class('frame')
-        for widget in (self.rev_leds, self.launch_options):
-            row = self._row_of(widget)
-            if row is not None:
-                row.get_parent().remove(row)
-                settings.add(row)
-        row, self.rev_leds_launch = self._switch_row(
-            _("Learn the limiter at each launch"),
-            _("A rally stage starts with the clutch in, handbrake up and throttle floored, which holds "
-              "the engine on its limiter. Held for a second, that RPM becomes the car's maximum for "
-              "the % shift point, whatever the game reports. Learnt again at every start."),
-            lambda state: self.controller.model.set_rev_leds_launch(state))
-        settings.insert(row, 1)
-        row, self.rev_leds_learnt = self._switch_row(
-            _("Shift lights at the learnt best upshift for each gear"),
-            _("Once Oversteer has learnt the car's power curve and gearing, the lights complete at the "
-              "rpm where the next gear starts pulling harder, gear by gear. Until then, and for gears "
-              "it doesn't know yet, the shift point above is used."),
-            lambda state: self.controller.model.set_rev_leds_learnt(state))
-        settings.insert(row, 2)
-        page.pack_start(settings, False, False, 0)
-
-        self.telemetry_live = Gtk.Label(xalign=0)
-        self.telemetry_live.set_selectable(True)
-        page.pack_start(self.telemetry_live, False, False, 0)
 
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         bar.pack_start(Gtk.Label(label=_("Car")), False, False, 0)
@@ -848,6 +822,39 @@ class GtkUi:
         self.telemetry_advice.set_line_wrap(True)
         self.telemetry_advice.set_selectable(True)
         page.pack_start(self.telemetry_advice, False, False, 0)
+
+        self.telemetry_live = Gtk.Label(xalign=0)
+        self.telemetry_live.set_selectable(True)
+        page.pack_start(self.telemetry_live, False, False, 0)
+
+        settings = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        settings.get_style_context().add_class('frame')
+        for widget in (self.rev_leds, self.launch_options):
+            row = self._row_of(widget)
+            if row is not None:
+                row.get_parent().remove(row)
+                settings.add(row)
+        row, self.rev_leds_launch = self._switch_row(
+            _("Learn the limiter at each launch"),
+            _("A rally stage starts with the clutch in, handbrake up and throttle floored, which holds "
+              "the engine on its limiter. Held for a second, that RPM becomes the car's maximum for "
+              "the % shift point, whatever the game reports. Learnt again at every start."),
+            lambda state: self.controller.model.set_rev_leds_launch(state))
+        settings.insert(row, 1)
+        row, self.rev_leds_learnt = self._switch_row(
+            _("Shift lights at the learnt best upshift for each gear"),
+            _("Once Oversteer has learnt the car's power curve and gearing, the lights complete at the "
+              "rpm where the next gear starts pulling harder, gear by gear. Until then, and for gears "
+              "it doesn't know yet, the shift point above is used."),
+            lambda state: self.controller.model.set_rev_leds_learnt(state))
+        settings.insert(row, 2)
+        self.telemetry_settings = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.telemetry_settings.set_margin_top(8)
+        self.telemetry_settings.pack_start(settings, False, False, 0)
+        expander = Gtk.Expander()
+        expander.set_label_widget(Gtk.Label(label=_("Settings: rev lights and telemetry")))
+        expander.add(self.telemetry_settings)
+        page.pack_start(expander, False, False, 0)
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
