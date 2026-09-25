@@ -173,3 +173,16 @@ def test_calibration_versions(tmp_path):
     assert store.save_calibration('dirt', 'surface', {'classes': ['gravel']}, 8, 160, 0.93, True) == 2
     calibration = store.calibration('dirt', 'surface')
     assert calibration['deployed'] and calibration['version'] == 2 and calibration['model'] == {'classes': ['gravel']}
+
+
+def test_a_session_is_labelled_run_by_run(tmp_path):
+    from oversteer.telemetry_store import open_store
+    store = open_store(str(tmp_path / 't.db'))
+    car = store.car_id('rally', 'eawrc/17', 'eawrc')
+    store.begin()
+    session = store.start_session('rally', car, 'eawrc', 1.0)
+    for n in (1, 2):
+        store.start_run(session, n, float(n), 'eawrc:4:12')
+    assert store.label_session(session, surface='gravel', shifter='h-pattern', at=5.0) == 2
+    store.commit()
+    assert [label['surface'] for _, label in store.labels_for('eawrc')] == ['gravel', 'gravel']

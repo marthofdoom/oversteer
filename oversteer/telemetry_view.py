@@ -1,0 +1,178 @@
+"""What the Telemetry tab shows, as strings: built here from snapshots and
+database rows so it can be tested without a display; gtk_ui only places
+them (docs/telemetry-coaching.md, section 12)."""
+
+import time
+from locale import gettext as _
+
+DISCIPLINES = {
+    'rally-stage': _("Rally stage"), 'hillclimb': _("Hillclimb"), 'circuit': _("Circuit"),
+    'rallycross': _("Rallycross"), 'drift': _("Drift"), 'free-roam': _("Free roam"),
+    'time-attack': _("Time attack"),
+}
+SURFACES = {'tarmac': _("tarmac"), 'gravel': _("gravel"), 'snow': _("snow"), 'ice': _("ice"),
+            'loose-low': _("snow or wet gravel")}
+METHODS = {'h-pattern': _("H-pattern"), 'sequential': _("sequential"), 'paddles': _("paddles"),
+           'auto': _("automatic"), 'mixed': _("mixed shifting")}
+KINDS = {'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': ''}
+CHANGES = {'first': _("first seen"), 'final-drive': _("final drive changed"), 'user': _("set by you")}
+
+
+def surface_name(value):
+    if value is None or value == 'unknown':
+        return None
+    if value.startswith('mixed:'):
+        return _("mixed ({})").format(', '.join(SURFACES.get(s, s) for s in value[6:].split(',')))
+    return SURFACES.get(value, value)
+
+
+def _confidence(conf):
+    return ' ({})'.format(conf) if conf else ''
+
+
+def context_line(session, runs, stage):
+    """(line, evidence) about the most recent session: discipline and
+    surface with their confidence and the stage's prior, the stage, the
+    tune change and the shifter; the evidence sentences of its runs."""
+    if session is None:
+        return _("No session recorded yet."), []
+    parts = []
+    discipline = session.get('discipline')
+    if discipline and discipline != 'unknown':
+        parts.append(DISCIPLINES.get(discipline, discipline) + _confidence(session.get('discipline_conf')))
+    else:
+        parts.append(_("discipline unknown"))
+    surface = surface_name(session.get('surface'))
+    parts.append(surface + _confidence(session.get('surface_conf')) if surface else _("surface unknown"))
+    prior = surface_name(stage.get('surface_prior')) if stage else None
+    if prior and prior != surface:
+        parts.append(_("usually {} here").format(prior))
+    if session.get('wet') == 'wet':
+        parts.append(_("wet"))
+    where = (stage.get('name') if stage else None) or session.get('stage') or session.get('track')
+    if where:
+        parts.append(where)
+    if session.get('shifter'):
+        parts.append(METHODS.get(session['shifter'], session['shifter']))
+    evidence = []
+    for run in runs:
+        lines = (run.get('discipline_evidence') or []) + (run.get('surface_evidence') or []) + \
+            (run.get('wet_evidence') or [])
+        if lines:
+            head = _("Run {}").format(run['n'])
+            if run.get('distance'):
+                head += ', {:.1f} km'.format(run['distance'] / 1000.0)
+            evidence.append(head + ': ' + ' '.join(lines))
+    return '  ·  '.join(parts), evidence
+
+
+def coaching_lines(tips, advice=None):
+    """The coach's tips as (line, kind); `advice` (the live car's own
+    lines) when the coach has nothing new to say, as before a run has
+    ended."""
+    lines = []
+    for tip in tips:
+        kind = tip['kind'] if isinstance(tip, dict) else tip.kind
+        text = tip['text'] if isinstance(tip, dict) else tip.text
+        label = KINDS.get(kind, '')
+        lines.append(('{}: {}'.format(label, text) if label else text, kind))
+    if advice and not any(kind != 'still' for _, kind in lines):
+        lines = [(text, 'tip') for text in advice] + lines
+    return lines
+
+
+def tuning_lines(tune, notes):
+    """The current tune (ratios, what changed, the measured extras or why
+    they are missing) and the tuning notes."""
+    if tune is None:
+        return [_("No setup recorded yet: a tune is kept once a session with two or more gears learnt ends.")]
+    ratios = ', '.join('{}: {:.1f}'.format(g, r / 3.6) for g, r in sorted(tune['ratios'].items()))
+    change = tune.get('change') or ''
+    if change.startswith('gears:'):
+        change = _("gears {} changed").format(change[6:].replace(',', ', '))
+    else:
+        change = CHANGES.get(change, change)
+    when = time.strftime('%x', time.localtime(tune['first_seen']))
+    lines = [_("Gearing (rpm per km/h) {}  ·  {} {}").format(ratios, change, when)]
+    extras = []
+    for field, name in (('ride_height_f', _("ride height")), ('brake_bias', _("brake bias")),
+                        ('tyre_radius', _("tyre radius"))):
+        value = tune.get(field)
+        if isinstance(value, (int, float)):
+            unit = '{:.0f} %'.format(value * 100) if field == 'brake_bias' else '{:.3f} m'.format(value)
+            extras.append('{} {}'.format(name, unit))
+        elif value:
+            extras.append('{}: {}'.format(name, _(value)))
+    if extras:
+        lines.append('  ·  '.join(extras))
+    for note in notes:
+        text = note['text'] if isinstance(note, dict) else note.text
+        kind = note['kind'] if isinstance(note, dict) else note.kind
+        lines.append((_("Setup") if kind == 'setup' else _("Driving")) + ': ' + text)
+    return lines
+
+
+def session_lines(history):
+    """One line per recent session (reader.history): date, stage,
+    discipline and surface, shift error and limiter time per km."""
+    lines = []
+    for h in history:
+        parts = [time.strftime('%x %H:%M', time.localtime(h['started']))]
+        if h.get('stage') or h.get('track'):
+            parts.append(h.get('stage') or h.get('track'))
+        found = [DISCIPLINES.get(h.get('discipline'), '') if h.get('discipline') not in (None, 'unknown') else '',
+                 surface_name(h.get('surface')) or '']
+        if any(found):
+            parts.append(' '.join(x for x in found if x))
+        if h.get('shifts'):
+            error = h.get('error')
+            parts.append(_("{} changes up, {:+.0f} rpm from the best").format(h['shifts'], error)
+                         if error is not None else _("{} changes up").format(h['shifts']))
+        km = (h.get('distance') or 0.0) / 1000.0
+        if km >= 0.5:
+            parts.append(_("{:.1f} km, {:.1f} s/km on the limiter").format(km, (h.get('limiter_time') or 0.0) / km))
+        lines.append('  ·  '.join(parts))
+    return lines
+
+
+def web_status(running, error, addresses, remote_seen, bind, port):
+    """The lines under the web page switch: where to open it, or why it is
+    not running, and what having it on means."""
+    if error:
+        return _("The web page could not start: {}").format(error)
+    if not running:
+        return _("Off. When on, any phone or computer on your network can open a read-only page with the "
+                 "live gear, the shift tables, coaching and your history.")
+    lines = [_("Open {}").format(_(" or ").join(addresses))]
+    lines.append(_("Anyone on the same network can read your driving history, car and profile names, when you "
+                   "drive and the live telemetry; nobody can change anything. It is plain HTTP: anything on the "
+                   "way can read it too. On a public or shared network, use \"This computer only\" or leave it "
+                   "off."))
+    if bind != 'local' and not remote_seen:
+        lines.append(_("Not opened from another device yet: if it does not load there, the firewall "
+                       "(firewalld, ufw) may need TCP port {} opened.").format(port))
+    return '\n'.join(lines)
+
+
+def gather(reader, profile, key, show_all=False):
+    """Everything the tab shows about a car's history, from a reader: a
+    history query, run on events (car change, session end, the tab
+    shown), never on the 1 s timer. `tips` are the coach's Tip objects,
+    for the caller to mark as seen once they are on screen."""
+    from . import coach, tuning
+    car = reader.car(profile, key) if key else None
+    if car is None:
+        return {'car_id': None, 'context': (_("No session recorded yet."), []), 'tips': [], 'tuning': [],
+                'sessions': [], 'last_session': None}
+    sessions = reader.sessions(car['id'], 1)
+    session = sessions[0] if sessions else None
+    runs = reader.runs(session['id']) if session else []
+    stage = reader.stage(session['stage'] or next((r['stage'] for r in runs if r['stage']), None) or '') \
+        if session else None
+    tips = coach.Coach(reader).tips(profile, car['id'], show_all=show_all)
+    surface = session['surface'] if session else None
+    notes = tuning.advice(reader, profile, car['id'], surface)
+    return {'car_id': car['id'], 'context': context_line(session, runs, stage), 'tips': tips,
+            'tuning': tuning_lines(tuning.tune_summary(reader, car['id'], car['game']), notes),
+            'sessions': session_lines(reader.history(profile, car['key'], 10)),
+            'last_session': session}

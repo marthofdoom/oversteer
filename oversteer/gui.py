@@ -83,6 +83,15 @@ class Gui:
         self.telemetry_car_live = None
         self.telemetry_tab_shown = 0            # counts the times the tab was opened: history is re-read then
         self._methods_cache = None
+        self._history_stamp = None              # what the tab's history sections were last read for
+        self._history = None                    # and what they showed (telemetry_view.gather())
+        self.telemetry_web = None               # the read-only web page's server, when on
+        # App preferences (config.ini): learn with the rev lights off (D4)
+        # and the web page, both off by default
+        self.telemetry_learn = False
+        self.telemetry_web_on = False
+        self.telemetry_web_port = 5301
+        self.telemetry_web_bind = 'lan'
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -144,6 +153,11 @@ class Gui:
 
         Thread(target=self.input_thread, daemon = True).start()
         GLib.timeout_add(1000, self.refresh_telemetry_view)
+        self.ui.set_telemetry_preferences(self.telemetry_learn, self.telemetry_web_on, self.telemetry_web_port,
+                                          self.telemetry_web_bind)
+        if self.device is None and self.telemetry_learn:
+            self.apply_rev_leds()               # learning needs no wheel
+        self.apply_telemetry_web()
 
         self.ui.main()
 
@@ -510,20 +524,29 @@ class Gui:
 
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""
-        from .telemetry import Telemetry, DEFAULT_PORT, LEGACY_PORT
+        from .telemetry import Telemetry, NoLeds, DEFAULT_PORT, LEGACY_PORT
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
         self.telemetry_generation += 1
-        if self.device is None or not self.model.get_rev_leds():
-            self.ui.set_rev_leds_status('')
-            return
-        leds = self.device.rev_leds()
-        if not leds.available():
-            self.ui.set_rev_leds_status(_("no LEDs"))
-            return
-        self.model.set_ffb_leds(False)        # the meter and the rev lights can't share the LEDs
-        self.ui.set_ffb_leds(False)
+        leds = None
+        if self.device is not None and self.model.get_rev_leds():
+            leds = self.device.rev_leds()
+            if leds.available():
+                self.model.set_ffb_leds(False)        # the meter and the rev lights can't share the LEDs
+                self.ui.set_ffb_leds(False)
+            else:
+                self.ui.set_rev_leds_status(_("no LEDs"))
+                leds = None
+        if leds is None:
+            if not self.telemetry_learn:
+                if self.device is None or not self.model.get_rev_leds():
+                    self.ui.set_rev_leds_status('')
+                return
+            # "Learn from game telemetry": the listener runs for the learner alone
+            leds = NoLeds()
+            if self.shift_learner.db is None:
+                self.update_learner_directory()
         self.telemetry_generation += 1
         generation = self.telemetry_generation
 
@@ -748,7 +771,68 @@ class Gui:
             self.ui.safe_call(self.refresh_telemetry_cars)
 
     def on_quit(self):
+        if self.telemetry_web is not None:
+            self.telemetry_web.stop()
+            self.telemetry_web = None
         self.shift_learner.save()
+
+    # -- learning without rev lights, and the web page (app preferences) --
+
+    def set_telemetry_learn(self, state):
+        if bool(state) != self.telemetry_learn:
+            self.telemetry_learn = bool(state)
+            self.save_preferences()
+            self.apply_rev_leds()
+
+    def set_telemetry_web(self, on=None, port=None, bind=None):
+        changed = False
+        for name, value in (('telemetry_web_on', on), ('telemetry_web_port', port), ('telemetry_web_bind', bind)):
+            if value is not None and getattr(self, name) != value:
+                setattr(self, name, value)
+                changed = True
+        if changed:
+            self.save_preferences()
+            self.apply_telemetry_web()
+
+    def apply_telemetry_web(self):
+        """Start or stop the read-only web page to match the preferences."""
+        from .telemetry_web import TelemetryWeb, find_page, live_dict
+        if self.telemetry_web is not None:
+            self.telemetry_web.stop()
+            self.telemetry_web = None
+        error = None
+        if self.telemetry_web_on:
+            if self.shift_learner.db is None:
+                self.update_learner_directory()
+            log = self.shift_learner.log
+            web = TelemetryWeb(port=self.telemetry_web_port, bind=self.telemetry_web_bind,
+                               live=lambda: live_dict(self.telemetry),
+                               reader_path=log.path if log is not None else None,
+                               profile=lambda: self.shift_learner.profile, status=self._web_status,
+                               learner=self.shift_learner, page=find_page(self.app.datadir),
+                               version=self.app.version)
+            if web.start():
+                self.telemetry_web = web
+            else:
+                error = web.error
+        self.refresh_web_status(error)
+
+    def _web_status(self):
+        """Web threads: what the page's status line says. Never the
+        address telemetry comes from."""
+        telemetry = self.telemetry
+        sample = telemetry.live if telemetry is not None else None
+        return {'udp_port': telemetry.port if telemetry is not None else None, 'receiving': sample is not None,
+                'game': sample.game if sample is not None else None, 'session': self.shift_learner.session}
+
+    def refresh_web_status(self, error=None):
+        from .telemetry_view import web_status
+        from .telemetry_web import urls
+        web = self.telemetry_web
+        addresses = urls(self.telemetry_web_bind, web.port) if web is not None else []
+        self.ui.set_telemetry_web_status(web_status(web is not None, error, addresses,
+                                                    web is not None and web.remote_seen, self.telemetry_web_bind,
+                                                    self.telemetry_web_port))
 
     # -- Telemetry tab --
 
@@ -775,6 +859,7 @@ class Gui:
     def forget_telemetry_car(self, key):
         self.shift_learner.forget(key)
         self._methods_cache = None
+        self._history_stamp = None
         if self.telemetry_car_selected == key:
             self.telemetry_car_selected = None
         self.refresh_telemetry_cars()
@@ -785,7 +870,8 @@ class Gui:
         telemetry = self.telemetry
         sample = telemetry.live if telemetry is not None else None
         if telemetry is None:
-            live = _("Turn on the rev lights (in Settings below) to read game telemetry and learn from it.")
+            live = _("Turn on the rev lights or \"Learn from game telemetry\" (in Settings below) to read game "
+                     "telemetry and learn from it.")
         elif sample is None:
             live = _("Waiting for telemetry on UDP {}.").format(telemetry.port)
         else:
@@ -809,7 +895,47 @@ class Gui:
         if snapshot is not None:
             snapshot = dict(snapshot, methods=self._method_shifts(snapshot['key']))
         self.ui.set_telemetry_view(live, snapshot)
+        self._refresh_history(snapshot['key'] if snapshot is not None else None)
+        if self.telemetry_web is not None and not self.telemetry_web.remote_seen:
+            self.refresh_web_status()                 # until the page is opened from another device
         return True
+
+    def _refresh_history(self, key, force=False):
+        """The tab's history sections (context, coaching, tuning, recent
+        sessions): read again only when the car or the session changes or
+        the tab is shown. Tips count as seen once they are on screen."""
+        from . import coach
+        from .telemetry_view import gather
+        learner = self.shift_learner
+        stamp = (key, learner.profile, learner.history_changed, self.telemetry_tab_shown)
+        if not force and stamp == self._history_stamp:
+            return
+        self._history_stamp = stamp
+        reader = learner._reader()
+        if reader is None:
+            return
+        try:
+            history = gather(reader, learner.profile, key)
+        except Exception:
+            logging.exception("telemetry history")
+            return
+        self._history = history
+        self.ui.set_telemetry_history(history)
+        if history['tips'] and self.ui.telemetry_tab_visible() and learner.log is not None:
+            profile, car, tips = learner.profile, history['car_id'], history['tips']
+            learner.log.post(lambda: coach.seen(learner.log.store, profile, car, tips))
+
+    def label_last_session(self, label):
+        """The label dialog's answer, on every run of the shown car's last
+        session: what calibration learns from."""
+        learner = self.shift_learner
+        session = self._history['last_session'] if self._history else None
+        if session is None or learner.log is None:
+            return 0
+        count = learner.log.call(learner.log.store.label_session, session['id'], label.get('discipline'),
+                                 label.get('surface'), label.get('wet'), label.get('shifter'), label.get('note'))
+        self._history_stamp = None                  # read again: the labels are part of it now
+        return count or 0
 
     def _method_shifts(self, key):
         """The car's changes up per way of changing, from the database:
@@ -985,6 +1111,15 @@ class Gui:
                 Locale.setlocale(Locale.LC_ALL, (self.locale, 'UTF-8'))
             if 'check_permissions' in config['DEFAULT']:
                 self.check_permissions = config['DEFAULT']['check_permissions'] == '1'
+            defaults = config['DEFAULT']
+            self.telemetry_learn = defaults.get('telemetry_learn', '0') == '1'
+            self.telemetry_web_on = defaults.get('telemetry_web', '0') == '1'
+            try:
+                self.telemetry_web_port = max(1024, min(65535, int(defaults.get('telemetry_web_port', '5301'))))
+            except ValueError:
+                self.telemetry_web_port = 5301
+            if defaults.get('telemetry_web_bind') in ('lan', 'local'):
+                self.telemetry_web_bind = defaults['telemetry_web_bind']
             if 'hotkeys' in config['DEFAULT']:
                 self.global_hotkeys = {a: i for a, i in hotkeys.parse(config['DEFAULT']['hotkeys']).items()
                                        if a in hotkeys.GLOBAL_ACTIONS}
@@ -1022,6 +1157,10 @@ class Gui:
             'button_toggle': ','.join(map(str, self.button_config[0])),
             'button_config': ','.join(map(str, self.button_config[1:])),
             'hotkeys': hotkeys.serialize(self.global_hotkeys),
+            'telemetry_learn': '1' if self.telemetry_learn else '0',
+            'telemetry_web': '1' if self.telemetry_web_on else '0',
+            'telemetry_web_port': str(self.telemetry_web_port),
+            'telemetry_web_bind': self.telemetry_web_bind,
         }
         config_file = os.path.join(self.config_path, 'config.ini')
         with open(config_file, 'w') as file:

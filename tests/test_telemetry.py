@@ -267,3 +267,22 @@ def test_probe_finds_a_game_on_the_other_port(monkeypatch):
     check = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     check.bind(('0.0.0.0', theirs))                            # let go again
     check.close()
+
+
+def test_learning_without_rev_lights():
+    """"Learn from game telemetry": the listener runs with no LEDs and
+    still feeds the learner."""
+    from oversteer.telemetry import NoLeds
+
+    class Learner:
+        fed = 0
+
+        def feed(self, *args):
+            Learner.fed += 1
+
+        def shift_rpm(self, gear):
+            return None
+    telemetry = Telemetry(NoLeds(), learner=Learner())
+    for i, rpm in enumerate((4000, 6000, 7400)):
+        telemetry.handle(i * 0.1, forza(rpm, max_rpm=8000), ('127.0.0.1', 5555))
+    assert Learner.fed == 3 and telemetry.live.rpm == 7400

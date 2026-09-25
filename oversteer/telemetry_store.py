@@ -1058,6 +1058,14 @@ class Store(Reader):
         self._do('INSERT OR REPLACE INTO labels (run, discipline, surface, wet, shifter, note, set_at) '
                  'VALUES (?, ?, ?, ?, ?, ?, ?)', (run, discipline, surface, wet, shifter, note, at or time.time()))
 
+    def label_session(self, session, discipline=None, surface=None, wet=None, shifter=None, note=None, at=None):
+        """The same label on every run of a session (the tab's "Label last
+        session"); the number of runs labelled."""
+        runs = [r[0] for r in self._do('SELECT id FROM runs WHERE session = ?', (session,)).fetchall()]
+        for run in runs:
+            self.set_label(run, discipline, surface, wet, shifter, note, at)
+        return len(runs)
+
     def add_capture(self, path, started, ended=None, size=None, packets=None, games=None, session=None):
         self._do('INSERT OR REPLACE INTO captures (path, started, ended, bytes, packets, games, session) '
                  'VALUES (?, ?, ?, ?, ?, ?, ?)', (path, started, ended, size, packets, games, session))

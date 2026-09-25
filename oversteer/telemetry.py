@@ -138,6 +138,26 @@ class RevLeds:
             time.sleep(step)
 
 
+class NoLeds:
+    """Rev lights that are not there: the listener runs to learn from the
+    game's telemetry with the rev lights off or on a wheel without them
+    ("Learn from game telemetry")."""
+
+    paths = ()
+
+    def available(self):
+        return False
+
+    def set_count(self, lit):
+        pass
+
+    def set_pattern(self, pattern):
+        pass
+
+    def off(self):
+        pass
+
+
 class Telemetry:
     """UDP listener thread driving a RevLeds."""
 
