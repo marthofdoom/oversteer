@@ -50,6 +50,7 @@ CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is
 CODEMASTERS_MAX = 512
 OVST_MAGIC = b'OVST'
 OVST_SIZE = 24
+OVST2_SIZE = 64                                      # + throttle, brake, car name
 
 # Launch mode: a rally stage starts with clutch in, handbrake up and the
 # throttle floored, which holds the engine on its limiter. That RPM is the
@@ -159,23 +160,73 @@ def _plausible(x):
     return math.isfinite(x) and -RPM_LIMIT < x < RPM_LIMIT
 
 
-def decode(data):
-    """Return (rpm, max_rpm or None, shift_light or None) or None if the
-    packet isn't a telemetry format we know (or carries nonsense)."""
+class Sample:
+    """One decoded packet. Everything but rpm may be None (not in this
+    format): max_rpm, shift (the game's shift light), gear (1.. forward,
+    0 neutral, -1 reverse), speed (m/s), car (a key naming the car within
+    its game), car_name, throttle and clutch (0..1, the game's view),
+    power (W, Forza only)."""
+
+    __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power')
+
+    def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
+                 throttle=None, clutch=None, power=None):
+        self.rpm, self.max_rpm, self.shift = rpm, max_rpm, shift
+        self.gear, self.speed, self.car, self.car_name = gear, speed, car, car_name
+        self.throttle, self.clutch, self.power = throttle, clutch, power
+
+
+def _finite(x):
+    return x if math.isfinite(x) else None
+
+
+def _ascii(raw):
+    text = raw.split(b'\0', 1)[0].decode('ascii', 'replace').strip()
+    return text if text and all(0x20 <= ord(c) < 0x7f for c in text) else None
+
+
+def decode_sample(data):
+    """A Sample, or None if the packet isn't a telemetry format we know
+    (or carries nonsense)."""
     n = len(data)
-    if n == OVST_SIZE and data[:4] == OVST_MAGIC:
+    if n in (OVST_SIZE, OVST2_SIZE) and data[:4] == OVST_MAGIC:
         version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
-        if version != 1 or not (_plausible(rpm) and _plausible(max_rpm)):
+        if version not in (1, 2) or (version == 2) != (n == OVST2_SIZE):
             return None
-        return (max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1))
+        if not (_plausible(rpm) and _plausible(max_rpm)):
+            return None
+        sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),
+                        gear=gear if -1 <= gear <= 12 else None,
+                        speed=_finite(speed / 3.6), car='acpmf')
+        if version == 2:
+            gas, brake = struct.unpack_from('<ff', data, 24)
+            sample.throttle = _finite(gas)
+            name = _ascii(data[32:64])
+            if name:
+                sample.car, sample.car_name = 'acpmf-' + name, name
+        return sample
     if n in FORZA_SIZES:
         race_on = struct.unpack_from('<i', data, 0)[0]
         max_rpm, idle_rpm, rpm = struct.unpack_from('<fff', data, 8)
         if not (_plausible(max_rpm) and _plausible(rpm)):
             return None
         if race_on == 0 or max_rpm <= 0:
-            return (0.0, max_rpm if max_rpm > 0 else None, None)
-        return (max(0.0, rpm), max_rpm, None)
+            return Sample(0.0, max_rpm if max_rpm > 0 else None)
+        ordinal = struct.unpack_from('<i', data, 212)[0]
+        sample = Sample(max(0.0, rpm), max_rpm, car='forza-{}'.format(ordinal),
+                        car_name='Forza car {}'.format(ordinal))
+        if n == 232:
+            vx, vy, vz = struct.unpack_from('<fff', data, 32)
+            sample.speed = _finite(math.sqrt(vx * vx + vy * vy + vz * vz))
+        else:
+            # The dash block follows the sled; Horizon puts 12 more bytes first
+            base = 244 if n == 324 else 232
+            speed, power = struct.unpack_from('<ff', data, base + 12)
+            accel, brake, clutch, handbrake, gear = struct.unpack_from('<BBBBB', data, base + 71)
+            sample.speed, sample.power = _finite(speed), _finite(power)
+            sample.throttle, sample.clutch = accel / 255.0, clutch / 255.0
+            sample.gear = gear if 1 <= gear <= 10 else (-1 if gear == 0 else None)
+        return sample
     if n in (92, 96):
         car = data[4:8]
         if any(b and not 0x20 <= b < 0x7f for b in car):     # Car[4]: short ASCII name
@@ -185,32 +236,61 @@ def decode(data):
             return None
         dashlights, showlights = struct.unpack_from('<II', data, 40)
         shift = bool(showlights & (1 << 0))          # DL_SHIFT
-        return (max(0.0, rpm), None, shift)
+        gear = data[10]                              # 0 reverse, 1 neutral, 2 first
+        speed = struct.unpack_from('<f', data, 12)[0]
+        throttle, brake, clutch = struct.unpack_from('<fff', data, 48)
+        name = _ascii(car)
+        return Sample(max(0.0, rpm), None, shift, gear=gear - 1 if gear >= 1 else -1,
+                      speed=_finite(speed), car='outgauge-' + (name or 'car'), car_name=name,
+                      throttle=_finite(throttle), clutch=_finite(clutch))
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
-        floats = struct.unpack_from('<64f', data, 0)
+        floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
         rpm, max_rpm = floats[37] * 10.0, floats[63] * 10.0
         if not (_plausible(max_rpm) and _plausible(rpm)) or max_rpm <= 0:
             return None
-        return (max(0.0, rpm), max_rpm, None)
+        idle = floats[64] * 10.0 if len(floats) > 64 else float('nan')
+        gears = floats[65] if len(floats) > 65 else float('nan')
+        gear = floats[33]
+        # No car name in this format: the engine and gearbox tell cars apart
+        key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(max_rpm, idle if math.isfinite(idle) else 0,
+                                                       gears if math.isfinite(gears) else 0)
+        name = '{:.0f} rpm, {:.0f} gears'.format(max_rpm, gears) if math.isfinite(gears) else None
+        return Sample(max(0.0, rpm), max_rpm,
+                      gear=int(gear) if math.isfinite(gear) and 0 <= gear <= 9 else None,
+                      speed=_finite(floats[7]), car=key, car_name=name,
+                      throttle=_finite(floats[29]), clutch=_finite(floats[32]))
     return None
+
+
+def decode(data):
+    """Return (rpm, max_rpm or None, shift_light or None) or None if the
+    packet isn't a telemetry format we know (or carries nonsense)."""
+    sample = decode_sample(data)
+    return None if sample is None else (sample.rpm, sample.max_rpm, sample.shift)
 
 
 class Telemetry:
     """UDP listener thread driving a RevLeds."""
 
     def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None,
-                 launch=False, inputs=None, on_limiter=None):
+                 launch=False, inputs=None, on_limiter=None, learner=None, use_learnt=False):
         """`shift` is the shift point as a fraction of the game's max RPM;
         `shift_rpm`, when given, is an absolute shift point instead. With
         `launch`, `shift` is a fraction of the limiter learnt at the last
         launch (see LAUNCH_*): `inputs()` gives the pedals as pressed
         fractions, {'clutch', 'throttle', 'handbrake'} (None = unknown),
-        and `on_limiter(rpm)` hears each limiter learnt."""
+        and `on_limiter(rpm)` hears each limiter learnt. `learner` (a
+        ShiftLearner) is fed every packet; with `use_learnt` its shift
+        point for the current gear replaces the percentage once known."""
         self.leds = leds
         self.port = int(port)
         self.set_shift(shift, shift_rpm, launch)
         self.inputs = inputs
         self.on_limiter = on_limiter
+        self.learner = learner
+        self.use_learnt = use_learnt
+        self.live = None                  # the last Sample, for the GUI
+        self.using_learnt = None          # the learnt shift point in use, or None
         self.launch_max = 0.0             # limiter from the last launch; 0 = none yet
         self._launch_samples = []         # (time, rpm) while a launch is held
         self.last_max_rpm = 0.0
@@ -325,18 +405,22 @@ class Telemetry:
                     # another car, and it starts with a launch anyway
                     self.launch_max = 0.0
                     self._launch_samples = []
+                    self.live = None
+                    if self.learner is not None:
+                        self.learner.idle()
                     self._status(None)
                 continue
             except OSError:
                 break
-            decoded = decode(data)
-            if decoded is None:
+            sample = decode_sample(data)
+            if sample is None:
                 if len(data) not in self._unknown_sizes:
                     self._unknown_sizes.add(len(data))
                     logging.info("telemetry: unknown %d-byte packet from %s", len(data), addr[0])
                 continue
-            rpm, max_rpm, shift = decoded
+            rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
             now = time.monotonic()
+            self.live = sample
             self.last_packet = now
             if self.last_source != addr[0]:
                 self.last_source = addr[0]
@@ -372,7 +456,11 @@ class Telemetry:
             # there and flashes above it.
             if self.launch and self.launch_max:
                 max_rpm = self.launch_max
-            reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
+            learnt = self._feed_learner(now, sample, max_rpm)
+            if learnt:
+                reference = learnt
+            else:
+                reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
             fraction = rpm / reference if reference > 0 else 0.0
             if shift or fraction >= 1.0 + FLASH_MARGIN:
                 if now - flash_at >= FLASH_PERIOD:
@@ -385,6 +473,32 @@ class Telemetry:
             if lit != lit_state:
                 self.leds.set_count(lit)
                 lit_state = lit
+
+    def _feed_learner(self, now, sample, max_rpm):
+        """Teach the learner; the learnt shift point for this gear when
+        the rev lights should use it."""
+        learner = self.learner
+        if learner is None:
+            return None
+        pedals = {}
+        if self.inputs is not None:
+            try:
+                pedals = self.inputs() or {}
+            except Exception:
+                pedals = {}
+        # The game's view of the pedals when it sends one (it includes an
+        # automatic clutch and traction control); ours otherwise
+        throttle = sample.throttle if sample.throttle is not None else pedals.get('throttle')
+        clutch = sample.clutch if sample.clutch is not None else pedals.get('clutch')
+        limiter = self.launch_max if self.launch_max else max_rpm
+        try:
+            learner.feed(now, sample, limiter, throttle, clutch)
+            learnt = learner.shift_rpm(sample.gear) if self.use_learnt else None
+        except Exception:
+            logging.exception("shift learner")
+            learnt = None
+        self.using_learnt = learnt
+        return learnt
 
     def _status(self, source):
         if self.on_status is not None:
