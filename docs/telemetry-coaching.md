@@ -1438,6 +1438,25 @@ off-screen: the tab built under GDK's broadway backend with a stub
 controller and rendered to an image, and the gui's recording and
 preference methods on a stub, never by running the app.
 
+Run 5 (in progress): two independent reviews (Opus, Fable) of
+`v0.13.1..HEAD`. Every finding is checked against the code; the ones
+found real are fixed with a test where one makes sense, the others are
+listed with the reason. The checklist is the recovery point:
+- [ ] O1 learnt shift point at or near the limiter never flashes
+- [ ] O2 one over-rev packet raises the launch limiter for good; launch at speed; `set_limiter` never lowers a launch figure
+- [ ] O3 `ceiling()` falls back to `top_seen`: early shifters locked in, false limiter coaching
+- [ ] O4 tips go quiet after two tab refreshes, not two sessions
+- [ ] O5 / F-low web slots held by idle keep-alive connections
+- [ ] O6 / F-low migration drops a merged car's sessions and shifts
+- [ ] O7 a rolled-back commit leaves stale row ids in memory
+- [ ] O8 `*/unknown` cars (BeamNG, AC pmf) share one model and drive the lights
+- [ ] F1 Forza above 100 m/s restarts the run every packet
+- [ ] F2 `shift.error` measured against a best the lights would not trust
+- [ ] F3 limiter below top gear counts top gear when the game sends no gear count
+- [ ] F4 / O-low migration backups miss the WAL
+- [ ] F5 / O-low segment rows grow while paused or parked
+- [ ] Lows and nits (listed with their outcome when done)
+
 ### Step B
 - [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
 - [x] Web preferences and Settings controls, bound URLs (`telemetry_web`, `telemetry_web_port`, `telemetry_web_bind` in `config.ini`; "Every network" / "This computer only"; the addresses from `/proc/net/fib_trie`; the notes of §11 and the firewall hint until the page has been opened from another device, `telemetry_view.web_status()`)
