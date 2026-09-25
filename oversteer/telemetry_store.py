@@ -645,6 +645,85 @@ class Reader:
         return {'version': r[0], 'model': json.loads(r[1]), 'trained': r[2], 'runs': r[3], 'segments': r[4],
                 'holdout': r[5], 'deployed': bool(r[6])}
 
+    def run_shifts(self, run_id):
+        names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle',
+                 'method', 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags')
+        return [dict(zip(names, r)) for r in self._rows(
+            'SELECT {} FROM shifts WHERE session = (SELECT session FROM runs WHERE id = ?) AND run = ? '    # by the session's index
+            'ORDER BY at, id'.format(', '.join(names)), (run_id, run_id))]
+
+    def run_session(self, run_id):
+        rows = self._rows('SELECT session FROM runs WHERE id = ?', (run_id,))
+        return rows[0][0] if rows else None
+
+    def stage_runs(self, key, exclude=None, limit=20):
+        """The stage's recent runs that ended, newest first."""
+        names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time')
+        return [dict(zip(names, r)) for r in self._rows(
+            'SELECT {} FROM runs WHERE stage = ? AND id IS NOT ? AND ended IS NOT NULL '
+            'ORDER BY started DESC LIMIT ?'.format(', '.join(names)), (key, exclude, limit))]
+
+    METRIC_FIELDS = ('session', 'run', 'started', 'name', 'value', 'count', 'gear', 'method', 'discipline',
+                     'surface', 'stage', 'distance', 'car', 'tune')
+
+    def metrics(self, profile, car=None, sessions=40, names=None):
+        """The metrics of the profile's (or one car's) most recent
+        `sessions` sessions, newest first: dicts of METRIC_FIELDS (stage
+        and distance are the run's, tune the session's)."""
+        where, args = ['s.profile = ?'], [profile]
+        if car is not None:
+            where.append('s.car = ?')
+            args.append(car)
+        if names:
+            where.append('m.name IN ({})'.format(', '.join('?' * len(names))))
+            args.extend(names)
+        return [dict(zip(self.METRIC_FIELDS, r)) for r in self._rows(
+            'SELECT m.session, m.run, COALESCE(r.started, s.started), m.name, m.value, m.count, m.gear, m.method, '
+            '       m.discipline, m.surface, r.stage, r.distance, s.car, s.tune '
+            'FROM metrics m JOIN sessions s ON m.session = s.id LEFT JOIN runs r ON m.run = r.id '
+            'WHERE {} AND m.session IN (SELECT id FROM sessions WHERE profile = ? {} ORDER BY started DESC LIMIT ?) '
+            'ORDER BY COALESCE(r.started, s.started) DESC, m.id'.format(
+                ' AND '.join(where), 'AND car = ?' if car is not None else ''),
+            tuple(args) + (profile,) + ((car,) if car is not None else ()) + (sessions,))]
+
+    def metric_series(self, profile, name, car=None, discipline=None, surface=None, method=None, gear=None,
+                      limit=50):
+        """One metric's values over time, newest first, in one slice (car,
+        discipline, surface, way of changing, gear; None = any)."""
+        where, args = ['s.profile = ?', 'm.name = ?'], [profile, name]
+        for column, value in (('s.car', car), ('m.discipline', discipline), ('m.surface', surface),
+                              ('m.method', method), ('m.gear', gear)):
+            if value is not None:
+                where.append(column + ' = ?')
+                args.append(value)
+        return [dict(zip(self.METRIC_FIELDS, r)) for r in self._rows(
+            'SELECT m.session, m.run, COALESCE(r.started, s.started), m.name, m.value, m.count, m.gear, m.method, '
+            '       m.discipline, m.surface, r.stage, r.distance, s.car, s.tune '
+            'FROM metrics m JOIN sessions s ON m.session = s.id LEFT JOIN runs r ON m.run = r.id '
+            'WHERE {} ORDER BY COALESCE(r.started, s.started) DESC, m.id LIMIT ?'.format(' AND '.join(where)),
+            tuple(args) + (limit,))]
+
+    def run_metrics(self, run_id):
+        names = ('name', 'value', 'count', 'gear', 'method')
+        return [dict(zip(names, r)) for r in self._rows(
+            'SELECT {} FROM metrics WHERE run = ? ORDER BY id'.format(', '.join(names)), (run_id,))]
+
+    def coach_state(self, profile, car=None):
+        """{tip id: {first_shown, last_shown, times, value, quiet}} of what
+        the coach has shown about the car (0: about the driver)."""
+        names = ('first_shown', 'last_shown', 'times', 'value', 'quiet')
+        return {r[0]: dict(zip(names, r[1:])) for r in self._rows(
+            'SELECT tip, {} FROM coach_state WHERE profile = ? AND car = ?'.format(', '.join(names)),
+            (profile, car or 0))}
+
+    def car_by_id(self, car_id):
+        rows = self._rows('SELECT profile, key FROM cars WHERE id = ?', (car_id,))
+        return self.car(*rows[0]) if rows else None
+
+    def laps(self, run_id):
+        return [{'n': r[0], 'time': r[1], 'distance': r[2], 'valid': r[3]} for r in self._rows(
+            'SELECT n, time, distance, valid FROM laps WHERE run = ? ORDER BY n', (run_id,))]
+
     def stage_history(self, key, limit=20, exclude=None):
         """Discipline and surface verdicts of the stage's recent runs, for
         its priors."""
@@ -988,9 +1067,15 @@ class Store(Reader):
                   int(bool(deployed))))
         return version
 
-    def coach_seen(self, profile, car, tip, value, at=None):
+    def coach_seen(self, profile, car, tip, value, at=None, quiet=False):
+        """The coach showed `tip` (its metric `value`): counted, or with
+        `quiet` only marked as having gone quiet (a "still:" line)."""
         at = at or time.time()
+        if quiet:
+            self._do('UPDATE coach_state SET quiet = 1 WHERE profile = ? AND car = ? AND tip = ?',
+                     (profile, car or 0, tip))
+            return
         self._do('INSERT INTO coach_state (profile, car, tip, first_shown, last_shown, times, value) '
                  'VALUES (?, ?, ?, ?, ?, 1, ?) ON CONFLICT (profile, car, tip) DO UPDATE SET '
-                 'last_shown = excluded.last_shown, times = coach_state.times + 1, value = excluded.value',
-                 (profile, car or 0, tip, at, at, value))
+                 'last_shown = excluded.last_shown, times = coach_state.times + 1, value = excluded.value, '
+                 'quiet = 0', (profile, car or 0, tip, at, at, value))

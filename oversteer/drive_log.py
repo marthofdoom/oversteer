@@ -17,7 +17,7 @@ import queue
 import threading
 import time
 
-from . import drive_detect
+from . import coach, drive_detect
 from .shift_learner import drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
@@ -197,6 +197,8 @@ class RunTracker:
         revs held (a launch)."""
         self._stood = 0.0
         self._launch = 0.0
+        self._launch_rpm = 0.0
+        self._rolling = None             # when the car began to move, before the run started
         self._after_end = False
 
     # -- the listener side --
@@ -218,10 +220,14 @@ class RunTracker:
             if speed < START_MOVING:
                 if speed < MOVING:
                     self._stood += dt
+                    self._rolling = None
                     if throttle is not None and throttle >= LAUNCH_THROTTLE:
                         self._launch += dt
+                        self._launch_rpm = max(self._launch_rpm, sample.rpm or 0.0)
                     else:
-                        self._launch = 0.0
+                        self._launch = self._launch_rpm = 0.0
+                elif self._rolling is None:
+                    self._rolling = now
                 self._remember(now, sample)
                 return
             self._start(now, sample, session, profile)
@@ -293,8 +299,12 @@ class RunTracker:
         self._summary = {
             'game': sample.game, 'profile': profile, 'stage': sample.stage, 'stage_length': sample.stage_length,
             'laps': sample.laps, 'has_pos': sample.pos is not None, 'standing': self._stood,
-            'launch': self._launch, 'track': sample.track}
-        self._stood = self._launch = 0.0
+            'launch': self._launch, 'launch_rpm': self._launch_rpm or None, 'track': sample.track,
+            'car': sample.car, 'gears': sample.gears,
+            # s from moving off to the run's start (at START_MOVING), for the launch time
+            'release': now - self._rolling if self._rolling is not None else 0.0}
+        self._stood = self._launch = self._launch_rpm = 0.0
+        self._rolling = None
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
                          sample.stage_length, list(sample.pos) if sample.pos is not None else None)
 
@@ -335,6 +345,8 @@ class RunTracker:
             summary['laps'] = max(summary['laps'] or 0, sample.laps)
         if sample.stage_length and not summary['stage_length']:
             summary['stage_length'] = sample.stage_length
+        if sample.gears and not summary['gears']:
+            summary['gears'] = sample.gears
         d = self._d(sample)
         lap = sample.lap
         if lap is not None and self._last_lap is not None and lap > self._last_lap:
@@ -397,6 +409,10 @@ class RunTracker:
         'silence', 'end')."""
         if self.run is None:
             return
+        # The run's changes of gear are written before it ends, so its
+        # metrics see them all (a double tap at the very end goes unflagged)
+        if self.learner.car is not None:
+            self.learner._flush_shifts_locked(self.learner.car)
         self._close_segment(self._last_t or now, self._trace[-1][T['distance']] if self._trace else 0.0)
         summary = dict(self._summary)
         finished = self._finished
@@ -459,8 +475,27 @@ class RunTracker:
         fields.update(verdicts)
         store.end_run(run, **fields)
         store.add_trace(run, trace)
-        store.add_corners(run, find_corners(trace))
+        corners = find_corners(trace)
+        store.add_corners(run, corners)
+        self._write_metrics(run, summary, fields, trace, corners)
         return True
+
+    def _write_metrics(self, run, summary, verdicts, trace, corners):
+        """What the run measured about the driver (coach.py), tagged with
+        the run's discipline and surface."""
+        learner, store = self.learner, self.learner.log.store
+        with learner.lock:
+            car = learner._models.get(summary.get('car'))
+            car = car.copy() if car is not None else None
+        context = coach.car_context(car)
+        metrics = coach.run_metrics(summary, trace, TRACE_CHANNELS, store.run_shifts(run), corners, context)
+        metrics += coach.stage_metrics(store, run, summary.get('stage'), trace, TRACE_CHANNELS, corners,
+                                       verdicts.get('finished'))
+        for m in metrics:
+            m['discipline'], m['surface'] = verdicts.get('discipline'), verdicts.get('surface')
+        session = store.run_session(run)
+        if session is not None and metrics:
+            store.add_metrics(session, run, metrics)
 
 
 def start_cell(trace):
