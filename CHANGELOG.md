@@ -16,6 +16,9 @@
   (H-pattern, sequential, paddles) once you have used it. How each change
   was made comes from the control you pressed: a shifter gear, the
   sequential plate or a paddle.
+- EA SPORTS WRC telemetry: the game's default structure, or Oversteer's own
+  (car and stage ids, session start/end/pause), set up with two Copy
+  buttons under the Telemetry tab's Settings.
 
 ### Changed
 - The telemetry port is now **UDP 5310** for new profiles and
