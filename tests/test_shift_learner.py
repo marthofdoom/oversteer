@@ -218,12 +218,12 @@ def test_shifts_per_method(tmp_path):
             learner.feed(t, Sample(4700.0, LIMITER, gear=3, speed=shift_rpm / RATIOS[2], car='test-car'),
                          LIMITER, 1.0, 0.0, press=(t - 0.1, press) if press else None)
             t += 1.0
+    changed = learner.history_changed
+    learner.idle()                                           # the last change is written once telemetry stops
+    assert learner.history_changed == changed + 1
     methods = learner.method_shifts('test-car')
     assert {m: (round(v[0]), v[1]) for m, v in methods[2].items()} == {
         'sequential': (6000, 3), 'paddles': (6400, 3), 'h-pattern': (5600, 3)}
-    changed = learner.history_changed
-    learner.idle()
-    assert learner.history_changed == changed + 1
 
 
 def test_coaching_is_short():
@@ -369,3 +369,43 @@ def test_first_models_are_read_and_saved_as_the_second():
     assert data['version'] == 2 and data['power_g'] == {} and data['drag'] == list(car.drag)
     car.power_g[(2, 60)] = [1.0] * 4
     assert CarModel.from_dict(car.to_dict()).power_g == {(2, 60): [1.0] * 4}
+
+
+def gears(learner, t, steps, throttle=1.0, rpm=6000.0, press=None):
+    """Feed a sequence of (seconds later, gear) at a steady speed."""
+    for dt, gear in steps:
+        t += dt
+        learner.feed(t, Sample(rpm if gear else 3000.0, LIMITER, gear=gear, speed=20.0, car='test-car'), LIMITER,
+                     throttle if gear else 0.0, 0.0, press=press(t) if press else None)
+    return t
+
+
+def written(learner):
+    learner.save()
+    session = learner.history('test-car')[0]['id']
+    return [(s['gear'], s['gear_to'], s['direction'], s['flags']) for s in learner._reader().shifts(session)]
+
+
+def test_changes_down_and_their_flags(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t = gears(learner, 0.0, [(0.1, 3)] * 5)
+    # a missed gate: 0.7 s in neutral, foot down, on the way from 3rd to 4th
+    t = gears(learner, t, [(0.1, 0)] * 7 + [(0.1, 4)] * 20)
+    # a skip: 4th to 6th
+    t = gears(learner, t, [(0.05, 6)] * 20)
+    # a change down that over-revs: 6th to 3rd at 3000 rpm in 6th lands past the limiter
+    t = gears(learner, t, [(0.1, 3)], rpm=LIMITER * 0.98, throttle=0.0)
+    t = gears(learner, t, [(0.1, 3)] * 20, throttle=0.0)
+    # sequential: 3rd, 4th, 5th in a blink, then back to 4th: the second tap was one too many
+    t = gears(learner, t, [(0.1, 4), (0.15, 5), (0.5, 4)] + [(0.1, 4)] * 20)
+    assert written(learner) == [
+        (3, 4, 'up', 'missed'), (4, 6, 'up', 'skip'), (6, 3, 'down', 'over-rev'), (3, 4, 'up', None),
+        (4, 5, 'up', 'double-tap'), (5, 4, 'down', None)]
+
+
+def test_flat_out_near_the_limiter_and_down_a_gear_is_a_miss(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t = gears(learner, 0.0, [(0.1, 3)] * 5, rpm=LIMITER * 0.97)
+    gears(learner, t, [(0.1, 2)] * 5, rpm=LIMITER * 0.7)
+    assert written(learner) == [(3, 2, 'down', 'skip')]
+    assert learner.car.upshifts == {}                        # not a change up to learn from

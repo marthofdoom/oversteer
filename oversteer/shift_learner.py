@@ -53,6 +53,11 @@ FULL_THROTTLE = 0.95
 BRAKE_POWER = 0.05               # braking at least this much: no power sample
 SLIP_POWER = {'raw': 0.08, 'normalised': 0.5}   # driven-wheel slip above which power is spin (calibrate per game)
 SHIFT_WINDOW = 0.3               # seconds before a change in which its rpm and throttle are taken
+SHIFT_SPAN = 1.5                 # seconds from leaving a gear to engaging the next that make one change
+MISSED_NEUTRAL = 0.5             # seconds in neutral on a change up under throttle: a missed gate
+OVER_REV = 0.95                  # a change down that takes the revs past this share of the limiter
+DOUBLE_TAP = 0.25                # two changes the same way this close (calibrate)...
+DOUBLE_TAP_REVERT = 1.0          # ...and the second taken back within this: a double tap
 LOW_SLIP_THROTTLE = 0.5          # below this the tyres barely slip: ratios are learnt here only
 BRAKE_OFF = 0.02
 COASTING = 0.05                  # with no brake reading, a little throttle says the brake is off
@@ -472,6 +477,7 @@ class ShiftLearner:
         self._sessions = 0
         self._session_rows = {}             # session number -> (sessions.id, cars.id); drive-log thread only
         self._last_feed = None              # monotonic time of the last packet fed
+        self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
         self.session_limiter_time = 0.0
         self.history_changed = 0            # counts up when history readers should query again
         self._loaded = None                 # load_snapshot(): ((profile, key, updated), snapshot)
@@ -520,6 +526,7 @@ class ShiftLearner:
         self._left = None                        # (gear, rpm, throttle, t, via neutral) when a forward gear was left
         self._off_ratio = {}                     # gear -> part-throttle ratios off the known one
         self._recent = collections.deque()       # (t, rpm, throttle) over SHIFT_WINDOW in a forward gear
+        self._slip = None                        # driven-wheel slip of the last sample in a forward gear
         self._flat_since = None                  # when the throttle went to the floor
 
     # -- storage (the listener side posts, the drive log writes) --
@@ -600,6 +607,8 @@ class ShiftLearner:
     def _end_session_locked(self):
         if self.session is None:
             return
+        if self.car is not None:
+            self._flush_shifts_locked(self.car)
         number, self.session = self.session, None
         if self.log is None:
             self.history_changed += 1
@@ -784,6 +793,8 @@ class ShiftLearner:
         SESSION_GAP passes without telemetry (tick()), so a pause does not
         split a stage."""
         with self.lock:
+            if self.car is not None:
+                self._flush_shifts_locked(self.car)
             self._save_locked()
             self._reset_motion()
         self.history_changed += 1
@@ -839,7 +850,7 @@ class ShiftLearner:
             return
         recent = self._recent
         if gear != self._gear:
-            # Where a change up happened: the peak rpm and the most throttle
+            # Where a change happened: the peak rpm and the most throttle
             # over the last moments in the old gear, also through neutral (an
             # H-pattern box shows it on the way). An H-pattern driver lifts
             # before the gear leaves, so the last sample alone reads low and
@@ -847,17 +858,13 @@ class ShiftLearner:
             if self._gear is not None and self._gear >= 1 and recent:
                 pressed = [x for _, _, x in recent if x is not None]
                 self._left = (self._gear, max(r for _, r, _ in recent), max(pressed) if pressed else None, now,
-                              gear == 0)
+                              gear == 0, self._slip)
             elif gear == 0 and self._left is not None:
-                self._left = self._left[:4] + (True,)
+                self._left = self._left[:4] + (True,) + self._left[5:]
             left = self._left
-            if left is not None and gear == left[0] + 1 and now - left[3] <= 1.5 and speed > 3.0:
-                if left[2] is None or left[2] >= 0.8:
-                    shifts = car.upshifts.setdefault(left[0], [])
-                    shifts.append(left[1])
-                    del shifts[:-SHIFTS_KEEP]
-                    self._dirty = True
-                    self._record_shift_locked(car, left, now)
+            if left is not None and gear != 0:
+                if gear >= 1 and gear != left[0] and now - left[3] <= SHIFT_SPAN and speed > 3.0:
+                    self._shift_locked(car, left, gear, rpm, now)
                 self._left = None
             self._gear = gear
             self._gear_since = now
@@ -867,6 +874,15 @@ class ShiftLearner:
             recent.append((now, rpm, throttle))
             while now - recent[0][0] > SHIFT_WINDOW:
                 recent.popleft()
+            slip = drive_slip(sample, car.drivetrain)
+            self._slip = slip[0] if slip is not None and slip[1] == 'raw' else None
+        pending = self._pending
+        if pending:
+            last = pending[-1]
+            if gear == last['gear_to'] and now - last['_t'] <= SHIFT_WINDOW and rpm > last['engage_rpm']:
+                last['engage_rpm'] = rpm              # the revs the new gear brought, once the clutch bites
+            if now - pending[0]['_t'] > DOUBLE_TAP_REVERT:
+                self._flush_shifts_locked(car, now)
         self._speeds.append((now, speed, sample.pos[1] if sample.pos is not None else None, rpm))
         while self._speeds and now - self._speeds[0][0] > ACCEL_WINDOW:
             self._speeds.popleft()
@@ -947,20 +963,61 @@ class ShiftLearner:
             values.append(power)
             del values[:-POWER_KEEP]
 
-    def _record_shift_locked(self, car, left, now):
-        """Keep the change up for the long run: gear, rpm, the learnt best
-        then, and how it was made."""
-        if self.log is None or self.session is None:
-            return
-        gear, rpm, throttle, left_at, via_neutral = left
-        best = car.best_shift(gear)
-        band = self._bands.get(car.key, (0, {}))[1].get(gear) if best else None
-        shift = {'at': self.wall(now), 'gear': gear, 'gear_to': gear + 1, 'direction': 'up', 'rpm': rpm,
-                 'best': best[0] if best else None, 'best_low': band[0] if band else None,
+    def _shift_locked(self, car, left, to, engage_rpm, now):
+        """A change from a forward gear to another: kept pending for
+        DOUBLE_TAP_REVERT seconds, so a quick correction can flag it and
+        the revs the new gear brought are known, then written."""
+        start, peak, throttle, left_at, via_neutral, slip = left
+        up = to > start
+        flat_out = up and (throttle is None or throttle >= 0.8)
+        if up and to == start + 1 and flat_out:
+            shifts = car.upshifts.setdefault(start, [])
+            shifts.append(peak)
+            del shifts[:-SHIFTS_KEEP]
+            self._dirty = True
+        best = car.best_shift(start) if up and to == start + 1 else None
+        band = self._bands.get(car.key, (0, {}))[1].get(start) if best else None
+        shift = {'_t': now, 'at': self.wall(now), 'gear': start, 'gear_to': to, 'direction': 'up' if up else 'down',
+                 'rpm': peak, 'best': best[0] if best else None, 'best_low': band[0] if band else None,
                  'best_high': band[1] if band else None, 'throttle': throttle,
                  'method': shift_method(getattr(self, '_press', None), left_at, now, via_neutral),
-                 'flat_out': int(throttle is None or throttle >= 0.8)}
-        self.log.post(self._write_shift, self.session, shift)
+                 'neutral_time': now - left_at if via_neutral else 0.0, 'engage_rpm': engage_rpm,
+                 'flat_out': int(flat_out), 'slip': slip, 'flags': []}
+        pending = self._pending
+        if len(pending) >= 1:
+            # Two taps the same way in a blink, the second taken back at once:
+            # the paddle or the lever was hit twice
+            before = pending[-1]
+            earlier = pending[-2] if len(pending) >= 2 else None
+            if (earlier is not None and earlier['direction'] == before['direction']
+                    and before['_t'] - earlier['_t'] < DOUBLE_TAP and now - before['_t'] <= DOUBLE_TAP_REVERT
+                    and to == before['gear'] and start == before['gear_to']):
+                before['flags'].append('double-tap')
+        pending.append(shift)
+
+    def _flush_shifts_locked(self, car, now=None):
+        """Write the pending changes older than DOUBLE_TAP_REVERT (all of
+        them when `now` is None), with their flags."""
+        pending = self._pending
+        while pending and (now is None or now - pending[0]['_t'] > DOUBLE_TAP_REVERT):
+            shift = pending.popleft()
+            del shift['_t']
+            flags = shift['flags']
+            limiter = car.limiter
+            if shift['direction'] == 'up':
+                if shift['neutral_time'] > MISSED_NEUTRAL and shift['throttle'] is not None and shift['throttle'] >= 0.8:
+                    flags.append('missed')           # stuck in neutral, foot down: a missed gate
+                if shift['gear_to'] >= shift['gear'] + 2:
+                    flags.append('skip')
+            else:
+                if (shift['gear_to'] == shift['gear'] - 1 and shift['throttle'] is not None
+                        and shift['throttle'] >= 0.8 and limiter and shift['rpm'] >= 0.9 * limiter):
+                    flags.append('skip')             # flat out near the limiter and down a gear: meant to go up
+                if limiter and shift['engage_rpm'] > OVER_REV * limiter:
+                    flags.append('over-rev')
+            shift['flags'] = ','.join(flags) or None
+            if self.log is not None and self.session is not None:
+                self.log.post(self._write_shift, self.session, shift)
 
     def _write_shift(self, number, shift):
         row = self._session_rows.get(number)
