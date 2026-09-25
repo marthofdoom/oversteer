@@ -30,6 +30,7 @@ PROBE_LISTEN = 1.0                                   # seconds the other port is
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
 LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point
 FLASH_MARGIN = 0.03                                  # above the shift point: flash (shift now)
+LEARNT_FLASH = 0.995                                 # a learnt shift point at the limiter flashes by this share of it
 LEARNED_DECAY = 0.01                                 # OutGauge: learnt ceiling sags this much per second
 IDLE_TIMEOUT = 2.0                                   # seconds without telemetry -> LEDs off
 FLASH_PERIOD = 0.08                                  # limiter flash half-period (seconds)
@@ -44,6 +45,24 @@ LAUNCH_HOLD = 1.0                                    # seconds held before the R
 LAUNCH_SETTLE = 0.3                                  # the last this-many seconds must not climb...
 LAUNCH_RISE = 0.02                                   # ...by more than this fraction: on the limiter
 LAUNCH_MIN_RPM = 2000.0
+LAUNCH_SPEED = 2.0                                   # m/s: a launch is made standing; a held clutch at speed is not one
+LAUNCH_RAISE_HOLD = 0.5                              # s held flat out past the launch figure before it is raised
+CLUTCH_OUT = 0.1
+LEARNER_ERROR_EVERY = 60.0                           # s between log lines of a learner that keeps failing
+
+
+def _held_peak(samples, now, hold):
+    """The peak of (time, rpm) `samples` spanning at least `hold` seconds
+    whose last LAUNCH_SETTLE did not climb past the earlier peak by more
+    than LAUNCH_RISE: the engine held on its limiter. None otherwise."""
+    if not samples or now - samples[0][0] < hold:
+        return None
+    recent = [r for t, r in samples if now - t <= LAUNCH_SETTLE]
+    earlier = [r for t, r in samples if now - t > LAUNCH_SETTLE]
+    peak_earlier = max(earlier) if earlier else 0.0
+    if not peak_earlier or max(recent) > peak_earlier * (1.0 + LAUNCH_RISE):
+        return None
+    return max(r for t, r in samples)
 
 
 class RevLeds:
@@ -183,6 +202,9 @@ class Telemetry:
         self.using_learnt = None          # the learnt shift point in use, or None
         self.launch_max = 0.0             # limiter from the last launch; 0 = none yet
         self._launch_samples = []         # (time, rpm) while a launch is held
+        self._raise_samples = []          # (time, rpm) while held flat out past the launch figure
+        self._carless = False             # the last packet had no car (Forza's menus)
+        self._learner_error_at = None
         self.last_max_rpm = 0.0
         self._learned_at = 0.0
         self.on_status = on_status
@@ -215,46 +237,73 @@ class Telemetry:
             return self.launch_max
         return self.last_max_rpm or self.learned_max
 
-    def _launch_held(self):
+    def _pedals(self):
+        """Our pedals as pressed fractions, {} when unknown."""
         if self.inputs is None:
-            return False
+            return {}
         try:
-            state = self.inputs()
+            return self.inputs() or {}
         except Exception:
-            return False
-        clutch, throttle, handbrake = state.get('clutch'), state.get('throttle'), state.get('handbrake')
+            return {}
+
+    @staticmethod
+    def _launch_held(pedals):
+        clutch, throttle, handbrake = pedals.get('clutch'), pedals.get('throttle'), pedals.get('handbrake')
         if clutch is None or throttle is None:
             return False
         # No handbrake fitted: clutch in and throttle floored is the launch
         return (clutch >= LAUNCH_CLUTCH and throttle >= LAUNCH_THROTTLE
                 and (handbrake is None or handbrake >= LAUNCH_HANDBRAKE))
 
-    def _learn_launch(self, now, rpm):
+    def _learn_launch(self, now, rpm, pedals=None, speed=None):
         """Watch a launch hold; once the RPM has stopped climbing, its
         peak is the limiter. A clutch kick that never reaches the limiter
-        is still climbing when released, and teaches nothing."""
-        if not self._launch_held():
+        is still climbing when released, and teaches nothing. Each launch
+        replaces the figure, lower or higher: it measures this car now."""
+        if pedals is None:
+            pedals = self._pedals()
+        if not self._launch_held(pedals) or (speed is not None and speed > LAUNCH_SPEED):
             self._launch_samples = []
             return
         samples = self._launch_samples
         samples.append((now, rpm))
-        if now - samples[0][0] < LAUNCH_HOLD:
+        limiter = _held_peak(samples, now, LAUNCH_HOLD)
+        if limiter is None or limiter < LAUNCH_MIN_RPM:
             return
-        recent = [r for t, r in samples if now - t <= LAUNCH_SETTLE]
-        earlier = [r for t, r in samples if now - t > LAUNCH_SETTLE]
-        peak_earlier = max(earlier) if earlier else 0.0
-        if peak_earlier < LAUNCH_MIN_RPM or max(recent) > peak_earlier * (1.0 + LAUNCH_RISE):
-            return
-        limiter = max(r for t, r in samples)
         # Keep only the settle window: a long hold stays cheap
         self._launch_samples = [(t, r) for t, r in samples if now - t <= LAUNCH_HOLD]
         if abs(limiter - self.launch_max) > 1.0:
-            self.launch_max = limiter
-            if self.on_limiter is not None:
-                try:
-                    self.on_limiter(limiter)
-                except Exception:
-                    pass
+            self._set_launch_max(limiter)
+
+    def _raise_launch(self, now, sample, throttle, clutch):
+        """Past the launch figure on the move (a launch control that caps
+        the revs at the line): it was not the top. Raised only once the
+        engine has been held there flat out, clutch out, in gear, for
+        LAUNCH_RAISE_HOLD: a missed change down, a money shift or one bad
+        packet goes past it for a moment and must not move it for the
+        rest of the stage."""
+        held = (self.launch_max and sample.rpm > self.launch_max and throttle is not None
+                and throttle >= LAUNCH_THROTTLE and (clutch is None or clutch <= CLUTCH_OUT)
+                and sample.gear is not None and sample.gear >= 1)
+        if not held:
+            self._raise_samples = []
+            return
+        samples = self._raise_samples
+        samples.append((now, sample.rpm))
+        peak = _held_peak(samples, now, LAUNCH_RAISE_HOLD)
+        if peak is None:
+            return
+        self._raise_samples = [(t, r) for t, r in samples if now - t <= LAUNCH_RAISE_HOLD]
+        if peak > self.launch_max * 1.001:
+            self._set_launch_max(peak)
+
+    def _set_launch_max(self, rpm):
+        self.launch_max = rpm
+        if self.on_limiter is not None:
+            try:
+                self.on_limiter(rpm)
+            except Exception:
+                pass
 
     def start(self):
         if self._thread is not None:
@@ -354,6 +403,7 @@ class Telemetry:
         # and it starts with a launch anyway
         self.launch_max = 0.0
         self._launch_samples = []
+        self._raise_samples = []
         self.live = None
         if self.learner is not None:
             self.learner.idle()
@@ -398,18 +448,14 @@ class Telemetry:
             self.last_source = addr[0]
             self._status(addr[0])
         shift_rpm, shift_fraction = self.shift_rpm, self.shift
+        pedals = self._pedals()
+        # The game's view of the pedals when it sends one (it includes an
+        # automatic clutch and traction control); ours otherwise
+        throttle = sample.throttle if sample.throttle is not None else pedals.get('throttle')
+        clutch = sample.clutch if sample.clutch is not None else pedals.get('clutch')
         if self.launch:
-            self._learn_launch(now, rpm)
-            if self.launch_max and rpm > self.launch_max:
-                # Past the launch figure on the move (a launch control
-                # that caps the revs at the line): it was not the top
-                report = rpm > self.launch_max * 1.01
-                self.launch_max = rpm
-                if report and self.on_limiter is not None:
-                    try:
-                        self.on_limiter(rpm)
-                    except Exception:
-                        pass
+            self._learn_launch(now, rpm, pedals, sample.speed)
+            self._raise_launch(now, sample, throttle, clutch)
         if max_rpm is None:
             # OutGauge: learn the ceiling from the highest RPM seen. It
             # sags slowly (per second, not per packet) so a change of
@@ -428,9 +474,12 @@ class Telemetry:
         # there and flashes above it.
         if self.launch and self.launch_max:
             max_rpm = self.launch_max
-        learnt = self._feed_learner(now, sample, max_rpm)
+        learnt = self._feed_learner(now, sample, max_rpm, pedals, throttle, clutch)
         if learnt:
-            reference = learnt
+            # A gear that pulls to the limiter learns the limiter itself as
+            # its shift point: the engine could never reach 3 % past it,
+            # and bouncing off it must still flash
+            reference = min(learnt, max_rpm * LEARNT_FLASH / (1.0 + FLASH_MARGIN)) if max_rpm else learnt
         else:
             reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
         fraction = rpm / reference if reference > 0 else 0.0
@@ -446,31 +495,33 @@ class Telemetry:
             self.leds.set_count(lit)
             self._lit = lit
 
-    def _feed_learner(self, now, sample, max_rpm):
+    def _feed_learner(self, now, sample, max_rpm, pedals, throttle, clutch):
         """Teach the learner; the learnt shift point for this gear when
         the rev lights should use it."""
         learner = self.learner
         if learner is None:
             return None
-        pedals = {}
-        if self.inputs is not None:
-            try:
-                pedals = self.inputs() or {}
-            except Exception:
-                pedals = {}
-        # The game's view of the pedals when it sends one (it includes an
-        # automatic clutch and traction control); ours otherwise
-        throttle = sample.throttle if sample.throttle is not None else pedals.get('throttle')
-        clutch = sample.clutch if sample.clutch is not None else pedals.get('clutch')
-        if self.launch_max:
+        if self.launch and self.launch_max:
             limiter, source = self.launch_max, 'launch'
         else:
             limiter, source = max_rpm, 'game' if sample.max_rpm is not None else 'seen'
         try:
+            if sample.car is None:
+                # Forza's menus send packets at full rate with no car: the
+                # socket never times out, so the pause (pending changes of
+                # gear, the model's save) and the session's end are seen here
+                if not self._carless:
+                    learner.idle()
+                learner.tick(now)
+            self._carless = sample.car is None
             learner.feed(now, sample, limiter, throttle, clutch, pedals.get('shift_press'), source)
             learnt = learner.shift_rpm(sample.gear) if self.use_learnt else None
         except Exception:
-            logging.exception("shift learner")
+            # Once a minute at most: a learner that keeps failing would
+            # otherwise log at packet rate
+            if self._learner_error_at is None or now - self._learner_error_at >= LEARNER_ERROR_EVERY:
+                self._learner_error_at = now
+                logging.exception("shift learner")
             learnt = None
         self.using_learnt = learnt
         return learnt

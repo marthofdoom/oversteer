@@ -27,8 +27,8 @@ def codemasters(rpm, max_rpm, count=66):
     return struct.pack('<%df' % count, *floats)
 
 
-def ovst(rpm, max_rpm, shift=False, version=1):
-    return b'OVST' + struct.pack('<BBHffif', version, 1, 1 if shift else 0, rpm, max_rpm, 3, 120.0)
+def ovst(rpm, max_rpm, shift=False, version=1, gear=3, kmh=120.0):
+    return b'OVST' + struct.pack('<BBHffif', version, 1, 1 if shift else 0, rpm, max_rpm, gear, kmh)
 
 
 def test_decode_formats():
@@ -180,12 +180,78 @@ def test_no_launch_no_learning():
 def test_launch_limiter_drives_the_bar_and_is_raised_on_the_move():
     inputs = dict(LAUNCH)
     telemetry = Telemetry(FakeLeds(), shift=0.9, launch=True, inputs=lambda: inputs)
-    writes = _feed(telemetry, [ovst(rpm, 9000) for _, rpm in _hold_on_limiter(7000, seconds=1.6)], gap=0.02)
+    writes = _feed(telemetry, [ovst(rpm, 9000, gear=1, kmh=0) for _, rpm in _hold_on_limiter(7000, seconds=1.6)],
+                   gap=0.02)
     assert telemetry.launch_max == 7000.0                    # learnt through the listener
     assert any(w[0] == 'pattern' for w in writes)            # on the limiter: past 90 % of 7000, flashing
     inputs.update(clutch=0.0, handbrake=0.0)                 # driving away, past a capped launch
-    writes = _feed(telemetry, [ovst(7300, 9000)], gap=0.02)
+    writes = _feed(telemetry, [ovst(7300, 9000)] * 40, gap=0.02)
     assert telemetry.launch_max == 7300.0
+
+
+def _handle(telemetry, packets, now, rate=120.0):
+    for packet in packets:
+        telemetry.handle(now, packet, ('127.0.0.1', 1))
+        now += 1.0 / rate
+    return now
+
+
+def test_launch_limiter_ignores_a_moment_past_it():
+    """A missed change down, a money shift or one bad packet: the launch
+    figure stays, and the lights still flash at the real limiter."""
+    inputs = dict(LAUNCH)
+    learnt = []
+    leds = FakeLeds()
+    telemetry = Telemetry(leds, shift=0.95, launch=True, inputs=lambda: inputs, on_limiter=learnt.append)
+    now = _handle(telemetry, [ovst(7500 + (i % 2) * 20, 8000, gear=1, kmh=0) for i in range(200)], 100.0)
+    assert telemetry.launch_max == 7520.0
+    inputs.update(clutch=0.0, handbrake=0.0)
+    now = _handle(telemetry, [ovst(8700, 8000)], now)
+    now = _handle(telemetry, [ovst(r, 8000) for r in (8600, 8200, 7000)], now)
+    assert telemetry.launch_max == 7520.0 and learnt == [7520.0]
+    del leds.writes[:]
+    _handle(telemetry, [ovst(7520, 8000)] * 60, now)
+    assert any(w[0] == 'pattern' for w in leds.writes)       # still flashing at the real limiter
+
+
+def test_no_launch_on_the_move():
+    telemetry = Telemetry(FakeLeds(), shift=0.95, launch=True, inputs=lambda: LAUNCH)
+    _handle(telemetry, [ovst(7500 + (i % 2) * 20, 8000, gear=2, kmh=60) for i in range(200)], 100.0)
+    assert telemetry.launch_max == 0.0                       # the clutch held at speed: not a launch
+
+
+def test_a_new_launch_may_measure_lower():
+    telemetry = Telemetry(FakeLeds(), launch=True)
+    _launch(telemetry, _hold_on_limiter(7450), LAUNCH)
+    telemetry._launch_samples = []
+    _launch(telemetry, [(t + 10.0, r) for t, r in _hold_on_limiter(7100)], LAUNCH)
+    assert telemetry.launch_max == 7100.0
+
+
+class _PullsToTheLimiter:
+    """A learner that has learnt gear 3 pulls to the limiter."""
+
+    def __init__(self, best=8000.0):
+        self.best = best
+
+    def feed(self, *args):
+        pass
+
+    def shift_rpm(self, gear):
+        return self.best if gear == 3 else None
+
+
+def test_a_learnt_shift_point_at_the_limiter_still_flashes():
+    for best in (8000.0, 7900.0):
+        leds = FakeLeds()
+        telemetry = Telemetry(leds, shift=0.95, learner=_PullsToTheLimiter(best), use_learnt=True)
+        forza_like = [ovst(7950 + (i % 2) * 50, 8000) for i in range(240)]     # bouncing on the limiter in 3rd
+        _handle(telemetry, forza_like, 1.0)
+        assert sum(1 for w in leds.writes if w[0] == 'pattern') > 10, best
+    leds = FakeLeds()
+    telemetry = Telemetry(leds, shift=0.95, learner=_PullsToTheLimiter(6000.0), use_learnt=True)
+    _handle(telemetry, [ovst(6000, 8000)] * 20, 1.0)
+    assert ('count', 5) in leds.writes and not any(w[0] == 'pattern' for w in leds.writes)
 
 
 def test_ovst_v2_names_the_car_and_track():
@@ -286,3 +352,26 @@ def test_learning_without_rev_lights():
     for i, rpm in enumerate((4000, 6000, 7400)):
         telemetry.handle(i * 0.1, forza(rpm, max_rpm=8000), ('127.0.0.1', 5555))
     assert Learner.fed == 3 and telemetry.live.rpm == 7400
+
+
+def test_forza_menus_are_a_pause_to_the_learner():
+    """Forza sends its menus at full rate with no car: the socket never
+    times out, so the listener tells the learner itself."""
+    calls = []
+
+    class Learner:
+        def feed(self, now, sample, *args):
+            calls.append('feed' if sample.car else 'menu')
+
+        def idle(self):
+            calls.append('idle')
+
+        def tick(self, now):
+            calls.append('tick')
+
+        def shift_rpm(self, gear):
+            return None
+    telemetry = Telemetry(FakeLeds(), learner=Learner())
+    now = _handle(telemetry, [forza(5000.0)] * 2, 1.0, rate=60.0)
+    _handle(telemetry, [forza(0.0, race_on=0)] * 3, now, rate=60.0)
+    assert calls == ['feed', 'feed', 'idle', 'tick', 'menu', 'tick', 'menu', 'tick', 'menu']
