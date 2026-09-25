@@ -1,0 +1,175 @@
+"""The telemetry database: the upgrade from the first schema, the writer's
+rules (adoption, forget, stages) and a reader alongside the writer."""
+import json
+import math
+import sqlite3
+
+from oversteer import telemetry_store
+from oversteer.telemetry_store import open_store, open_reader, SCHEMA_V1, TRACE_CHANNELS
+
+
+def v1_database(path):
+    """A file as Oversteer 0.13 left it: DiRT cars keyed in rad/s x 10."""
+    db = sqlite3.connect(path)
+    db.executescript(SCHEMA_V1)
+    f = math.pi / 3                                              # what the old decoder multiplied by
+    cars = {
+        'codemasters-7854-838-6': {'key': 'codemasters-7854-838-6', 'name': '7854 rpm, 6 gears',
+                                   'limiter': 7215.0, 'top_seen': 7100.0, 'ratios': {'2': [330.0 * f] * 30},
+                                   'upshifts': {'2': [6800.0 * f]}, 'power': {str(int(6000 * f // 100)): [100.0] * 5}},
+        'forza-777': {'key': 'forza-777', 'name': 'My Forza car', 'limiter': 8000.0, 'ratios': {'3': [250.0] * 30}},
+        'outgauge-beam': {'key': 'outgauge-beam', 'name': 'beam', 'limiter': 6000.0},
+        'eawrc-17': {'key': 'eawrc-17', 'name': 'EA WRC car 17', 'limiter': 7000.0},
+    }
+    for key, model in cars.items():
+        db.execute('INSERT INTO cars (profile, key, name, model, updated) VALUES (?, ?, ?, ?, 5)',
+                   ('rally', key, model['name'], json.dumps(model)))
+    dirt = db.execute("INSERT INTO sessions (profile, car, track, started, ended, limiter_time) "
+                      "VALUES ('rally', 'codemasters-7854-838-6', NULL, 10, 20, 3.5)").lastrowid
+    db.execute('INSERT INTO shifts (session, at, gear, rpm, best, throttle, method) VALUES (?, 11, 2, ?, ?, 1.0, ?)',
+               (dirt, 6800.0 * f, 7000.0 * f, 'sequential'))
+    db.execute('INSERT INTO shifts (session, at, gear, rpm, best, throttle, method) VALUES (?, 12, 3, 6000, NULL, 0.5, NULL)',
+               (dirt,))
+    forza = db.execute("INSERT INTO sessions (profile, car, track, started) VALUES ('rally', 'forza-777', 'x', 30)").lastrowid
+    db.execute('INSERT INTO shifts (session, at, gear, rpm) VALUES (?, 31, 1, 7000)', (forza,))
+    orphan = db.execute("INSERT INTO sessions (profile, car, started) VALUES ('rally', 'gone', 40)").lastrowid
+    db.execute('INSERT INTO shifts (session, at, gear, rpm) VALUES (?, 41, 1, 7000)', (orphan,))
+    db.commit()
+    db.close()
+
+
+def test_upgrade_from_the_first_schema(tmp_path):
+    path = str(tmp_path / 'telemetry.db')
+    v1_database(path)
+    store = open_store(path)
+    assert store.db.execute('PRAGMA user_version').fetchone()[0] == telemetry_store.VERSION
+    assert (tmp_path / 'telemetry.db.v0.bak').exists() and (tmp_path / 'telemetry.db.v1.bak').exists()
+    cars = {k: n for k, n in store.cars('rally')}
+    assert cars == {'codemasters/7500-800-6': '7500 rpm, 6 gears', 'forza/777': 'My Forza car',
+                    'beamng/unknown': 'beam', 'eawrc/17': 'EA WRC car 17'}
+    dirt = store.car('rally', 'codemasters/7500-800-6')
+    assert dirt['game'] == 'codemasters' and dirt['model']['key'] == 'codemasters/7500-800-6'
+    assert abs(dirt['model']['limiter'] - 7215.0 * 3 / math.pi) < 0.01        # the launch figure, rescaled
+    assert abs(dirt['model']['ratios']['2'][0] - 330.0) < 0.01
+    assert list(dirt['model']['power']) in (['59'], ['60'])
+    history = store.history('rally', 'codemasters/7500-800-6')
+    assert len(history) == 1 and history[0]['limiter_time'] == 3.5
+    assert abs(history[0]['error'] + 200.0) < 0.01 and history[0]['methods'] == ['sequential']
+    shifts = store.shifts(history[0]['id'])
+    assert [(s['gear'], s['gear_to'], s['direction'], s['flat_out']) for s in shifts] == [
+        (2, 3, 'up', 1), (3, 4, 'up', 0)]
+    # The session of a car that was forgotten has nothing to be read against
+    assert store.db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 2
+    assert store.db.execute('SELECT COUNT(*) FROM shifts').fetchone()[0] == 3
+    store.db.close()
+    again = open_store(path)                                     # nothing more to do
+    assert len(again.cars('rally')) == 4
+
+
+def test_a_new_game_key_adopts_the_old_car(tmp_path):
+    path = str(tmp_path / 'telemetry.db')
+    v1_database(path)
+    store = open_store(path)
+    reader = open_reader(path)
+    assert reader.car('rally', 'forza-fh/777')['key'] == 'forza/777'       # found before it is renamed
+    old = store.car('rally', 'forza/777')['id']
+    assert store.car_id('rally', 'forza-fh/777', 'forza-fh') == old
+    car = reader.car('rally', 'forza-fh/777')
+    assert car['key'] == 'forza-fh/777' and car['game'] == 'forza-fh'
+    assert len(reader.history('rally', 'forza-fh/777')) == 1              # its sessions came along
+    assert store.car_id('rally', 'dirt/7500-800-6', 'dirt') == store.car('rally', 'dirt/7500-800-6')['id']
+    assert store.car_id('rally', 'wrcg/7500-800-6', 'wrcg') != old        # nothing left to adopt: a new car
+
+
+def test_forget_keeps_sessions_runs_and_labels(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.save_model('p', 'dirt/1', 'dirt', 'car', {'key': 'dirt/1', 'name': 'car', 'limiter': 7000.0})
+    store.add_tune(car, 1.0, {2: 330.0}, 'first')
+    session = store.start_session('p', car, 'dirt', 1.0)
+    run = store.start_run(session, 1, 1.0)
+    store.set_label(run, surface='gravel')
+    store.forget_model('p', 'dirt/1')
+    assert store.car('p', 'dirt/1')['model'] == {'key': 'dirt/1', 'name': 'car'}
+    assert store.tunes(car) == [] and len(store.sessions(car)) == 1
+    assert store.labels_for('dirt') == [(run, {'discipline': None, 'surface': 'gravel', 'wet': None,
+                                               'shifter': None, 'note': None})]
+
+
+def test_a_run_on_a_new_stage(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'eawrc/17', 'eawrc')
+    session = store.start_session('p', car, 'eawrc', 1.0, stage='eawrc:4:12')     # the stage row comes first
+    run = store.start_run(session, 1, 1.0, stage='eawrc:4:12', stage_length=10200.0, start_pos=[1, 2, 3])
+    store.end_run(run, ended=2.0, distance=10150.0, discipline='rally-stage', discipline_conf='game',
+                  discipline_evidence=['EA SPORTS WRC sends stage telemetry'])
+    stage = store.stage('eawrc:4:12')
+    assert stage['game'] == 'eawrc' and stage['length'] == 10200.0 and stage['runs'] == 1
+    runs = store.runs(session)
+    assert runs[0]['start_pos'] == [1, 2, 3] and runs[0]['discipline_evidence'] == [
+        'EA SPORTS WRC sends stage telemetry']
+
+
+def test_stage_keys_match_within_tolerance(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    key = store.match_stage('dirt', 9843.4, 104.9)
+    assert key == 'dirt:9843:100'
+    store.upsert_stage(key, 'dirt', 9843.4)
+    assert store.match_stage('dirt', 9844.2, 105.1) == key                  # the same stage over a boundary
+    assert store.match_stage('dirt', 9843.4, 160.0) != key                  # same length, another start
+    assert store.match_stage('dirt', 9900.0, 105.0) != key
+    cell = store.match_cell('forza-fh', (10, -4, 2), 5230.0)
+    assert cell == 'cell:forza-fh:10:-4:2:5200'
+    store.upsert_stage(cell, 'forza-fh')
+    assert store.match_cell('forza-fh', (11, -4, 3), 5300.0) == cell        # a neighbouring cell and heading
+    assert store.match_cell('forza-fh', (10, -4, 2), 8000.0) != cell        # another route from the same start
+
+
+def test_reader_alongside_the_writer(tmp_path):
+    path = str(tmp_path / 'telemetry.db')
+    store = open_store(path)
+    reader = open_reader(path)
+    store.begin()
+    store.save_model('p', 'lfs/XRG', 'lfs', 'XRG', {'key': 'lfs/XRG'})
+    assert reader.cars('p') == []                           # not committed yet: the reader is not blocked
+    store.commit()
+    assert reader.cars('p') == [('lfs/XRG', 'XRG')]
+
+
+def test_traces_and_their_cap(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'lfs/XRG', 'lfs')
+    session = store.start_session('p', car, 'lfs', 1.0)
+    rows = [tuple(float(i + c) for c in range(len(TRACE_CHANNELS))) for i in range(100)]
+    rows[5] = (None,) + rows[5][1:]
+    runs = [store.start_run(session, n, float(n)) for n in (1, 2, 3)]
+    for run in runs:
+        store.add_trace(run, rows)
+    back = store.trace(runs[0])
+    assert len(back) == 100 and back[7] == rows[7] and math.isnan(back[5][0])
+    size = store.db.execute('SELECT LENGTH(data) FROM traces WHERE run = ?', (runs[0],)).fetchone()[0]
+    assert store.prune_traces(cap=size * 2) == 1                            # the oldest goes
+    assert store.trace(runs[0]) is None and store.trace(runs[2]) is not None
+    assert len(store.runs(session)) == 3                                    # its run stays
+
+
+def test_session_shifter(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'lfs/XRG', 'lfs')
+    session = store.start_session('p', car, 'lfs', 1.0)
+    assert store.session_shifter(session) is None
+    for i, method in enumerate(['sequential'] * 8 + ['paddles'] * 2):
+        store.add_shift(session, None, {'at': i, 'gear': 2, 'gear_to': 3, 'rpm': 6000.0, 'method': method})
+    assert store.session_shifter(session) == 'sequential'
+    store.add_shift(session, None, {'at': 20, 'gear': 2, 'gear_to': 3, 'rpm': 6000.0, 'method': 'h-pattern'})
+    assert store.session_shifter(session) == 'mixed'
+    empty = store.start_session('p', car, 'lfs', 2.0)
+    assert store.drop_session_if_empty(empty) and not store.drop_session_if_empty(session)
+
+
+def test_calibration_versions(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    assert store.calibration('dirt', 'surface') is None
+    assert store.save_calibration('dirt', 'surface', {'classes': []}, 6, 120, 0.7, False) == 1
+    assert store.save_calibration('dirt', 'surface', {'classes': ['gravel']}, 8, 160, 0.93, True) == 2
+    calibration = store.calibration('dirt', 'surface')
+    assert calibration['deployed'] and calibration['version'] == 2 and calibration['model'] == {'classes': ['gravel']}
