@@ -1367,7 +1367,8 @@ a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
 - [x] Car keys `<game>/<id>` with adoption; stage keys with tolerance (`legacy_keys()`: `forza/…` → `forza-fh|fm/…`, `codemasters/…` → `dirt|wrcg/…`, found by the reader and renamed by the writer on first save; `match_stage()` for measured (length, start z) keys, `match_cell()` for start cells)
 - [x] `Sample` v2 fields for Forza, Codemasters, EA WRC (done in Step A with the decoders; see the Step A note)
 - [ ] Sessions, runs, segment features, corners, traces
-- [ ] Shift learner §8.1 items 1–7, 10; shifts with downshifts and flags
+- [x] Shift learner §8.1 items 1–7, 10 (per-gear power `power_g`; slope-free acceleration from `accel_kind == 'specific'`, the forward vector's height, or the climb rate from positions; gates: `BOOST_HOLD`, brake < 0.05, driven-wheel slip from `drive_slip()`; P75 when slope-free; 0.3 s window for the change's peak rpm and throttle; `set_limiter()` with launch > game > seen, passed by the listener; `best_bands()` with 20 seeded bootstrap resamples, worked out at most every 10 s per car on the drive-log thread or when a snapshot is asked for; model version 2). **Found while building:** the acceleration is a 0.3 s regression, so it belongs to the window's middle rpm, not the last sample's: at 3000 rpm/s in 2nd that was 500 rpm off and put the per-gear crossovers 350 rpm late; power samples are now binned by the window's mean rpm and speed (shifts now land within 25 rpm of the analytic answer in the simulator, 150 before). Item 10's tab wording ("learnt from your recent driving") waits for the tab work
+- [ ] Shifts with downshifts and flags (§8.2)
 - [ ] Tunes and re-tune rules
 - [ ] Discipline tiers 1–3, 5 and the profile line; surface and wet game tier
 - [ ] Coach metrics, habits, growth, rate limiting; tuning rules

@@ -270,3 +270,102 @@ def test_a_pause_does_not_split_a_session(tmp_path):
     learner.tick(t + SESSION_GAP + 1)
     assert learner.session is None
     assert [h['shifts'] for h in learner.history('test-car')] == [8]    # the second one taught nothing
+
+
+def learnt_error(learner):
+    return max(abs(learner.car.best_shift(g)[0] - analytic_shift(g)) for g in (1, 2, 3, 4))
+
+
+def test_a_hilly_stage_finds_the_same_shifts(tmp_path):
+    """+-8 % grades: with the forward vector the slope comes out of the
+    acceleration and the shifts land within 100 rpm; per-gear curves at the
+    same road speed are compared where known."""
+    from tests.sim import Road, hill
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    road = Road(grade=hill)
+    t = exits(learner, road=road, runs=3)
+    drive(learner, road=road, t=t)
+    assert learner.car.slope_free
+    assert learnt_error(learner) <= 100, [(g, learner.car.best_shift(g)) for g in (1, 2, 3, 4)]
+
+
+def test_turbo_lag_does_not_bend_the_curve(tmp_path):
+    """Power builds for 0.6 s after the throttle goes down: those samples are
+    not the engine (BOOST_HOLD)."""
+    from tests.sim import Road
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    road = Road(lag=0.6)
+    t = exits(learner, road=road, runs=3)
+    drive(learner, road=road, runs=4, t=t)            # every change up starts a lag
+    assert learnt_error(learner) <= 100
+
+
+def test_the_change_up_is_read_before_the_lift():
+    """An H-pattern driver lifts, then leaves the gear: the change is taken
+    at the peak rpm and the most throttle of the last 0.3 s."""
+    learner = ShiftLearner()
+    t = 0.0
+    for rpm, throttle in ((6000, 1.0), (6400, 1.0), (6500, 0.6), (6100, 0.0), (5800, 0.0)):
+        t += 0.05
+        learner.feed(t, Sample(rpm, LIMITER, gear=2, speed=rpm / RATIOS[2], car='test-car'), LIMITER, throttle, 0.0)
+    learner.feed(t + 0.2, Sample(4000, LIMITER, gear=0, speed=17.5, car='test-car'), LIMITER, 0.0, 1.0)
+    learner.feed(t + 0.4, Sample(4400, LIMITER, gear=3, speed=17.5, car='test-car'), LIMITER, 0.2, 0.0)
+    assert learner.car.upshifts == {2: [6500.0]}
+
+
+def test_limiter_precedence():
+    """A launch on the limiter beats the game's figure, even lower; the
+    game's beats the highest rpm seen; the same source only raises it."""
+    car = CarModel('x')
+    assert car.set_limiter(7000.0, 'seen') and car.set_limiter(7600.0, 'game')
+    assert not car.set_limiter(7800.0, 'seen') and car.limiter == 7600.0
+    assert car.set_limiter(7215.0, 'launch') and car.limiter == 7215.0      # WRCG over-reports its max
+    assert not car.set_limiter(7600.0, 'game') and not car.set_limiter(7210.0, 'launch')
+    assert car.set_limiter(7240.0, 'launch') and car.limiter_source == 'launch'
+
+
+def test_spinning_wheels_teach_no_power(tmp_path):
+    """Wheel speeds 12 % ahead of the car: the drive is not reaching the road."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)
+    learner.car.power, learner.car.power_g = {}, {}
+    t, speed = 5000.0, 12.0
+    for _ in range(200):
+        speed += 3.0 / 60
+        t += 1 / 60
+        sample = Sample(RATIOS[2] * speed, LIMITER, gear=2, speed=speed, car='test-car')
+        sample.wheel_speed = (speed, speed, speed * 1.12, speed * 1.12)
+        learner.feed(t, sample, LIMITER, 1.0, 0.0)
+    assert learner.car.power == {}
+    sample.wheel_speed = (speed, speed, speed * 1.02, speed * 1.02)
+    for _ in range(100):                                     # gripping: power again
+        speed += 3.0 / 60
+        t += 1 / 60
+        sample = Sample(RATIOS[2] * speed, LIMITER, gear=2, speed=speed, car='test-car')
+        sample.wheel_speed = (speed, speed, speed * 1.02, speed * 1.02)
+        learner.feed(t, sample, LIMITER, 1.0, 0.0)
+    assert learner.car.power != {}
+
+
+def test_the_best_comes_with_its_range(tmp_path):
+    """Bootstrap resamples of noisy power give each best change up a range,
+    and the true answer lies in it."""
+    from oversteer.shift_learner import SHIFT_STEP
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive(learner, jitter=0.01)
+    exits(learner, runs=3, jitter=0.01)
+    rows = {row['gear']: row for row in learner.snapshot()['gears']}
+    for gear in (1, 2, 3, 4):
+        low, high = rows[gear]['best_low'], rows[gear]['best_high']
+        assert low <= rows[gear]['best'] + SHIFT_STEP and high >= rows[gear]['best'] - SHIFT_STEP
+        assert low - 2 * SHIFT_STEP <= analytic_shift(gear) <= high + 2 * SHIFT_STEP, (gear, low, high)
+
+
+def test_first_models_are_read_and_saved_as_the_second():
+    old = {'key': 'x', 'name': 'x', 'limiter': 7000.0, 'power': {'60': [100.0] * 5}, 'ratios': {'2': [330.0] * 30}}
+    car = CarModel.from_dict(old)
+    assert car.limiter_source == 'game' and car.power_g == {} and car.boost_hold > 0
+    data = car.to_dict()
+    assert data['version'] == 2 and data['power_g'] == {} and data['drag'] == list(car.drag)
+    car.power_g[(2, 60)] = [1.0] * 4
+    assert CarModel.from_dict(car.to_dict()).power_g == {(2, 60): [1.0] * 4}

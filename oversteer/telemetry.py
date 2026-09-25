@@ -436,9 +436,12 @@ class Telemetry:
         # automatic clutch and traction control); ours otherwise
         throttle = sample.throttle if sample.throttle is not None else pedals.get('throttle')
         clutch = sample.clutch if sample.clutch is not None else pedals.get('clutch')
-        limiter = self.launch_max if self.launch_max else max_rpm
+        if self.launch_max:
+            limiter, source = self.launch_max, 'launch'
+        else:
+            limiter, source = max_rpm, 'game' if sample.max_rpm is not None else 'seen'
         try:
-            learner.feed(now, sample, limiter, throttle, clutch, pedals.get('shift_press'))
+            learner.feed(now, sample, limiter, throttle, clutch, pedals.get('shift_press'), source)
             learnt = learner.shift_rpm(sample.gear) if self.use_learnt else None
         except Exception:
             logging.exception("shift learner")

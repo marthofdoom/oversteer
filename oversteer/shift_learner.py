@@ -6,10 +6,14 @@ is proportional to engine power (force = power / speed), so what we need
 is the engine's power curve and each gear's ratio:
 
 - Power: at full throttle with the clutch out, the car's acceleration
-  (plus what drag and rolling resistance take, which we estimate) times
-  its speed is proportional to engine power, whatever the gear. Forza
-  sends the power itself. Samples are kept per 100 rpm band; the median
-  of each band makes slopes, bumps and the odd slide wash out.
+  (plus what drag and rolling resistance take, which we estimate, and
+  what the slope takes where the game says which way is up) times its
+  speed is proportional to engine power, whatever the gear. Forza sends
+  the power itself. Samples count once the throttle has been down a
+  moment (turbo lag), off the brake, without wheelspin. They are kept
+  per 100 rpm band, pooled and per gear; the median of each band (the
+  75th percentile once slopes are taken out) makes bumps and the odd
+  slide wash out.
 - Ratios: engine rpm per m/s in each gear, from part-throttle samples
   at a steady speed off the brake, where the tyres barely slip. A
   full-throttle sample whose ratio is off its gear's (wheelspin, a jump)
@@ -17,7 +21,10 @@ is the engine's power curve and each gear's ratio:
 
 For each gear the best shift is then the lowest rpm from which the next
 gear's power at the same speed (rpm x next ratio / this ratio) is higher
-than this gear's, or the limiter if that never happens.
+than this gear's, or the limiter if that never happens. Each gear's own
+curve is used where both gears' are known (at the same road speed drag
+and slope cancel out), the pooled one elsewhere; bootstrap resamples of
+the power samples give the answer a range.
 
 Everything is per car and kept on disk, per Oversteer profile, so the
 learning continues across sessions. The listener thread feeds samples;
@@ -27,6 +34,7 @@ the GUI reads snapshots.
 import collections
 import logging
 import math
+import random
 import re
 import statistics
 import threading
@@ -42,6 +50,9 @@ RETUNE_SAMPLES = 90              # part-throttle samples agreeing on a new ratio
 RETUNE_SPREAD = 0.015
 SHIFTS_KEEP = 40
 FULL_THROTTLE = 0.95
+BRAKE_POWER = 0.05               # braking at least this much: no power sample
+SLIP_POWER = {'raw': 0.08, 'normalised': 0.5}   # driven-wheel slip above which power is spin (calibrate per game)
+SHIFT_WINDOW = 0.3               # seconds before a change in which its rpm and throttle are taken
 LOW_SLIP_THROTTLE = 0.5          # below this the tyres barely slip: ratios are learnt here only
 BRAKE_OFF = 0.02
 COASTING = 0.05                  # with no brake reading, a little throttle says the brake is off
@@ -56,9 +67,34 @@ SHIFT_CONFIRM = 3                # steps the next gear must stay ahead (noise)
 LIMITER_BAND = 0.985             # within this of the limiter counts as on it
 DRAG_C0 = 0.15                   # m/s^2: rolling resistance, typical car
 DRAG_C2 = 3.5e-4                 # 1/m: aerodynamic drag / mass, typical car
+BOOST_HOLD = 0.8                 # s of full throttle before power counts: turbo lag (calibrate; learnt per car later)
+BOOTSTRAP_RESAMPLES = 20         # for the confidence band of each best change up
+BANDS_EVERY = 10.0               # seconds between working the bands out again, per car
 SAVE_EVERY = 20.0                # seconds between saves while learning
 SESSION_GAP = 120.0              # seconds without telemetry that end a session (a pause does not)
 TIPS_SHOWN = 3                   # coaching tips at a time, the biggest first
+
+
+G = 9.80665
+DRIVEN = {'fwd': (0, 1), 'rwd': (2, 3), 'awd': (0, 1, 2, 3)}     # wheel indices (FL, FR, RL, RR)
+
+
+def drive_slip(sample, drivetrain=None):
+    """(slip, kind) of the driven wheels, or None where the game sends no
+    wheel speeds or slip. From wheel speeds: how much faster the driven
+    wheels turn than the car moves (0.1 = 10 %), 'raw'; from Forza's slip
+    ratio, its own figure where 1 is the grip limit, 'normalised'. The
+    driven wheels are the drivetrain's, or the fastest wheel when it is
+    unknown (the driven ones are the ones that spin)."""
+    wheels = DRIVEN.get(drivetrain)
+    if sample.wheel_speed is not None and sample.speed and sample.speed > MIN_SPEED:
+        speeds = [abs(v) for v in sample.wheel_speed]
+        driven = sum(speeds[i] for i in wheels) / len(wheels) if wheels else max(speeds)
+        return driven / sample.speed - 1.0, 'raw'
+    if sample.slip_ratio is not None:
+        values = [abs(v) for v in sample.slip_ratio]
+        return max(values[i] for i in wheels) if wheels else max(values), sample.slip_kind or 'raw'
+    return None
 
 
 def _median(values):
@@ -69,20 +105,57 @@ def safe_name(text):
     return re.sub(r'[^A-Za-z0-9_.-]+', '_', text)[:80] or 'car'
 
 
+def _quantile(values, q):
+    """The q-quantile of values, interpolated (q = 0.5 is the median)."""
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * q
+    low = int(position)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def _interpolate(curve, rpm):
+    """A {band: value} curve at `rpm`, interpolated between the bands
+    either side; None where too little is known."""
+    position = rpm / POWER_BIN - 0.5
+    low = math.floor(position)
+    weight = position - low
+    total = value = 0.0
+    for band, w in ((low, 1.0 - weight), (low + 1, weight)):
+        v = curve.get(band)
+        if v is None:
+            if w > 0.25:
+                return None
+            continue
+        total += w
+        value += v * w
+    return value / total if total else None
+
+
+LIMITER_SOURCES = {'seen': 0, 'game': 1, 'launch': 2}     # which ceiling beats which
+
+
 class CarModel:
     """What has been learnt about one car."""
+
+    VERSION = 2
 
     def __init__(self, key, name=None):
         self.key = key
         self.name = name or key
         self.limiter = 0.0
+        self.limiter_source = None       # 'launch' (held on the limiter), 'game' (its max), 'seen' (highest rpm)
         self.power_source = None         # 'game' (Forza's power figure) or 'accel'
-        self.power = {}                  # band -> [power samples]
+        self.power = {}                  # band -> [power samples], all gears
+        self.power_g = {}                # (gear, band) -> [power samples] in that gear
+        self.slope_free = False          # power from slope-corrected acceleration: a high quantile is safe
         self.ratios = {}                 # gear -> [rpm per m/s]
         self.upshifts = {}               # gear -> [rpm at the change up to gear + 1]
         self.limiter_time = 0.0          # seconds on the limiter at full throttle (all sessions)
         self.top_seen = 0.0              # highest rpm seen flat out in gear: where the data ends
         self.retuned = {}                # gear -> time.time() its ratio was seen to change
+        self.boost_hold = BOOST_HOLD     # seconds of full throttle before power counts (turbo lag)
+        self.drag = (DRAG_C0, DRAG_C2)
         self.game = None                 # Sample.game
         self.car_class = None
         self.drivetrain = None           # 'fwd', 'rwd', 'awd' where the game says
@@ -93,14 +166,20 @@ class CarModel:
         """A plain dict of copies: another thread may serialise it while
         the listener goes on learning."""
         return {
+            'version': self.VERSION,
             'key': self.key, 'name': self.name, 'game': self.game, 'limiter': self.limiter,
+            'limiter_source': self.limiter_source,
             'power_source': self.power_source,
             'power': {str(b): list(v) for b, v in self.power.items()},
+            'power_g': {'{}:{}'.format(g, b): list(v) for (g, b), v in self.power_g.items()},
+            'slope_free': self.slope_free,
             'ratios': {str(g): list(v) for g, v in self.ratios.items()},
             'upshifts': {str(g): list(v) for g, v in self.upshifts.items()},
             'limiter_time': self.limiter_time,
             'top_seen': self.top_seen,
             'retuned': {str(g): v for g, v in self.retuned.items()},
+            'boost_hold': self.boost_hold,
+            'drag': list(self.drag),
         }
 
     def copy(self):
@@ -110,17 +189,42 @@ class CarModel:
 
     @classmethod
     def from_dict(cls, data):
+        """Version 1 (pooled power only, no limiter source) is read as it
+        is and saved as version 2."""
         car = cls(data['key'], data.get('name'))
         car.limiter = float(data.get('limiter') or 0.0)
+        car.limiter_source = data.get('limiter_source') or ('game' if car.limiter else None)
         car.power_source = data.get('power_source')
         car.power = {int(b): [float(x) for x in v][-POWER_KEEP:] for b, v in (data.get('power') or {}).items()}
+        power_g = {}
+        for key, v in (data.get('power_g') or {}).items():
+            gear, band = key.split(':')
+            power_g[(int(gear), int(band))] = [float(x) for x in v][-POWER_KEEP:]
+        car.power_g = power_g
+        car.slope_free = bool(data.get('slope_free'))
         car.ratios = {int(g): [float(x) for x in v][-RATIO_KEEP:] for g, v in (data.get('ratios') or {}).items()}
         car.upshifts = {int(g): [float(x) for x in v][-SHIFTS_KEEP:] for g, v in (data.get('upshifts') or {}).items()}
         car.limiter_time = float(data.get('limiter_time') or 0.0)
         car.top_seen = float(data.get('top_seen') or 0.0)
         car.retuned = {int(g): float(v) for g, v in (data.get('retuned') or {}).items()}
+        car.boost_hold = float(data.get('boost_hold') or BOOST_HOLD)
+        drag = data.get('drag')
+        car.drag = (float(drag[0]), float(drag[1])) if drag else (DRAG_C0, DRAG_C2)
         car.game = data.get('game')
         return car
+
+    def set_limiter(self, rpm, source):
+        """A ceiling from `source`: a better source replaces the figure even
+        when it is lower (a launch on the limiter beats a game's max, which
+        WRC Generations over-reports); the same source only raises it.
+        True when it changed."""
+        if not rpm:
+            return False
+        rank, known = LIMITER_SOURCES.get(source, 0), LIMITER_SOURCES.get(self.limiter_source, -1)
+        if rank > known or (rank == known and rpm > self.limiter * 1.001) or not self.limiter:
+            self.limiter, self.limiter_source = rpm, source
+            return True
+        return False
 
     def ceiling(self):
         """The highest rpm worth changing up at: the limiter, or where the
@@ -139,42 +243,51 @@ class CarModel:
     def gears(self):
         return sorted(g for g in self.ratios if self.ratio(g) is not None)
 
-    def power_at(self, rpm):
-        """Power at an rpm, interpolated between the bands either side;
-        None where too little is known."""
-        position = rpm / POWER_BIN - 0.5
-        low = math.floor(position)
-        weight = position - low
-        values = []
-        for band, w in ((low, 1.0 - weight), (low + 1, weight)):
-            samples = self.power.get(band)
-            if samples is None or len(samples) < POWER_MIN:
-                if w > 0.25:
-                    return None
-                continue
-            values.append((_median(samples), w))
-        if not values:
-            return None
-        total = sum(w for _, w in values)
-        return sum(v * w for v, w in values) / total
+    def _estimate(self, samples):
+        # With the slope taken out, what is left low is lift and slides: a
+        # high quantile is the engine. Without, a downhill would inflate it.
+        return _quantile(samples, 0.75) if self.slope_free else _median(samples)
 
-    def best_shift(self, gear):
+    def curve(self, gear=None, resample=None):
+        """{band: power estimate} for the bands known well enough, pooled
+        over all gears or in one gear. `resample(samples)` draws a
+        bootstrap sample instead of the samples themselves."""
+        if gear is None:
+            bands = self.power.items()
+        else:
+            bands = ((b, v) for (g, b), v in self.power_g.items() if g == gear)
+        out = {}
+        for band, samples in bands:
+            if len(samples) >= POWER_MIN:
+                out[band] = self._estimate(resample(samples) if resample else samples)
+        return out
+
+    def power_at(self, rpm, gear=None):
+        """Power at an rpm (in `gear`, or pooled), interpolated between the
+        bands either side; None where too little is known."""
+        return _interpolate(self.curve(gear), rpm)
+
+    def best_shift(self, gear, resample=None):
         """(rpm, coverage 0..1) for changing up from `gear`, or None when
         there isn't enough known yet. rpm is the limiter when staying in
-        gear always pulls harder."""
+        gear always pulls harder. Where both gears' own curves are known
+        they are compared (the same road speed on both sides, so drag and
+        slope cancel); elsewhere the pooled curve."""
         this, following = self.ratio(gear), self.ratio(gear + 1)
         ceiling = self.ceiling()
         if not this or not following or not ceiling:
             return None
+        pooled = self.curve(resample=resample)
+        own, next_own = self.curve(gear, resample), self.curve(gear + 1, resample)
         step = following / this
-        start = ceiling * 0.5
-        known = checked = 0
-        ahead = 0
-        rpm = start
+        known = checked = ahead = 0
+        rpm = ceiling * 0.5
         crossing = None
         while rpm <= ceiling:
             checked += 1
-            stay, change = self.power_at(rpm), self.power_at(rpm * step)
+            stay, change = _interpolate(own, rpm), _interpolate(next_own, rpm * step)
+            if stay is None or change is None:
+                stay, change = _interpolate(pooled, rpm), _interpolate(pooled, rpm * step)
             if stay is not None and change is not None:
                 known += 1
                 if change > stay:
@@ -188,34 +301,61 @@ class CarModel:
             rpm += SHIFT_STEP
         coverage = known / checked if checked else 0.0
         # Never beaten: hold it to the limiter, if the top end is known
-        if self.power_at(ceiling * 0.97) is not None and coverage >= 0.5:
+        top = _interpolate(own, ceiling * 0.97)
+        if top is None:
+            top = _interpolate(pooled, ceiling * 0.97)
+        if top is not None and coverage >= 0.5:
             return (ceiling, coverage)
         return None
+
+    def best_bands(self, resamples=BOOTSTRAP_RESAMPLES, seed=0):
+        """{gear: (low, high)}: the 10th and 90th percentiles of the best
+        change up over bootstrap resamples of the power samples, for the
+        gears whose best is known. Slow (tens of ms): the drive-log thread
+        works it out, at most every BANDS_EVERY seconds per car."""
+        rng = random.Random(seed)
+
+        def resample(samples):
+            return [samples[rng.randrange(len(samples))] for _ in samples]
+        gears = self.gears()
+        bands = {}
+        for gear in gears:
+            if gear + 1 not in gears or self.best_shift(gear) is None:
+                continue
+            found = [b[0] for b in (self.best_shift(gear, resample) for _ in range(resamples)) if b is not None]
+            if len(found) >= resamples // 2:
+                bands[gear] = (_quantile(found, 0.1), _quantile(found, 0.9))
+        return bands
 
     def average_upshift(self, gear):
         shifts = self.upshifts.get(gear)
         return (statistics.mean(shifts), len(shifts)) if shifts else None
 
-    def snapshot(self):
-        """A plain dict for the GUI."""
+    def snapshot(self, bands=None):
+        """A plain dict for the GUI; `bands` from best_bands() give each
+        best change up its range (best_low, best_high)."""
         gears = self.gears()
+        bands = bands or {}
         rows = []
         for gear in gears:
             best = self.best_shift(gear) if gear + 1 in gears else None
             average = self.average_upshift(gear)
+            band = bands.get(gear) if best else None
             rows.append({
                 'gear': gear,
                 'ratio': self.ratio(gear),
                 'ratio_samples': len(self.ratios.get(gear, [])),
                 'best': best[0] if best else None,
+                'best_low': band[0] if band else None,
+                'best_high': band[1] if band else None,
                 'coverage': best[1] if best else 0.0,
                 'average_shift': average[0] if average else None,
                 'shifts': average[1] if average else 0,
                 'last': gear + 1 not in gears,
             })
-        bands = sum(1 for v in self.power.values() if len(v) >= POWER_MIN)
+        known = sum(1 for v in self.power.values() if len(v) >= POWER_MIN)
         return {'key': self.key, 'name': self.name, 'limiter': self.ceiling(), 'gears': rows,
-                'power_bands': bands, 'limiter_time': self.limiter_time,
+                'limiter_source': self.limiter_source, 'power_bands': known, 'limiter_time': self.limiter_time,
                 'power_source': self.power_source, 'retuned': dict(self.retuned)}
 
     def advice(self, session_limiter_time=0.0):
@@ -337,6 +477,7 @@ class ShiftLearner:
         self._loaded = None                 # load_snapshot(): ((profile, key, updated), snapshot)
         self._shift_cache = {}
         self._shift_cache_at = 0.0
+        self._bands = {}                    # key -> (monotonic time, best_bands())
         if database is not None:
             self.open(database)
 
@@ -372,12 +513,14 @@ class ShiftLearner:
         return self.clock(now) if self.clock is not None else time.time()
 
     def _reset_motion(self):
-        self._speeds = collections.deque()       # (t, speed) for the acceleration
+        self._speeds = collections.deque()       # (t, speed, world height or None, rpm) for the acceleration
         self._gear = None
         self._gear_since = 0.0
         self._last = None                        # previous (t, rpm, gear, throttle)
         self._left = None                        # (gear, rpm, throttle, t, via neutral) when a forward gear was left
         self._off_ratio = {}                     # gear -> part-throttle ratios off the known one
+        self._recent = collections.deque()       # (t, rpm, throttle) over SHIFT_WINDOW in a forward gear
+        self._flat_since = None                  # when the throttle went to the floor
 
     # -- storage (the listener side posts, the drive log writes) --
 
@@ -551,7 +694,7 @@ class ShiftLearner:
         if live:
             return self.snapshot()
         if car is not None:
-            data = self._snapshot_of(copy)
+            data = self._snapshot_of(copy, bands=self._bands_of(copy))
             self._loaded = (stamp, data)
             return data
         reader = self._reader()
@@ -569,7 +712,7 @@ class ShiftLearner:
         except (ValueError, KeyError, TypeError, AttributeError):
             return None
         car.name = row['name'] or car.name
-        data = self._snapshot_of(car)
+        data = self._snapshot_of(car, bands=self._bands_of(car))
         self._loaded = (stamp, data)
         return data
 
@@ -587,7 +730,7 @@ class ShiftLearner:
             if self.car is None:
                 return None
             copy, limiter_time = self.car.copy(), self.session_limiter_time
-        return self._snapshot_of(copy, limiter_time)
+        return self._snapshot_of(copy, limiter_time, self._bands_of(copy))
 
     published = None                    # the drive-log thread's last snapshot of the current car
 
@@ -599,11 +742,23 @@ class ShiftLearner:
                 self.published = None
                 return
             copy, limiter_time = self.car.copy(), self.session_limiter_time
-        self.published = self._snapshot_of(copy, limiter_time)
+        self.published = self._snapshot_of(copy, limiter_time, self._bands_of(copy))
+
+    def _bands_of(self, car):
+        """The car's best_bands(), worked out again at most every
+        BANDS_EVERY seconds (they take tens of milliseconds)."""
+        cached = self._bands.get(car.key)
+        now = time.monotonic()
+        if cached is None or now - cached[0] > BANDS_EVERY:
+            cached = (now, car.best_bands())
+            bands = dict(self._bands)
+            bands[car.key] = cached
+            self._bands = bands                  # a new dict: the listener reads it without the lock
+        return cached[1]
 
     @staticmethod
-    def _snapshot_of(car, session_limiter_time=0.0):
-        data = car.snapshot()
+    def _snapshot_of(car, session_limiter_time=0.0, bands=None):
+        data = car.snapshot(bands)
         data['session_limiter_time'] = session_limiter_time
         data['advice'] = car.advice(session_limiter_time)
         return data
@@ -640,8 +795,9 @@ class ShiftLearner:
             if self.session is not None and self._last_feed is not None and now - self._last_feed > SESSION_GAP:
                 self._end_session_locked()
 
-    def feed(self, now, sample, limiter, throttle, clutch, press=None):
-        """One telemetry packet. `limiter` is the best known ceiling;
+    def feed(self, now, sample, limiter, throttle, clutch, press=None, limiter_source='game'):
+        """One telemetry packet. `limiter` is the best known ceiling and
+        `limiter_source` where it comes from ('launch', 'game', 'seen');
         `throttle` and `clutch` are pressed fractions (None = unknown);
         `press` is (monotonic time, 'gear', 'sequential' or 'paddle') of
         the last button that could have changed gear."""
@@ -664,8 +820,7 @@ class ShiftLearner:
             if self.session is None:
                 self._start_session_locked(now, sample)
             self._press = press
-            if limiter and limiter > car.limiter * 1.001 or (limiter and not car.limiter):
-                car.limiter = limiter
+            if car.set_limiter(limiter, limiter_source):
                 self._dirty = True
             self._feed_locked(car, now, sample, throttle, clutch)
             if self._dirty and now - self._saved_at > SAVE_EVERY:
@@ -675,13 +830,24 @@ class ShiftLearner:
         gear, speed, rpm = sample.gear, sample.speed, sample.rpm
         previous = self._last
         self._last = (now, rpm, gear, throttle)
+        flat_out = throttle is not None and throttle >= FULL_THROTTLE
+        if not flat_out:
+            self._flat_since = None
+        elif self._flat_since is None:
+            self._flat_since = now
         if gear is None or speed is None:
             return
+        recent = self._recent
         if gear != self._gear:
-            # Where a change up happened: the last rpm in the old gear, also
-            # through neutral (an H-pattern box shows it on the way)
-            if self._gear is not None and self._gear >= 1 and previous is not None:
-                self._left = (self._gear, previous[1], previous[3], now, gear == 0)
+            # Where a change up happened: the peak rpm and the most throttle
+            # over the last moments in the old gear, also through neutral (an
+            # H-pattern box shows it on the way). An H-pattern driver lifts
+            # before the gear leaves, so the last sample alone reads low and
+            # often not flat out.
+            if self._gear is not None and self._gear >= 1 and recent:
+                pressed = [x for _, _, x in recent if x is not None]
+                self._left = (self._gear, max(r for _, r, _ in recent), max(pressed) if pressed else None, now,
+                              gear == 0)
             elif gear == 0 and self._left is not None:
                 self._left = self._left[:4] + (True,)
             left = self._left
@@ -696,7 +862,12 @@ class ShiftLearner:
             self._gear = gear
             self._gear_since = now
             self._speeds.clear()
-        self._speeds.append((now, speed))
+            recent.clear()
+        if gear >= 1:
+            recent.append((now, rpm, throttle))
+            while now - recent[0][0] > SHIFT_WINDOW:
+                recent.popleft()
+        self._speeds.append((now, speed, sample.pos[1] if sample.pos is not None else None, rpm))
         while self._speeds and now - self._speeds[0][0] > ACCEL_WINDOW:
             self._speeds.popleft()
 
@@ -704,7 +875,6 @@ class ShiftLearner:
         settled = now - self._gear_since >= SETTLED
         if gear < 1 or speed < MIN_SPEED or not clutch_out or not settled:
             return
-        flat_out = throttle is not None and throttle >= FULL_THROTTLE
         if flat_out and rpm > car.top_seen:
             car.top_seen = rpm
         if flat_out and car.limiter and rpm >= car.limiter * LIMITER_BAND and previous is not None:
@@ -739,28 +909,43 @@ class ShiftLearner:
         if not on_ratio:
             # Wheelspin or a jump, or a gear not learnt yet: no power from it
             return
-        if not flat_out:
+        if not flat_out or now - self._flat_since < car.boost_hold:
+            # Power counts once the throttle has been floored a moment: a
+            # turbo builds boost after the pedal goes down
             return
         if car.limiter and rpm > car.limiter * 1.01:
             return
+        if brake is not None and brake >= BRAKE_POWER:
+            return                                   # left-foot braking: the engine is fighting it
+        slip = drive_slip(sample, car.drivetrain)
+        if slip is not None and slip[0] > SLIP_POWER[slip[1]]:
+            return                                   # spinning: the drive is not reaching the road
         if sample.power is not None:
             if car.power_source != 'game':
-                car.power, car.power_source = {}, 'game'     # the real figure beats the estimate
+                car.power, car.power_g, car.power_source = {}, {}, 'game'   # the real figure beats the estimate
             power = sample.power
         else:
             if car.power_source == 'game':
                 return
             car.power_source = 'accel'
-            accel = self._acceleration()
+            accel, slope_free = self._drive_acceleration(sample)
             if accel is None or accel <= 0:
                 return
-            power = (accel + DRAG_C0 + DRAG_C2 * speed * speed) * speed
+            car.slope_free = slope_free
+            # The acceleration is the window's, so it belongs to the window's
+            # middle: at 3000 rpm a second in 2nd gear, the last sample's rpm
+            # would be 500 too high
+            points = self._speeds
+            rpm = sum(p[3] for p in points) / len(points)
+            speed = sum(p[1] for p in points) / len(points)
+            c0, c2 = car.drag
+            power = (accel + c0 + c2 * speed * speed) * speed
         if power <= 0:
             return
         band = int(rpm // POWER_BIN)
-        values = car.power.setdefault(band, [])
-        values.append(power)
-        del values[:-POWER_KEEP]
+        for values in (car.power.setdefault(band, []), car.power_g.setdefault((gear, band), [])):
+            values.append(power)
+            del values[:-POWER_KEEP]
 
     def _record_shift_locked(self, car, left, now):
         """Keep the change up for the long run: gear, rpm, the learnt best
@@ -769,8 +954,10 @@ class ShiftLearner:
             return
         gear, rpm, throttle, left_at, via_neutral = left
         best = car.best_shift(gear)
+        band = self._bands.get(car.key, (0, {}))[1].get(gear) if best else None
         shift = {'at': self.wall(now), 'gear': gear, 'gear_to': gear + 1, 'direction': 'up', 'rpm': rpm,
-                 'best': best[0] if best else None, 'throttle': throttle,
+                 'best': best[0] if best else None, 'best_low': band[0] if band else None,
+                 'best_high': band[1] if band else None, 'throttle': throttle,
                  'method': shift_method(getattr(self, '_press', None), left_at, now, via_neutral),
                  'flat_out': int(throttle is None or throttle >= 0.8)}
         self.log.post(self._write_shift, self.session, shift)
@@ -797,15 +984,40 @@ class ShiftLearner:
             self._dirty = True
             logging.info("shift learner: %s gear %d re-tuned (%.1f rpm per m/s)", car.key, gear, middle)
 
+    @staticmethod
+    def _slope(points, index):
+        """Least-squares slope over time of field `index` of the points."""
+        n = len(points)
+        mean_t = sum(p[0] for p in points) / n
+        mean_v = sum(p[index] for p in points) / n
+        spread = sum((p[0] - mean_t) ** 2 for p in points)
+        if spread <= 0:
+            return None
+        return sum((p[0] - mean_t) * (p[index] - mean_v) for p in points) / spread
+
     def _acceleration(self):
-        """Least-squares slope of speed over the recent window."""
+        """The rate of change of speed over the recent window."""
         points = self._speeds
         if len(points) < ACCEL_MIN_POINTS or points[-1][0] - points[0][0] < ACCEL_WINDOW * 0.5:
             return None
-        n = len(points)
-        mean_t = sum(t for t, _ in points) / n
-        mean_v = sum(v for _, v in points) / n
-        spread = sum((t - mean_t) ** 2 for t, _ in points)
-        if spread <= 0:
-            return None
-        return sum((t - mean_t) * (v - mean_v) for t, v in points) / spread
+        return self._slope(points, 1)
+
+    def _drive_acceleration(self, sample):
+        """(what the drive accelerates the car by, slope-free): an
+        accelerometer reading as it is (gravity is in it); otherwise the
+        change of speed plus what the slope takes, from the car's forward
+        vector or from how fast it climbs; otherwise the change of speed
+        alone (False: a hill is in it)."""
+        if sample.accel_kind == 'specific' and sample.accel is not None:
+            return sample.accel[0], True
+        accel = self._acceleration()
+        if accel is None:
+            return None, False
+        if sample.forward is not None:
+            return accel + G * sample.forward[1], True
+        points = self._speeds
+        if all(p[2] is not None for p in points) and sample.speed:
+            climb = self._slope(points, 2)
+            if climb is not None:
+                return accel + G * max(-1.0, min(1.0, climb / sample.speed)), True
+        return accel, False
