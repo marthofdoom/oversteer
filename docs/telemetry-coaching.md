@@ -1390,9 +1390,9 @@ advice, the web server and page, then the tab. Items are ticked below as
 they are committed.
 
 ### Step B
-- [ ] Web server (read-only, limits, Host check, headers) over today's data, and page
+- [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
 - [ ] Web preferences and Settings controls, bound URLs
-- [ ] Web tests
+- [x] Web tests (`tests/test_web.py`: every endpoint, another profile's data refused, 405 with `Allow`, 421 and the IPv6 literal, the 9th request → 503 and the slots given back, headers, a taken port, no database yet, the bound URLs)
 
 ### Step C
 - [x] Drive-log thread; SQLite writes off the listener lock (`drive_log.DriveLog`: events are a function and its arguments run on the thread with the only writer; batches committed every 5 s or when an event asks; `threaded=False` runs them inline for tests and replays, and a test checks both write the same). The learner lock is an `RLock` held only for in-memory work and model copies; the listener reads a car's model once when it first sees it (read-only connection), never writes. Sessions end after `SESSION_GAP` without telemetry (`ShiftLearner.tick()` from the listener's idle loop), not at the 2 s idle; the GUI's refresh counter is `history_changed`. `snapshot()` returns what the drive-log thread published (`publish()` once a second) or works it out from a copy
