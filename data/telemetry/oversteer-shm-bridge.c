@@ -37,15 +37,19 @@
 
 /* Offsets into the shared structs (4-byte packing, identical in AC/ACC/ACR) */
 #define PHYS_PACKET_ID   0     /* int */
+#define PHYS_GAS         4     /* float 0..1 */
+#define PHYS_BRAKE       8     /* float 0..1 */
 #define PHYS_GEAR        16    /* int, 0 = reverse, 1 = neutral, 2 = first ... */
 #define PHYS_RPMS        20    /* int */
 #define PHYS_SPEED_KMH   28    /* float */
 #define PHYS_VIEW_SIZE   64
 #define STATIC_MAX_RPM   412   /* int; after smVersion/acVersion (2x15 wchar), 2 ints,
                                   5x33 wchar strings, sectorCount, maxTorque, maxPower */
+#define STATIC_CAR_MODEL 68    /* wchar_t[33] */
+#define STATIC_TRACK     134   /* wchar_t[33] */
 #define STATIC_VIEW_SIZE 416
 
-#define OVST_VERSION 1
+#define OVST_VERSION 2
 #define OVST_SOURCE_ACPMF 1
 
 #pragma pack(push, 1)
@@ -58,6 +62,11 @@ struct ovst_packet {
     float max_rpm;       /* 0 when unknown */
     int32_t gear;        /* -1 reverse, 0 neutral, 1.. */
     float speed_kmh;
+    /* version 2 */
+    float gas;           /* 0..1 */
+    float brake;
+    char car[32];        /* static carModel, ASCII, NUL-padded */
+    char track[32];      /* static track */
 };
 #pragma pack(pop)
 
@@ -156,6 +165,16 @@ static int32_t rd_i32(const void *base, size_t off)
     int32_t v;
     memcpy(&v, (const char *)base + off, sizeof(v));
     return v;
+}
+
+/* A wchar_t[33] from the static page as printable ASCII (others -> '_'). */
+static void rd_name(const void *base, size_t off, char *out, size_t size)
+{
+    const uint16_t *w = (const uint16_t *)((const char *)base + off);
+    size_t i;
+    memset(out, 0, size);
+    for (i = 0; i + 1 < size && i < 33 && w[i]; i++)
+        out[i] = (w[i] >= 0x20 && w[i] < 0x7f) ? (char)w[i] : '_';
 }
 
 static float rd_f32(const void *base, size_t off)
@@ -276,6 +295,12 @@ int main(int argc, char **argv)
             pkt.max_rpm = stat ? (float)rd_i32(stat, STATIC_MAX_RPM) : 0.0f;
             pkt.gear = rd_i32(phys, PHYS_GEAR) - 1;
             pkt.speed_kmh = rd_f32(phys, PHYS_SPEED_KMH);
+            pkt.gas = rd_f32(phys, PHYS_GAS);
+            pkt.brake = rd_f32(phys, PHYS_BRAKE);
+            if (stat) {
+                rd_name(stat, STATIC_CAR_MODEL, pkt.car, sizeof(pkt.car));
+                rd_name(stat, STATIC_TRACK, pkt.track, sizeof(pkt.track));
+            }
             if (sendto(sock, (const char *)&pkt, sizeof(pkt), 0, (struct sockaddr *)&dest, sizeof(dest)) == SOCKET_ERROR) {
                 if (verbose)
                     logmsg("sendto failed: %d", WSAGetLastError());

@@ -702,10 +702,14 @@ class Gui:
         circuit one each keep their own."""
         profile = self.model.get_profile()
         name = os.path.splitext(os.path.basename(profile))[0] if profile else '_no_profile'
-        from .shift_learner import safe_name
-        directory = os.path.join(self.config_path, 'cars', safe_name(name))
-        if directory != self.shift_learner.directory:
-            self.shift_learner.set_directory(directory)
+        if self.shift_learner.db is None:
+            from xdg.BaseDirectory import save_data_path
+            try:
+                self.shift_learner.open(os.path.join(save_data_path('oversteer'), 'telemetry.db'))
+            except Exception as e:
+                logging.warning("telemetry database: %s", e)
+        if name != self.shift_learner.profile:
+            self.shift_learner.set_profile(name)
             self.ui.safe_call(self.refresh_telemetry_cars)
 
     def on_quit(self):

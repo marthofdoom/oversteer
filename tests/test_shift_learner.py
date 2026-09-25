@@ -67,7 +67,7 @@ def exits(learner, car='test-car', runs=2):
 
 
 def test_learns_the_best_shift_per_gear(tmp_path):
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     drive(learner)
     exits(learner)
     car = learner.car
@@ -79,18 +79,18 @@ def test_learns_the_best_shift_per_gear(tmp_path):
 
 
 def test_records_where_the_driver_changes_up(tmp_path):
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     drive(learner, shift_at=6000, runs=2)
     average, count = learner.car.average_upshift(2)
     assert count == 2 and 5950 <= average <= 6100
 
 
 def test_car_profiles_persist_and_switch(tmp_path):
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     drive(learner, runs=2)
     exits(learner)
     learner.idle()                                  # telemetry stopped: saved
-    again = ShiftLearner(str(tmp_path))
+    again = ShiftLearner(str(tmp_path / 'telemetry.db'))
     drive(again, runs=0, car='test-car')
     again.feed(0.0, Sample(3000, LIMITER, gear=1, speed=30, car='test-car'), LIMITER, 0.0, 0.0)
     assert again.car.best_shift(2) is not None     # picked up where it left off
@@ -102,7 +102,7 @@ def test_car_profiles_persist_and_switch(tmp_path):
 
 
 def test_wheelspin_does_not_teach_power(tmp_path):
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     exits(learner)                                  # ratios known
     learner.car.power = {}
     t = 5000.0
@@ -116,7 +116,7 @@ def test_wheelspin_does_not_teach_power(tmp_path):
 
 
 def test_a_retuned_gear_is_relearnt(tmp_path):
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     exits(learner)
     t = 9000.0
     for i in range(120):                             # cruising in a longer 3rd
@@ -126,7 +126,7 @@ def test_a_retuned_gear_is_relearnt(tmp_path):
 
 
 def test_coaching_says_early_or_late(tmp_path):
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     exits(learner)
     drive(learner, shift_at=5200, runs=3)            # well short of ~6700
     tips = learner.snapshot()['advice']
@@ -137,8 +137,31 @@ def test_coaching_says_early_or_late(tmp_path):
     assert any(t.startswith('2→3') and 'late' in t for t in tips), tips
 
 
+def test_sessions_keep_every_shift_and_how_it_was_made(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)
+    drive(learner, shift_at=5600, runs=2)            # through neutral: an H-pattern box
+    learner.idle()                                    # end of the stage
+    history = learner.history('test-car')
+    assert len(history) == 1 and history[0]['shifts'] == 8
+    assert history[0]['methods'] == ['h-pattern'] and history[0]['error'] < -800
+    again = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    assert again.known_cars() == [('test-car', 'test-car')]
+    assert len(again.history('test-car')) == 1
+
+
+def test_profiles_keep_their_own_cars(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'), profile='rally')
+    exits(learner)
+    learner.save()
+    learner.set_profile('circuit')
+    assert learner.known_cars() == []
+    learner.set_profile('rally')
+    assert [k for k, _ in learner.known_cars()] == ['test-car']
+
+
 def test_shift_point_needs_confidence(tmp_path):
     car = CarModel('x')
     assert car.best_shift(1) is None
-    learner = ShiftLearner(str(tmp_path))
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     assert learner.shift_rpm(2) is None

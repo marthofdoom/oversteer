@@ -29,6 +29,7 @@ import logging
 import math
 import os
 import re
+import sqlite3
 import statistics
 import threading
 import time
@@ -252,91 +253,160 @@ class CarModel:
         return tips
 
 
-class ShiftLearner:
-    """Feeds telemetry into the current car's model and keeps the models
-    on disk. Thread-safe: the listener feeds, the GUI reads."""
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS cars (
+    profile TEXT NOT NULL,
+    key TEXT NOT NULL,
+    name TEXT,
+    model TEXT NOT NULL,            -- CarModel.to_dict() as JSON
+    updated REAL,
+    PRIMARY KEY (profile, key)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY,
+    profile TEXT NOT NULL,
+    car TEXT NOT NULL,
+    track TEXT,
+    discipline TEXT,                -- not detected yet
+    surface TEXT,                   -- not detected yet
+    started REAL NOT NULL,
+    ended REAL,
+    limiter_time REAL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS shifts (
+    id INTEGER PRIMARY KEY,
+    session INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    at REAL NOT NULL,
+    gear INTEGER NOT NULL,          -- changed up from
+    rpm REAL NOT NULL,
+    best REAL,                      -- the learnt best at the time, if known
+    throttle REAL,
+    method TEXT                     -- 'h-pattern', 'sequential', 'paddles', or NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_car ON sessions (profile, car, started);
+CREATE INDEX IF NOT EXISTS shifts_session ON shifts (session);
+"""
 
-    def __init__(self, directory=None):
+SHIFT_PRESS_WINDOW = 0.6         # a shifter/wheel button this long before a change made it
+
+
+class ShiftLearner:
+    """Feeds telemetry into the current car's model and keeps everything in
+    an SQLite database: the cars (per Oversteer profile), each driving
+    session, and every upshift, which is what long-term coaching reads.
+    Thread-safe: the listener feeds, the GUI reads; one lock serialises
+    all use of the connection."""
+
+    def __init__(self, database=None, profile='_no_profile'):
         self.lock = threading.Lock()
-        self.directory = directory
+        self.profile = profile
         self.car = None
         self.enabled = True
+        self.db = None
         self._reset_motion()
         self._dirty = False
         self._saved_at = time.monotonic()
+        self.session = None                      # sessions.id of the drive going on
         self.session_limiter_time = 0.0
         self._shift_cache = {}
         self._shift_cache_at = 0.0
+        if database is not None:
+            self.open(database)
+
+    def open(self, path):
+        with self.lock:
+            if path != ':memory:':
+                os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+            self.db = sqlite3.connect(path, check_same_thread=False)
+            self.db.execute('PRAGMA foreign_keys = ON')
+            self.db.executescript(SCHEMA)
+            self.db.commit()
 
     def _reset_motion(self):
         self._speeds = collections.deque()       # (t, speed) for the acceleration
         self._gear = None
         self._gear_since = 0.0
         self._last = None                        # previous (t, rpm, gear, throttle)
-        self._left = None                        # (gear, rpm, throttle, t) when a forward gear was left
+        self._left = None                        # (gear, rpm, throttle, t, via neutral) when a forward gear was left
         self._off_ratio = {}                     # gear -> part-throttle ratios off the known one
 
     # -- storage --
 
-    def set_directory(self, directory):
+    def set_profile(self, profile):
         """Switch to another Oversteer profile's cars."""
         with self.lock:
+            if profile == self.profile:
+                return
+            self._end_session_locked()
             self._save_locked()
-            self.directory = directory
+            self.profile = profile
             key, name = (self.car.key, self.car.name) if self.car else (None, None)
             self.car = None
             if key is not None:
                 self._load_locked(key, name)
 
-    def _path(self, key):
-        return os.path.join(self.directory, safe_name(key) + '.json') if self.directory else None
-
     def _load_locked(self, key, name):
-        path = self._path(key)
         car = None
-        if path and os.path.exists(path):
-            try:
-                with open(path) as f:
-                    car = CarModel.from_dict(json.load(f))
-            except (OSError, ValueError, KeyError, TypeError) as e:
-                logging.warning("shift learner: can't read %s: %s", path, e)
+        if self.db is not None:
+            row = self.db.execute('SELECT model, name FROM cars WHERE profile = ? AND key = ?',
+                                  (self.profile, key)).fetchone()
+            if row is not None:
+                try:
+                    car = CarModel.from_dict(json.loads(row[0]))
+                    car.name = row[1] or car.name
+                except (ValueError, KeyError, TypeError) as e:
+                    logging.warning("shift learner: can't read %s: %s", key, e)
         self.car = car or CarModel(key, name)
         self._reset_motion()
         self.session_limiter_time = 0.0
 
     def _save_locked(self):
-        if self.car is None or not self._dirty or not self.directory:
+        if self.car is None or not self._dirty or self.db is None:
             return
-        path = self._path(self.car.key)
         try:
-            os.makedirs(self.directory, exist_ok=True)
-            tmp = path + '.tmp'
-            with open(tmp, 'w') as f:
-                json.dump(self.car.to_dict(), f)
-            os.replace(tmp, path)
+            self.db.execute('INSERT OR REPLACE INTO cars (profile, key, name, model, updated) VALUES (?, ?, ?, ?, ?)',
+                            (self.profile, self.car.key, self.car.name, json.dumps(self.car.to_dict()), time.time()))
+            if self.session is not None:
+                self.db.execute('UPDATE sessions SET ended = ?, limiter_time = ? WHERE id = ?',
+                                (time.time(), self.session_limiter_time, self.session))
+            self.db.commit()
             self._dirty = False
             self._saved_at = time.monotonic()
-        except OSError as e:
-            logging.warning("shift learner: can't save %s: %s", path, e)
+        except sqlite3.Error as e:
+            logging.warning("shift learner: can't save %s: %s", self.car.key, e)
+
+    def _start_session_locked(self, track):
+        if self.db is None or self.car is None:
+            return
+        cursor = self.db.execute('INSERT INTO sessions (profile, car, track, started) VALUES (?, ?, ?, ?)',
+                                 (self.profile, self.car.key, track, time.time()))
+        self.session = cursor.lastrowid
+        self.session_limiter_time = 0.0
+
+    def _end_session_locked(self):
+        if self.session is None:
+            return
+        self._dirty = True
+        self._save_locked()
+        # A session with no upshift taught nothing about the driver
+        if self.db is not None:
+            self.db.execute('DELETE FROM sessions WHERE id = ? AND NOT EXISTS '
+                            '(SELECT 1 FROM shifts WHERE session = ?)', (self.session, self.session))
+            self.db.commit()
+        self.session = None
 
     def save(self):
         with self.lock:
+            self._end_session_locked()
             self._save_locked()
 
     def known_cars(self):
-        """[(key, name)] saved for this profile."""
-        cars = []
-        if self.directory and os.path.isdir(self.directory):
-            for entry in sorted(os.listdir(self.directory)):
-                if not entry.endswith('.json'):
-                    continue
-                try:
-                    with open(os.path.join(self.directory, entry)) as f:
-                        data = json.load(f)
-                    cars.append((data['key'], data.get('name') or data['key']))
-                except (OSError, ValueError, KeyError):
-                    continue
-        return cars
+        """[(key, name)] learnt in this profile."""
+        if self.db is None:
+            return []
+        with self.lock:
+            return [(k, n or k) for k, n in self.db.execute(
+                'SELECT key, name FROM cars WHERE profile = ? ORDER BY name', (self.profile,))]
 
     def rename(self, key, name):
         with self.lock:
@@ -344,39 +414,53 @@ class ShiftLearner:
                 self.car.name = name
                 self._dirty = True
                 self._save_locked()
-                return
-            path = self._path(key)
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-                data['name'] = name
-                with open(path, 'w') as f:
-                    json.dump(data, f)
-            except (OSError, ValueError, TypeError) as e:
-                logging.warning("shift learner: rename %s: %s", key, e)
+            elif self.db is not None:
+                self.db.execute('UPDATE cars SET name = ? WHERE profile = ? AND key = ?', (name, self.profile, key))
+                self.db.commit()
 
     def forget(self, key):
-        """Start the car over."""
+        """Start the car over, history and all."""
         with self.lock:
-            path = self._path(key)
-            if path and os.path.exists(path):
-                os.remove(path)
+            if self.db is not None:
+                self.db.execute('DELETE FROM cars WHERE profile = ? AND key = ?', (self.profile, key))
+                self.db.execute('DELETE FROM sessions WHERE profile = ? AND car = ?', (self.profile, key))
+                self.db.commit()
             if self.car is not None and self.car.key == key:
                 self.car = CarModel(key, self.car.name)
+                self.session = None
                 self._reset_motion()
                 self._dirty = False
+
+    def history(self, key, limit=10):
+        """The car's recent sessions, newest first: dicts with started,
+        track, shifts, mean error to the best (rpm, signed), limiter time,
+        and the shifting methods used."""
+        if self.db is None:
+            return []
+        with self.lock:
+            rows = self.db.execute(
+                'SELECT s.id, s.started, s.track, s.limiter_time, COUNT(h.id), AVG(h.rpm - h.best), '
+                '       GROUP_CONCAT(DISTINCT h.method) '
+                'FROM sessions s LEFT JOIN shifts h ON h.session = s.id '
+                'WHERE s.profile = ? AND s.car = ? GROUP BY s.id ORDER BY s.started DESC LIMIT ?',
+                (self.profile, key, limit)).fetchall()
+        return [{'id': r[0], 'started': r[1], 'track': r[2], 'limiter_time': r[3] or 0.0, 'shifts': r[4],
+                 'error': r[5], 'methods': sorted((r[6] or '').split(',')) if r[6] else []} for r in rows]
 
     def load_snapshot(self, key):
         """A saved car's snapshot without switching to it."""
         with self.lock:
             if self.car is not None and self.car.key == key:
                 return self.car.snapshot()
-            path = self._path(key)
-        try:
-            with open(path) as f:
-                car = CarModel.from_dict(json.load(f))
-        except (OSError, ValueError, KeyError, TypeError):
+            row = self.db.execute('SELECT model, name FROM cars WHERE profile = ? AND key = ?',
+                                  (self.profile, key)).fetchone() if self.db is not None else None
+        if row is None:
             return None
+        try:
+            car = CarModel.from_dict(json.loads(row[0]))
+        except (ValueError, KeyError, TypeError):
+            return None
+        car.name = row[1] or car.name
         data = car.snapshot()
         data['session_limiter_time'] = 0.0
         data['advice'] = car.advice()
@@ -409,21 +493,29 @@ class ShiftLearner:
             return self._shift_cache[gear]
 
     def idle(self):
-        """Telemetry stopped (menus, loading): keep what was learnt."""
+        """Telemetry stopped (menus, loading, the end of a stage): the
+        session is over; keep what was learnt."""
         with self.lock:
+            self._end_session_locked()
             self._save_locked()
             self._reset_motion()
 
-    def feed(self, now, sample, limiter, throttle, clutch):
+    def feed(self, now, sample, limiter, throttle, clutch, press=None):
         """One telemetry packet. `limiter` is the best known ceiling;
-        `throttle` and `clutch` are pressed fractions (None = unknown)."""
+        `throttle` and `clutch` are pressed fractions (None = unknown);
+        `press` is (monotonic time, 'shifter' or 'wheel') of the last
+        button that could have changed gear."""
         if not self.enabled or sample.car is None:
             return
         with self.lock:
             if self.car is None or self.car.key != sample.car:
+                self._end_session_locked()
                 self._save_locked()
                 self._load_locked(sample.car, sample.car_name)
                 self._shift_cache = {}
+            if self.session is None:
+                self._start_session_locked(getattr(sample, 'track', None))
+            self._press = press
             car = self.car
             if limiter and limiter > car.limiter * 1.001 or (limiter and not car.limiter):
                 car.limiter = limiter
@@ -442,7 +534,9 @@ class ShiftLearner:
             # Where a change up happened: the last rpm in the old gear, also
             # through neutral (an H-pattern box shows it on the way)
             if self._gear is not None and self._gear >= 1 and previous is not None:
-                self._left = (self._gear, previous[1], previous[3], now)
+                self._left = (self._gear, previous[1], previous[3], now, gear == 0)
+            elif gear == 0 and self._left is not None:
+                self._left = self._left[:4] + (True,)
             left = self._left
             if left is not None and gear == left[0] + 1 and now - left[3] <= 1.5 and speed > 3.0:
                 if left[2] is None or left[2] >= 0.8:
@@ -450,6 +544,7 @@ class ShiftLearner:
                     shifts.append(left[1])
                     del shifts[:-SHIFTS_KEEP]
                     self._dirty = True
+                    self._record_shift_locked(car, left, now)
                 self._left = None
             self._gear = gear
             self._gear_since = now
@@ -506,6 +601,26 @@ class ShiftLearner:
         values = car.power.setdefault(band, [])
         values.append(power)
         del values[:-POWER_KEEP]
+
+    def _record_shift_locked(self, car, left, now):
+        """Keep the change up for the long run: gear, rpm, the learnt best
+        then, and how it was made."""
+        if self.db is None or self.session is None:
+            return
+        gear, rpm, throttle, left_at, via_neutral = left
+        if via_neutral:
+            method = 'h-pattern'
+        else:
+            press = getattr(self, '_press', None)
+            kind = press[1] if press and 0 <= left_at - press[0] <= SHIFT_PRESS_WINDOW else None
+            method = {'shifter': 'sequential', 'wheel': 'paddles'}.get(kind)
+        best = car.best_shift(gear)
+        try:
+            self.db.execute('INSERT INTO shifts (session, at, gear, rpm, best, throttle, method) '
+                            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                            (self.session, time.time(), gear, rpm, best[0] if best else None, throttle, method))
+        except sqlite3.Error as e:
+            logging.warning("shift learner: %s", e)
 
     def _check_retune(self, car, gear, ratio, throttle):
         if throttle is None or throttle > 0.5:

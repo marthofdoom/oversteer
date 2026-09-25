@@ -50,7 +50,7 @@ CODEMASTERS_MIN = 64 * 4                             # DR2/DiRT 4 extradata 3 is
 CODEMASTERS_MAX = 512
 OVST_MAGIC = b'OVST'
 OVST_SIZE = 24
-OVST2_SIZE = 64                                      # + throttle, brake, car name
+OVST2_SIZE = 96                                      # + throttle, brake, car and track names
 
 # Launch mode: a rally stage starts with clutch in, handbrake up and the
 # throttle floored, which holds the engine on its limiter. That RPM is the
@@ -167,13 +167,15 @@ class Sample:
     its game), car_name, throttle and clutch (0..1, the game's view),
     power (W, Forza only)."""
 
-    __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power')
+    __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
+                 'track')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None):
         self.rpm, self.max_rpm, self.shift = rpm, max_rpm, shift
         self.gear, self.speed, self.car, self.car_name = gear, speed, car, car_name
         self.throttle, self.clutch, self.power = throttle, clutch, power
+        self.track = None                 # the track or stage, where the game says
 
 
 def _finite(x):
@@ -204,6 +206,7 @@ def decode_sample(data):
             name = _ascii(data[32:64])
             if name:
                 sample.car, sample.car_name = 'acpmf-' + name, name
+            sample.track = _ascii(data[64:96])
         return sample
     if n in FORZA_SIZES:
         race_on = struct.unpack_from('<i', data, 0)[0]
@@ -492,7 +495,7 @@ class Telemetry:
         clutch = sample.clutch if sample.clutch is not None else pedals.get('clutch')
         limiter = self.launch_max if self.launch_max else max_rpm
         try:
-            learner.feed(now, sample, limiter, throttle, clutch)
+            learner.feed(now, sample, limiter, throttle, clutch, pedals.get('shift_press'))
             learnt = learner.shift_rpm(sample.gear) if self.use_learnt else None
         except Exception:
             logging.exception("shift learner")
