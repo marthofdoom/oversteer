@@ -124,7 +124,7 @@ def _launch(telemetry, profile, inputs):
         telemetry._learn_launch(t, rpm)
 
 
-def _hold_on_limiter(limiter=7450.0, seconds=1.5):
+def _hold_on_limiter(limiter=7450.0, seconds=1.8):
     """Revs climbing to the limiter, then bouncing just under it."""
     samples, t = [], 0.0
     while t < seconds:
@@ -149,7 +149,7 @@ def test_launch_learns_the_limiter():
 
 def test_launch_without_a_handbrake_fitted():
     telemetry = Telemetry(FakeLeds(), launch=True)
-    _launch(telemetry, _hold_on_limiter(6900), {'clutch': 0.9, 'throttle': 0.95, 'handbrake': None})
+    _launch(telemetry, _hold_on_limiter(6900), {'clutch': 0.95, 'throttle': 0.95, 'handbrake': None})
     assert telemetry.launch_max == 6900.0
 
 
@@ -157,6 +157,13 @@ def test_no_launch_no_learning():
     telemetry = Telemetry(FakeLeds(), launch=True)
     # handbrake down: driving, not a launch
     _launch(telemetry, _hold_on_limiter(), dict(LAUNCH, handbrake=0.0))
+    assert telemetry.launch_max == 0.0
+    # clutch or handbrake only part way: not a launch
+    _launch(telemetry, _hold_on_limiter(), dict(LAUNCH, clutch=0.85))
+    _launch(telemetry, _hold_on_limiter(), dict(LAUNCH, handbrake=0.85))
+    assert telemetry.launch_max == 0.0
+    # held under a second: too short to count
+    _launch(telemetry, _hold_on_limiter(seconds=0.9), LAUNCH)
     assert telemetry.launch_max == 0.0
     # a clutch kick: too short to count
     _launch(telemetry, _hold_on_limiter(seconds=0.4), LAUNCH)
@@ -173,7 +180,7 @@ def test_no_launch_no_learning():
 def test_launch_limiter_drives_the_bar_and_is_raised_on_the_move():
     inputs = dict(LAUNCH)
     telemetry = Telemetry(FakeLeds(), shift=0.9, launch=True, inputs=lambda: inputs)
-    writes = _feed(telemetry, [ovst(rpm, 9000) for _, rpm in _hold_on_limiter(7000, seconds=1.2)], gap=0.02)
+    writes = _feed(telemetry, [ovst(rpm, 9000) for _, rpm in _hold_on_limiter(7000, seconds=1.6)], gap=0.02)
     assert telemetry.launch_max == 7000.0                    # learnt through the listener
     assert any(w[0] == 'pattern' for w in writes)            # on the limiter: past 90 % of 7000, flashing
     inputs.update(clutch=0.0, handbrake=0.0)                 # driving away, past a capped launch

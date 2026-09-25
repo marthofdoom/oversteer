@@ -54,10 +54,10 @@ OVST_SIZE = 24
 # Launch mode: a rally stage starts with clutch in, handbrake up and the
 # throttle floored, which holds the engine on its limiter. That RPM is the
 # car's real ceiling, whatever (if anything) the game reports as its max.
-LAUNCH_CLUTCH = 0.6                                  # pressed at least this far
+LAUNCH_CLUTCH = 0.9                                  # pressed at least this far
 LAUNCH_THROTTLE = 0.85
-LAUNCH_HANDBRAKE = 0.5
-LAUNCH_HOLD = 0.6                                    # seconds held before the RPM counts
+LAUNCH_HANDBRAKE = 0.9
+LAUNCH_HOLD = 1.0                                    # seconds held before the RPM counts
 LAUNCH_SETTLE = 0.3                                  # the last this-many seconds must not climb...
 LAUNCH_RISE = 0.02                                   # ...by more than this fraction: on the limiter
 LAUNCH_MIN_RPM = 2000.0
