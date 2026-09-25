@@ -80,6 +80,43 @@ def test_trace_metrics():
     assert not by_name(metrics, 'pedal.overlap') and not by_name(metrics, 'pedal.coast')
 
 
+def test_limiter_time_without_the_games_gear_count():
+    """Forza, OutGauge and the AC bridge send no gear count: time on the
+    limiter in the highest gear learnt is not "below top gear", and the
+    top gear's own metrics are not measured."""
+    rows, t, d = [], 0.0, 0.0
+    for i in range(1200):
+        on_limiter = 300 <= i < 330 or 600 <= i < 650
+        rows.append({'t': t, 'distance': d, 'speed': 20.0, 'rpm': 7450.0 if on_limiter else 6000.0,
+                     'gear': 5.0 if i >= 600 else 3.0, 'throttle': 1.0})
+        t += 0.1
+        d += 2.0
+    summary = {'distance': d}
+    metrics = coach.trace_metrics(summary, trace(rows), TRACE_CHANNELS, [], {'limiter': 7500.0, 'top_gear': 5})
+    [per_km] = by_name(metrics, 'limiter.per_km')
+    assert abs(per_km['value'] - 3.0 / 2.4) < 0.1                # 3rd only, not the 5 s in 5th
+    assert not by_name(metrics, 'limiter.top') and not by_name(metrics, 'top.share')
+    metrics = coach.trace_metrics(summary, trace(rows), TRACE_CHANNELS, [], {'limiter': 7500.0})
+    assert not by_name(metrics, 'limiter.per_km')                # which gear is top: unknown
+
+
+def test_an_early_shifter_is_not_on_the_limiter():
+    """The highest rpm reached is not the limiter: pulls to 6500 of 8000
+    are no time on it."""
+    from oversteer.shift_learner import CarModel
+    car = CarModel('forza-fm/1')
+    car.set_limiter(8000.0, 'game')
+    car.top_seen = 6500.0
+    car.ratios = {g: [100.0 * g] * 20 for g in range(1, 6)}
+    context = coach.car_context(car)
+    assert context['limiter'] == 8000.0 and context['top_gear'] == 5
+    rows = [{'t': i * 0.1, 'distance': i * 2.0, 'speed': 20.0, 'rpm': 6500.0 if i % 20 < 5 else 5000.0,
+             'gear': 3.0, 'throttle': 1.0} for i in range(1000)]
+    [per_km] = by_name(coach.trace_metrics({'distance': 2000.0}, trace(rows), TRACE_CHANNELS, [], context),
+                       'limiter.per_km')
+    assert per_km['value'] == 0.0
+
+
 def test_balance_from_steering_against_grip():
     """steer = a x curvature + K x lateral g: K > 0 is understeer."""
     for k in (0.05, -0.03):
@@ -238,14 +275,17 @@ def test_tips_go_quiet_and_come_back(tmp_path):
     assert [t.kind for t in tips] == ['tip', 'tip', 'tip']
     assert [t.id for t in tips] == ['limiter', 'hpattern.missed:h-pattern', 'hpattern.skip:h-pattern']
     h.show(tips)
-    h.show(h.tips())
-    tips = h.tips()
+    h.show(h.tips())                                                # the tab visited again, the same evening
+    h.show(h.tips(days=0.2), days=0.2)
+    assert [t.kind for t in h.tips(days=0.2)] == ['tip', 'tip', 'tip']   # one sitting is one showing
+    h.show(h.tips(days=1), days=1)
+    tips = h.tips(days=1)
     assert [t.id for t in tips] == ['downshift.over_rev:h-pattern', 'limiter', 'hpattern.missed:h-pattern',
                                     'hpattern.skip:h-pattern']
     assert [t.kind for t in tips] == ['tip', 'still', 'still', 'still']
     assert tips[1].text.startswith('Still: 2.0 s per km on the limiter')
     h.session([dict(rates[3], value=2.5)])                          # worse: back as a tip
-    assert [t.id for t in h.tips() if t.kind == 'tip'][0] == 'limiter'
+    assert [t.id for t in h.tips(days=1) if t.kind == 'tip'][0] == 'limiter'
     assert 'limiter' in [t.id for t in h.tips(days=15) if t.kind == 'tip']
     assert len([t for t in h.tips(show_all=True) if t.kind == 'tip']) == 4
 

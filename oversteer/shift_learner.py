@@ -53,6 +53,8 @@ RETUNE_DISTANCE = 2000.0         # ...or metres: setups change in menus, which e
 RETUNE_SPEED_BIN = 5.0           # m/s; a new ratio must be seen at two speeds at least
 SHIFTS_KEEP = 40
 FULL_THROTTLE = 0.95
+SHIFT_THROTTLE = 0.8             # at a change up, flat out: an H-pattern driver lifts a little before the gear leaves
+SHIFT_COVERAGE = 0.6             # share of the rev range known before a best change up is used (lights, coaching)
 BRAKE_POWER = 0.05               # braking at least this much: no power sample
 SLIP_POWER = {'raw': 0.08, 'normalised': 0.5}   # driven-wheel slip above which power is spin (calibrate per game)
 SHIFT_WINDOW = 0.3               # seconds before a change in which its rpm and throttle are taken
@@ -103,6 +105,14 @@ def drive_slip(sample, drivetrain=None):
         values = [abs(v) for v in sample.slip_ratio]
         return max(values[i] for i in wheels) if wheels else max(values), sample.slip_kind or 'raw'
     return None
+
+
+def shared_car(key):
+    """Cars the game does not tell apart share one key (BeamNG over
+    OutGauge, AC without the bridge's names): what one of them teaches
+    would drive the lights in the next, so nothing about the car is
+    learnt under such a key."""
+    return key is not None and key.endswith('/unknown')
 
 
 def _median(values):
@@ -239,23 +249,32 @@ class CarModel:
     def set_limiter(self, rpm, source):
         """A ceiling from `source`: a better source replaces the figure even
         when it is lower (a launch on the limiter beats a game's max, which
-        WRC Generations over-reports); the same source only raises it.
-        True when it changed."""
+        WRC Generations over-reports); the same source only raises it,
+        except a launch, which measures the car as it is now and replaces
+        an earlier launch's figure either way. True when it changed."""
         if not rpm:
             return False
         rank, known = LIMITER_SOURCES.get(source, 0), LIMITER_SOURCES.get(self.limiter_source, -1)
-        if rank > known or (rank == known and rpm > self.limiter * 1.001) or not self.limiter:
+        same = rank == known and (rpm > self.limiter * 1.001
+                                  or (source == 'launch' and abs(rpm - self.limiter) > 1.0))
+        if rank > known or same or not self.limiter:
             self.limiter, self.limiter_source = rpm, source
             return True
         return False
 
+    def known_limiter(self):
+        """The limiter when a launch measured it or the game reported it; 0
+        when only the highest rpm seen stands in for it (OutGauge sends no
+        maximum)."""
+        return self.limiter if self.limiter_source in ('launch', 'game') else 0.0
+
     def ceiling(self):
-        """The highest rpm worth changing up at: the limiter, or where the
-        car has actually been taken when that is lower (a game whose
-        reported maximum is above the real limiter)."""
-        if self.top_seen and self.limiter and self.top_seen < self.limiter:
-            return max(self.top_seen, self.limiter * 0.5)
-        return self.limiter or self.top_seen
+        """The highest rpm worth changing up at: the known limiter, else
+        the highest rpm seen flat out, where the data ends. The highest rpm
+        seen never stands in for a known limiter: a driver who changes up
+        early has only been that far, which says nothing about the engine
+        above it (a game that over-reports its maximum needs a launch)."""
+        return self.known_limiter() or self.top_seen or self.limiter
 
     # -- what it knows --
 
@@ -323,7 +342,11 @@ class CarModel:
                     ahead, crossing = 0, None
             rpm += SHIFT_STEP
         coverage = known / checked if checked else 0.0
-        # Never beaten: hold it to the limiter, if the top end is known
+        # Never beaten: hold it to the limiter, if the top end is known. Where
+        # the limiter is not, the scan ended at the highest rpm seen, and
+        # nothing says the engine stops pulling there
+        if not self.known_limiter():
+            return None
         top = _interpolate(own, ceiling * 0.97)
         if top is None:
             top = _interpolate(pooled, ceiling * 0.97)
@@ -395,7 +418,7 @@ class CarModel:
                 continue
             best = self.best_shift(gear)
             average = self.average_upshift(gear)
-            if best is None or average is None or average[1] < 3:
+            if best is None or best[1] < SHIFT_COVERAGE or average is None or average[1] < 3:
                 continue
             best_rpm, (shift_rpm, count) = best[0], average
             step = self.ratio(gear + 1) / self.ratio(gear)
@@ -937,8 +960,8 @@ class ShiftLearner:
             if now - self._shift_cache_at > 2.0:
                 self._shift_cache, self._shift_cache_at = {}, now
             if gear not in self._shift_cache:
-                best = self.car.best_shift(gear)
-                self._shift_cache[gear] = best[0] if best and best[1] >= 0.6 else None
+                best = self.car.best_shift(gear) if not shared_car(self.car.key) else None
+                self._shift_cache[gear] = best[0] if best and best[1] >= SHIFT_COVERAGE else None
             return self._shift_cache[gear]
 
     def idle(self):
@@ -987,7 +1010,7 @@ class ShiftLearner:
             if self.log is not None:
                 self.runs.feed(now, sample, throttle, self.session, self.profile)
             self._press = press
-            if car.set_limiter(limiter, limiter_source):
+            if not shared_car(car.key) and car.set_limiter(limiter, limiter_source):
                 self._dirty = True
             self._feed_locked(car, now, sample, throttle, clutch)
             if self._dirty and now - self._saved_at > SAVE_EVERY:
@@ -1049,11 +1072,12 @@ class ShiftLearner:
 
         clutch_out = clutch is None or clutch <= CLUTCH_OUT
         settled = now - self._gear_since >= SETTLED
-        if gear < 1 or speed < MIN_SPEED or not clutch_out or not settled:
+        if gear < 1 or speed < MIN_SPEED or not clutch_out or not settled or shared_car(car.key):
             return
         if flat_out and rpm > car.top_seen:
             car.top_seen = rpm
-        if flat_out and car.limiter and rpm >= car.limiter * LIMITER_BAND and previous is not None:
+        limiter = car.known_limiter()
+        if flat_out and limiter and rpm >= limiter * LIMITER_BAND and previous is not None:
             dt = min(0.2, max(0.0, now - previous[0]))
             car.limiter_time += dt
             self.session_limiter_time += dt
@@ -1137,13 +1161,16 @@ class ShiftLearner:
         the revs the new gear brought are known, then written."""
         start, peak, throttle, left_at, via_neutral, slip = left
         up = to > start
-        flat_out = up and (throttle is None or throttle >= 0.8)
+        flat_out = up and (throttle is None or throttle >= SHIFT_THROTTLE)
         if up and to == start + 1 and flat_out:
             shifts = car.upshifts.setdefault(start, [])
             shifts.append(peak)
             del shifts[:-SHIFTS_KEEP]
             self._dirty = True
+        # Measured against a best the lights would trust, or none: a half
+        # learnt curve would coach "600 rpm early" from noise
         best = car.best_shift(start) if up and to == start + 1 else None
+        best = best if best is not None and best[1] >= SHIFT_COVERAGE else None
         band = self._bands.get(car.key, (0, {}))[1].get(start) if best else None
         shift = {'_t': now, 'at': self.wall(now), 'gear': start, 'gear_to': to, 'direction': 'up' if up else 'down',
                  'rpm': peak, 'best': best[0] if best else None, 'best_low': band[0] if band else None,
@@ -1171,15 +1198,16 @@ class ShiftLearner:
             shift = pending.popleft()
             del shift['_t']
             flags = shift['flags']
-            limiter = car.limiter
+            limiter = car.known_limiter()
             if shift['direction'] == 'up':
-                if shift['neutral_time'] > MISSED_NEUTRAL and shift['throttle'] is not None and shift['throttle'] >= 0.8:
+                if (shift['neutral_time'] > MISSED_NEUTRAL and shift['throttle'] is not None
+                        and shift['throttle'] >= SHIFT_THROTTLE):
                     flags.append('missed')           # stuck in neutral, foot down: a missed gate
                 if shift['gear_to'] >= shift['gear'] + 2:
                     flags.append('skip')
             else:
                 if (shift['gear_to'] == shift['gear'] - 1 and shift['throttle'] is not None
-                        and shift['throttle'] >= 0.8 and limiter and shift['rpm'] >= 0.9 * limiter):
+                        and shift['throttle'] >= SHIFT_THROTTLE and limiter and shift['rpm'] >= 0.9 * limiter):
                     flags.append('skip')             # flat out near the limiter and down a gear: meant to go up
                 if limiter and shift['engage_rpm'] > OVER_REV * limiter:
                     flags.append('over-rev')

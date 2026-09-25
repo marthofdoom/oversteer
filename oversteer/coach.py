@@ -15,7 +15,7 @@ import math
 import statistics
 import time
 
-from .shift_learner import LIMITER_BAND, FULL_THROTTLE
+from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SHIFT_COVERAGE
 
 # -- metrics of one run (section 9.1) --
 
@@ -118,7 +118,9 @@ def trace_metrics(summary, trace, channels, corners, context):
     handbrake, counter-steer, top gear use, exits below the power band,
     and the car's balance. `context` (car_context()): the car's limiter
     and where its power band starts, each None if unknown; the top gear
-    is the game's gear count (summary 'gears')."""
+    is the game's gear count (summary 'gears'). Without it the highest
+    gear learnt keeps top gear out of the limiter time below it, but
+    measures nothing of its own: the gears learnt may stop short."""
     c = {name: i for i, name in enumerate(channels)}
     out = []
     if len(trace) < 10:
@@ -129,14 +131,15 @@ def trace_metrics(summary, trace, channels, corners, context):
     km = distance / KM
     count = _km_count(distance)
     limiter = context.get('limiter')
-    top = summary.get('gears') or context.get('top_gear')
+    top = summary.get('gears')
+    highest = top or context.get('top_gear')
 
-    if limiter and km > 0.2:
+    if limiter and highest and km > 0.2:
         below = on_top = 0.0
         for i, row in enumerate(trace):
             if (_finite(row[rpm]) and _finite(row[throttle]) and row[rpm] >= limiter * LIMITER_BAND
                     and row[throttle] >= FULL_THROTTLE and _finite(row[gear]) and row[gear] >= 1):
-                if top is not None and row[gear] >= top:
+                if row[gear] >= highest:
                     on_top += _dt(trace, i, t)
                 else:
                     below += _dt(trace, i, t)
@@ -378,7 +381,11 @@ def car_context(car):
     so far may stop short of it."""
     if car is None:
         return {}
-    return {'limiter': car.ceiling() or None, 'power_band_low': power_band_low(car)}
+    # The known limiter, never the highest rpm seen: an early shifter has
+    # only been that far, and would be told he sits on the limiter there
+    gears = car.gears()
+    return {'limiter': car.known_limiter() or None, 'power_band_low': power_band_low(car),
+            'top_gear': gears[-1] if gears else None}
 
 
 # -- over time (section 9.2) --
@@ -390,6 +397,7 @@ HABIT_SHARE = 0.7                # ...and the share of them past the threshold
 TIPS = 3                         # tips per view
 STILL = 3                        # quiet "still:" lines per view
 QUIET_AFTER = 2                  # showings without change before a tip goes quiet
+SHOWING = 6 * 3600.0             # s: views of a tip within this of its last counted showing are the same one
 RESHOW_WORSE = 0.2               # a quiet tip comes back when its value got this much worse...
 RESHOW_AFTER = 14 * 86400.0      # ...or after this long
 DAY = 86400.0
@@ -610,7 +618,7 @@ class Coach:
                 count, sessions, '' if sessions == 1 else 's', ' ({})'.format(where) if where else '')]
             slip = recent(slices.get(('shift.slip', gear, method, discipline, surface), []), 1)
             best = model.best_shift(gear) if model is not None else None
-            best_rpm = best[0] if best else None
+            best_rpm = best[0] if best and best[1] >= SHIFT_COVERAGE else None
             key = '{}:{}:{}:{}'.format(gear, method, discipline, surface)
             is_habit = habit(rows, lambda v: abs(v) > SHIFT_OFF and (v > 0) == (error > 0))
             if is_habit:
@@ -902,6 +910,8 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False):
 
 def seen(store, profile, car_id, tips, at=None):
     """Record that `tips` were shown (drive-log thread: the GTK tab calls
-    it through the drive log; the web page never does)."""
+    it through the drive log; the web page never does). The tab redraws
+    on every visit and every pause in the telemetry, so a showing is a
+    sitting: views within SHOWING of the last counted one add nothing."""
     for tip in tips:
-        store.coach_seen(profile, car_id, tip.id, tip.value, at, quiet=tip.kind == 'still')
+        store.coach_seen(profile, car_id, tip.id, tip.value, at, quiet=tip.kind == 'still', gap=SHOWING)

@@ -1080,9 +1080,11 @@ class Store(Reader):
                   int(bool(deployed))))
         return version
 
-    def coach_seen(self, profile, car, tip, value, at=None, quiet=False):
+    def coach_seen(self, profile, car, tip, value, at=None, quiet=False, gap=0.0):
         """The coach showed `tip` (its metric `value`): counted, or with
-        `quiet` only marked as having gone quiet (a "still:" line)."""
+        `quiet` only marked as having gone quiet (a "still:" line). A
+        showing within `gap` seconds of the last counted one is the same
+        showing and changes nothing."""
         at = at or time.time()
         if quiet:
             self._do('UPDATE coach_state SET quiet = 1 WHERE profile = ? AND car = ? AND tip = ?',
@@ -1091,4 +1093,5 @@ class Store(Reader):
         self._do('INSERT INTO coach_state (profile, car, tip, first_shown, last_shown, times, value) '
                  'VALUES (?, ?, ?, ?, ?, 1, ?) ON CONFLICT (profile, car, tip) DO UPDATE SET '
                  'last_shown = excluded.last_shown, times = coach_state.times + 1, value = excluded.value, '
-                 'quiet = 0', (profile, car or 0, tip, at, at, value))
+                 'quiet = 0 WHERE excluded.last_shown - coach_state.last_shown >= ? '
+                 'OR coach_state.last_shown IS NULL', (profile, car or 0, tip, at, at, value, gap))

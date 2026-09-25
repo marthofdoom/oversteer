@@ -382,13 +382,16 @@ def test_the_change_up_is_read_before_the_lift():
 
 def test_limiter_precedence():
     """A launch on the limiter beats the game's figure, even lower; the
-    game's beats the highest rpm seen; the same source only raises it."""
+    game's beats the highest rpm seen; the same source only raises it,
+    but a launch measures the car as it is now and replaces the last one
+    either way (a figure raised by one bad packet must not stay)."""
     car = CarModel('x')
     assert car.set_limiter(7000.0, 'seen') and car.set_limiter(7600.0, 'game')
     assert not car.set_limiter(7800.0, 'seen') and car.limiter == 7600.0
     assert car.set_limiter(7215.0, 'launch') and car.limiter == 7215.0      # WRCG over-reports its max
-    assert not car.set_limiter(7600.0, 'game') and not car.set_limiter(7210.0, 'launch')
-    assert car.set_limiter(7240.0, 'launch') and car.limiter_source == 'launch'
+    assert not car.set_limiter(7600.0, 'game') and not car.set_limiter(7215.5, 'launch')
+    assert car.set_limiter(8700.0, 'launch') and car.set_limiter(7240.0, 'launch')
+    assert car.limiter == 7240.0 and car.limiter_source == 'launch'
 
 
 def test_spinning_wheels_teach_no_power(tmp_path):
@@ -506,3 +509,54 @@ def test_forza_tyre_radius(tmp_path):
     reader = learner._reader()
     tune = reader.tunes(reader.car('_no_profile', 'test-car')['id'])[0]
     assert abs(tune['tyre_radius'] - 0.33) < 1e-6
+
+
+def _rising_car(top_band, limiter=8000.0, source='game'):
+    """Power rising all the way, known up to `top_band` x 100 rpm: staying
+    in gear always pulls harder."""
+    car = CarModel('forza-fm/1')
+    car.ratios = {2: [300.0] * 20, 3: [220.0] * 20}
+    car.power = {band: [float(band)] * 4 for band in range(20, top_band + 1)}
+    car.top_seen = top_band * 100.0 + 50
+    car.set_limiter(limiter, source)
+    return car
+
+
+def test_the_highest_rpm_seen_is_not_the_limiter():
+    """A driver who has only taken the car to 6500 of 8000: nothing says the
+    engine stops pulling there, so no best change up, and the lights keep
+    the percentage rule instead of locking the early change in."""
+    early = _rising_car(64)
+    assert early.ceiling() == 8000.0 and early.best_shift(2) is None
+    assert early.best_shift(2) is None and early.snapshot()['limiter'] == 8000.0
+    explored = _rising_car(80)
+    best, coverage = explored.best_shift(2)
+    assert best == 8000.0 and coverage > 0.9                 # pulls to the limiter, now that it is known there
+    # Without a limiter from the game or a launch, the scan ends where the
+    # data does, and "pulls to the limiter" is never the answer
+    seen = _rising_car(80, limiter=8300.0, source='seen')
+    assert seen.known_limiter() == 0.0 and seen.ceiling() == 8050.0 and seen.best_shift(2) is None
+
+
+def test_cars_the_game_does_not_tell_apart_teach_nothing(tmp_path):
+    """BeamNG's cars all arrive as beamng/unknown: what one teaches would
+    drive the lights in the next."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive(learner, car='beamng/unknown')
+    exits(learner, car='beamng/unknown')
+    car = learner.car
+    assert car.key == 'beamng/unknown' and car.ratios == {} and car.power == {} and not car.limiter
+    assert learner.shift_rpm(2) is None
+
+
+def test_the_best_a_change_is_measured_against_is_one_the_lights_trust(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    exits(learner)                                          # ratios, but the top end hardly known
+    car = learner.car
+    # Known from 3400 to 5200 rpm only, peaking at 4000: a crossover found
+    # from a sliver of the range
+    car.power = {band: [float(band if band <= 40 else 80 - band)] * 4 for band in range(34, 53)}
+    car.power_g = {}
+    assert car.best_shift(2) is not None and car.best_shift(2)[1] < 0.6
+    learner._shift_locked(car, (2, 5000.0, 1.0, 1.0, False, None), 3, 4000.0, 1.5)
+    assert learner._pending[-1]['best'] is None
