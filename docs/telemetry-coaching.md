@@ -666,7 +666,7 @@ In one transaction, after the backup copy:
    `key_max / 10 × 30/π` is within 2 rpm of a multiple of 50, the car was
    recorded in rad/s × 10; rescale by `f = 3/π` (0.95493) the
    model's `limiter, top_seen`, every `upshifts` value, every `ratios`
-   value, and re-bin `power` bands (`band × f`, merging lists); rescale that
+   value, and re-bin `power` bands (the band's middle × f, merging lists); rescale that
    car's `shifts.rpm` and `shifts.best`; rebuild the key with the corrected
    rpm rounded to 10. Otherwise leave the car as it is and log it (a WRCG
    car whose unit was right).
@@ -1295,8 +1295,8 @@ Design revised after the independent review (§3.2): done.
 
 ### Step A
 - [ ] Tab order (shift table first, Settings expander); README fixed
-- [ ] Forza gear 11, DiRT reverse; OutGauge reverse and Forza `IsRaceOn = 0` tests
-- [ ] Codemasters rpm units (three branches) and rescale of stored cars from the key's max
+- [x] Forza gear 11, DiRT reverse; OutGauge reverse and Forza `IsRaceOn = 0` tests (`tests/test_formats.py`)
+- [x] Codemasters rpm units (three branches, `codemasters_unit()`) and rescale of stored cars from the key's max (`rescale_codemasters()`, `user_version` 1, `telemetry.db.v0.bak`)
 - [ ] Ratios from low-slip samples; `top_seen` reset on re-tune; spin-first test
 - [ ] Shift-press wiring and method from the press; per-method columns
 - [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)

@@ -165,3 +165,48 @@ def test_shift_point_needs_confidence(tmp_path):
     assert car.best_shift(1) is None
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     assert learner.shift_rpm(2) is None
+
+
+def test_dirt_cars_learnt_in_the_wrong_unit_are_rescaled(tmp_path):
+    """Before the decoder fix DiRT's rad/s were read as rpm / 10: a car with
+    a 7500 rpm max was keyed 7854 and everything learnt was 30/pi too high."""
+    import json
+    import sqlite3
+    from oversteer.shift_learner import SCHEMA
+    path = str(tmp_path / 'telemetry.db')
+    db = sqlite3.connect(path)
+    db.executescript(SCHEMA)
+    f = math.pi / 3                                              # what the old decoder multiplied by
+    dirt = CarModel('codemasters-7854-838-6', '7854 rpm, 6 gears')
+    dirt.limiter = 7215.0                                        # launch-learnt, bouncing: not round
+    dirt.top_seen = 7100.0
+    dirt.ratios = {2: [330.0 * f] * 30}
+    dirt.upshifts = {2: [6800.0 * f]}
+    dirt.power = {int(6000 * f // 100): [100.0] * 5}
+    wrcg = CarModel('codemasters-7000-900-5', 'my WRCG car')     # max round as read: left alone
+    wrcg.limiter = 7000.0
+    for car in (dirt, wrcg):
+        db.execute('INSERT INTO cars (profile, key, name, model, updated) VALUES (?, ?, ?, ?, 0)',
+                   ('rally', car.key, car.name, json.dumps(car.to_dict())))
+    session = db.execute("INSERT INTO sessions (profile, car, started) VALUES ('rally', 'codemasters-7854-838-6', 0)").lastrowid
+    db.execute('INSERT INTO shifts (session, at, gear, rpm, best) VALUES (?, 0, 2, ?, ?)', (session, 6800.0 * f, 7000.0 * f))
+    db.commit()
+    db.close()
+
+    learner = ShiftLearner(path, profile='rally')
+    assert dict(learner.known_cars()) == {'codemasters-7500-800-6': '7500 rpm, 6 gears',
+                                          'codemasters-7000-900-5': 'my WRCG car'}
+    snapshot = learner.load_snapshot('codemasters-7500-800-6')
+    assert abs(snapshot['gears'][0]['ratio'] - 330.0) < 0.01
+    fixed = learner.load_snapshot('codemasters-7000-900-5')
+    assert fixed['limiter'] == 7000.0
+    row = learner.db.execute('SELECT model FROM cars WHERE key = ?', ('codemasters-7500-800-6',)).fetchone()
+    model = CarModel.from_dict(json.loads(row[0]))
+    assert abs(model.limiter - 7215.0 / f) < 0.01 and abs(model.upshifts[2][0] - 6800.0) < 0.01
+    assert list(model.power) in ([59], [60])                     # around 6000 rpm, not 6283
+    assert abs(learner.history('codemasters-7500-800-6')[0]['error'] + 200.0) < 0.01
+    assert learner.db.execute('PRAGMA user_version').fetchone()[0] == 1
+    assert (tmp_path / 'telemetry.db.v0.bak').exists()
+    learner.db.close()
+    again = ShiftLearner(path, profile='rally')                 # done once only
+    assert 'codemasters-7500-800-6' in dict(again.known_cars())

@@ -29,10 +29,13 @@ import logging
 import math
 import os
 import re
+import shutil
 import sqlite3
 import statistics
 import threading
 import time
+
+from . import telemetry_formats
 
 POWER_BIN = 100                  # rpm per power band
 POWER_KEEP = 40                  # samples kept per band (most recent)
@@ -287,6 +290,75 @@ CREATE INDEX IF NOT EXISTS sessions_car ON sessions (profile, car, started);
 CREATE INDEX IF NOT EXISTS shifts_session ON shifts (session);
 """
 
+CODEMASTERS_KEY = re.compile(r'^codemasters-(\d+)-(\d+)-(\d+)$')
+CODEMASTERS_NAME = re.compile(r'^\d+ rpm, \d+ gears$')      # the decoder's own name, not the user's
+
+
+def rescale_codemasters(db, path=None):
+    """One-off, at schema version 0: DiRT Rally sends engine rates in
+    rad/s, which Oversteer read as rpm / 10 until the decoder was fixed,
+    so every rpm it learnt about those cars is 30/pi too high. The unit is
+    decided from the game's max in the key (floats[63] x 10, rounded), not
+    the model's limiter, which is often a launch-learnt figure bouncing on
+    the limiter and never round. A car whose max is not a round rpm in
+    rad/s (a WRC Generations car read right) is left as it was. The file
+    is copied to `<path>.v0.bak` first when anything changes."""
+    rows = db.execute("SELECT profile, key, name, model FROM cars WHERE key LIKE 'codemasters-%'").fetchall()
+    todo = []
+    for profile, key, name, model in rows:
+        match = CODEMASTERS_KEY.match(key)
+        if match is None:
+            continue
+        key_max, key_idle, gears = (int(x) for x in match.groups())
+        if telemetry_formats.codemasters_unit(key_max / 10.0) != telemetry_formats.RAD_S:
+            logging.info("shift learner: %s kept as it is (its max is a round rpm as read)", key)
+            continue
+        todo.append((profile, key, name, model, key_max, key_idle, gears))
+    if todo and path is not None and not os.path.exists(path + '.v0.bak'):
+        try:
+            db.commit()
+            shutil.copy2(path, path + '.v0.bak')
+        except OSError as e:
+            logging.warning("shift learner: no backup before the DiRT rpm fix: %s", e)
+    factor = 3.0 / math.pi               # stored = raw x 10; true = raw x 30/pi
+    try:
+        for profile, key, name, model, key_max, key_idle, gears in todo:
+            top = round(key_max * factor, -1)
+            new_key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(top, round(key_idle * factor, -1), gears)
+            if db.execute('SELECT 1 FROM cars WHERE profile = ? AND key = ?', (profile, new_key)).fetchone():
+                logging.warning("shift learner: %s not rescaled, %s exists already", key, new_key)
+                continue
+            try:
+                car = CarModel.from_dict(json.loads(model))
+            except (ValueError, KeyError, TypeError) as e:
+                logging.warning("shift learner: can't read %s: %s", key, e)
+                continue
+            car.key = new_key
+            car.limiter *= factor
+            car.top_seen *= factor
+            car.ratios = {g: [r * factor for r in v] for g, v in car.ratios.items()}
+            car.upshifts = {g: [r * factor for r in v] for g, v in car.upshifts.items()}
+            power = {}
+            for band in sorted(car.power):
+                # The band's middle, rescaled, lands in the new band
+                power.setdefault(int((band + 0.5) * factor), []).extend(car.power[band])
+            car.power = {b: v[-POWER_KEEP:] for b, v in power.items()}
+            if name is None or CODEMASTERS_NAME.match(name):
+                name = '{:.0f} rpm, {} gears'.format(top, gears)
+            car.name = name
+            db.execute('UPDATE cars SET key = ?, name = ?, model = ? WHERE profile = ? AND key = ?',
+                       (new_key, name, json.dumps(car.to_dict()), profile, key))
+            db.execute('UPDATE shifts SET rpm = rpm * ?, best = best * ? WHERE session IN '
+                       '(SELECT id FROM sessions WHERE profile = ? AND car = ?)', (factor, factor, profile, key))
+            db.execute('UPDATE sessions SET car = ? WHERE profile = ? AND car = ?', (new_key, profile, key))
+            logging.info("shift learner: %s is %s (DiRT rpm were read x 10 instead of rad/s)", key, new_key)
+        db.execute('PRAGMA user_version = 1')
+        db.commit()
+    except sqlite3.Error as e:
+        db.rollback()
+        logging.warning("shift learner: DiRT rpm fix not applied: %s", e)
+
+
 SHIFT_PRESS_WINDOW = 0.6         # a shifter/wheel button this long before a change made it
 
 
@@ -321,6 +393,8 @@ class ShiftLearner:
             self.db.execute('PRAGMA foreign_keys = ON')
             self.db.executescript(SCHEMA)
             self.db.commit()
+            if self.db.execute('PRAGMA user_version').fetchone()[0] < 1:
+                rescale_codemasters(self.db, None if path == ':memory:' else path)
 
     def _reset_motion(self):
         self._speeds = collections.deque()       # (t, speed) for the acceleration

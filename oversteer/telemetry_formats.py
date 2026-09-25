@@ -14,15 +14,17 @@ None. The formats:
   seen and forgotten when the telemetry stops.
 - Codemasters extradata=3 (DiRT Rally 2.0, DiRT 4) and the games that copy
   its layout (WRC 10 / WRC Generations native telemetry): 64 or more
-  little-endian floats, engine rate at index 37 and max at 63, both in
-  rpm / 10. The packet length varies by game, so any 4-byte-aligned length
-  from 256 bytes up is accepted once the Forza sizes are excluded.
+  little-endian floats, engine rate at index 37, max at 63 and idle at 64,
+  in rad/s in DiRT Rally (see codemasters_unit()). The packet length varies
+  by game, so any 4-byte-aligned length from 256 bytes up is accepted once
+  the Forza sizes are excluded.
 - Oversteer's own "OVST" datagram (24 bytes) from oversteer-shm-bridge, the
   helper that runs inside a Proton prefix and forwards shared-memory
   telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
   Rally): rpm, max rpm (0 = unknown), gear, speed.
 """
 
+import logging
 import math
 import struct
 
@@ -62,6 +64,42 @@ class Sample:
         self.game = game
         self.track = None
         self.stage = None
+
+
+RAD_S = 30.0 / math.pi                               # rpm per rad/s
+_codemasters_units = {}                              # (game, raw max) -> rpm per unit of the engine fields
+
+
+def _near_multiple(x, step, tolerance):
+    return abs(x - round(x / step) * step) <= tolerance
+
+
+def codemasters_unit(raw_max):
+    """rpm per unit of the Codemasters engine rate fields (37, 63, 64),
+    decided from the raw maximum. DiRT Rally 1/2 send rad/s (every car's
+    max is then a round rpm times pi/30), WRC Generations copies the
+    layout with a unit nobody has verified, and the format was long
+    documented as rpm / 10. A real maximum is a round figure in the true
+    unit, so the first unit that makes it one wins; rad/s when none does."""
+    if _near_multiple(raw_max * RAD_S, 50.0, 1.0):
+        return RAD_S
+    if 3000.0 <= raw_max < RPM_LIMIT and _near_multiple(raw_max, 50.0, 1.0):
+        return 1.0
+    if _near_multiple(raw_max * 10.0, 50.0, 1.0):
+        return 10.0
+    return RAD_S
+
+
+def _codemasters_unit(game, raw_max):
+    """codemasters_unit(), decided once per car and logged."""
+    unit = _codemasters_units.get((game, raw_max))
+    if unit is None:
+        unit = codemasters_unit(raw_max)
+        if len(_codemasters_units) < 1000:
+            _codemasters_units[(game, raw_max)] = unit
+        logging.info("telemetry: %s engine max %.3f read as %s (%.0f rpm)", game, raw_max,
+                     {1.0: 'rpm', 10.0: 'rpm / 10'}.get(unit, 'rad/s'), raw_max * unit)
+    return unit
 
 
 def _finite(x):
@@ -115,7 +153,8 @@ def decode_sample(data):
             accel, brake, clutch, handbrake, gear = struct.unpack_from('<BBBBB', data, base + 71)
             sample.speed, sample.power = _finite(speed), _finite(power)
             sample.throttle, sample.clutch, sample.brake = accel / 255.0, clutch / 255.0, brake / 255.0
-            sample.gear = gear if 1 <= gear <= 10 else (-1 if gear == 0 else None)
+            # 0 is reverse and 11 neutral (an H-pattern box shows it between gears)
+            sample.gear = gear if 1 <= gear <= 10 else {0: -1, 11: 0}.get(gear)
         return sample
     if n in (92, 96):
         car = data[4:8]
@@ -136,21 +175,33 @@ def decode_sample(data):
                       game='beamng' if name == 'beam' else 'lfs')
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
         floats = struct.unpack_from('<%df' % min(66, n // 4), data, 0)
-        rpm, max_rpm = floats[37] * 10.0, floats[63] * 10.0
-        if not (_plausible(max_rpm) and _plausible(rpm)) or max_rpm <= 0:
+        game = 'dirt' if n == CODEMASTERS_DIRT else 'wrcg'
+        raw_max = floats[63]
+        if not (math.isfinite(raw_max) and 0 < raw_max < RPM_LIMIT and math.isfinite(floats[37])):
             return None
-        idle = floats[64] * 10.0 if len(floats) > 64 else float('nan')
+        unit = _codemasters_unit(game, raw_max)
+        rpm, max_rpm = floats[37] * unit, raw_max * unit
+        if not (_plausible(max_rpm) and _plausible(rpm)):
+            return None
+        idle = floats[64] * unit if len(floats) > 64 else float('nan')
         gears = floats[65] if len(floats) > 65 else float('nan')
         gear = floats[33]
-        # No car name in this format: the engine and gearbox tell cars apart
-        key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(max_rpm, idle if math.isfinite(idle) else 0,
+        if not math.isfinite(gear):
+            gear = None
+        elif gear < 0 or gear == 10:           # reverse: 10 in DiRT Rally and WRCG, negative in some titles
+            gear = -1
+        else:
+            gear = int(gear) if gear <= 9 else None
+        # No car name in this format: the engine and gearbox tell cars apart.
+        # Rounded to 10 rpm, so the key is the same whatever the float noise.
+        top = round(max_rpm, -1)
+        key = 'codemasters-{:.0f}-{:.0f}-{:.0f}'.format(top, round(idle, -1) if math.isfinite(idle) else 0,
                                                        gears if math.isfinite(gears) else 0)
-        name = '{:.0f} rpm, {:.0f} gears'.format(max_rpm, gears) if math.isfinite(gears) else None
-        return Sample(max(0.0, rpm), max_rpm,
-                      gear=int(gear) if math.isfinite(gear) and 0 <= gear <= 9 else None,
+        name = '{:.0f} rpm, {:.0f} gears'.format(top, gears) if math.isfinite(gears) else None
+        return Sample(max(0.0, rpm), max_rpm, gear=gear,
                       speed=_finite(floats[7]), car=key, car_name=name,
                       throttle=_finite(floats[29]), clutch=_finite(floats[32]), brake=_finite(floats[31]),
-                      game='dirt' if n == CODEMASTERS_DIRT else 'wrcg')
+                      game=game)
     return None
 
 
