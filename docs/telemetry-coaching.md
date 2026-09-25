@@ -1377,6 +1377,13 @@ steps. That is this document's Step C items 1–5 and 7, so those are built
 now and ticked under Step C below; the web page (Step B here) is left for
 a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
 
+Run 3 (in progress): the build prompt's "Step C" is "coaching engine +
+tuning advice + web server/page + tests": Step C item 6 here, and Step B
+(the web page), which run 2 left for later, since the coaching endpoints
+need the server. Order: metrics written at run end, the coach, tuning
+advice, the web server and page, then the tab. Items are ticked below as
+they are committed.
+
 ### Step B
 - [ ] Web server (read-only, limits, Host check, headers) over today's data, and page
 - [ ] Web preferences and Settings controls, bound URLs
