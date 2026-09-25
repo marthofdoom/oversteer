@@ -440,6 +440,38 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
   nothing gets a new rounded key (`dirt:<round(length)>:<round(start z,
   -1)>`, `acr:<round(length, -1)>`). Forza Horizon and BeamNG have no stage
   (§8.4 builds a start-cell key for repeated routes).
+- **Shipped stage tables** (`data/telemetry/stages/<game>.json`, loaded by
+  `oversteer/stage_tables.py`, seeded into `stages` when the drive log
+  opens: name, location, length, and the table's prior for a mixed
+  surface, keeping whatever a row already has). An entry has `location`,
+  `stage`, `length_m`, `surface` (`gravel|tarmac|snow|ice|mixed`),
+  `surface_parts` (`{surface: share}`, or a list when the shares are not
+  published), `reverse_of`, `shakedown`, `sources`, `confidence`
+  (`high`: two sources agree; `medium`: one good source; `low`: inferred
+  or missing), `note`; DiRT's add `start_z`, ACR's `track`/`config`. Keys:
+  DiRT `dirt:<round(length)>:<round(start z, -1)>` (the key a measured run
+  gets, so old rows merge), the others `<game>:<location>:<stage>` in
+  ASCII lower-case words. Matching, in order:
+  - **DiRT**: the length it sends and the start z against the table (±2 m,
+    ±15 m), before the stored stages.
+  - **WRC Generations** sends no stage and, on the one real run so far, no
+    length (it was keyed by its start cell). At the run's end, when it
+    finished (progress ≥ 0.99) or the game sends no progress at all, the
+    distance to the finish is matched against the published lengths
+    within 1 %. The finish is where progress crossed 0.99, else where the
+    stage clock stopped while the car rolled on for 1 s (after 500 m),
+    else the run's last distance. Two or more stages that close (a stage
+    and its reverse are often one length) are told apart by where
+    earlier runs of each started (within 50 m in x and z; a stage whose
+    runs all started elsewhere is out). Still open, the run keeps a start
+    cell key, with the location when the candidates share one, and the
+    surface when they share one (the game tier, with the candidates as
+    evidence). Should WRCG send a length after all, it is matched the
+    same way at the start.
+  - **Assetto Corsa Rally**: the shared memory's `track` name as the bridge
+    sends it (ASCII, others `_`, 31 characters) against the table's
+    `track`; two of one name (`Alsace For_t`) by the nearer published
+    length. v2 bridges (`acpmf`) are tried too.
 
 ## 6. Capture and replay
 
@@ -950,10 +982,15 @@ Tiers, as for discipline:
 
 1. **Game** (confidence `game`, Step C): the stage key names a route on a
    single-surface location in the shipped route table
-   (`data/telemetry/stages/*.json`): EA WRC Sweden (snow), Croatia, Japan,
-   Iberia, Mediterraneo (tarmac) and the gravel locations; DiRT Rally 2.0
-   locations from dr2_logger's tables (MIT, with its notice). **Confirm per
-   route** against the game where a location has both. Mixed locations
+   (`data/telemetry/stages/*.json`, §5.4): per stage, the entry's surface;
+   a `mixed` one whose other parts are each under 25 % counts as its main
+   surface (a gravel stage with 2 % tarmac is gravel), otherwise it is a
+   prior only. Without an entry, the location: EA WRC by name
+   (`LOCATION_SURFACES`: Sweden snow; Croatia, Japan, Iberia,
+   Mediterraneo tarmac; the gravel locations), or the one surface all the
+   table's stages of that location share. DiRT Rally 2.0 from dr2_logger's
+   table (MIT, both notices kept in the file). **Confirm per route**
+   against the game where a location has both. Mixed locations
    (Monte-Carlo, Central Europe) fall through. Games that send the
    surface outright (ACC rain, AC `surfaceGrip`, Forza puddles for wet)
    decide here too.
@@ -1494,6 +1531,70 @@ listed with the reason. The checklist is the recovery point:
 - [ ] Measured surface classifier, calibration, `telemetry-calibrate.py` (needs §6.3 captures)
 - [ ] Drag fit, `BOOST_HOLD` per car (optional)
 - [x] README, CHANGELOG, this document (run 4: the README's telemetry section covers the history, coaching, setup advice, the web page, learning without LEDs, recording and EA SPORTS WRC; the surface is said to stay mostly unknown until labels exist)
+
+### Stage tables
+
+Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
+
+- `dirt.json`: DiRT Rally 2.0, 170 entries: all 156 rally stages (12 per
+  location, 13 locations), 13 rallycross tracks and DirtFish. Names,
+  lengths (the float the game sends) and start z from dr2_logger
+  (`ErlerPhilipp/dr2_logger`, `source/dirt_rally/track_data_dr2.py`,
+  5e5fcbe), which adapted `soong-construction/dirt-rally-time-recorder`
+  (`resources/setup-dr2.sql`): every rally length is the same float in
+  both; start z within 1 m for most, up to 18.6 m apart for three
+  (Taylor Farm Sprint, Rockton Plains, Chandlers Creek; the time
+  recorder's value is kept as `start_z_alt`). Both MIT notices are in
+  the file. Confidence high for the rally stages, medium for rallycross
+  and DirtFish (dr2_logger alone). Surfaces are per location (the
+  sources have none): Monte Carlo mixed tarmac/snow/ice (a prior only;
+  no per-stage shares published), Sweden snow, Spain and Germany tarmac,
+  the rest gravel, rallycross mixed. `reverse_of` is set only where the
+  name says so (29); many other stages are reverses in the game.
+- `wrcg.json`: WRC Generations, 165 entries (the official count: 21
+  rallies with one shakedown each; the game has no Rally Hub, free roam
+  or DLC rallies), 128 with a length. Lengths to 0.01 km from the WRC
+  Generations fandom wiki (in-game figures, Monte-Carlo, Sweden,
+  Croatia, Portugal, Sardegna, Greece, New Zealand, Spain, Japan,
+  Sanremo) and, for the bonus rallies, WRC 8's figures for the same
+  stages (a Steam thread), which agree with the wiki within about 0.1 km
+  where both exist (0.2 km on two super specials). Mostly medium; high
+  only where both agree exactly (4 in Sardegna); low where missing.
+- `acr.json`: Assetto Corsa Rally to update 0.6 (2026-09-10), 46 stages
+  in Alsace, Wales, Monte Carlo, Greece and the Livigno ice circuit, the
+  game's own lengths (0.1 km) as two community dumps of its data table
+  read them (PacenotePal, acr-live-timing), agreeing on all 46; press
+  lists agree rounded. `track` is the shared-memory name as PacenotePal
+  builds it, in English.
+
+Matching: DiRT by length and start z against the table first; WRCG by
+the distance to the finish within 1 % (start positions of earlier runs
+to tell apart stages of one length; the location and surface when they
+stay open); ACR by its shared-memory track name. Tests in
+`tests/test_store.py` and `tests/test_drive_log.py`.
+
+Unverified (needs the §6.3 captures):
+- [ ] WRCG: that it really sends no length (field 61) and no progress
+  (field 3); whether its stage clock (field 1) stops at the finish line,
+  which is what finds the finish when it sends no progress; that its
+  lap distance (field 2) is the distance along the stage.
+- [ ] WRCG: no length for Kenya, Estonia, most of Belgium, the Finland
+  reverses, Chile's Biobio and Pelun, and most shakedowns (37 entries);
+  those stages are never matched, only named. Surfaces of Kenya, Estonia
+  and Belgium follow the real rallies; Great Orme (gravel) and Harju
+  (tarmac, WRC 8 length) are doubtful. In-game lengths may differ from
+  the wiki and WRC 8 by more than 1 %; a run that stays unmatched keeps
+  its start cell.
+- [ ] WRCG: a stage and its reverse of one length never get their name
+  until a run is matched otherwise (nothing records which start is
+  which); the surface is known when they share it.
+- [ ] ACR: the `track` strings (only English; the game localises them;
+  the Livigno ones are extrapolated), what `trackConfiguration` holds,
+  and how the spline length compares with the published lengths (one
+  value known: 12077.95 m for an 11.3 km stage, so lengths are not used
+  to match ACR).
+- [ ] DiRT: rallycross and DirtFish entries (one source); starting grid
+  places may put a rallycross start more than 15 m from the table's z.
 
 ## 17. Appendix: format research findings
 
