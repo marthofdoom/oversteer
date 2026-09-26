@@ -947,8 +947,14 @@ class Gui:
         if key != self.telemetry_car_live:
             self.telemetry_car_live = key
             self.refresh_telemetry_cars()
-        if self.telemetry_car_selected is not None:
-            snapshot = self.shift_learner.load_snapshot(self.telemetry_car_selected)
+        # The car picked, else the one being driven, else the one the picker
+        # shows by default: with nothing driven the tab must still show the
+        # profile's car, not an empty page under a filled-in picker
+        shown = self.telemetry_car_selected
+        if shown is None and key is None:
+            shown = self.ui.telemetry_car.get_active_id()
+        if shown is not None:
+            snapshot = self.shift_learner.load_snapshot(shown)
         else:
             snapshot = self.shift_learner.snapshot()
         if snapshot is not None:
