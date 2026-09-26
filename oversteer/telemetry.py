@@ -25,7 +25,9 @@ from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 DEFAULT_PORT = 5310
 LEGACY_PORT = 5300                                   # the default before 0.14: games may still send there
 PROBE_AFTER = 10.0                                   # seconds of nothing before looking at the other port
-PROBE_EVERY = 60.0
+PROBE_EVERY = 15.0                                   # a bridge sends only while on a stage: look often...
+PROBE_OFTEN_FOR = 300.0                              # ...for the first minutes after start
+PROBE_LATER = 60.0                                   # then less: 5300 is in Forza Horizon 6's range
 PROBE_LISTEN = 1.0                                   # seconds the other port is held: FH6 may want 5300
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
 LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point
@@ -321,7 +323,8 @@ class Telemetry:
         self.running = True
         self.heard = False
         self.elsewhere = None
-        self._probe_at = time.monotonic() + PROBE_AFTER
+        self._started_at = time.monotonic()
+        self._probe_at = self._started_at + PROBE_AFTER
         self._thread = threading.Thread(target=self._run, name='telemetry', daemon=True)
         self._thread.start()
         return True
@@ -345,8 +348,9 @@ class Telemetry:
                 self.check_idle(now)
                 if self.learner is not None:
                     self.learner.tick(now)
-                if not self.heard and now >= self._probe_at:
-                    self._probe_at = now + PROBE_EVERY
+                # Not once the answer is known (a game heard there)
+                if not self.heard and not self.elsewhere and now >= self._probe_at:
+                    self._probe_at = now + (PROBE_EVERY if now - self._started_at < PROBE_OFTEN_FOR else PROBE_LATER)
                     self.probe_other_port()
                 continue
             except OSError:

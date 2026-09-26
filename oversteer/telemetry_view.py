@@ -203,15 +203,20 @@ def session_lines(history):
     return ['  ·  '.join(part for part in row if part) for row in session_rows(history)]
 
 
-def live_status(port, sample=None, learnt=None):
+def live_status(port, sample=None, learnt=None, elsewhere=None):
     """(state, markup) of the line about the telemetry arriving now:
     'off' without a listener (`port` None), 'waiting' while nothing
     arrives on it, 'live' with the car, gear, revs, speed, where the
-    lights end when learnt, and the way through the stage."""
+    lights end when learnt, and the way through the stage. `elsewhere`:
+    the port a game was heard sending to instead of ours."""
     if port is None:
         return 'off', escape(
             _("Not listening. Turn on the rev lights or \"Learn from game telemetry\" in Settings to read the "
               "game's telemetry and learn from it."))
+    if sample is None and elsewhere:
+        return 'waiting', escape(
+            _("Telemetry is arriving on UDP {0}, but Oversteer listens on {1}: set the port to {0} under "
+              "Settings and save the profile, or set the game to {1}.").format(elsewhere, port))
     if sample is None:
         return 'waiting', escape(_("Waiting for telemetry on UDP {}.").format(port))
     parts = ['<b>{}</b>'.format(escape(sample.car_name or sample.car or _("unknown car")))]
@@ -222,7 +227,9 @@ def live_status(port, sample=None, learnt=None):
         parts.append('{:.0f} km/h'.format(sample.speed * 3.6))
     if learnt:
         parts.append(_("lights at the learnt {:.0f} rpm").format(learnt))
-    distance = getattr(sample, 'distance', None)
+    distance = getattr(sample, 'lap_distance', None)
+    if distance is None:
+        distance = getattr(sample, 'distance', None)
     length = getattr(sample, 'stage_length', None)
     if distance is not None and length:
         parts.append(_("{:.1f} of {:.1f} km").format(max(0.0, distance) / 1000.0, length / 1000.0))

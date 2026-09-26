@@ -942,7 +942,8 @@ class Gui:
         telemetry = self.telemetry
         sample = telemetry.live if telemetry is not None else None
         live = live_status(telemetry.port if telemetry is not None else None, sample,
-                           telemetry.using_learnt if telemetry is not None else None)
+                           elsewhere=telemetry.other_port if telemetry is not None and telemetry.elsewhere else None,
+                           learnt=telemetry.using_learnt if telemetry is not None else None)
         key = self.shift_learner.car.key if self.shift_learner.car else None
         if key != self.telemetry_car_live:
             self.telemetry_car_live = key

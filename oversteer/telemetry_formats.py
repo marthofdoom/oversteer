@@ -269,14 +269,34 @@ def _ovst(data, n):
 def _ovst3(sample, v):
     """The bridge's version 3 fields. Taken here: what has one meaning in
     every AC game (the wheels' speeds and suspension, the stage's length,
-    the progress along it). Left for a capture to confirm (the design's
-    rule): the signs of steer, accG, local velocity and angular velocity,
-    the clutch's direction, and ride height, which ACR leaves empty."""
+    the progress along it); for ACR also steer, clutch, acceleration,
+    local velocity and yaw, whose signs its captures confirmed. Left for
+    captures to confirm: those in AC and ACC, and ride height, which ACR
+    leaves empty."""
     game = OVST3_GAMES.get(v[0])
     if game is not None:
         sample.game = game
         if sample.car and sample.car.startswith('acpmf/') and sample.car != 'acpmf/unknown':
             sample.car = '{}/{}'.format(game, sample.car_name)
+    if sample.car == 'acpmf/unknown':
+        # The first packets of a stage come before the game has filled in
+        # the car's name: no car yet, rather than a session started for an
+        # unknown one (seen on marth's ACR captures)
+        sample.car = None
+    if game == 'acr':
+        # Confirmed on marth's ACR captures: steer is -1 at full left lock;
+        # in a left-hand corner accG x and the angular velocity about y are
+        # positive, so its car frame is x left, y up, z forward; accG reads
+        # 0 at rest (no gravity); clutch is 1 engaged, 0 disengaged
+        clutch, steer = v[3], v[4]
+        accg, local_vel, ang = v[5:8], v[8:11], v[11:14]
+        sample.steer = _finite(-steer)
+        sample.clutch = _finite(1.0 - clutch)
+        if all(math.isfinite(a) for a in accg):
+            sample.accel = (accg[2] * G, accg[0] * G, accg[1] * G)
+            sample.accel_kind = 'kinematic'
+        sample.vel = _vector((local_vel[2], local_vel[0], local_vel[1]))
+        sample.yaw_rate = _finite(ang[1])
     at = 3 + 2 + 9                                   # past game, flags2, reserved, clutch/steer, three vectors
     slip, rot, travel = v[at:at + 4], v[at + 4:at + 8], v[at + 8:at + 12]
     at += 16                                         # and the wheel loads
@@ -294,11 +314,15 @@ def _ovst3(sample, v):
         sample.max_rpm = current_max_rpm
     if math.isfinite(track_length) and track_length > 100:
         sample.stage_length = track_length
-    if math.isfinite(spline_pos) and 0.0 <= spline_pos <= 1.0:
-        sample.progress = spline_pos
-    # distanceTraveled counts the whole session, not the stage: the
-    # distance along the stage is the progress along its spline
-    if sample.progress is not None and sample.stage_length:
+    if math.isfinite(spline_pos) and 0.0 <= spline_pos <= 1.0 and not (game == 'acr' and spline_pos == 0.0):
+        sample.progress = spline_pos                 # ACR leaves it at 0 throughout
+    # ACR's distanceTraveled is the position along the stage's road spline
+    # (a capture of Wales Afon Bidno: 238 m at the start line, rising to
+    # 5518 m): the distance along the stage. Elsewhere, the progress along
+    # the spline when the game fills it in.
+    if game == 'acr' and math.isfinite(distance) and distance > 0.0:
+        sample.lap_distance = distance
+    elif sample.progress is not None and sample.stage_length:
         sample.lap_distance = sample.progress * sample.stage_length
     sample.laps = laps if laps >= 0 else None
     sample.pos = _vector(world)
