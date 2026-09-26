@@ -97,6 +97,25 @@
 - The listener takes telemetry from one source at a time (the first one
   heard, until it goes quiet), so a bridge left running next to a game
   no longer mixes two cars.
+- The Telemetry tab is laid out like the other tabs, in two views.
+  **Car and coaching**: the car, a one-line live status with a coloured
+  dot, the shift points in a framed table (the best upshift in bold),
+  coaching one row per tip with a Focus / Tip / Better tag, the last
+  session with "Why Oversteer thinks so" and "Label…", recent sessions
+  one row each, the setup. **Settings**: framed lists for receiving
+  telemetry, the rev lights (no longer one crowded row), the web page
+  and recording, each row a title with a short explanation or its status
+  under it.
+- The web page is a dark live dashboard for a phone or laptop next to
+  the rig: shift lights, the gear huge, speed, rpm, where to change up in
+  this gear and the stage by name with its progress, updated four times
+  a second; then coaching, the shift points with the current gear
+  highlighted, the setup and recent sessions. It fits portrait and
+  landscape phones and puts the live panel beside the rest on a laptop.
+  It keeps the screen on: with the browser's wake lock where allowed
+  (HTTPS or the same computer), otherwise after a first tap with a tiny
+  muted video made in the page. A chip at the top says whether the screen
+  is being kept on.
 
 ### Fixed
 - DiRT Rally 2.0 (and DiRT Rally, DiRT 4): engine rpm was read 4.7 % too

@@ -1170,9 +1170,10 @@ what it is still collecting.
   at most 8 requests in flight (503 beyond), 10 s socket timeout, request
   logging at debug level only. Every response carries
   `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
-  'self'` (the page's inline CSS/JS gets a hash or `'unsafe-inline'` for
-  style and script; nothing external either way) and `Referrer-Policy:
-  no-referrer`.
+  'self'` (the page's inline CSS and JS by their sha256 hashes, computed
+  when the page is loaded, never `'unsafe-inline'`; `media-src 'self'
+  blob:` for the keep-awake video; nothing external) and
+  `Referrer-Policy: no-referrer`.
 - **Host check** against DNS rebinding: requests whose `Host` is not an IP
   literal (IPv4, or IPv6 in brackets like `[fe80::1]:5301`), `localhost`,
   the machine's hostname or `<hostname>.local` get 421.
@@ -1181,22 +1182,67 @@ what it is still collecting.
     external resources) from `data/telemetry/web/`, installed with the other
     telemetry data.
   - `GET /api/v1/status` → version, profile, listening port, game, car,
-    session id. Not the telemetry source address: it would tell anyone on
-    the network which machine runs the game.
-  - `GET /api/v1/live` → the last sample (gear, rpm, speed, shift target,
-    limiter, stage distance) or `null`; the page polls it once a second.
+    session id, and the stage being driven (`current_stage()`: the stage
+    the current run was matched to, else the game's own stage key, named
+    from the stage tables, else the track as the game names it; `null`
+    when nothing says). Not the telemetry source address: it would tell
+    anyone on the network which machine runs the game.
+  - `GET /api/v1/live` → the last sample (gear, rpm, speed, shift target
+    and whether it is learnt, limiter, stage distance and length,
+    progress, stage key, track) or `null`; the page polls it every 250 ms
+    while telemetry arrives, every second otherwise.
   - `GET /api/v1/cars` → cars in the current profile.
   - `GET /api/v1/cars/<id>` → the shift table (best, band, your average per
     method), current tune, tuning advice.
   - `GET /api/v1/cars/<id>/sessions?limit=20` → sessions with discipline,
-    surface, confidence and evidence.
+    surface, confidence and evidence, and `stage_name` from the stage
+    tables.
   - `GET /api/v1/sessions/<id>` → runs, metrics, verdicts, laps.
   - `GET /api/v1/coach?car=<id>` → focus, tips, praise, growth. The web page
     does not mark tips as seen (read-only); only the GTK tab does.
-- The page: live strip (gear, rpm bar to the shift point, speed), the car's
-  shift table, coaching, recent sessions with expandable evidence. Phone
-  first (single column, 16 px gutters), light and dark by
-  `prefers-color-scheme`.
+- The page, for a phone or laptop next to the rig: dark only (it sits
+  beside a screen), phone first, no horizontal scroll at any width.
+  - **Live panel** first, to read at arm's length: 15 shift lights (green,
+    amber, red up to the change-up point from 60 % of it, all flashing
+    above it, as the wheel's), the gear huge, speed and rpm large,
+    "Change up at" the point for this gear (learnt, or the profile's), the
+    stage by name with its distance and a progress bar. A grey panel with
+    "No telemetry arriving" when nothing arrives.
+  - Then **coaching** (focus first, then tips, praise, the quiet lines),
+    the **shift points** of the car (followed from the live car until you
+    pick another; the gear being driven highlighted), the **setup** and
+    **recent sessions** with expandable evidence.
+  - Portrait phone: one column. Landscape phone (height ≤ 540 px): gear on
+    the left, numbers on the right, the live panel in one screen. 900 px
+    and wider: the live panel sticky on the left, the cards on the right.
+  - A sticky top bar with two chips: the connection (green receiving from
+    <game>, amber waiting on UDP <port>, red Oversteer not answering) and
+    the screen.
+- **Keeping the screen on** while the page is open:
+  - The Screen Wake Lock API (`navigator.wakeLock.request('screen')`) when
+    the browser offers it, which is only in a secure context: HTTPS, or
+    `localhost` (a laptop opening the page on the rig itself). The lock is
+    released when the page is hidden and taken again on
+    `visibilitychange`.
+  - The page is plain HTTP on the LAN, so on a phone the API is missing.
+    The fallback, after the first tap or key press anywhere (browsers let
+    video play only then): a tiny muted, inline, looping video made in the
+    page. A 16 px canvas is painted twice a second and its
+    `captureStream()` plays at once; a second of it is recorded with
+    `MediaRecorder` and then looped from a `blob:` URL, a real video file
+    as the long-standing keep-awake libraries play. It sits in the sticky
+    top bar as the chip's dot, in view, since some browsers only keep
+    awake for visible video. Nothing is fetched for it; the CSP allows
+    `media-src 'self' blob:`.
+  - The chip says "Screen on", "Tap to keep screen on" (a gesture is
+    needed) or "Screen may sleep" (neither is possible: set the phone's
+    screen timeout instead). Tapping the chip retries.
+  - Expected: wake lock in Chrome, Edge, Firefox (126+) and Safari (16.4+)
+    over HTTPS or on localhost; over LAN HTTP the video keeps Chrome on
+    Android and Safari on iOS awake in most versions, which is what the
+    keep-awake libraries rely on. Verified in headless Firefox (lock
+    taken on localhost; with the API turned off, the video plays from its
+    `blob:` after a tap); not yet verified on a real phone.
 - **What no authentication implies** (shown next to the switch): anyone on
   the same network can read the driving history, car and profile names,
   when you drive, and the live telemetry while you drive; nobody can change
@@ -1213,33 +1259,58 @@ what it is still collecting.
 
 ## 12. GTK Telemetry tab
 
-What shows first is what requirement 1 asks for. Top to bottom:
+What shows first is what requirement 1 asks for: the car and what has
+been learnt about it. The tab looks like the others (framed lists, rows of
+a title with a dim line under it on the left and the control on the right,
+70 px high, 12 px margins) and is split in two views by a switcher at its
+top.
 
-1. **Car bar**: car picker (as now), rename, forget, "Label last session…".
-   Forget's confirmation says what it does: "Relearn this car from
-   scratch. Its sessions and your labels are kept."
-2. **Context line**: discipline and surface with confidence and prior,
-   stage/location, tune, shifter — e.g. "Rally stage (high: point to point,
-   9.8 km) · gravel (medium) · usually gravel here · H-pattern". Clicking
-   shows the evidence.
-3. **Shift table**: Gear | Best (± band) | You | H-pattern | Sequential |
-   Paddles | Data; method columns only when they have shifts. As built:
-   Gear | rpm per km/h | Best upshift (with its range) | of limiter | You
-   change up | the method columns | Samples.
-4. **Coaching**: focus habit, up to 3 tips, praise, growth line; "Show all"
-   expander with the quiet lines.
-5. **Tuning**: current tune (ratios, change type, measured ride height /
+**Car and coaching**, top to bottom:
+
+1. **Car bar**: the car picker, and Rename… and Forget… (insensitive until
+   a car is known). Forget's confirmation says what it does: "Relearn
+   this car from scratch? Its sessions and your labels are kept."
+2. **Live line**, compact: a dot (grey not listening, amber waiting on the
+   UDP port, green receiving), then the car in bold, gear, rpm, km/h,
+   "lights at the learnt … rpm" and "2.3 of 9.8 km" through a stage
+   (`telemetry_view.live_status()`).
+3. **Shift points**: the limiter and how much of the power curve is known,
+   then the table in a frame: Change (1→2 … 5 (top)) | Best upshift (bold)
+   | Known to (its range, dimmed) | of limiter | You change up | a column
+   per way of changing once used (H-pattern, Sequential, Paddles) | rpm
+   per km/h | Samples (the last two dimmed). Figures right-aligned in
+   tabular digits.
+4. **Coaching**: one row per tip with its kind as a coloured tag (Focus,
+   Tip, Better); the car's own advice until the coach has any; the quiet
+   "still" lines behind "Also noted (n)".
+5. **Sessions**: the last session's context line (discipline and surface
+   with confidence and prior, stage, shifter) with "Why Oversteer thinks
+   so" (the evidence) and "Label…"; then one row per recent session (10):
+   date, stage and discipline/surface, and dimmed on the right the changes
+   up with their error and the limiter s/km (`telemetry_view.session_rows()`).
+6. **Setup**: the current tune (ratios, change type, measured ride height /
    tyre radius / brake bias; "not sent by this game" where the game has
-   none), up to 2 tuning notes, "This is a different car" on a fingerprint
-   split.
-6. **Recent sessions** (10): date, stage, discipline/surface badges,
-   shift error, limiter s/km.
-7. **Live line** (as now).
-8. **Settings** expander: the rev light switches (moved from the top),
-   "Learn from game telemetry" (D4), UDP port, web page switch, port,
-   bind, the bound URLs and the notes of §11, "Record raw telemetry" with
-   the capture folder and size, EA WRC setup (copy buttons and target
-   paths, §5.3).
+   none) and the tuning notes, one row each.
+
+**Settings**, in four framed lists:
+
+1. **Receiving telemetry**: UDP port (saved with the profile), "Learn from
+   game telemetry" (D4, for every profile), the shared-memory games' Steam
+   launch options with Copy, and "EA SPORTS WRC: turn on its telemetry"
+   folded (target paths and the two copy buttons, §5.3).
+2. **Rev lights** (saved with the profile): the switch with Test LEDs and
+   the listener's status under it, "Shift at" with its unit, "Learn the
+   limiter at each launch", "Shift lights at the learnt best upshift". The
+   widgets come from main.ui (their handlers are there) and are placed in
+   rows of their own here.
+3. **Web page** (for every profile): the switch with the bound URLs and
+   the notes of §11 under it; TCP port and "Every network" / "This
+   computer only".
+4. **Recording**: "Record raw telemetry" with the capture folder and size
+   under it; "Keep at most … GB".
+
+Every view has an empty state from the start (not listening, nothing
+learnt yet, no session, no setup) before the controller has read anything.
 
 The label dialog: discipline, surface, wet, shifter (preset from the
 detected ones), note; saved to `labels` for every run of the session.
