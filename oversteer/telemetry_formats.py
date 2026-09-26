@@ -269,9 +269,10 @@ def _ovst(data, n):
 def _ovst3(sample, v):
     """The bridge's version 3 fields. Taken here: what has one meaning in
     every AC game (the wheels' speeds and suspension, the stage's length,
-    the progress along it). Left for a capture to confirm (the design's
-    rule): the signs of steer, accG, local velocity and angular velocity,
-    the clutch's direction, and ride height, which ACR leaves empty."""
+    the progress along it); for ACR also steer, clutch, acceleration,
+    local velocity and yaw, whose signs its captures confirmed. Left for
+    captures to confirm: those in AC and ACC, and ride height, which ACR
+    leaves empty."""
     game = OVST3_GAMES.get(v[0])
     if game is not None:
         sample.game = game
@@ -313,7 +314,7 @@ def _ovst3(sample, v):
         sample.max_rpm = current_max_rpm
     if math.isfinite(track_length) and track_length > 100:
         sample.stage_length = track_length
-    if math.isfinite(spline_pos) and 0.0 < spline_pos <= 1.0:
+    if math.isfinite(spline_pos) and 0.0 <= spline_pos <= 1.0 and not (game == 'acr' and spline_pos == 0.0):
         sample.progress = spline_pos                 # ACR leaves it at 0 throughout
     # ACR's distanceTraveled is the position along the stage's road spline
     # (a capture of Wales Afon Bidno: 238 m at the start line, rising to

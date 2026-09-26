@@ -129,10 +129,13 @@ def allowed_host(host, names):
         return True
     except ValueError:
         pass
-    if name.endswith('.ts.net') and name.split('.')[0] in names:
-        # This machine's Tailscale name (<host>.<tailnet>.ts.net), as
-        # `tailscale serve` sends it: it only resolves inside the tailnet,
-        # and gives the page real HTTPS, which the screen wake lock needs
+    name = name.rstrip('.')
+    labels = name.split('.')
+    if len(labels) == 4 and labels[2:] == ['ts', 'net'] and labels[0] != 'localhost' and labels[0] in names:
+        # This machine's Tailscale name, exactly <host>.<tailnet>.ts.net, as
+        # `tailscale serve` sends it: Tailscale holds all of ts.net, so it
+        # can't be pointed at this machine from outside, and it gives the
+        # page real HTTPS, which the screen wake lock needs
         return True
     return name in names
 

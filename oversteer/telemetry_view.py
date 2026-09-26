@@ -216,7 +216,7 @@ def live_status(port, sample=None, learnt=None, elsewhere=None):
     if sample is None and elsewhere:
         return 'waiting', escape(
             _("Telemetry is arriving on UDP {0}, but Oversteer listens on {1}: set the port to {0} under "
-              "Settings and save the profile.").format(elsewhere, port))
+              "Settings and save the profile, or set the game to {1}.").format(elsewhere, port))
     if sample is None:
         return 'waiting', escape(_("Waiting for telemetry on UDP {}.").format(port))
     parts = ['<b>{}</b>'.format(escape(sample.car_name or sample.car or _("unknown car")))]

@@ -119,6 +119,9 @@ def test_the_host_check(served):
     # tailscale serve: this machine's name in its tailnet, for real HTTPS
     assert allowed_host('rig.example-tailnet.ts.net', names)
     assert not allowed_host('other.example-tailnet.ts.net', names) and not allowed_host('rig.ts.net.evil.com', names)
+    assert allowed_host('RIG.example-tailnet.ts.net.:443', names)
+    assert not allowed_host('rig.ts.net', names) and not allowed_host('rig.a.b.ts.net', names)
+    assert not allowed_host('localhost.example-tailnet.ts.net', names)
 
 
 def test_a_ninth_request_waits_its_turn(served):
