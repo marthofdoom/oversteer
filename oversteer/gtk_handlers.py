@@ -19,6 +19,7 @@ class GtkHandlers:
         return str(round(value * 10))
 
     def on_main_window_destroy(self, *args):
+        self.controller.on_quit()
         self.ui.quit()
 
     def on_preferences_window_delete_event(self, *args):

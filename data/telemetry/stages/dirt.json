@@ -1,0 +1,2998 @@
+{
+ "game": "dirt",
+ "title": "DiRT Rally 2.0 stages",
+ "keys": "length_m is the track length DiRT sends (UDP field 61) and start_z the car's z at the start line, both as dr2_logger recorded them; a run matches within 2 m of length and 15 m of start z. start_z_alt is the same start as dirt-rally-time-recorder recorded it.",
+ "notes": "Stage names, lengths and start z from dr2_logger (adapted from dirt-rally-time-recorder); every rally length is the same float in both, start z agrees within 1 m for most stages (up to 18.6 m: Taylor Farm Sprint, Rockton Plains, Chandlers Creek). Surfaces are per location (the source tables have none). reverse_of is set only where the name says so; many other stages are reverses of each other in the game. Rallycross and DirtFish are from dr2_logger alone.",
+ "licenses": [
+  {
+   "source": "https://github.com/ErlerPhilipp/dr2_logger",
+   "text": "MIT License\n\nCopyright (c) 2019-2020 ErlerPhilipp\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+  },
+  {
+   "source": "https://github.com/soong-construction/dirt-rally-time-recorder",
+   "text": "The MIT License (MIT)\n\nCopyright (c) 2018 Max Bechtold\n\nThis work is derived from that of the original authors:\n\nCopyright (c) 2015 Slocan\nCopyright © 2015 Colin Fein\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n\n"
+  }
+ ],
+ "stages": [
+  {
+   "location": "Germany",
+   "stage": "Waldaufstieg",
+   "length_m": 5361.90966796875,
+   "start_z": -2668.4755859375,
+   "start_z_alt": -2668.8408203125,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Waldabstieg",
+   "length_m": 5882.1796875,
+   "start_z": -948.372314453125,
+   "start_z_alt": -948.1590576171875,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Kreuzungsring",
+   "length_m": 6121.8701171875,
+   "start_z": -718.9346923828125,
+   "start_z_alt": -718.7255249023438,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Kreuzungsring reverse",
+   "length_m": 5666.25,
+   "start_z": 539.2579345703125,
+   "start_z_alt": 539.3837890625,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Kreuzungsring",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Ruschberg",
+   "length_m": 10699.9599609375,
+   "start_z": 814.2764892578125,
+   "start_z_alt": 813.9644165039062,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Verbundsring",
+   "length_m": 5855.6796875,
+   "start_z": 513.0728759765625,
+   "start_z_alt": 513.0369873046875,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Verbundsring reverse",
+   "length_m": 5550.85009765625,
+   "start_z": 657.1261596679688,
+   "start_z_alt": 657.0391235351562,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Verbundsring",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Innerer Feld-Sprint",
+   "length_m": 5129.0400390625,
+   "start_z": 814.3093872070312,
+   "start_z_alt": 814.1966552734375,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Innerer Feld-Sprint reverse",
+   "length_m": 4937.85009765625,
+   "start_z": 656.46044921875,
+   "start_z_alt": 656.4170532226562,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Innerer Feld-Sprint",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Oberstein",
+   "length_m": 11487.189453125,
+   "start_z": -2668.59033203125,
+   "start_z_alt": -2661.260986328125,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Hammerstein",
+   "length_m": 10805.23046875,
+   "start_z": 513.07177734375,
+   "start_z_alt": 513.0381469726562,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Germany",
+   "stage": "Frauenberg",
+   "length_m": 11551.16015625,
+   "start_z": 539.3564453125,
+   "start_z_alt": 539.3903198242188,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Route de Turini",
+   "length_m": 10805.220703125,
+   "start_z": 1276.76611328125,
+   "start_z_alt": 1276.76611328125,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Vallee descendante",
+   "length_m": 10866.8603515625,
+   "start_z": -2344.705810546875,
+   "start_z_alt": -2344.705810546875,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Col de Turini – Sprint en descente",
+   "length_m": 4730.02001953125,
+   "start_z": 283.7648620605469,
+   "start_z_alt": 283.7648620605469,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Col de Turini sprint en Montee",
+   "length_m": 4729.5400390625,
+   "start_z": -197.3816375732422,
+   "start_z_alt": -197.3816375732422,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Col de Turini – Descente",
+   "length_m": 5175.91015625,
+   "start_z": -131.84573364257812,
+   "start_z_alt": -131.84573364257812,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Gordolon – Courte montee",
+   "length_m": 5175.91015625,
+   "start_z": -467.3677062988281,
+   "start_z_alt": -467.3677062988281,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Route de Turini (Descente)",
+   "length_m": 4015.35986328125,
+   "start_z": -991.9784545898438,
+   "start_z_alt": -991.9784545898438,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Approche du Col de Turini – Montee",
+   "length_m": 3952.150146484375,
+   "start_z": 1276.780517578125,
+   "start_z_alt": 1276.780517578125,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Pra d´Alart",
+   "length_m": 9831.4501953125,
+   "start_z": -467.483154296875,
+   "start_z_alt": -467.483154296875,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Col de Turini Depart",
+   "length_m": 9832.0205078125,
+   "start_z": 283.4727478027344,
+   "start_z_alt": 283.4727478027344,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Route de Turini (Montee)",
+   "length_m": 6843.3203125,
+   "start_z": -991.945068359375,
+   "start_z_alt": -991.945068359375,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Monte Carlo",
+   "stage": "Col de Turini – Depart en descente",
+   "length_m": 6846.830078125,
+   "start_z": -2344.592529296875,
+   "start_z_alt": -2344.592529296875,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "snow",
+    "ice"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Tarmac with snow and ice patches; the shares per stage are not published"
+  },
+  {
+   "location": "Wales",
+   "stage": "Pant Mawr Reverse",
+   "length_m": 4821.64990234375,
+   "start_z": 2047.56201171875,
+   "start_z_alt": 2047.56201171875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Pant Mawr",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Bidno Moorland",
+   "length_m": 4960.06005859375,
+   "start_z": 1924.06884765625,
+   "start_z_alt": 1924.06884765625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Bidno Moorland Reverse",
+   "length_m": 5165.96044921875,
+   "start_z": 2481.105224609375,
+   "start_z_alt": 2481.105224609375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Bidno Moorland",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "River Severn Valley",
+   "length_m": 11435.5107421875,
+   "start_z": -557.0780029296875,
+   "start_z_alt": -557.0780029296875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Bronfelen",
+   "length_m": 11435.5400390625,
+   "start_z": 169.15403747558594,
+   "start_z_alt": 169.15403747558594,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Fferm Wynt",
+   "length_m": 5717.39990234375,
+   "start_z": -557.11328125,
+   "start_z_alt": -557.11328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Fferm Wynt Reverse",
+   "length_m": 5717.3896484375,
+   "start_z": -22.597640991210938,
+   "start_z_alt": -22.597640991210938,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Fferm Wynt",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Dyffryn Afon",
+   "length_m": 5718.099609375,
+   "start_z": -23.46375274658203,
+   "start_z_alt": -23.46375274658203,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Dyffryn Afon Reverse",
+   "length_m": 5718.10009765625,
+   "start_z": 169.0966033935547,
+   "start_z_alt": 169.0966033935547,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Dyffryn Afon",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Sweet Lamb",
+   "length_m": 9911.66015625,
+   "start_z": 2220.982177734375,
+   "start_z_alt": 2220.982177734375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Geufron Forest",
+   "length_m": 10063.6005859375,
+   "start_z": 2481.169677734375,
+   "start_z_alt": 2481.169677734375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Wales",
+   "stage": "Pant Mawr",
+   "length_m": 4788.669921875,
+   "start_z": 2221.004150390625,
+   "start_z_alt": 2221.004150390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Sweden",
+   "stage": "Älgsjön",
+   "length_m": 7055.9501953125,
+   "start_z": -1618.4476318359375,
+   "start_z_alt": -1618.4476318359375,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Östra Hinnsjön",
+   "length_m": 4911.68017578125,
+   "start_z": -1742.0498046875,
+   "start_z_alt": -1742.0498046875,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Stor-jangen Sprint",
+   "length_m": 6666.89013671875,
+   "start_z": -2143.403076171875,
+   "start_z_alt": -2143.403076171875,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Stor-jangen Sprint Reverse",
+   "length_m": 6693.43994140625,
+   "start_z": 563.3468017578125,
+   "start_z_alt": 563.3468017578125,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": "Stor-jangen Sprint",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Björklangen",
+   "length_m": 4931.990234375,
+   "start_z": -5101.59619140625,
+   "start_z_alt": -5101.59619140625,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Ransbysäter",
+   "length_m": 11922.6201171875,
+   "start_z": -4328.87158203125,
+   "start_z_alt": -4328.87158203125,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Hamra",
+   "length_m": 12123.740234375,
+   "start_z": 2697.36279296875,
+   "start_z_alt": 2697.36279296875,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Lysvik",
+   "length_m": 12123.5908203125,
+   "start_z": -5101.78369140625,
+   "start_z_alt": -5101.78369140625,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Norraskoga",
+   "length_m": 11503.490234375,
+   "start_z": 562.8009033203125,
+   "start_z_alt": 562.8009033203125,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Älgsjön Sprint",
+   "length_m": 5248.35986328125,
+   "start_z": -4328.87158203125,
+   "start_z_alt": -4328.87158203125,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Elgsjön",
+   "length_m": 7058.47998046875,
+   "start_z": 2696.98291015625,
+   "start_z_alt": 2696.98291015625,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "Sweden",
+   "stage": "Skogsrallyt",
+   "length_m": 4804.0302734375,
+   "start_z": -2143.44384765625,
+   "start_z_alt": -2143.44384765625,
+   "surface": "snow",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "Snow and ice over gravel"
+  },
+  {
+   "location": "USA",
+   "stage": "Tolt Valley Sprint Forward",
+   "length_m": 6575.8701171875,
+   "start_z": -408.4866027832031,
+   "start_z_alt": -408.7677917480469,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Hancock Creek Burst",
+   "length_m": 6701.61962890625,
+   "start_z": 1521.6917724609375,
+   "start_z_alt": 1521.3895263671875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Hancock Hill Sprint Reverse",
+   "length_m": 6109.5400390625,
+   "start_z": -353.0966796875,
+   "start_z_alt": -353.2311096191406,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Hancock Hill Sprint Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "North Fork Pass",
+   "length_m": 12228.830078125,
+   "start_z": 1521.5872802734375,
+   "start_z_alt": 1521.4326171875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "North Fork Pass Reverse",
+   "length_m": 12276.1201171875,
+   "start_z": 27.728849411010742,
+   "start_z_alt": 27.196266174316406,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "North Fork Pass",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Fuller Mountain Descent",
+   "length_m": 6488.330078125,
+   "start_z": 27.087112426757812,
+   "start_z_alt": 27.112668991088867,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Fuller Mountain Ascent",
+   "length_m": 6468.2998046875,
+   "start_z": 2768.10107421875,
+   "start_z_alt": 2768.20947265625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Fury Lake Depart",
+   "length_m": 6681.60986328125,
+   "start_z": 2950.6044921875,
+   "start_z_alt": 2951.18115234375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Beaver Creek Trail Forward",
+   "length_m": 12856.66015625,
+   "start_z": 518.76123046875,
+   "start_z_alt": 519.74462890625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Beaver Creek Trail Reverse",
+   "length_m": 12765.919921875,
+   "start_z": -4617.37744140625,
+   "start_z_alt": -4618.1796875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Beaver Creek Trail Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Hancock Hill Sprint Forward",
+   "length_m": 6229.10986328125,
+   "start_z": 518.7451171875,
+   "start_z_alt": 519.571533203125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "USA",
+   "stage": "Tolt Valley Sprint Reverse",
+   "length_m": 6604.0302734375,
+   "start_z": -4617.388671875,
+   "start_z_alt": -4618.16796875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Tolt Valley Sprint Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Valle de los puentes",
+   "length_m": 7667.31982421875,
+   "start_z": 131.03880310058594,
+   "start_z_alt": 131.24305725097656,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Huillaprima",
+   "length_m": 3494.010009765625,
+   "start_z": -1876.9149169921875,
+   "start_z_alt": -1876.92578125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Camino a la Puerta",
+   "length_m": 8265.9501953125,
+   "start_z": 205.80775451660156,
+   "start_z_alt": 205.77462768554688,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Las Juntas",
+   "length_m": 8256.8603515625,
+   "start_z": 2581.345947265625,
+   "start_z_alt": 2581.4658203125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Camino de acantilados y rocas",
+   "length_m": 5303.7900390625,
+   "start_z": 2581.339599609375,
+   "start_z_alt": 2581.419189453125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "San Isidro",
+   "length_m": 4171.5,
+   "start_z": -3227.17626953125,
+   "start_z_alt": -3227.052001953125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Miraflores",
+   "length_m": 3353.0400390625,
+   "start_z": 130.6753692626953,
+   "start_z_alt": 131.09925842285156,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "El Rodeo",
+   "length_m": 2845.6298828125,
+   "start_z": 206.18272399902344,
+   "start_z_alt": 205.79042053222656,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Valle de los puentes a la inversa",
+   "length_m": 7929.18994140625,
+   "start_z": -3227.17724609375,
+   "start_z_alt": -3223.035400390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Valle de los puentes",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Camino de acantilados y rocas inverso",
+   "length_m": 5294.81982421875,
+   "start_z": 1379.72607421875,
+   "start_z_alt": 1379.3668212890625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Camino de acantilados y rocas",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "Camino a Coneta",
+   "length_m": 4082.2998046875,
+   "start_z": -1864.662109375,
+   "start_z_alt": -1864.53857421875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Argentina",
+   "stage": "La Merced",
+   "length_m": 2779.489990234375,
+   "start_z": 1344.307373046875,
+   "start_z_alt": 1344.740478515625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Te Awanga Sprint Forward",
+   "length_m": 4799.84033203125,
+   "start_z": -4415.70703125,
+   "start_z_alt": -4415.01025390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Ocean Beach",
+   "length_m": 11437.0703125,
+   "start_z": 1789.1517333984375,
+   "start_z_alt": 1788.5035400390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Ocean Beach Sprint",
+   "length_m": 6624.0302734375,
+   "start_z": 1789.0382080078125,
+   "start_z_alt": 1788.5035400390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "time-recorder name: 'Ocean Beach Sprint Forward'"
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Te Awanga Sprint Reverse",
+   "length_m": 4688.52978515625,
+   "start_z": -2004.0015869140625,
+   "start_z_alt": -2004.3233642578125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Te Awanga Sprint Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Waimarama Sprint Forward",
+   "length_m": 8807.490234375,
+   "start_z": 2074.951171875,
+   "start_z_alt": 2074.85498046875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Ocean Beach Sprint Reverse",
+   "length_m": 6584.10009765625,
+   "start_z": -1950.1710205078125,
+   "start_z_alt": -1950.1280517578125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Ocean Beach Sprint",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Elsthorpe Sprint Forward",
+   "length_m": 7137.81005859375,
+   "start_z": 2892.6181640625,
+   "start_z_alt": 2893.062744140625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Waimarama Point Reverse",
+   "length_m": 15844.529296875,
+   "start_z": 2074.938720703125,
+   "start_z_alt": 2074.9248046875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Waimarama Point Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Waimarama Point Forward",
+   "length_m": 16057.8505859375,
+   "start_z": 2892.97216796875,
+   "start_z_alt": 2892.6748046875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Te Awanga Forward",
+   "length_m": 11507.4404296875,
+   "start_z": -4415.119140625,
+   "start_z_alt": -4415.01025390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Waimarama Sprint Reverse",
+   "length_m": 8733.98046875,
+   "start_z": 5268.0849609375,
+   "start_z_alt": 5268.06494140625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Waimarama Sprint Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "New Zealand",
+   "stage": "Elsthorpe Sprint Reverse",
+   "length_m": 6643.490234375,
+   "start_z": 5161.06396484375,
+   "start_z_alt": 5161.2197265625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Elsthorpe Sprint Forward",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Czarny Las",
+   "length_m": 6622.080078125,
+   "start_z": 4644.4375,
+   "start_z_alt": 4644.47900390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Marynka",
+   "length_m": 9254.900390625,
+   "start_z": 1972.7869873046875,
+   "start_z_alt": 1972.655029296875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Lejno",
+   "length_m": 6698.81005859375,
+   "start_z": -3314.843505859375,
+   "start_z_alt": -3314.945556640625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Józefin",
+   "length_m": 8159.81982421875,
+   "start_z": 7583.216796875,
+   "start_z_alt": 7583.14111328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Kopina",
+   "length_m": 7840.1796875,
+   "start_z": 4674.87548828125,
+   "start_z_alt": 4674.8505859375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Jagodno",
+   "length_m": 6655.5400390625,
+   "start_z": -402.56207275390625,
+   "start_z_alt": -402.5574951171875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Zienki",
+   "length_m": 13180.3798828125,
+   "start_z": -3314.898193359375,
+   "start_z_alt": -3314.868408203125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Zaróbka",
+   "length_m": 16475.009765625,
+   "start_z": 4674.9150390625,
+   "start_z_alt": 4674.81787109375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Zagorze",
+   "length_m": 16615.0,
+   "start_z": 1973.2518310546875,
+   "start_z_alt": 1972.2744140625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Jezioro Rotcze",
+   "length_m": 13295.6796875,
+   "start_z": 4644.3798828125,
+   "start_z_alt": 4644.48193359375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Borysik",
+   "length_m": 9194.3203125,
+   "start_z": 7393.35107421875,
+   "start_z_alt": 7393.10205078125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Poland",
+   "stage": "Jezioro Lukie",
+   "length_m": 6437.80029296875,
+   "start_z": -396.1388854980469,
+   "start_z_alt": -396.3538513183594,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Mount Kaye Pass",
+   "length_m": 13304.1201171875,
+   "start_z": 2242.524169921875,
+   "start_z_alt": 2242.036865234375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Mount Kaye Pass Reverse",
+   "length_m": 13301.109375,
+   "start_z": -2352.5615234375,
+   "start_z_alt": -2353.1884765625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Mount Kaye Pass",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Rockton Plains",
+   "length_m": 6951.15966796875,
+   "start_z": 2242.5224609375,
+   "start_z_alt": 2224.94921875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Rockton Plains Reverse",
+   "length_m": 7116.14990234375,
+   "start_z": 2457.100341796875,
+   "start_z_alt": 2456.95458984375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Rockton Plains",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Yambulla Mountain Ascent",
+   "length_m": 6398.90966796875,
+   "start_z": 2519.408447265625,
+   "start_z_alt": 2519.379150390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Yambulla Mountain Descent",
+   "length_m": 6221.490234375,
+   "start_z": -2352.546630859375,
+   "start_z_alt": -2353.200439453125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Chandlers Creek",
+   "length_m": 12341.25,
+   "start_z": 2049.85888671875,
+   "start_z_alt": 2065.60888671875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Chandlers Creek Reverse",
+   "length_m": 12305.0400390625,
+   "start_z": -1280.10595703125,
+   "start_z_alt": -1279.528564453125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Chandlers Creek",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Bondi Forest",
+   "length_m": 7052.2998046875,
+   "start_z": -603.9149169921875,
+   "start_z_alt": -604.4165649414062,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Taylor Farm Sprint",
+   "length_m": 7007.02001953125,
+   "start_z": -1280.1004638671875,
+   "start_z_alt": -1261.5372314453125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Noorinbee Ridge Ascent",
+   "length_m": 5277.02978515625,
+   "start_z": 2049.85791015625,
+   "start_z_alt": 2050.32373046875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Australia",
+   "stage": "Noorinbee Ridge Descent",
+   "length_m": 5236.91015625,
+   "start_z": -565.1859130859375,
+   "start_z_alt": -564.4724731445312,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Comienzo en Bellriu",
+   "length_m": 14348.3603515625,
+   "start_z": 190.28546142578125,
+   "start_z_alt": 190.2432861328125,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "time-recorder name: 'Comienzo de Bellriu'"
+  },
+  {
+   "location": "Spain",
+   "stage": "Centenera",
+   "length_m": 10568.4296875,
+   "start_z": -2326.21142578125,
+   "start_z_alt": -2326.286865234375,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Ascenso bosque Montverd",
+   "length_m": 7297.27001953125,
+   "start_z": 2593.36376953125,
+   "start_z_alt": 2593.37646484375,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Vinedos Dardenya inversa",
+   "length_m": 6194.7099609375,
+   "start_z": -2979.6650390625,
+   "start_z_alt": -2979.6708984375,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": "Vinedos Dardenya",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Vinedos Dardenya",
+   "length_m": 6547.39990234375,
+   "start_z": -2002.0657958984375,
+   "start_z_alt": -2001.9224853515625,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Vinedos dentro del valle Parra",
+   "length_m": 6815.4501953125,
+   "start_z": -2404.635009765625,
+   "start_z_alt": -2404.659423828125,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Camino a Centenera",
+   "length_m": 10584.6796875,
+   "start_z": -2001.96337890625,
+   "start_z_alt": -2001.93310546875,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": "dr2_logger: 'Camina a Centenera'"
+  },
+  {
+   "location": "Spain",
+   "stage": "Subida por carretera",
+   "length_m": 4380.740234375,
+   "start_z": -3003.546630859375,
+   "start_z_alt": -3003.61083984375,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Salida desde Montverd",
+   "length_m": 6143.5703125,
+   "start_z": 2607.470947265625,
+   "start_z_alt": 2607.35400390625,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Ascenso por valle el Gualet",
+   "length_m": 7005.68994140625,
+   "start_z": 190.13796997070312,
+   "start_z_alt": 190.19236755371094,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Descenso por carretera",
+   "length_m": 4562.80029296875,
+   "start_z": -2326.251708984375,
+   "start_z_alt": -2326.102783203125,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Spain",
+   "stage": "Final de Bellriu",
+   "length_m": 13164.330078125,
+   "start_z": -2404.1171875,
+   "start_z_alt": -2404.716552734375,
+   "surface": "tarmac",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Ampelonas Ormi",
+   "length_m": 4860.1904296875,
+   "start_z": 91.54808044433594,
+   "start_z_alt": 91.54808044433594,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Anodou Farmakas",
+   "length_m": 9666.5,
+   "start_z": -2033.0767822265625,
+   "start_z_alt": -2033.0767822265625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Kathodo Leontiou",
+   "length_m": 9665.990234375,
+   "start_z": 457.1891784667969,
+   "start_z_alt": 457.1891784667969,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Pomono Ékrixi",
+   "length_m": 5086.830078125,
+   "start_z": -2033.0767822265625,
+   "start_z_alt": -2033.0767822265625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Koryfi Dafni",
+   "length_m": 4582.009765625,
+   "start_z": 164.40521240234375,
+   "start_z_alt": 164.40521240234375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Fourketa Kourva",
+   "length_m": 4515.39990234375,
+   "start_z": 457.18927001953125,
+   "start_z_alt": 457.18927001953125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Perasma Platani",
+   "length_m": 10487.060546875,
+   "start_z": 504.3974609375,
+   "start_z_alt": 504.3974609375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Tsiristra Théa",
+   "length_m": 10357.8798828125,
+   "start_z": -3672.5810546875,
+   "start_z_alt": -3672.5810546875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Ourea Spevsi",
+   "length_m": 5739.099609375,
+   "start_z": 504.3973693847656,
+   "start_z_alt": 504.3973693847656,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Ypsona tou Dasos",
+   "length_m": 5383.009765625,
+   "start_z": -2277.10986328125,
+   "start_z_alt": -2277.10986328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Abies Koiláda",
+   "length_m": 6888.39990234375,
+   "start_z": -1584.236083984375,
+   "start_z_alt": -1584.236083984375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Greece",
+   "stage": "Pedines Epidaxi",
+   "length_m": 6595.31005859375,
+   "start_z": -3672.58154296875,
+   "start_z_alt": -3672.58154296875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Kailajärvi",
+   "length_m": 7515.40966796875,
+   "start_z": 39.52613830566406,
+   "start_z_alt": 39.52613830566406,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Paskuri",
+   "length_m": 7461.65966796875,
+   "start_z": 881.0377197265625,
+   "start_z_alt": 881.0377197265625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Naarajärvi",
+   "length_m": 7310.5400390625,
+   "start_z": 846.68701171875,
+   "start_z_alt": 846.68701171875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Jyrkysjärvi",
+   "length_m": 7340.3798828125,
+   "start_z": -192.40794372558594,
+   "start_z_alt": -192.40794372558594,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Kakaristo",
+   "length_m": 16205.1904296875,
+   "start_z": 3751.42236328125,
+   "start_z_alt": 3751.42236328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Pitkäjärvi",
+   "length_m": 16205.259765625,
+   "start_z": 833.2575073242188,
+   "start_z_alt": 833.2575073242188,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Iso Oksjärvi",
+   "length_m": 8042.5205078125,
+   "start_z": 3751.42236328125,
+   "start_z_alt": 3751.42236328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Oksala",
+   "length_m": 8057.52978515625,
+   "start_z": -3270.775390625,
+   "start_z_alt": -3270.775390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Kotajärvi",
+   "length_m": 8147.560546875,
+   "start_z": -3263.315185546875,
+   "start_z_alt": -3263.315185546875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Järvenkylä",
+   "length_m": 8147.419921875,
+   "start_z": 833.2575073242188,
+   "start_z_alt": 833.2575073242188,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Kontinjärvi",
+   "length_m": 14929.7998046875,
+   "start_z": 39.52613067626953,
+   "start_z_alt": 39.52613067626953,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Finland",
+   "stage": "Hämelahti",
+   "length_m": 14866.08984375,
+   "start_z": -192.407958984375,
+   "start_z_alt": -192.407958984375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Rosebank Farm",
+   "length_m": 7144.69970703125,
+   "start_z": -1657.4295654296875,
+   "start_z_alt": -1657.54736328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Rosebank Farm Reverse",
+   "length_m": 6967.89990234375,
+   "start_z": 3383.216796875,
+   "start_z_alt": 3383.734130859375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Rosebank Farm",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Newhouse Bridge",
+   "length_m": 12857.0703125,
+   "start_z": 1386.7626953125,
+   "start_z_alt": 1386.6217041015625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Newhouse Bridge Reverse",
+   "length_m": 12969.2109375,
+   "start_z": -403.3143310546875,
+   "start_z_alt": -403.2851867675781,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Newhouse Bridge",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Old Butterstone Muir",
+   "length_m": 5822.77001953125,
+   "start_z": -1157.0889892578125,
+   "start_z_alt": -1157.8094482421875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Old Butterstone Muir Reverse",
+   "length_m": 5659.8203125,
+   "start_z": 3339.01513671875,
+   "start_z_alt": 3338.64306640625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Old Butterstone Muir",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Annbank Station",
+   "length_m": 7703.72021484375,
+   "start_z": -403.3154602050781,
+   "start_z_alt": -403.28497314453125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Annbank Station Reverse",
+   "length_m": 7587.64013671875,
+   "start_z": -1839.5506591796875,
+   "start_z_alt": -1838.8472900390625,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Annbank Station",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Glencastle Farm",
+   "length_m": 5245.4501953125,
+   "start_z": 1387.3612060546875,
+   "start_z_alt": 1386.62158203125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "Glencastle Farm Reverse",
+   "length_m": 5238.43994140625,
+   "start_z": -1860.2203369140625,
+   "start_z_alt": -1860.947021484375,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "Glencastle Farm",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "South Morningside",
+   "length_m": 12583.41015625,
+   "start_z": -1157.111083984375,
+   "start_z_alt": -1157.8094482421875,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Scotland",
+   "stage": "South Morningside Reverse",
+   "length_m": 12670.58984375,
+   "start_z": -1656.8243408203125,
+   "start_z_alt": -1657.54736328125,
+   "surface": "gravel",
+   "surface_parts": null,
+   "reverse_of": "South Morningside",
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/soong-construction/dirt-rally-time-recorder/blob/c0a42db0ece165c292f00906a3c14ee3249cebb8/resources/setup-dr2.sql"
+   ],
+   "confidence": "high",
+   "note": null
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Mettet (BE)",
+   "length_m": 1075.0989990234375,
+   "start_z": 149.30722045898438,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Trois-Rivieres (CA)",
+   "length_m": 1400.0770263671875,
+   "start_z": -230.09457397460938,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Lydden Hill (UK)",
+   "length_m": 1348.85400390625,
+   "start_z": 101.5931396484375,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Silverstone (UK)",
+   "length_m": 991.1160278320312,
+   "start_z": -185.40646362304688,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Loheac (FR)",
+   "length_m": 1064.97998046875,
+   "start_z": 195.76113891601562,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Estering (DE)",
+   "length_m": 951.51171875,
+   "start_z": -17.769332885742188,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Bikernieki (LV)",
+   "length_m": 1287.4329833984375,
+   "start_z": 134.0433807373047,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Hell (NO)",
+   "length_m": 1036.0970458984375,
+   "start_z": 122.2354736328125,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Montalegre (PT)",
+   "length_m": 1026.759033203125,
+   "start_z": -541.3275756835938,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Killarney (ZA)",
+   "length_m": 1064.623046875,
+   "start_z": -100.92737579345703,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Barcelona-Catalunya (ES)",
+   "length_m": 1119.3590087890625,
+   "start_z": -341.3289794921875,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Holjes (SE)",
+   "length_m": 1207.18798828125,
+   "start_z": 180.26181030273438,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "Rallycross",
+   "stage": "Yas Marina (AE)",
+   "length_m": 1194.22900390625,
+   "start_z": -133.4615936279297,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "tarmac",
+    "gravel"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Rallycross circuit (mixed tarmac/gravel lap); from dr2_logger only"
+  },
+  {
+   "location": "DirtFish (USA)",
+   "stage": "DirtFish",
+   "length_m": 3601.22998046875,
+   "start_z": 121.67539978027344,
+   "start_z_alt": null,
+   "surface": "mixed",
+   "surface_parts": [
+    "gravel",
+    "tarmac"
+   ],
+   "reverse_of": null,
+   "shakedown": false,
+   "sources": [
+    "https://github.com/ErlerPhilipp/dr2_logger/blob/5e5fcbe3a2e2df5c366e11ec5aec942712e946ac/source/dirt_rally/track_data_dr2.py",
+    "https://github.com/strawhatboy/ztmz_pacenote/blob/master/src/ZTMZ.PacenoteTool/dr2itinerarymap.py"
+   ],
+   "confidence": "medium",
+   "note": "Test/free-roam venue; from dr2_logger only. The game ships three DirtFish routes (usa/twin_peaks route_0 to route_2, from the file names in its NeFS headers); which one this is is not known, and the other two are missing"
+  }
+ ]
+}

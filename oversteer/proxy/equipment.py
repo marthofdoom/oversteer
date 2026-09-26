@@ -394,3 +394,41 @@ def _from_fields(code, etype):
     if name.isdigit():
         return {'from': str(code), 'from_type': 'ABS' if etype == ecodes.EV_ABS else 'KEY'}
     return {'from': name}
+
+
+# The G29/G920 family's shift paddles (right: up, left: down)
+LOGITECH_PADDLE_CODES = (ecodes.BTN_TOP2, ecodes.BTN_PINKIE)
+
+
+def shift_button_kinds(spec=None, logitech=True):
+    """{evdev key code on the wheel Oversteer reads: 'gear', 'sequential'
+    or 'paddle'}: which physical control a press came from, so the shift
+    learner can tell how a gear change was made. Whether the game shows
+    neutral between gears depends on its transmission model, not on the
+    shifter, so the press is the evidence. `spec` is the combined device's
+    ProxySpec, whose shifter mappings say where each shifter button lands;
+    `logitech` adds the codes a Logitech wheel uses itself for its paddles
+    and the shifter port."""
+    kinds = {}
+    if logitech:
+        for code in G29_GEAR_CODES + [G29_REVERSE_CODE]:
+            kinds[code] = 'gear'
+        for code in LOGITECH_PADDLE_CODES:
+            kinds[code] = 'paddle'
+    if spec is None:
+        return kinds
+    for key, source in spec.sources.items():
+        if not key.startswith(KIND_SHIFTER):
+            continue
+        mapped = [m for m in spec.mappings if m.source == key and m.from_type == ecodes.EV_KEY
+                  and m.to_type == ecodes.EV_KEY]
+        # A shifter's buttons in code order are its positions in order (as
+        # build_combined_spec assumes); the known ones say which are the
+        # sequential plate's
+        usb_id = '{:04x}:{:04x}'.format(source.vendor or 0, source.product or 0)
+        seq_index = (KNOWN_SHIFTERS.get(usb_id) or (None, None, None))[2] or ()
+        buttons = sorted(m.from_code for m in mapped)
+        sequential = {buttons[i] for i in seq_index if i < len(buttons)}
+        for m in mapped:
+            kinds[m.to_code] = 'sequential' if m.from_code in sequential else 'gear'
+    return kinds

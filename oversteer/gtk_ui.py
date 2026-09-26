@@ -6,6 +6,9 @@ import math
 import os
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
+from .telemetry import DEFAULT_PORT
+from .telemetry_formats import eawrc_structure, eawrc_config_lines
+from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_items, live_status, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -53,6 +56,7 @@ class GtkUi:
         self.set_range_overlay('never')
         self.disable_save_profile()
         self._build_hotkeys_page()
+        self._build_telemetry_page()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -758,7 +762,676 @@ class GtkUi:
         visual = screen.get_rgba_visual()
         self.overlay_window.set_visual(visual)
 
-    HOTKEYS_TAB_POSITION = 3        # after Tools
+    HOTKEYS_TAB_POSITION = 3        # after Tools (Telemetry then goes in front of it)
+    TELEMETRY_TAB_POSITION = 3
+
+    @staticmethod
+    def _row_of(widget):
+        while widget is not None and not isinstance(widget, Gtk.ListBoxRow):
+            widget = widget.get_parent()
+        return widget
+
+    @staticmethod
+    def _detach(widget):
+        """Take a widget built by main.ui out of its box, to place it
+        elsewhere; its signals stay connected."""
+        parent = widget.get_parent()
+        if parent is not None:
+            parent.remove(widget)
+        return widget
+
+    @staticmethod
+    def _heading(text, subtitle=None):
+        """A section heading above a framed list, as a box: the title in
+        bold, then a dim line under it when there is one."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_start(2)
+        title = Gtk.Label(xalign=0)
+        title.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(text)))
+        box.pack_start(title, False, False, 0)
+        if subtitle:
+            line = Gtk.Label(label=subtitle, xalign=0)
+            line.set_line_wrap(True)
+            line.get_style_context().add_class('dim-label')
+            box.pack_start(line, False, False, 0)
+        return box
+
+    @staticmethod
+    def _list():
+        """A framed list like the other tabs' settings."""
+        listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        listbox.set_activate_on_single_click(False)
+        listbox.get_style_context().add_class('list')
+        return listbox
+
+    def _section(self, parent, title, listbox, subtitle=None):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.pack_start(self._heading(title, subtitle), False, False, 0)
+        box.pack_start(listbox, False, False, 0)
+        parent.pack_start(box, False, False, 0)
+        return box
+
+    SETTING_ROW_HEIGHT = 70             # as the rows of the other tabs
+
+    def _setting_row(self, title, subtitle=None, tooltip=None, controls=(), status=None):
+        """A settings row as in the other tabs: the title (and a dim
+        explanation or status under it) on the left, the controls on the
+        right. `status` is a label to show under the title instead of a
+        fixed subtitle. Returns the row."""
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        row.set_size_request(-1, self.SETTING_ROW_HEIGHT)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        if tooltip:
+            box.set_tooltip_text(tooltip)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.CENTER)
+        label = Gtk.Label(label=title, xalign=0)
+        label.set_line_wrap(True)
+        text.pack_start(label, False, False, 0)
+        if subtitle and status is None:
+            status = self._status_label()
+            status.set_text(subtitle)
+        if status is not None:
+            text.pack_start(status, False, False, 0)
+        box.pack_start(text, True, True, 0)
+        end = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, valign=Gtk.Align.CENTER)
+        for control in controls:
+            control.set_valign(Gtk.Align.CENTER)
+            end.pack_start(control, False, False, 0)
+        box.pack_end(end, False, False, 0)
+        row.add(box)
+        return row
+
+    def _switch_row(self, text, tooltip, handler, subtitle=None, status=None, extra=()):
+        switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        switch.connect('state-set', lambda w, state: handler(state) or False)
+        return self._setting_row(text, subtitle, tooltip, tuple(extra) + (switch,), status), switch
+
+    def _build_telemetry_page(self):
+        """The Telemetry tab (docs/telemetry-coaching.md, section 12), in
+        two views: "Car and coaching" (the car, the telemetry arriving now,
+        its learnt shift points, coaching, sessions and setup) and
+        "Settings" (receiving telemetry, the rev lights, moved from Tools,
+        the web page and recording), in framed lists like the other tabs."""
+        self._telemetry_history = None
+        self._telemetry_advice_lines = []
+        self._telemetry_rows = None
+        self._telemetry_coaching_shown = None
+
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        stack.add_titled(self._telemetry_overview(), 'overview', _("Car and coaching"))
+        stack.add_titled(self._telemetry_settings_view(), 'settings', _("Settings"))
+        self.telemetry_stack = stack
+        switcher = Gtk.StackSwitcher(stack=stack, halign=Gtk.Align.CENTER)
+
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        page.set_margin_top(12)
+        switcher.set_margin_bottom(4)
+        page.pack_start(switcher, False, False, 0)
+        page.pack_start(stack, True, True, 0)
+
+        self.main_notebook.insert_page(page, Gtk.Label(label=_("Telemetry")), self.TELEMETRY_TAB_POSITION)
+        self.main_notebook.connect('switch-page', lambda notebook, child, index:
+                                   self.controller.telemetry_tab_selected() if child is page else None)
+        self._telemetry_page = page
+        # What it shows until the controller has read anything
+        self.set_telemetry_history({'context': (_("No session recorded yet."), []), 'tips': [], 'tuning': [],
+                                    'sessions': [], 'last_session': None})
+        self.set_telemetry_view(live_status(None), None)
+
+    @staticmethod
+    def _scrolled(child):
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_vexpand(True)
+        scrolled.add(child)
+        return scrolled
+
+    def _telemetry_overview(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        page.set_border_width(12)
+        page.get_style_context().add_class('telemetry-page')
+
+        # The car shown, and what is arriving now
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        car = Gtk.Label(label=_("Car"))
+        car.set_margin_end(4)
+        bar.pack_start(car, False, False, 0)
+        self.telemetry_car = Gtk.ComboBoxText()
+        self.telemetry_car.set_tooltip_text(_("Cars learnt in this profile. The car being driven is shown "
+                                              "unless you pick another."))
+        self.telemetry_car_handler = self.telemetry_car.connect(
+            'changed', lambda w: self.controller.select_telemetry_car(w.get_active_id()))
+        bar.pack_start(self.telemetry_car, True, True, 0)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        buttons.get_style_context().add_class('linked')
+        buttons.set_sensitive(False)                # until there is a car
+        self.telemetry_car_buttons = buttons
+        rename = Gtk.Button(label=_("Rename…"))
+        rename.set_tooltip_text(_("Give this car the name you know it by"))
+        rename.connect('clicked', lambda w: self._rename_car())
+        buttons.pack_start(rename, False, False, 0)
+        forget = Gtk.Button(label=_("Forget…"))
+        forget.set_tooltip_text(_("Throw away what has been learnt about this car and start again"))
+        forget.connect('clicked', lambda w: self._forget_car())
+        buttons.pack_start(forget, False, False, 0)
+        bar.pack_start(buttons, False, False, 0)
+        top.pack_start(bar, False, False, 0)
+
+        live = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        live.set_margin_start(2)
+        self.telemetry_live_dot = Gtk.Label(label='●')
+        self.telemetry_live_dot.get_style_context().add_class('telemetry-dot')
+        live.pack_start(self.telemetry_live_dot, False, False, 0)
+        self.telemetry_live = Gtk.Label(xalign=0)
+        self.telemetry_live.set_line_wrap(True)
+        self.telemetry_live.set_selectable(True)
+        live.pack_start(self.telemetry_live, True, True, 0)
+        top.pack_start(live, False, False, 0)
+        page.pack_start(top, False, False, 0)
+
+        # The learnt shift points
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        heading = self._heading(_("Shift points"))
+        self.telemetry_summary = Gtk.Label(xalign=0)
+        self.telemetry_summary.set_line_wrap(True)
+        self.telemetry_summary.get_style_context().add_class('dim-label')
+        heading.pack_start(self.telemetry_summary, False, False, 0)
+        box.pack_start(heading, False, False, 0)
+        frame = Gtk.Frame()
+        frame.get_style_context().add_class('telemetry-table')
+        self.telemetry_gears = Gtk.Grid(column_spacing=20, row_spacing=0)
+        self.telemetry_gears.set_border_width(12)
+        table = Gtk.ScrolledWindow()
+        table.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        table.set_propagate_natural_height(True)
+        table.add(self.telemetry_gears)
+        frame.add(table)
+        self.telemetry_gears_frame = frame
+        frame.set_no_show_all(True)
+        box.pack_start(frame, False, False, 0)
+        page.pack_start(box, False, False, 0)
+
+        # Coaching: one row per tip, its kind as a tag
+        self.telemetry_coaching = self._list()
+        self._section(page, _("Coaching"), self.telemetry_coaching)
+
+        # The last session, why Oversteer thinks it was that, and the ones before
+        sessions = self._list()
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        grid = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(10)
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.CENTER)
+        self.telemetry_context = Gtk.Label(xalign=0)
+        self.telemetry_context.set_line_wrap(True)
+        self.telemetry_context.set_selectable(True)
+        column.pack_start(self.telemetry_context, False, False, 0)
+        self.telemetry_evidence = self._status_label()
+        expander = Gtk.Expander(label=_("Why Oversteer thinks so"))
+        expander.get_style_context().add_class('dim-label')
+        expander.add(self.telemetry_evidence)
+        expander.set_no_show_all(True)
+        self.telemetry_evidence_expander = expander
+        column.pack_start(expander, False, False, 0)
+        grid.pack_start(column, True, True, 0)
+        label = Gtk.Button(label=_("Label…"), valign=Gtk.Align.CENTER)
+        label.set_tooltip_text(_("Say what the last session was (discipline, surface, wet, shifter): your labels "
+                                 "are kept for Oversteer to learn to tell surfaces apart from"))
+        label.connect('clicked', lambda w: self._label_session())
+        self.telemetry_label_button = label
+        grid.pack_end(label, False, False, 0)
+        row.add(grid)
+        sessions.add(row)
+        self.telemetry_sessions = sessions
+        self._section(page, _("Sessions"), sessions)
+
+        # The setup
+        self.telemetry_tuning = self._list()
+        self._section(page, _("Setup"), self.telemetry_tuning)
+        return self._scrolled(page)
+
+    def _telemetry_settings_view(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        page.set_border_width(12)
+        page.get_style_context().add_class('telemetry-page')
+
+        # The rev light widgets are built by main.ui (their handlers are
+        # there); their row is taken out of Tools and the widgets placed
+        # in rows of their own here
+        tooltips = {}
+        for widget in (self.rev_leds, self.launch_options):
+            row = self._row_of(widget)
+            if row is None:
+                continue
+            tooltips[widget] = row.get_child().get_tooltip_text()
+            for child in row.get_child().get_children():
+                if isinstance(child, Gtk.Label) and child.get_tooltip_text():
+                    tooltips[child.get_text()] = child.get_tooltip_text()
+            row.get_parent().remove(row)
+        for widget in (self.rev_leds, self.rev_leds_status, self.rev_leds_port, self.rev_leds_shift,
+                       self.rev_leds_shift_unit, self.rev_leds_test, self.launch_options, self.launch_options_copy):
+            self._detach(widget)
+        self.rev_leds_status.set_line_wrap(True)
+        self.rev_leds_status.set_xalign(0)
+        self.rev_leds_status.set_halign(Gtk.Align.FILL)
+        self.rev_leds_status.set_max_width_chars(80)
+        self.rev_leds_status.set_selectable(True)
+
+        receive = self._list()
+        receive.add(self._setting_row(
+            _("UDP port"), _("Where games send their telemetry. Saved with the profile."),
+            _("Turn on the game's UDP telemetry and point it at this computer and this port (Forza: Settings > "
+              "HUD and gameplay > Data Out; BeamNG: OutGauge; DiRT Rally 2.0: hardware_settings_config.xml, "
+              "extradata 3)."), (self.rev_leds_port,)))
+        row, self.telemetry_learn = self._switch_row(
+            _("Learn from game telemetry"),
+            _("Listen to the game's telemetry and learn from it even with the rev lights off or on a wheel "
+              "without them. Uses the UDP port above. An app setting, for every profile."),
+            lambda state: self.controller.set_telemetry_learn(state),
+            subtitle=_("Even with the rev lights off or no wheel. For every profile."))
+        receive.add(row)
+        self.launch_options.set_width_chars(28)
+        self.launch_options.set_hexpand(False)
+        receive.add(self._setting_row(
+            _("Shared-memory games (Assetto Corsa family)"), _("Put this in the game's Steam launch options."),
+            tooltips.get(self.launch_options), (self.launch_options, self.launch_options_copy)))
+        receive.add(self._eawrc_setup())
+        self._section(page, _("Receiving telemetry"), receive)
+
+        leds = self._list()
+        leds.add(self._setting_row(_("Rev lights from game telemetry"), tooltip=tooltips.get(self.rev_leds),
+                                   controls=(self.rev_leds_test, self.rev_leds), status=self.rev_leds_status))
+        leds.add(self._setting_row(
+            _("Shift at"), _("Where the last light comes on, until a gear's best upshift is learnt."),
+            tooltips.get(_("Shift at")), (self.rev_leds_shift, self.rev_leds_shift_unit)))
+        row, self.rev_leds_launch = self._switch_row(
+            _("Learn the limiter at each launch"),
+            _("A rally stage starts with the clutch in, handbrake up and throttle floored, which holds "
+              "the engine on its limiter. Held for a second standing, that RPM becomes the car's maximum for "
+              "the % shift point, whatever the game reports. Learnt again at every start."),
+            lambda state: self.controller.model.set_rev_leds_launch(state),
+            subtitle=_("Clutch in, handbrake up, throttle floored for a second at the start."))
+        leds.add(row)
+        row, self.rev_leds_learnt = self._switch_row(
+            _("Shift lights at the learnt best upshift"),
+            _("Once Oversteer has learnt the car's power curve and gearing, the lights complete at the "
+              "rpm where the next gear starts pulling harder, gear by gear. Until then, and for gears "
+              "it doesn't know yet, the shift point above is used."),
+            lambda state: self.controller.model.set_rev_leds_learnt(state),
+            subtitle=_("Gear by gear, once known; the shift point above until then."))
+        leds.add(row)
+        self._section(page, _("Rev lights"), leds, _("Saved with the profile."))
+
+        web = self._list()
+        self.telemetry_web_status = self._status_label()
+        row, self.telemetry_web = self._switch_row(
+            _("Web page for a phone or another computer"),
+            _("A read-only page with the live gear, the shift tables, coaching and your history, on the TCP "
+              "port below. Off by default."),
+            lambda state: self.controller.set_telemetry_web(on=state), status=self.telemetry_web_status)
+        web.add(row)
+        self.telemetry_web_port = Gtk.SpinButton.new_with_range(1024, 65535, 1)
+        self.telemetry_web_port.connect('value-changed', lambda w: self.controller.set_telemetry_web(
+            port=w.get_value_as_int()))
+        self.telemetry_web_bind = Gtk.ComboBoxText()
+        self.telemetry_web_bind.append('lan', _("Every network"))
+        self.telemetry_web_bind.append('local', _("This computer only"))
+        self.telemetry_web_bind.connect('changed', lambda w: w.get_active_id() and self.controller.set_telemetry_web(
+            bind=w.get_active_id()))
+        web.add(self._setting_row(_("TCP port and who can open it"),
+                                  controls=(self.telemetry_web_port, self.telemetry_web_bind)))
+        self._section(page, _("Web page"), web, _("For every profile."))
+
+        record = self._list()
+        self.telemetry_capture_status = self._status_label()
+        row, self.telemetry_capture = self._switch_row(
+            _("Record raw telemetry"),
+            _("Keep everything the game sends, as it arrived, in capture files: Oversteer can learn from them "
+              "again when it improves, and one attached to a bug report shows what happened. Labelled "
+              "sessions are kept for it to learn to tell surfaces apart from. Off by default."),
+            lambda state: self.controller.set_telemetry_capture(on=state), status=self.telemetry_capture_status)
+        record.add(row)
+        self.telemetry_capture_cap = Gtk.SpinButton.new_with_range(1, 100, 1)
+        self.telemetry_capture_cap.connect('value-changed', lambda w: self.controller.set_telemetry_capture(
+            cap=w.get_value_as_int()))
+        record.add(self._setting_row(_("Keep at most"), _("GB of captures: the oldest go first."),
+                                     controls=(self.telemetry_capture_cap,)))
+        self._section(page, _("Recording"), record, _("For every profile."))
+        return self._scrolled(page)
+
+    @staticmethod
+    def _status_label():
+        """A dim, wrapping, selectable line of text under a setting."""
+        label = Gtk.Label(xalign=0)
+        label.set_line_wrap(True)
+        label.set_selectable(True)
+        label.set_max_width_chars(80)
+        label.get_style_context().add_class('dim-label')
+        return label
+
+    def telemetry_tab_visible(self):
+        page = self.main_notebook.get_nth_page(self.main_notebook.get_current_page())
+        return page is self._telemetry_page and self.window.is_active()
+
+    def set_telemetry_preferences(self, prefs):
+        """The app-wide telemetry settings (telemetry_view.PREFERENCES),
+        shown without writing them back."""
+        # The handlers see the values the controller already has: no write
+        self.telemetry_learn.set_active(prefs['telemetry_learn'])
+        self.telemetry_web.set_active(prefs['telemetry_web_on'])
+        self.telemetry_web_port.set_value(prefs['telemetry_web_port'])
+        self.telemetry_web_bind.set_active_id(prefs['telemetry_web_bind'])
+        self.telemetry_capture.set_active(prefs['telemetry_capture_on'])
+        self.telemetry_capture_cap.set_value(prefs['telemetry_capture_cap'])
+
+    def set_telemetry_web_status(self, text):
+        self.telemetry_web_status.set_text(text)
+
+    def set_telemetry_capture_status(self, text):
+        self.telemetry_capture_status.set_text(text)
+
+    @staticmethod
+    def _clear_rows(listbox, keep=0):
+        for row in listbox.get_children()[keep:]:
+            row.destroy()
+
+    @staticmethod
+    def _text_row(text, dim=False, markup=False):
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        label = Gtk.Label(xalign=0)
+        if markup:
+            label.set_markup(text)
+        else:
+            label.set_text(text)
+        label.set_line_wrap(True)
+        label.set_selectable(True)
+        label.set_margin_top(10)
+        label.set_margin_bottom(10)
+        if dim:
+            label.get_style_context().add_class('dim-label')
+        row.add(label)
+        return row
+
+    def set_telemetry_history(self, history):
+        """The sections read from the database (telemetry_view.gather())."""
+        self._telemetry_history = history
+        context, evidence = history['context']
+        self.telemetry_context.set_text(context)
+        self.telemetry_label_button.set_sensitive(history.get('last_session') is not None)
+        self.telemetry_evidence.set_text('\n'.join(evidence))
+        if evidence:
+            self.telemetry_evidence.show()
+            self.telemetry_evidence_expander.show()
+        else:
+            self.telemetry_evidence_expander.hide()
+
+        self._clear_rows(self.telemetry_tuning)
+        for line in history['tuning'] or [_("No setup recorded yet.")]:
+            self.telemetry_tuning.add(self._text_row(line))
+        self.telemetry_tuning.show_all()
+
+        self._clear_rows(self.telemetry_sessions, keep=1)
+        rows = history['sessions']
+        if not rows and history.get('last_session') is not None:
+            self.telemetry_sessions.add(self._text_row(_("No sessions yet."), dim=True))
+        for when, where, facts in rows:
+            row = Gtk.ListBoxRow(activatable=False, selectable=False)
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+            date = Gtk.Label(xalign=0, yalign=0)
+            date.set_markup('<span font_features="tnum">{}</span>'.format(GLib.markup_escape_text(when)))
+            date.set_width_chars(16)
+            box.pack_start(date, False, False, 0)
+            place = Gtk.Label(label=where or '—', xalign=0, yalign=0)
+            place.set_line_wrap(True)
+            place.set_width_chars(20)
+            place.set_max_width_chars(34)
+            box.pack_start(place, False, False, 0)
+            detail = Gtk.Label(label=facts, xalign=1, yalign=0)
+            detail.set_line_wrap(True)
+            detail.set_justify(Gtk.Justification.RIGHT)
+            detail.get_style_context().add_class('dim-label')
+            box.pack_end(detail, True, True, 0)
+            row.add(box)
+            self.telemetry_sessions.add(row)
+        self.telemetry_sessions.show_all()
+        self._show_coaching()
+
+    KIND_TAGS = {'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip'}
+
+    def _show_coaching(self):
+        """The coach's tips, one row each with its kind as a tag, the
+        car's own advice until the coach has any, and the quiet "still"
+        lines behind an expander at the end."""
+        tips = self._telemetry_history['tips'] if self._telemetry_history else []
+        items = coaching_items(tips, self._telemetry_advice_lines)
+        if items == self._telemetry_coaching_shown:
+            return                          # an open expander stays open
+        self._telemetry_coaching_shown = items
+        listbox = self.telemetry_coaching
+        self._clear_rows(listbox)
+        shown = [item for item in items if item[2] != 'still']
+        quiet = [item for item in items if item[2] == 'still']
+        if not shown:
+            listbox.add(self._text_row(_("Drive some full-throttle pulls through the gears: the advice appears "
+                                         "as Oversteer learns the car and how you drive it."), dim=True))
+        for badge, text, kind in shown:
+            row = Gtk.ListBoxRow(activatable=False, selectable=False)
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            box.set_margin_top(10)
+            box.set_margin_bottom(10)
+            tag = Gtk.Label(label=badge or _("Tip"), valign=Gtk.Align.START)
+            tag.get_style_context().add_class('telemetry-tag')
+            tag.get_style_context().add_class(self.KIND_TAGS.get(kind, 'telemetry-tip'))
+            tag.set_width_chars(7)
+            box.pack_start(tag, False, False, 0)
+            label = Gtk.Label(label=text, xalign=0)
+            label.set_line_wrap(True)
+            label.set_selectable(True)
+            box.pack_start(label, True, True, 0)
+            row.add(box)
+            listbox.add(row)
+        if quiet:
+            row = Gtk.ListBoxRow(activatable=False, selectable=False)
+            expander = Gtk.Expander(label=_("Also noted ({})").format(len(quiet)))
+            expander.set_margin_top(8)
+            expander.set_margin_bottom(8)
+            text = self._status_label()
+            text.set_text('\n'.join('•  ' + text for _badge, text, _kind in quiet))
+            text.set_margin_top(4)
+            expander.add(text)
+            row.add(expander)
+            listbox.add(row)
+        listbox.show_all()
+
+    LABEL_CHOICES = (
+        ('discipline', _("Discipline"), ('rally-stage', 'hillclimb', 'circuit', 'rallycross', 'drift', 'free-roam',
+                                         'time-attack')),
+        ('surface', _("Surface"), ('tarmac', 'gravel', 'snow', 'ice')),
+        ('wet', _("Wet"), ('dry', 'wet')),
+        ('shifter', _("Shifter"), ('h-pattern', 'sequential', 'paddles', 'auto')),
+    )
+
+    def _label_session(self):
+        """The label dialog: what the last session was, preset from what
+        Oversteer detected; saved for every run of it."""
+        history = self._telemetry_history
+        session = history['last_session'] if history else None
+        if session is None:
+            self.info_dialog(_("No session to label yet"), _("Drive a stage or some laps first."))
+            return
+        names = dict(DISCIPLINES, **SURFACES, **METHODS)
+        names.update({'dry': _("dry"), 'wet': _("wet")})
+        dialog = Gtk.Dialog(title=_("Label last session"), transient_for=self.window, modal=True)
+        dialog.add_buttons(_("Cancel"), Gtk.ResponseType.CANCEL, _("Save"), Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8)
+        combos = {}
+        for row, (field, title, choices) in enumerate(self.LABEL_CHOICES):
+            grid.attach(Gtk.Label(label=title, xalign=0), 0, row, 1, 1)
+            combo = Gtk.ComboBoxText()
+            combo.append('', _("Don't know"))
+            for value in choices:
+                combo.append(value, names.get(value, value))
+            detected = session.get(field)
+            combo.set_active_id(detected if detected in choices else '')
+            grid.attach(combo, 1, row, 1, 1)
+            combos[field] = combo
+        grid.attach(Gtk.Label(label=_("Note"), xalign=0), 0, len(self.LABEL_CHOICES), 1, 1)
+        note = Gtk.Entry(activates_default=True)
+        grid.attach(note, 1, len(self.LABEL_CHOICES), 1, 1)
+        area = dialog.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(8)
+        area.add(Gtk.Label(label=_("What was the last session? Your labels are kept for Oversteer to learn "
+                                   "to tell surfaces apart from."), xalign=0, wrap=True, max_width_chars=50))
+        area.add(grid)
+        dialog.show_all()
+        response = dialog.run()
+        label = {field: combo.get_active_id() or None for field, combo in combos.items()}
+        label['note'] = note.get_text().strip() or None
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            self.controller.label_last_session(label)
+
+    EAWRC_FOLDER = ('…/steamapps/compatdata/1849250/pfx/drive_c/users/steamuser/Documents/'
+                    'My Games/WRC/telemetry/')
+
+    def _eawrc_setup(self):
+        """EA SPORTS WRC sends telemetry once its config says what and
+        where. Oversteer can't reach the game's Proton prefix from its
+        sandbox, so it hands over the text and says where it goes: a row
+        of the "Receiving telemetry" list, folded until opened."""
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        expander = Gtk.Expander(label=_("EA SPORTS WRC: turn on its telemetry"))
+        expander.set_margin_top(14)
+        expander.set_margin_bottom(14)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(8)
+        text = Gtk.Label(xalign=0)
+        text.set_line_wrap(True)
+        text.set_max_width_chars(90)
+        text.set_selectable(True)
+        text.set_markup(GLib.markup_escape_text(
+            _("Start the game once so it creates its telemetry folder, then quit it. In that folder, inside "
+              "the game's Proton prefix:\n{folder}\n• save the structure as udp/oversteer.json;\n"
+              "• in config.json, add the config lines to the \"packets\" list under \"udp\" (they send "
+              "to this computer on the port above; check that the game's own entries call the switch "
+              "\"bEnabled\" too).").format(folder=self.EAWRC_FOLDER)))
+        box.pack_start(text, False, False, 0)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        structure = Gtk.Button(label=_("Copy structure JSON"))
+        structure.connect('clicked', lambda w: self._copy_text(eawrc_structure()))
+        buttons.pack_start(structure, False, False, 0)
+        config = Gtk.Button(label=_("Copy config lines"))
+        config.connect('clicked', lambda w: self._copy_text(
+            eawrc_config_lines(self.rev_leds_port.get_value_as_int() or DEFAULT_PORT)))
+        buttons.pack_start(config, False, False, 0)
+        box.pack_start(buttons, False, False, 0)
+        expander.add(box)
+        row.add(expander)
+        return row
+
+    def _copy_text(self, text):
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
+
+    def set_rev_leds_options(self, launch, learnt):
+        for switch, value in ((self.rev_leds_launch, launch), (self.rev_leds_learnt, learnt)):
+            switch.set_sensitive(value is not None)
+            if value is not None and switch.get_active() != bool(value):
+                switch.set_active(bool(value))
+
+    def set_telemetry_cars(self, cars, active):
+        """[(key, name)] and the key to show."""
+        self.telemetry_car.handler_block(self.telemetry_car_handler)
+        try:
+            self.telemetry_car.remove_all()
+            for key, name in cars:
+                self.telemetry_car.append(key, name)
+            if active is not None:
+                self.telemetry_car.set_active_id(active)
+            self.telemetry_car_buttons.set_sensitive(bool(cars))
+        finally:
+            self.telemetry_car.handler_unblock(self.telemetry_car_handler)
+
+    def _rename_car(self):
+        key = self.telemetry_car.get_active_id()
+        if key is None:
+            return
+        dialog = Gtk.Dialog(title=_("Rename car"), transient_for=self.window, modal=True)
+        dialog.add_buttons(_("Cancel"), Gtk.ResponseType.CANCEL, _("Rename"), Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        entry = Gtk.Entry(text=self.telemetry_car.get_active_text() or '', activates_default=True)
+        dialog.get_content_area().set_border_width(12)
+        dialog.get_content_area().add(entry)
+        dialog.show_all()
+        response = dialog.run()
+        name = entry.get_text().strip()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK and name:
+            self.controller.rename_telemetry_car(key, name)
+
+    def _forget_car(self):
+        key = self.telemetry_car.get_active_id()
+        if key is not None and self.confirmation_dialog(
+                _("Relearn this car from scratch? Its sessions and your labels are kept.")):
+            self.controller.forget_telemetry_car(key)
+
+    LIVE_STATES = ('off', 'waiting', 'live')
+
+    def set_telemetry_view(self, live, snapshot):
+        """`live`: (state, markup) of the telemetry arriving now
+        (telemetry_view.live_status()). `snapshot`: the shown car's
+        learner snapshot, or None."""
+        state, markup = live
+        self.telemetry_live.set_markup(markup)
+        context = self.telemetry_live_dot.get_style_context()
+        for name in self.LIVE_STATES:
+            if name == state:
+                context.add_class('telemetry-' + name)
+            else:
+                context.remove_class('telemetry-' + name)
+        advice = list(snapshot['advice']) if snapshot is not None else []
+        if advice != self._telemetry_advice_lines:
+            self._telemetry_advice_lines = advice
+            self._show_coaching()
+        # Rebuilt only when what it shows changed, not every second
+        shown = (shift_summary(snapshot), shift_table(snapshot) if snapshot is not None else None)
+        if shown == self._telemetry_rows:
+            return
+        self._telemetry_rows = shown
+        for child in self.telemetry_gears.get_children():
+            child.destroy()
+        self.telemetry_summary.set_text(shown[0])
+        if snapshot is None:
+            self.telemetry_gears_frame.hide()
+            return
+        headers, cells = shown[1]
+        numeric = set(range(1, len(headers)))
+        for column, text in enumerate(headers):
+            label = Gtk.Label(label=text, xalign=1 if column in numeric else 0)
+            label.get_style_context().add_class('dim-label')
+            label.get_style_context().add_class('telemetry-header')
+            self.telemetry_gears.attach(label, column, 0, 1, 1)
+        for index, row in enumerate(cells, start=1):
+            for column, text in enumerate(row):
+                label = Gtk.Label(xalign=1 if column in numeric else 0)
+                markup = '<span font_features="tnum">{}</span>'.format(GLib.markup_escape_text(text))
+                if column == 1:
+                    markup = '<b>{}</b>'.format(markup)
+                label.set_markup(markup)
+                context = label.get_style_context()
+                context.add_class('telemetry-cell')
+                if column == 2 or column >= len(headers) - 2:
+                    context.add_class('dim-label')
+                self.telemetry_gears.attach(label, column, index, 1, 1)
+        self.telemetry_gears_frame.get_child().show_all()
+        self.telemetry_gears_frame.show()
 
     def _build_hotkeys_page(self):
         """The Hotkeys tab: one row per action, with its wheel button (saved
@@ -954,6 +1627,7 @@ class GtkUi:
         self.rev_leds_test = self.builder.get_object('rev_leds_test')
         self.rev_leds_status = self.builder.get_object('rev_leds_status')
         self.launch_options = self.builder.get_object('launch_options')
+        self.launch_options_copy = self.builder.get_object('launch_options_copy')
         self.ffbmeter_overlay = self.builder.get_object('ffbmeter_overlay')
         self.wheel_range_overlay_never = self.builder.get_object('wheel_range_overlay_never')
         self.wheel_range_overlay_always = self.builder.get_object('wheel_range_overlay_always')

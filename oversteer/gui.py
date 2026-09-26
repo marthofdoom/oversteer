@@ -40,6 +40,8 @@ class Gui:
         _("Press button for -90°"),
     ]
 
+    CAPTURE_STATUS_EVERY = 5.0      # seconds between re-reading the capture folder's size while the tab is shown
+
     languages = [
         ('', _('System default')),
         ('en_US', _('English')),
@@ -70,6 +72,29 @@ class Gui:
         self.equipment = []
         self.telemetry = None
         self.telemetry_generation = 0
+        # Pedals as pressed fractions for the rev lights' launch mode; the
+        # input thread writes, the telemetry thread reads (plain floats).
+        # shift_press: (monotonic time, 'gear'/'sequential'/'paddle') of the
+        # last press that could change gear, for how each change was made.
+        self.launch_inputs = {'clutch': None, 'throttle': None, 'handbrake': None, 'shift_press': None}
+        self.shift_buttons = {}           # evdev key code -> 'gear', 'sequential' or 'paddle'
+        self.telemetry_status = lambda: None
+        from .shift_learner import ShiftLearner
+        self.shift_learner = ShiftLearner(threaded=True)
+        self.telemetry_car_selected = None      # a saved car picked in the Telemetry tab; None = the live one
+        self.telemetry_car_live = None
+        self.telemetry_tab_shown = 0            # counts the times the tab was opened: history is re-read then
+        self._methods_cache = None
+        self._history_stamp = None              # what the tab's history sections were last read for
+        self._history = None                    # and what they showed (telemetry_view.gather())
+        self.telemetry_web = None               # the read-only web page's server, when on
+        self.telemetry_recorder = None          # telemetry_capture.Recorder, while recording
+        self._capture_shown_at = 0.0
+        # App preferences (config.ini): learn with the rev lights off (D4),
+        # the web page and recording, all off by default
+        from .telemetry_view import read_preferences
+        for name, value in read_preferences({}).items():
+            setattr(self, name, value)
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -83,7 +108,8 @@ class Gui:
         self.keyboard_hotkeys = None
         self.keyboard_needs_bind = False
         self.keyboard_session_failed = False
-        self.global_hotkeys = {}          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
+        self.global_hotkeys = {}
+        self.last_profile = ''                  # reopened at start (preferences)
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
 
@@ -114,6 +140,11 @@ class Gui:
 
         if self.app.args.profile is not None:
             self.ui.set_profile(self.app.args.profile)
+        elif self.last_profile and not self._settings_from_command_line():
+            # Cars and runs are learnt per profile: starting on none shows
+            # an empty Telemetry tab and files the next drive apart
+            if os.path.exists(os.path.join(self.app.profile_path, self.last_profile + '.ini')):
+                self.ui.set_profile(self.last_profile)
 
         start_manually = self.app.args.start_manually
         if start_manually is None:
@@ -130,6 +161,12 @@ class Gui:
                 self.start_app()
 
         Thread(target=self.input_thread, daemon = True).start()
+        GLib.timeout_add(1000, self.refresh_telemetry_view)
+        self.ui.set_telemetry_preferences(self._telemetry_preferences())
+        self.apply_telemetry_capture()
+        if self.device is None and self.telemetry_learn:
+            self.apply_rev_leds()               # learning needs no wheel
+        self.apply_telemetry_web()
 
         self.ui.main()
 
@@ -440,6 +477,7 @@ class Gui:
         self.update_handbrake()
         self.update_driver_status()
         self.ui.set_launch_options(self.launch_options())
+        self.update_learner_directory()
         self.apply_rev_leds()
 
         if self.model.get_profile():
@@ -495,41 +533,82 @@ class Gui:
 
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""
-        from .telemetry import Telemetry
+        from .telemetry import Telemetry, NoLeds, DEFAULT_PORT, LEGACY_PORT
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
         self.telemetry_generation += 1
-        if self.device is None or not self.model.get_rev_leds():
-            self.ui.set_rev_leds_status('')
-            return
-        leds = self.device.rev_leds()
-        if not leds.available():
-            self.ui.set_rev_leds_status(_("no LEDs"))
-            return
-        self.model.set_ffb_leds(False)        # the meter and the rev lights can't share the LEDs
-        self.ui.set_ffb_leds(False)
+        leds = None
+        if self.device is not None and self.model.get_rev_leds():
+            leds = self.device.rev_leds()
+            if leds.available():
+                self.model.set_ffb_leds(False)        # the meter and the rev lights can't share the LEDs
+                self.ui.set_ffb_leds(False)
+            else:
+                self.ui.set_rev_leds_status(_("no LEDs"))
+                leds = None
+        if leds is None:
+            if not self.telemetry_learn:
+                if self.device is None or not self.model.get_rev_leds():
+                    self.ui.set_rev_leds_status('')
+                self.refresh_capture_status()
+                return
+            # "Learn from game telemetry": the listener runs for the learner alone
+            leds = NoLeds()
+            if self.shift_learner.db is None:
+                self.update_learner_directory()
         self.telemetry_generation += 1
         generation = self.telemetry_generation
 
-        def status(source):
-            text = _("telemetry from {}").format(source) if source else _("waiting for telemetry")
+        shown = {'source': None, 'limiter': 0.0}
 
-            def show():
-                if self.telemetry is not None and generation == self.telemetry_generation:
-                    self.ui.set_rev_leds_status(text)
+        def show():
+            telemetry = self.telemetry
+            if telemetry is None or generation != self.telemetry_generation:
+                return
+            if shown['source']:
+                text = _("telemetry from {}").format(shown['source'])
+            elif telemetry.elsewhere:
+                text = _("telemetry arrives on UDP {0}, not {1}: set the port here to {0}, or the game to {1}").format(
+                    telemetry.other_port, telemetry.port)
+            elif telemetry.elsewhere is False and telemetry.port == DEFAULT_PORT:
+                text = _("waiting for telemetry on UDP {} (games set up for 5300 need the new port)").format(
+                    telemetry.port)
+            else:
+                text = _("waiting for telemetry on UDP {}").format(telemetry.port)
+            if shown['source'] and self.model.get_rev_leds_launch() and self.model.get_rev_leds_shift_unit() != 'rpm':
+                text += '  ·  ' + (_("limiter {} rpm (from the launch)").format(int(round(shown['limiter'])))
+                                   if shown['limiter'] else _("launch to learn the limiter"))
+            self.ui.set_rev_leds_status(text)
+
+        def status(source):
+            shown['source'] = source
+            if not source:
+                shown['limiter'] = 0.0          # the listener forgets it when telemetry stops
             self.ui.safe_call(show)
-        shift = self.model.get_rev_leds_shift()
-        if self.model.get_rev_leds_shift_unit() == 'rpm':
-            kwargs = {'shift_rpm': shift or 7000}
-        else:
-            kwargs = {'shift': (shift or 97) / 100.0}
-        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or 5300, on_status=status, **kwargs)
+
+        def limiter(rpm):
+            shown['limiter'] = rpm
+            self.ui.safe_call(show)
+        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or DEFAULT_PORT, on_status=status,
+                                   inputs=lambda: self.launch_inputs, on_limiter=limiter,
+                                   learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
+                                   **self._shift_kwargs())
+        self.telemetry.recorder = self.telemetry_recorder
+        if self.telemetry_recorder is not None:
+            self.telemetry_recorder.port = self.telemetry.port
+        self.telemetry_status = show
         if self.telemetry.start():
             self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
+        elif self.telemetry.port == LEGACY_PORT:
+            # Forza Horizon 6 binds its own socket in 5200-5300
+            self.ui.set_rev_leds_status(_("port {} in use (Forza Horizon 6 may hold it): use {}").format(
+                LEGACY_PORT, DEFAULT_PORT))
+            self.telemetry = None
         else:
             self.ui.set_rev_leds_status(_("port {} in use").format(self.telemetry.port))
             self.telemetry = None
+        self.refresh_capture_status()
 
     PEDAL_BOX = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'accelerator', ecodes.ABS_RZ: 'brakes'}
 
@@ -564,6 +643,17 @@ class Gui:
             if value is not None and high > low:
                 self.ui.set_handbrake_input(min(1.0, max(0.0, (value - low) / (high - low))))
         return False
+
+    LAUNCH_PEDAL = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'throttle'}
+
+    @staticmethod
+    def _pressed_fraction(axis, value):
+        """How far a pedal is pressed, 0 released to 1 floored, whichever
+        way its axis runs."""
+        released, pressed = axis[0], axis[1]
+        if pressed == released:
+            return 0.0
+        return min(1.0, max(0.0, (value - released) / (pressed - released)))
 
     @staticmethod
     def _axis_fraction(axis, value):
@@ -616,15 +706,32 @@ class Gui:
         Re-checked as proxies come and go: the axis lives on the virtual
         device a proxy presents, which appears, changes and disappears
         while Oversteer runs."""
+        self.update_shift_buttons()
         axis = self.device.handbrake_axis() if self.device is not None else None
         proxied = self._proxied_handbrake()
         state = proxied[3] if proxied is not None else None
         if axis == self.handbrake_axis and state == self.handbrake_invert:
             return
         self.handbrake_axis = axis
+        if axis is None:
+            self.launch_inputs['handbrake'] = None     # none fitted: clutch and throttle make the launch
         self.handbrake_invert = state
         self.ui.set_handbrake_visible(axis is not None)
         self.ui.set_handbrake_invert(state)
+
+    def update_shift_buttons(self):
+        """Which key codes of the wheel Oversteer reads are shifter gears,
+        the sequential plate or paddles: from the combined device's spec,
+        re-read as proxies come and go."""
+        from .proxy.equipment import shift_button_kinds
+        from . import wheel_ids as wid
+        spec = self._load_combined_spec()
+        wheel = spec.sources.get('wheel') if spec is not None else None
+        if wheel is not None:
+            logitech = wheel.vendor == int(wid.VENDOR_LOGITECH, 16)
+        else:
+            logitech = self.device is not None and self.device.vendor_id == wid.VENDOR_LOGITECH
+        self.shift_buttons = shift_button_kinds(spec, logitech)
 
     def set_handbrake_invert(self, state):
         """Override the direction the proxy gives the handbrake. The spec
@@ -662,23 +769,291 @@ class Gui:
 
         Thread(target=work, daemon=True).start()
 
+    def update_learner_directory(self):
+        """Cars are learnt per Oversteer profile: a rally profile and a
+        circuit one each keep their own."""
+        profile = self.model.get_profile()
+        name = os.path.splitext(os.path.basename(profile))[0] if profile else '_no_profile'
+        if self.shift_learner.db is None:
+            from xdg.BaseDirectory import save_data_path
+            try:
+                self.shift_learner.open(os.path.join(save_data_path('oversteer'), 'telemetry.db'))
+            except Exception as e:
+                logging.warning("telemetry database: %s", e)
+        if name != self.shift_learner.profile:
+            self.shift_learner.set_profile(name)
+            self.ui.safe_call(self.refresh_telemetry_cars)
+
+    def on_quit(self):
+        if self.telemetry_web is not None:
+            self.telemetry_web.stop()
+            self.telemetry_web = None
+        if self.telemetry_recorder is not None:
+            if self.telemetry is not None:
+                self.telemetry.recorder = None
+            self.telemetry_recorder.close()
+            self.telemetry_recorder = None
+        self.shift_learner.save()
+
+    # -- learning without rev lights, the web page and recording (app preferences) --
+
+    def _telemetry_preferences(self):
+        from .telemetry_view import PREFERENCES
+        return {name: getattr(self, name) for name, _key, _default in PREFERENCES}
+
+    def set_telemetry_learn(self, state):
+        if bool(state) != self.telemetry_learn:
+            self.telemetry_learn = bool(state)
+            self.save_preferences()
+            self.apply_rev_leds()
+
+    def set_telemetry_web(self, on=None, port=None, bind=None):
+        changed = False
+        for name, value in (('telemetry_web_on', on), ('telemetry_web_port', port), ('telemetry_web_bind', bind)):
+            if value is not None and getattr(self, name) != value:
+                setattr(self, name, value)
+                changed = True
+        if changed:
+            self.save_preferences()
+            self.apply_telemetry_web()
+
+    def apply_telemetry_web(self):
+        """Start or stop the read-only web page to match the preferences."""
+        from .telemetry_web import TelemetryWeb, find_page, live_dict
+        if self.telemetry_web is not None:
+            self.telemetry_web.stop()
+            self.telemetry_web = None
+        error = None
+        if self.telemetry_web_on:
+            if self.shift_learner.db is None:
+                self.update_learner_directory()
+            log = self.shift_learner.log
+            web = TelemetryWeb(port=self.telemetry_web_port, bind=self.telemetry_web_bind,
+                               live=lambda: live_dict(self.telemetry),
+                               reader_path=log.path if log is not None else None,
+                               profile=lambda: self.shift_learner.profile, status=self._web_status,
+                               learner=self.shift_learner, page=find_page(self.app.datadir),
+                               version=self.app.version)
+            if web.start():
+                self.telemetry_web = web
+            else:
+                error = web.error
+        self.refresh_web_status(error)
+
+    def capture_folder(self):
+        from xdg.BaseDirectory import save_data_path
+        return os.path.join(save_data_path('oversteer'), 'captures')
+
+    def set_telemetry_capture(self, on=None, cap=None):
+        changed = False
+        for name, value in (('telemetry_capture_on', on), ('telemetry_capture_cap', cap)):
+            if value is not None and getattr(self, name) != value:
+                setattr(self, name, value)
+                changed = True
+        if changed:
+            self.save_preferences()
+            self.apply_telemetry_capture()
+
+    def apply_telemetry_capture(self):
+        """Start or stop recording raw telemetry to match the preferences.
+        The recorder outlives the listener (a change of port or wheel
+        restarts that), so a stretch of driving stays one file."""
+        from .telemetry_capture import Recorder
+        recorder = self.telemetry_recorder
+        if recorder is not None and (not self.telemetry_capture_on or recorder.error):
+            if self.telemetry is not None:
+                self.telemetry.recorder = None
+            recorder.close()
+            recorder = self.telemetry_recorder = None
+        if self.telemetry_capture_on and recorder is None:
+            recorder = self.telemetry_recorder = Recorder(
+                self.capture_folder(), port=self.telemetry.port if self.telemetry is not None else None,
+                version=self.app.version)
+        if recorder is not None:
+            recorder.cap = self.telemetry_capture_cap << 30
+        if self.telemetry is not None:
+            self.telemetry.recorder = recorder
+        self.refresh_capture_status()
+
+    def refresh_capture_status(self):
+        from .telemetry_capture import capture_summary
+        from .telemetry_view import capture_status
+        if getattr(self, 'ui', None) is None:
+            return
+        self._capture_shown_at = time.monotonic()
+        recorder = self.telemetry_recorder
+        folder = self.capture_folder()
+        self.ui.set_telemetry_capture_status(capture_status(
+            self.telemetry_capture_on, self.telemetry is not None, folder, capture_summary(folder),
+            self.telemetry_capture_cap, recorder.error if recorder is not None else None,
+            recorder.dropped if recorder is not None else 0))
+
+    def _web_status(self):
+        """Web threads: what the page's status line says. Never the
+        address telemetry comes from."""
+        telemetry = self.telemetry
+        sample = telemetry.live if telemetry is not None else None
+        return {'udp_port': telemetry.port if telemetry is not None else None, 'receiving': sample is not None,
+                'game': sample.game if sample is not None else None, 'session': self.shift_learner.session}
+
+    def refresh_web_status(self, error=None):
+        from .telemetry_view import web_status
+        from .telemetry_web import urls
+        web = self.telemetry_web
+        addresses = urls(self.telemetry_web_bind, web.port) if web is not None else []
+        self.ui.set_telemetry_web_status(web_status(web is not None, error, addresses,
+                                                    web is not None and web.remote_seen, self.telemetry_web_bind,
+                                                    self.telemetry_web_port))
+
+    # -- Telemetry tab --
+
+    def refresh_telemetry_cars(self):
+        cars = dict(self.shift_learner.known_cars())
+        snapshot = self.shift_learner.snapshot()
+        if snapshot is not None:
+            cars[snapshot['key']] = snapshot['name']
+        active = self.telemetry_car_selected or (snapshot['key'] if snapshot else None)
+        if active is None and cars:
+            active = sorted(cars.items(), key=lambda kv: kv[1].lower())[0][0]
+        self.ui.set_telemetry_cars(sorted(cars.items(), key=lambda kv: kv[1].lower()), active)
+        return False
+
+    def select_telemetry_car(self, key):
+        live = self.shift_learner.car.key if self.shift_learner.car else None
+        self.telemetry_car_selected = None if key == live else key
+        self.refresh_telemetry_view()
+
+    def rename_telemetry_car(self, key, name):
+        self.shift_learner.rename(key, name)
+        self.refresh_telemetry_cars()
+
+    def forget_telemetry_car(self, key):
+        self.shift_learner.forget(key)
+        self._methods_cache = None
+        self._history_stamp = None
+        if self.telemetry_car_selected == key:
+            self.telemetry_car_selected = None
+        self.refresh_telemetry_cars()
+        self.refresh_telemetry_view()
+
+    def refresh_telemetry_view(self):
+        """Once a second: the live line, and the shown car's learning."""
+        from .telemetry_view import live_status
+        telemetry = self.telemetry
+        sample = telemetry.live if telemetry is not None else None
+        live = live_status(telemetry.port if telemetry is not None else None, sample,
+                           telemetry.using_learnt if telemetry is not None else None)
+        key = self.shift_learner.car.key if self.shift_learner.car else None
+        if key != self.telemetry_car_live:
+            self.telemetry_car_live = key
+            self.refresh_telemetry_cars()
+        # The car picked, else the one being driven, else the one the picker
+        # shows by default: with nothing driven the tab must still show the
+        # profile's car, not an empty page under a filled-in picker
+        shown = self.telemetry_car_selected
+        if shown is None and key is None:
+            shown = self.ui.telemetry_car.get_active_id()
+        if shown is not None:
+            snapshot = self.shift_learner.load_snapshot(shown)
+        else:
+            snapshot = self.shift_learner.snapshot()
+        if snapshot is not None:
+            snapshot = dict(snapshot, methods=self._method_shifts(snapshot['key']))
+        self.ui.set_telemetry_view(live, snapshot)
+        self._refresh_history(snapshot['key'] if snapshot is not None else None)
+        if self.telemetry_web is not None and not self.telemetry_web.remote_seen:
+            self.refresh_web_status()                 # until the page is opened from another device
+        if self.telemetry_recorder is not None and self.ui.telemetry_tab_visible() and \
+                time.monotonic() - self._capture_shown_at >= self.CAPTURE_STATUS_EVERY:
+            self.refresh_capture_status()             # the folder grows while you drive
+        return True
+
+    def _refresh_history(self, key, force=False):
+        """The tab's history sections (context, coaching, tuning, recent
+        sessions): read again only when the car or the session changes or
+        the tab is shown. Tips count as seen once they are on screen."""
+        from . import coach
+        from .telemetry_view import gather
+        learner = self.shift_learner
+        stamp = (key, learner.profile, learner.history_changed, self.telemetry_tab_shown)
+        if not force and stamp == self._history_stamp:
+            return
+        self._history_stamp = stamp
+        reader = learner._reader()
+        if reader is None:
+            return
+        try:
+            history = gather(reader, learner.profile, key)
+        except Exception:
+            logging.exception("telemetry history")
+            return
+        self._history = history
+        self.ui.set_telemetry_history(history)
+        if history['tips'] and self.ui.telemetry_tab_visible() and learner.log is not None:
+            profile, car, tips = learner.profile, history['car_id'], history['tips']
+            learner.log.post(lambda: coach.seen(learner.log.store, profile, car, tips))
+
+    def label_last_session(self, label):
+        """The label dialog's answer, on every run of the shown car's last
+        session: what calibration learns from."""
+        learner = self.shift_learner
+        session = self._history['last_session'] if self._history else None
+        if session is None or learner.log is None:
+            return 0
+        count = learner.log.call(learner.log.store.label_session, session['id'], label.get('discipline'),
+                                 label.get('surface'), label.get('wet'), label.get('shifter'), label.get('note'))
+        self._history_stamp = None                  # read again: the labels are part of it now
+        # The raw captures of that session keep the label too, and are
+        # kept when the folder is pruned: they are what calibration needs
+        folder = self.capture_folder()
+        if count and os.path.isdir(folder):
+            from .telemetry_capture import label_captures
+            about = {'profile': learner.profile, 'car': self.telemetry_car_selected or
+                     (learner.car.key if learner.car else None), 'stage': session.get('stage') or session.get('track')}
+            try:
+                label_captures(folder, session['started'], session['ended'] or time.time(), label, about)
+            except OSError as e:
+                logging.warning("capture labels: %s", e)
+            self.refresh_capture_status()
+        return count or 0
+
+    def _method_shifts(self, key):
+        """The car's changes up per way of changing, from the database:
+        queried again only when the car or the session changes or the tab
+        is shown, never just because a second went by."""
+        stamp = (key, self.shift_learner.profile, self.shift_learner.history_changed, self.telemetry_tab_shown)
+        if self._methods_cache is None or self._methods_cache[0] != stamp:
+            self._methods_cache = (stamp, self.shift_learner.method_shifts(key))
+        return self._methods_cache[1]
+
+    def telemetry_tab_selected(self):
+        self.telemetry_tab_shown += 1
+        if getattr(self, 'ui', None) is not None:          # not while the window is being built
+            self.refresh_telemetry_view()
+            self.refresh_capture_status()
+
+    def _shift_kwargs(self):
+        shift = self.model.get_rev_leds_shift()
+        unit = self.model.get_rev_leds_shift_unit()
+        if unit == 'rpm':
+            return {'shift_rpm': shift or 7000}
+        return {'shift': (shift or 95) / 100.0, 'launch': self.model.get_rev_leds_launch()}
+
     def update_rev_leds_shift(self):
         """Push a changed shift point to the running listener without
         restarting it (a restart would blink the LEDs and forget the
         learnt max RPM)."""
         if self.telemetry is None:
             return
-        shift = self.model.get_rev_leds_shift()
-        if self.model.get_rev_leds_shift_unit() == 'rpm':
-            self.telemetry.set_shift(shift_rpm=shift or 7000)
-        else:
-            self.telemetry.set_shift(shift=(shift or 97) / 100.0)
+        self.telemetry.set_shift(**self._shift_kwargs())
+        self.telemetry.use_learnt = self.model.get_rev_leds_learnt()
+        self.telemetry_status()
 
     def change_rev_leds_shift_unit(self, unit):
         """Switch the shift point between % of max RPM and an RPM figure,
         converting the value when the game has told us the max RPM."""
         value = None
-        max_rpm = self.telemetry.last_max_rpm if self.telemetry is not None else 0.0
+        max_rpm = self.telemetry.reference_max() if self.telemetry is not None else 0.0
         current = self.model.get_rev_leds_shift()
         if max_rpm and current:
             if unit == 'rpm' and self.model.get_rev_leds_shift_unit() != 'rpm':
@@ -759,7 +1134,24 @@ class Gui:
         self.model.flush_device()
         self.model.flush_ui()
         self.update_pedals()
+        self.update_learner_directory()
         self.apply_rev_leds()
+        self._remember_profile(profile_name)
+
+    # Settings given on the command line: a start with any of them keeps
+    # to them rather than reopening the last profile over them
+    COMMAND_LINE_SETTINGS = ('mode', 'range', 'sensitivity', 'combine_pedals', 'invert_pedals', 'ffb_enabled',
+                             'inertia_mode', 'autocenter', 'ff_gain', 'autocenter_persistent', 'app_gain',
+                             'spring_level', 'damper_level', 'friction_level', 'rumble_level', 'ffb_leds',
+                             'center_wheel')
+
+    def _settings_from_command_line(self):
+        return any(getattr(self.app.args, name, None) is not None for name in self.COMMAND_LINE_SETTINGS)
+
+    def _remember_profile(self, name):
+        if name != self.last_profile:
+            self.last_profile = name
+            self.save_preferences()
 
     def save_profile(self, profile_name, check_exists = False):
         if self.device is None:
@@ -779,12 +1171,16 @@ class Gui:
         current_file = os.path.join(self.app.profile_path, current_name + '.ini')
         new_file = os.path.join(self.app.profile_path, new_name + '.ini')
         os.rename(current_file, new_file)
+        if self.last_profile == current_name:
+            self._remember_profile(new_name)
 
     def delete_profile(self, profile_name):
         if profile_name != '' and profile_name is not None:
             profile_file = os.path.join(self.app.profile_path, profile_name + '.ini')
             if self.ui.confirmation_dialog(_("This profile will be deleted, are you sure?")):
                 os.remove(profile_file)
+                if self.last_profile == profile_name:
+                    self._remember_profile('')
             else:
                 raise Exception()
 
@@ -806,7 +1202,7 @@ class Gui:
         shutil.copyfile(profile_file, path)
 
     def load_preferences(self):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)    # a profile name may hold a %
         config_file = os.path.join(self.config_path, 'config.ini')
         config.read(config_file)
         self.check_permissions = True
@@ -816,6 +1212,10 @@ class Gui:
                 Locale.setlocale(Locale.LC_ALL, (self.locale, 'UTF-8'))
             if 'check_permissions' in config['DEFAULT']:
                 self.check_permissions = config['DEFAULT']['check_permissions'] == '1'
+            self.last_profile = config['DEFAULT'].get('last_profile', '')
+            from .telemetry_view import read_preferences
+            for name, value in read_preferences(config['DEFAULT']).items():
+                setattr(self, name, value)
             if 'hotkeys' in config['DEFAULT']:
                 self.global_hotkeys = {a: i for a, i in hotkeys.parse(config['DEFAULT']['hotkeys']).items()
                                        if a in hotkeys.GLOBAL_ACTIONS}
@@ -846,14 +1246,17 @@ class Gui:
         self.save_preferences()
 
     def save_preferences(self):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)    # a profile name may hold a %
         config['DEFAULT'] = {
             'locale': self.locale,
             'check_permissions': '1' if self.check_permissions else '0',
             'button_toggle': ','.join(map(str, self.button_config[0])),
             'button_config': ','.join(map(str, self.button_config[1:])),
             'hotkeys': hotkeys.serialize(self.global_hotkeys),
+            'last_profile': self.last_profile,
         }
+        from .telemetry_view import write_preferences
+        config['DEFAULT'].update(write_preferences(self._telemetry_preferences()))
         config_file = os.path.join(self.config_path, 'config.ini')
         with open(config_file, 'w') as file:
             config.write(file)
@@ -1147,7 +1550,7 @@ class Gui:
         low, high = adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
         fraction = (value - low) / (high - low) if high > low else 1.0
         if action.kind == 'shift':
-            max_rpm = self.telemetry.last_max_rpm if self.telemetry is not None else 0.0
+            max_rpm = self.telemetry.reference_max() if self.telemetry is not None else 0.0
             if unit == 'rpm':
                 if max_rpm:
                     fraction = value / max_rpm
@@ -1208,11 +1611,17 @@ class Gui:
                                   ecodes.ABS_RZ: self.ui.set_brakes_input,
                                   ecodes.ABS_Y: self.ui.set_clutch_input}[event.code]
                         self.ui.safe_call(setter, self._axis_fraction(axis, event.value))
+                        name = self.LAUNCH_PEDAL.get(event.code)
+                        if name is not None:
+                            self.launch_inputs[name] = self._pressed_fraction(axis, event.value)
                 elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
                     _, low, high = self.handbrake_axis
                     if high > low:
-                        self.ui.safe_call(self.ui.set_handbrake_input,
-                                          min(1.0, max(0.0, (event.value - low) / (high - low))))
+                        # As the game receives it: pulled is high once the
+                        # Invert box is right, which the game needs too
+                        pulled = min(1.0, max(0.0, (event.value - low) / (high - low)))
+                        self.launch_inputs['handbrake'] = pulled
+                        self.ui.safe_call(self.ui.set_handbrake_input, pulled)
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     if event.value:
@@ -1234,6 +1643,9 @@ class Gui:
             if event.type == ecodes.EV_KEY:
                 if event.value == 1:
                     self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
+                    kind = self.shift_buttons.get(event.code)
+                    if kind is not None:
+                        self.launch_inputs['shift_press'] = (time.monotonic(), kind)
                 if event.value:
                     delay = 0
                     if self.test and self.test.is_awaiting_action():

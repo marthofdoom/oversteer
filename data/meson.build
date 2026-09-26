@@ -45,6 +45,21 @@ install_data('telemetry/oversteer-run',
 install_data('telemetry/oversteer-shm-bridge.exe', 'telemetry/oversteer-shm-bridge.c',
   install_dir: join_paths(get_option('libdir'), 'oversteer')
 )
+# EA SPORTS WRC: Oversteer's packet structure, for the game's telemetry/udp
+# folder (the Telemetry tab copies the same text)
+install_data('telemetry/eawrc/oversteer.json',
+  install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry', 'eawrc')
+)
+# The stage tables of the rally games that name no stage (DiRT Rally 2.0,
+# WRC Generations, Assetto Corsa Rally): oversteer/stage_tables.py
+install_subdir('telemetry/stages',
+  install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry')
+)
+# The read-only telemetry web page (served by oversteer/telemetry_web.py
+# when the Telemetry tab turns it on)
+install_data('telemetry/web/index.html',
+  install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry', 'web')
+)
 
 # ---- Tests ----
 

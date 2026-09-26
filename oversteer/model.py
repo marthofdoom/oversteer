@@ -27,6 +27,8 @@ class Model:
         'rev_leds_port': None,
         'rev_leds_shift': None,
         'rev_leds_shift_unit': None,
+        'rev_leds_launch': None,
+        'rev_leds_learnt': None,
         'ffb_overlay': None,
         'range_overlay': None,
         'use_buttons': None,
@@ -56,6 +58,8 @@ class Model:
         'rev_leds_port': 'integer',
         'rev_leds_shift': 'integer',
         'rev_leds_shift_unit': 'string',
+        'rev_leds_launch': 'boolean',
+        'rev_leds_learnt': 'boolean',
         'ffb_overlay': 'boolean',
         'range_overlay': 'string',
         'use_buttons': 'boolean',
@@ -112,9 +116,11 @@ class Model:
             'rumble_level': self.device.get_rumble_level(),
             'ffb_leds': self.device.get_ffb_leds(),
             'rev_leds': False if self.device.has_rev_leds() else None,
-            'rev_leds_port': 5300 if self.device.has_rev_leds() else None,
-            'rev_leds_shift': 97 if self.device.has_rev_leds() else None,
+            'rev_leds_port': 5310 if self.device.has_rev_leds() else None,   # telemetry.DEFAULT_PORT
+            'rev_leds_shift': 95 if self.device.has_rev_leds() else None,
             'rev_leds_shift_unit': 'percent' if self.device.has_rev_leds() else None,
+            'rev_leds_launch': True if self.device.has_rev_leds() else None,
+            'rev_leds_learnt': True if self.device.has_rev_leds() else None,
             'ffb_overlay': False if self.device.get_peak_ffb_level() is not None else None,
             'range_overlay': 'never' if self.device.get_peak_ffb_level() is not None else None,
             'use_buttons': False if self.device.get_range() is not None else None,
@@ -161,10 +167,21 @@ class Model:
         # greying the boxes out.
         if data['invert_pedals'] is None:
             data['invert_pedals'] = self.device.get_invert_pedals()
-        # Profiles from before the shift point: keep the old fixed 97 %
         if data['rev_leds'] is not None:
+            if data['rev_leds_shift_unit'] == 'launch':
+                # a development build had the launch limiter as a unit
+                data['rev_leds_shift_unit'], data['rev_leds_launch'] = 'percent', True
             if data['rev_leds_shift_unit'] not in ('percent', 'rpm'):
                 data['rev_leds_shift_unit'] = 'percent'
+            # Profiles from before the shift point: keep the old fixed 97 %
+            # (a new profile starts at 95)
+            if data['rev_leds_shift'] is None and data['rev_leds_shift_unit'] == 'percent':
+                data['rev_leds_shift'] = 97
+            # Profiles from before these existed: both on, as for a new one
+            if data['rev_leds_launch'] is None:
+                data['rev_leds_launch'] = True
+            if data['rev_leds_learnt'] is None:
+                data['rev_leds_learnt'] = True
             data['rev_leds_shift'] = self._clamp_shift(data['rev_leds_shift_unit'], data['rev_leds_shift'])
 
         # A profile saved before hotkeys existed keeps the ones in use, so
@@ -374,7 +391,7 @@ class Model:
         """The shift point within its unit's range; None -> the default."""
         if unit == 'rpm':
             return max(1000, min(25000, int(value))) if value is not None else 7000
-        return max(50, min(100, int(value))) if value is not None else 97
+        return max(50, min(100, int(value))) if value is not None else 95
 
     def set_rev_leds_shift(self, value):
         value = self._clamp_shift(self.get_rev_leds_shift_unit(), value)
@@ -385,9 +402,10 @@ class Model:
         return self.data['rev_leds_shift']
 
     def set_rev_leds_shift_unit(self, unit, value=None):
-        """Change the unit of the shift point; `value` is the converted
-        shift point in the new unit (the controller supplies it when the
-        game's max RPM is known), otherwise the unit's default."""
+        """Change the unit of the shift point: 'percent' of the max RPM
+        (the limiter learnt at a launch when there is one) or 'rpm'.
+        `value` is the converted shift point in the new unit (the
+        controller supplies it when it can), otherwise the unit's default."""
         unit = 'rpm' if unit == 'rpm' else 'percent'
         if self.data['rev_leds_shift_unit'] == unit:
             return
@@ -398,6 +416,23 @@ class Model:
             self.ui.set_rev_leds(self.data['rev_leds'], None, self.data['rev_leds_shift'], unit)
             if self.data['rev_leds']:
                 self.ui.controller.update_rev_leds_shift()
+
+    def set_rev_leds_launch(self, value):
+        """Learn the limiter at each launch."""
+        if self.set_if_changed('rev_leds_launch', bool(value)) and self.ui is not None:
+            self.ui.controller.update_rev_leds_shift()
+
+    def get_rev_leds_launch(self):
+        return self.data['rev_leds_launch'] is not False
+
+    def set_rev_leds_learnt(self, value):
+        """Put the rev lights' shift point where the learner found each
+        gear's best upshift, once it knows."""
+        if self.set_if_changed('rev_leds_learnt', bool(value)) and self.ui is not None:
+            self.ui.controller.update_rev_leds_shift()
+
+    def get_rev_leds_learnt(self):
+        return self.data['rev_leds_learnt'] is not False
 
     def get_rev_leds_shift_unit(self):
         return self.data['rev_leds_shift_unit'] or 'percent'
@@ -496,6 +531,7 @@ class Model:
         self.ui.set_rumble_level(data['rumble_level'])
         self.ui.set_ffb_leds(data['ffb_leds'])
         self.ui.set_rev_leds(data['rev_leds'], data['rev_leds_port'], data['rev_leds_shift'], data['rev_leds_shift_unit'])
+        self.ui.set_rev_leds_options(data['rev_leds_launch'], data['rev_leds_learnt'])
         self.ui.set_ffb_overlay(data['ffb_overlay'])
         self.ui.set_range_overlay(data['range_overlay'])
         self.ui.set_use_buttons(data['use_buttons'])

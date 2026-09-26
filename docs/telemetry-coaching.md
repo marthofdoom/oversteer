@@ -1,0 +1,1775 @@
+# Telemetry and coaching: design
+
+Branch `launch-limiter`. This document is the design for the telemetry,
+learning and coaching system, and the recovery point for the work on it: if
+a run is cut off, the checklist at the end says what is done and the notes
+next to each item say what was deferred and why. Keep it current with every
+commit that touches the system.
+
+Starting point (commit 8bcd348): `oversteer/telemetry.py` (UDP listener, rev
+LEDs, launch limiter, `decode_sample()`), `oversteer/shift_learner.py`
+(`CarModel`, `ShiftLearner`, SQLite schema v1), the Telemetry tab in
+`gui.py`/`gtk_ui.py`, `data/telemetry/oversteer-shm-bridge.c` (OVST v2) and
+35 passing tests.
+
+Revised after an independent review (decisions in §3.2): the build plan
+(§14) is ordered as vertical slices, so each step ships something the user
+can see even if the run stops there, and the parts that need calibration
+data nobody has yet (measured surface, dynamics-based discipline) come
+last.
+
+## 1. What it has to do
+
+| # | Requirement | Where in this design |
+|---|---|---|
+| 1 | Learn each car's best upshift per gear, per Oversteer profile, and keep learning; show it first in the Telemetry tab | §8.1, §12 |
+| 2 | Long-term coaching: growth over time, habits, aware of discipline and of the shifter used (sequential, paddles, H-pattern); needs a database | §7, §9 |
+| 3 | Detect discipline and surface from evidence, measurably, with honest confidence; unknown is a valid answer | §8.4–8.6 |
+| 4 | Detect tuning (gear lengths, ride height, ...) per car, surface and stage; tuning advice fitted to the driver | §8.3, §10 |
+| 5 | Read-only web page for a phone or laptop on the LAN, off by default, TCP 5301 | §11 |
+| 6 | Launch limiter as an always-on tickbox | done (e1aa004) |
+
+Non-goals for now: writing anything from the web page, cloud sync, sharing
+data between users, AC EVO (`acevo_pmf_*`), LFS beyond what OutGauge already
+gives.
+
+## 2. Principles
+
+- **Evidence or unknown.** Every detected fact (discipline, surface, wet,
+  tune change, shifter) is a `Verdict` with a value, a confidence label and
+  the evidence as sentences. "Unknown, because this game sends no position"
+  is a complete answer. No invented probabilities: confidence is tied to
+  which kind of evidence decided (§8.5).
+- **Calibrate per game.** Units, signs and scales differ per game; no
+  numeric threshold is shared across sources unless it is physical (g,
+  m/s). Thresholds the research could not fix are marked **calibrate** and
+  start as conservative defaults that answer unknown more often.
+- **Priors are not evidence; the game's own word is.** A route the game
+  identifies on a single-surface location (EA WRC Sweden, DiRT's Wales) is
+  game evidence, like an EA session packet is for discipline. "Usually
+  gravel here" learnt from past runs, or a table entry for a mixed
+  location, is shown next to what was measured, never merged into it.
+- **The listener never waits.** The UDP thread does constant-time work per
+  packet and never touches SQLite (§4).
+- **Keep the raw data.** Raw captures and a compact per-run trace let every
+  detector be re-run when its calibration improves.
+- **Standard library only.** sqlite3, http.server, json, zlib, gzip,
+  struct, threading, queue, statistics, array.
+
+## 3. Decisions
+
+### 3.1 To confirm with the user
+
+These are decided here so the work can go on; each is cheap to reverse.
+
+- **D1. UDP default port 5300 → 5310.** The FH6 Data Out documentation says
+  to avoid 5200–5300 because the game binds its own outgoing socket in that
+  range; FH6 runs on the same host, so 5300 can collide. New profiles and
+  profiles that never set a port get 5310; a profile that stored 5300 keeps
+  it, and the "port in use" status then suggests 5310. `oversteer-run` and
+  the bridge default follow (`OVERSTEER_TELEMETRY_PORT`, `--port`). Games
+  already set up for 5300 would go quiet without a hint, so when a profile
+  on 5310 has received nothing for 10 s the listener binds 5300 for one
+  second (only if it is free); if packets arrive there the status says
+  "your game sends to 5300: set it to 5310", otherwise "waiting for
+  telemetry on 5310 (games set up for 5300 need the new port)". It does not
+  keep listening on 5300: that is the socket FH6 may need. *As built:* the
+  probe is symmetric (`Telemetry.other_port`): a profile that stored 5300
+  probes 5310, because `oversteer-run` now sends there; it runs 10 s after
+  start and then every 60 s until anything is heard. The bridge's own
+  compiled-in default stays 5300 until the .exe is rebuilt (Step D):
+  `oversteer-run` always passes `--port`, so only a bridge run by hand
+  sees it. The web
+  page stays on **TCP 5301** as asked (TCP and UDP ports are separate; 5301
+  TCP is not in FH6's way).
+- **D2. Codemasters RPM units.** DiRT Rally 1/2 send engine rates in rad/s,
+  not rpm/10 (every max/idle value in the car tables is an exact multiple of
+  π/30 of a round rpm). Stored cars are migrated (§7.3) rather than
+  forgotten.
+- **D3. Car keys gain the game** (`<game>/<id>`); old keys are adopted on
+  first sight (§5.4).
+- **D4. The listener can run without rev lights** ("Learn from game
+  telemetry", app-wide). Off by default: today the listener only runs with
+  the rev lights on, and that stays the default. Learning should not depend
+  on having LEDs.
+
+### 3.2 Design decisions
+
+Responses to the independent review of 2026-09-25 (numbers are the review's
+findings). Accepted unless marked; the section named carries the change.
+
+| # | Finding | Decision |
+|---|---|---|
+| 1 | Ratios learnt under wheelspin are wrong forever and later fire a false re-tune | Accepted. Ratios come from part-throttle, no brake, clutch-out samples, or from rpm ÷ driven-wheel speed where sent; full-throttle samples feed power only (§8.3). Test "spin first on gravel". |
+| 2 | Neutral-between-gears misidentifies the shifter; `shift_press` is read but never written | Accepted. Method from the evdev code of the last press (gear button, sequential plate, paddle) via the combined spec; neutral only as fallback (§8.2). Moved to Step A. |
+| 3 | Forget cascades into runs and labels | Accepted. Forget resets the model and tunes and keeps sessions, runs and labels (§7.4, §12). |
+| 4 | Counter-steer inverted under the stated sign conventions | Accepted. `steer` is positive left like `yaw_rate` (ISO 8855); counter-steer = opposite signs, tested on a simulated left-hand corner (§5.2, §8.4). |
+| 5 | Surface unknown until 6+ labelled stages per game; game-named routes demoted to priors | Accepted. Surface tier 1 is `game` from a route table for single-surface locations; the measured classifier waits for the §6.3 captures, segment features are stored from the start (§8.6). |
+| 6 | Discipline dynamics tier (β percentiles) cannot be calibrated and is not needed | Accepted. Tier dropped until captures exist; the profile name is shown as an evidence line and breaks ties at `low` (§8.5). |
+| 7 | Codemasters migration tests the launch limiter, not the game's max; decoder lacks a true-rpm branch | Accepted. Migration parses the max from the key; decoder gets a third branch (§5.3, §7.3). |
+| 8 | EA WRC setup cannot read the game prefix from the Flatpak | Accepted: copy buttons with target paths and a shipped id → name table (§5.3). Manifest filesystem access rejected: a narrow sandbox is worth more than automatic names. |
+| 9 | Bridge v3 cannot be built here; `OVST3_SIZE` missing from the size check | Accepted. Build with `ziglang` from a scratch venv (a build tool, not shipped); v3 moves to Step D and stays marked unbuilt if that fails (§5.3). |
+| 10 | Plan front-loads decoding fidelity; nothing visible if cut off after Step A | Accepted. The four steps are re-cut as vertical slices (§14); `tests/sim.py` limited to what tests use. |
+| 11 | Trace blobs in `runs`; `stages` FK order; metrics slicing; tunes keyed two ways | Accepted. `traces` table, `start_run` upserts the stage first, `metrics` carries discipline/surface/method with a `(session, name)` index, tunes are one ratio set per car (§7.2, §8.3). |
+| 12 | Rounded DiRT stage keys split a stage at a boundary | Accepted. Tolerance match against known stages first, rounded key only for new ones (§5.4). |
+| 13 | Two sources at once thrash the learner | Accepted. The listener locks to the first (address, format) until idle (§4). |
+| 14 | Coaching that nags or misleads | Accepted: "if the setup allows" with a driving alternative, top-gear limiter gated per stage, growth weighted by count with ≥ 20 events a side, at most 3 "still:" lines (§9.2, §10). |
+| 15 | Threading and performance details | Accepted: new dict then assign; history queried on events, not every second; snapshot cached by `updated`; bootstrap caches band medians; web server daemon threads and a connection per request; `EOFError` on truncated captures (§4, §6.1, §8.1, §11). Moving SQLite writes off the listener lock is the first commit of Step C. |
+| 16 | Web LAN exposure hardening | Accepted: list every bound address, security headers, no source IP in status, IPv6 Host literals, "plain HTTP" note (§11). |
+| 17 | Port move silently breaks configured games | Accepted with a one-second probe of 5300 and a hint (§3.1 D1). Listening on both ports rejected: 5300 is the port FH6 may need for itself. |
+| 18 | Smaller gaps | Accepted: "not sent by this game" cells, bottoming depends on unverified units, the learner's 40-sample memory stated and `top_seen` reset on a re-tune, README fixed in Step A, tests for OutGauge reverse and Forza `IsRaceOn = 0` (§8.1, §10, §12, §13). |
+
+## 4. Architecture, threads and performance
+
+```
+UDP :5310 ──► telemetry thread (Telemetry._run → Telemetry.handle)
+               decode_sample() ─► RevLeds / launch limiter        (as now)
+                               ─► ShiftLearner.feed()   in-memory, O(1)
+                               ─► RunTracker.feed()     in-memory, O(1) accumulators
+                               ─► capture queue (raw bytes)       optional, its own writer thread
+                               └► events ──► queue.Queue(maxsize=8192)
+                                                  │
+                         drive-log thread (DriveLog) ◄┘
+                           owns the only write connection (WAL)
+                           runs/segments/corners/shifts/metrics/tunes
+                           detectors, coach, snapshots every 1 s
+                                  │ publishes immutable dicts
+             ┌────────────────────┴───────────────────┐
+     GTK main loop (1 s refresh)                web threads (GET only)
+     reads snapshots; history via               read snapshots; history via
+     its own read-only connection               per-thread read-only connections
+```
+
+- **Telemetry thread** (existing). Per packet: decode, LEDs, launch,
+  `ShiftLearner.feed` (in-memory model only), `RunTracker.feed` (running
+  sums, a 0.3 s ring buffer, the current 200 m segment buffer), and
+  `put_nowait` of events. Budget: **mean ≤ 0.3 ms, p99 ≤ 2 ms** per packet
+  at 120 packets/s on the user's machine (8.3 ms between packets). If the
+  queue is full the event is dropped and counted (`DriveLog.dropped`), never
+  waited on.
+- **Source lock.** The listener takes the first (address, format) it sees
+  and ignores other sources until `IDLE_TIMEOUT` passes without a packet
+  from it, logging each ignored source once. A stale bridge next to a game,
+  or a replay sent while a game runs, would otherwise alternate car keys
+  per packet and make the learner end and start a session on each.
+- **Drive-log thread** (new, `oversteer/drive_log.py`). Consumes events:
+  shift, launch, run start/end, segment closed (≈ every 200 m), sample at
+  10 Hz for the trace. (Raw packets for a capture go to the recorder's own
+  thread instead, §6.1: recording then needs no database.) Computes segment features,
+  corners, run metrics, verdicts, coaching; writes SQLite in batches (commit
+  at most every 5 s and at every run end). Publishes snapshots by building
+  a new dict and then assigning it to an attribute (atomic in CPython); a
+  published dict is never mutated, so readers take no lock.
+  Expensive work (bootstrap confidence bands, calibration) runs here, never
+  on the listener.
+- **Readers.** The GTK timer (1 s) and the web handlers read the published
+  snapshots and no longer call `snapshot()`/`advice()` under the learner
+  lock (6 ms a call today). History queries use read-only connections
+  (`sqlite3.connect('file:...?mode=ro', uri=True)`), which WAL lets run
+  alongside the writer, and run only on session end, car change or when
+  the tab is shown, never on the 1 s timer. Until the drive-log thread
+  exists (Step C), the tab caches `load_snapshot()` of a saved car by its
+  `updated` time instead of re-parsing the model every second.
+- **Locks.** `ShiftLearner.lock` guards only the in-memory `CarModel` (feed
+  vs. snapshot); it is never held across I/O. Today's per-shift INSERT and
+  the 20 s save under that lock (which can stall LED updates on a busy
+  disk) move to the drive-log thread; that is the first commit of Step C.
+- **Memory.** Per run: a 10 Hz trace (≈ 12 float32 channels: 480 B/s,
+  ≈ 290 KB for 10 minutes before zlib); the current segment's 60 Hz buffer
+  (≈ 10 s) is discarded once its features are computed.
+- **Measured by** `tests/bench_telemetry.py` (like `bench_latency.py`):
+  replays a synthetic 10-minute stage through `Telemetry.handle` with a null
+  LED object and reports mean/p99 per packet. Not part of pytest (timing is
+  machine-dependent); a loose sanity test (< 2 ms mean) is.
+
+## 5. Decoding layer
+
+### 5.1 Module split
+
+`oversteer/telemetry.py` keeps the listener, `RevLeds` and the launch
+logic. Decoding moves to **`oversteer/telemetry_formats.py`**: `Sample`,
+`decode_sample(data)`, one private function per format, the EA WRC
+structure loader and the unit helpers. `telemetry.py` re-exports `Sample`,
+`decode_sample` and `decode` so existing imports and tests keep working.
+The socket loop body becomes `Telemetry.handle(now, data, addr)` so replay
+and tests drive exactly the live path.
+
+### 5.2 `Sample` v2
+
+`__slots__`, every field None when the format does not carry it. Conventions
+are fixed here and every decoder converts to them:
+
+- Car frame **x forward, y left, z up** (ISO 8855); m, m/s, m/s², rad/s.
+  `yaw_rate` positive turning left, and `steer` **positive left** (ISO
+  8855: positive steer is counter-clockwise). In a steady left turn both
+  are positive; counter-steer is steer and yaw rate of opposite sign. Each
+  decoder converts its game's sign, **verified by capture** (a left turn
+  gives steer > 0 and yaw rate > 0).
+- `accel` is **specific force** (what an accelerometer reads: excludes
+  gravity) in the car frame. Where a game sends g, multiply by 9.80665.
+  Where the game's figure is derived from velocity (includes gravity on a
+  hill), the decoder says so with `accel_kind = 'kinematic'`; otherwise
+  `'specific'`. Which one each game sends is verified by capture (§6.3).
+- Wheel tuples are ordered **FL, FR, RL, RR** (DiRT sends rear first).
+- `gear`: -1 reverse, 0 neutral, 1.. forward (as today).
+- `susp`: displacement in metres, compression positive; `susp_norm` 0..1 of
+  travel where the game knows the travel.
+
+| Group | Fields |
+|---|---|
+| As today | `rpm, max_rpm, shift, gear, speed, car, car_name, throttle, clutch, power, track` |
+| Identity | `game` (§5.4), `idle_rpm, gears` (forward gear count), `car_class, drivetrain` ('fwd'/'rwd'/'awd'), `location, stage` (ids or names), `stage_length` (m), `game_mode` |
+| Timing | `game_time` (the game's own clock, s), `running` (False in menus/pause where the game says so), `packet` ('update', 'start', 'end', 'pause', 'resume' for EA WRC) |
+| Inputs | `brake, handbrake, steer` (+1 full left .. -1 full right, normalised; lock unknown) |
+| Motion | `pos` (world x, y up, z; m), `vel` (car frame), `accel`, `accel_kind`, `yaw_rate`, `forward`, `up` (world unit vectors) |
+| Wheels | `wheel_speed` (m/s at the tread), `wheel_rot` (rad/s, Forza: turned into m/s once the tyre radius is learnt, §8.3), `slip_ratio` (game's own figure, `slip_kind` says 'raw' or 'normalised'), `slip_angle`, `susp, susp_vel, susp_norm, wheel_load, tyre_radius`, `ride_height` (front, rear; m), `fx, fy` (N, ACC/ACR) |
+| Surface hints | `puddle` (per wheel), `rumble` (per wheel, kerb), `surface_rumble` (Forza), `grip` (AC surfaceGrip level), `rain` (ACC) |
+| Structure | `lap, laps, lap_distance, distance, progress` (0..1), `stage_time`, `race_position` |
+| Game's own | `game_shift_rpm` (EA shiftlights_rpm_end), `boost`, `brake_bias`, `auto_shift` (AC autoShifterOn) |
+
+Initialising ≈ 60 slots costs a few µs per packet; measured by the bench.
+
+### 5.3 Per format: fixes and additions
+
+Numbers in brackets refer to the format research findings listed in the
+appendix (§17).
+
+**Forza (232/311/324/331).**
+- Fix [4]: gear byte `0` → -1 (reverse), `1..10` forward, **`11` → 0
+  (neutral)**. H-pattern shifts through neutral are then seen in FH6.
+- Add from the sled: acceleration 20–28 (car frame X right, Y up, Z forward
+  → convert to x forward, y left, z up), local velocity 32–40, angular
+  velocity 44–52 (Y is yaw; its sign is **verified by capture**: a left
+  turn must give a positive `yaw_rate`), yaw/pitch/roll 56–64, normalised suspension 68–80,
+  slip ratio 84–96 (normalised: `slip_kind = 'normalised'`), wheel rotation
+  100–112 (rad/s), rumble 116–128, puddle 132–144 (FH6 S32 0/1, FM F32
+  depth: branch on game), surface rumble 148–160, slip angle 164–176,
+  suspension metres 196–208.
+- Car: class 216, PI 220, drivetrain 224 (0/1/2 → fwd/rwd/awd). FH: car
+  group U32 at 232 (kept raw in `car_class` as `group:<n>`; its values are
+  undocumented and only ever a hint).
+- Dash: position B+0..8, boost B+40, distance B+48, lap B+68, race position
+  B+70, brake B+72, handbrake B+74, steer B+76 (s8 / 127), current race time
+  **B+64** (B+60 is the current lap's time; corrected while building). FM2023: track ordinal 327 → `stage = 'fm:<n>'`.
+- `game`: 324 → `forza-fh`, 311/331 → `forza-fm`, 232 → `forza`.
+- Tyre radius per wheel = speed / undriven-wheel rad/s, learnt (not
+  decoded) in §8.3.
+
+**Codemasters extradata 3 (DiRT Rally 1/2, DiRT 4; WRC Generations copies
+the layout).**
+- Fix [2]: engine rate 37, max 63, idle 64 are **rad/s → × 30/π**. Because
+  WRCG's unit is unverified [3], the decoder decides per car from the raw
+  max `m = floats[63]`, in this order: if `m × 30/π` lies within 1 rpm of a
+  multiple of 50, rad/s; else if `m` itself is ≥ 3000, below `RPM_LIMIT`
+  and within 1 of a multiple of 50, true rpm (without this branch a WRCG
+  car in real rpm would be scaled × 9.55, fail `_plausible` and lose every
+  packet); else if `m × 10` is a round figure, rpm/10; else rad/s. The
+  decision is cached per (game, raw max) and logged once.
+- Fix [5]: gear `10` (or any negative) → -1; `0` neutral; `1..9` forward.
+- Fix [6, 15]: key and name use the corrected rpm, rounded to 10 rpm (stable
+  across the migration in §7.3).
+- Add: total time 0 → `game_time`, lap time 1 → `stage_time`, lap distance
+  2, progress 3, position 4–6, world velocity 8–10 (projected on the forward
+  vector 14–16 and left vector 11–13 into the car frame), suspension
+  position 17–20 and velocity 21–24 (**unit and sign verify**; research
+  says mm, low confidence), wheel speed 25–28 (m/s, **sign verify**),
+  steer 30, brake 31, lateral/longitudinal g 34/35 (×9.80665; DR2 sign
+  **verify**), lap 36, laps 59/60, track length 61 → `stage_length`.
+- `game`: 264 bytes → `dirt`; any other accepted length → `wrcg`
+  (**provisional**: confirm WRCG's length from the "unknown size" log or a
+  capture, then match it exactly). WRCG's g-forces are probably m/s² (/30
+  in vAzhure's decoder) and reverse is 10; handled by per-game constants.
+- Fix [8]: the catch-all only runs after the EA WRC checks below.
+- Pause: DR2 repeats identical packets while paused (only the run time
+  moves); the run tracker treats an unchanged `stage_time` with speed 0 for
+  > 1 s as a pause, not driving.
+
+**EA SPORTS WRC (new) [7].** EA's own JSON-configured UDP.
+- Oversteer ships **`data/telemetry/eawrc/oversteer.json`**, a packet
+  structure whose header is `["packet_4cc"]` and whose `session_update`
+  lists: `packet_uid, game_total_time, game_delta_time, game_frame_count,
+  shiftlights_fraction, shiftlights_rpm_start, shiftlights_rpm_end,
+  shiftlights_rpm_valid, vehicle_gear_index, vehicle_gear_index_neutral,
+  vehicle_gear_index_reverse, vehicle_gear_maximum, vehicle_speed,
+  vehicle_transmission_speed, vehicle_position_{x,y,z},
+  vehicle_velocity_{x,y,z}, vehicle_acceleration_{x,y,z},
+  vehicle_left_direction_{x,y,z}, vehicle_forward_direction_{x,y,z},
+  vehicle_up_direction_{x,y,z}, vehicle_hub_position_{bl,br,fl,fr},
+  vehicle_hub_velocity_{bl,br,fl,fr}, vehicle_cp_forward_speed_{bl,br,fl,fr},
+  vehicle_brake_temperature_{bl,br,fl,fr}, vehicle_engine_rpm_{max,idle,current},
+  vehicle_throttle, vehicle_brake, vehicle_clutch, vehicle_steering,
+  vehicle_handbrake, stage_current_time, stage_current_distance,
+  stage_length, stage_shakedown, vehicle_id, vehicle_class_id,
+  vehicle_manufacturer_id, location_id, route_id` (252 bytes by the
+  channel types; computed, **verify on a capture**). `session_start`,
+  `session_end`, `session_pause`, `session_resume` use the same list.
+  Only channels from `channels.json` data version 2 are used; the v1.8
+  channels (`game_mode`, `stage_result_*`, `vehicle_tyre_state_*`,
+  `stage_progress`) go in an optional `oversteer_v18.json` once a capture
+  confirms the game accepts them.
+- The decoder builds its `struct` format from the shipped JSON and a
+  channel → type table in Python (`EAWRC_TYPES`: fourcc `4s`, uint8 `B`,
+  uint16 `H`, uint64 `Q`, float32 `f`, float64 `d`, **boolean 1 byte `B`**).
+  Recognised by the 4CC (`SESS/SESU/SESE/SESP/SESR`) and the computed
+  length; a length mismatch is logged once with both numbers.
+- The game's default `wrc` structure (**237 bytes**, no header) is decoded
+  too, by length, as a `session_update` without ids.
+- Gear: compare with the sentinels sent in the packet (`neutral` → 0,
+  `reverse` → -1). Motion axes are x **left**, y up, z forward: map to the
+  car frame by projecting world vectors on the forward/left/up vectors.
+  Per-wheel slip = contact-patch speed vs body speed. RPM is true rpm.
+- Identity: `car = eawrc/<vehicle_id>`, `stage = eawrc:<location_id>:<route_id>`.
+  The Flatpak cannot read the game's Proton prefix (the manifest grants no
+  home access, and this design does not add it), so names come from
+  **`data/telemetry/eawrc/ids.json`**, a small id → name table for vehicle
+  classes, locations and routes built from the game's
+  `readme/ids.json` (names only, with attribution; check the readme's
+  terms before shipping it, and ship numbers if they forbid it). Vehicle
+  names are left to the user's rename; unknown ids show as numbers.
+- *As built (Step A):* the channel list and types live in Python
+  (`EAWRC_DEFAULT_CHANNELS`, `EAWRC_CHANNELS`, `EAWRC_TYPES` in
+  `telemetry_formats.py`); `eawrc_structure()` generates the JSON, and the
+  shipped `data/telemetry/eawrc/oversteer.json` is that text (a test keeps
+  them equal), so decoding needs no data file at run time. Sizes check
+  out: 237 and 252 bytes. Still to **verify on a capture**: the 4CC byte
+  order (both orders are accepted), the structure file's shape (top-level
+  `header`, `versions.data` 2), `frequencyHz` for the event packets, and
+  that forward gears are indexed 1..`vehicle_gear_maximum` (neutral and
+  reverse come from the packet's sentinels). A 4CC packet of another
+  length is logged once and never reaches the Codemasters catch-all.
+  Car keys follow today's v1 form (`eawrc-<vehicle_id>`, or
+  `eawrc-<max>-<idle>-<gears>` from the default structure); D3's
+  `eawrc/<id>` comes with Step C. **Deferred: `ids.json`** (names for
+  classes, locations, routes): the game is not installed here, so its
+  `readme/ids.json` and its terms could not be read; ids show as numbers
+  (`location 4, route 12`) until it is.
+- Setup help (in the tab, Step A): **"Copy structure JSON"** and **"Copy
+  config lines"** buttons, like the existing launch-options Copy, next to
+  the exact target paths inside the prefix
+  (`…/steamapps/compatdata/1849250/pfx/drive_c/users/steamuser/Documents/My
+  Games/WRC/telemetry/udp/oversteer.json` and `…/telemetry/config.json`).
+  The config lines are `structure: "oversteer"`, each `session_*` packet,
+  `ip: "127.0.0.1"`, `port: 5310`, `frequencyHz: 60`, enabled. **Verify the
+  enable key's exact name** in the generated file (EA's readme says
+  `enabled`; community notes say `bEnabled`). Oversteer does not edit the
+  game's files.
+
+**OutGauge (LFS layout; BeamNG).**
+- Unchanged decoding. Fix [9]: BeamNG always sends `"beam"`, so
+  `game = 'beamng'`, `car = 'beamng/unknown'`, and car identity comes from
+  the fingerprint in §5.4. LFS: `game = 'lfs'`, car from `Car[4]`.
+- Optional (Step D, low priority): BeamNG MotionSim `BNG1` packets on the
+  same port for position, velocity, acceleration and angular velocity,
+  merged into the next OutGauge sample by arrival time.
+
+**OVST (bridge) v3 [10–14].** v1/v2 stay decodable. v3 keeps the v2 prefix
+byte for byte and appends:
+
+```c
+/* version 3, after the 96-byte v2 prefix */
+uint8_t game;            /* 1 AC, 2 ACC, 3 ACR (by executable, then smVersion) */
+uint8_t flags2;          /* bit 0 autoShifterOn, bit 1 isInPit */
+uint16_t reserved;
+float clutch, steer;                 /* physics 364, 24 */
+float accg[3];                       /* physics 44, as the game sends */
+float local_vel[3];                  /* physics 568 */
+float local_ang_vel[3];              /* physics 296 */
+float wheel_slip[4];                 /* 56 */
+float wheel_ang_speed[4];            /* 104 */
+float susp_travel[4];                /* 184 */
+float wheel_load[4];                 /* 72 */
+float ride_height[2];                /* 268; NaN in ACR */
+float tyre_radius[4];                /* static 436; NaN when 0 */
+float susp_max_travel[4];            /* static 420 */
+float fx[4], fy[4];                  /* 608, 624; ACC/ACR only, else NaN */
+float current_max_rpm;               /* 588, int32 in memory; ACC/ACR only */
+float track_length;                  /* static 520 (trackSplineLength) */
+float spline_pos, distance;          /* graphics normalizedCarPosition, distanceTraveled */
+float surface_grip, brake_bias;      /* graphics surfaceGrip, physics 564 */
+int32_t laps, session_type;          /* graphics numberOfLaps, ACC sessionType */
+float world_pos[3];                  /* graphics carCoordinates (player) */
+```
+
+  Physics view 580 B for AC1, 800 B for ACC/ACR; static 684/820; if
+  `MapViewOfFile` fails with the larger size, retry smaller and send NaN for
+  the missing fields [13]. `max_rpm` prefers `current_max_rpm` when > 0 in
+  ACC/ACR [10]. Car key `ac|acc|acr/<carModel>`; ACR stage key
+  `acr:<round(track_length)>` because `track` is often empty [11]. Graphics
+  offsets differ between AC1 and ACC: the bridge branches on the game and
+  **the graphics fields are sent only after one ACR capture confirms them**
+  (NaN until then). The `game` byte comes from the executable name that
+  `oversteer-run` passes to `--watch`, falling back to `smVersion`. Gear
+  stays `gear - 1` [12]; verify reverse logs -1 once in ACR. ACR
+  temperatures are Kelvin (not forwarded now).
+- `decode_sample` accepts `OVST3_SIZE` next to `OVST_SIZE` and
+  `OVST2_SIZE` in its length check (it matches on the size set today), and
+  checks the version byte against the length as it does for v2.
+- **Build.** Neither `x86_64-w64-mingw32-gcc` nor `zig` is installed here.
+  `scripts/build-shm-bridge.sh` is run with `zig` from `pip install ziglang`
+  in a scratch venv (a build tool, never an app dependency). If that fails,
+  the C change is not committed half-built: v3 stays unchecked in §16 with
+  "bridge v3 unbuilt" and the reason. Because every ACR-specific feature
+  (`mu_wheel`, brake bias, suspension travel) depends on v3, v3 sits in
+  Step D next to the measured detectors that use it.
+
+### 5.4 Identity: game, car, stage
+
+- `Sample.game` ∈ `forza-fh, forza-fm, forza, dirt, wrcg, eawrc, ac, acc,
+  acr, acpmf` (bridge v1/v2, game unknown), `beamng, lfs`.
+- `Sample.car` = `<game>/<id>`: `forza-fh/<ordinal>`,
+  `dirt/<max>-<idle>-<gears>`, `eawrc/<vehicle_id>`, `acr/<carModel>`,
+  `beamng/unknown`.
+- **Adoption of old keys** (D3): when `(profile, key)` is not in the
+  database, look for its legacy form (`forza-<n>`, `codemasters-…` after the
+  unit migration, `acpmf-<name>`, `outgauge-beam`) and rename that row (and
+  its sessions) to the new key. One rename per car, logged.
+- **Fingerprint split** for games whose key is not unique (DiRT collisions
+  [6], BeamNG): when a session's learnt ratio set differs from the car's on
+  ≥ 2 gears by > 3 % (**calibrate**), it is recorded as a new tune (§8.3),
+  not silently merged. The tab offers "This is a different car" on such a
+  tune, which splits it into `<key>#2` with its own model. Automatic
+  splitting is deferred: a tune change and a different car look the same in
+  these games.
+- `stage` key: `eawrc:<loc>:<route>`, `fm:<track ordinal>`,
+  `ac:<track>:<config>`, `acc:<track>` are exact. Keys built from measured
+  numbers are **matched with a tolerance first** so a value on a rounding
+  boundary does not split a stage: DiRT's (length, start z) against the
+  shipped stage table (±2 m, ±15 m), then against stages already in the
+  database; ACR's track length against known `acr:` stages (±10 m); a
+  start cell against its neighbouring cells (§8.4). Only a stage matching
+  nothing gets a new rounded key (`dirt:<round(length)>:<round(start z,
+  -1)>`, `acr:<round(length, -1)>`). Forza Horizon and BeamNG have no stage
+  (§8.4 builds a start-cell key for repeated routes).
+- **Shipped stage tables** (`data/telemetry/stages/<game>.json`, loaded by
+  `oversteer/stage_tables.py`, seeded into `stages` when the drive log
+  opens: name, location, length, and the table's prior for a mixed
+  surface, keeping whatever a row already has). An entry has `location`,
+  `stage`, `length_m`, `surface` (`gravel|tarmac|snow|ice|mixed`),
+  `surface_parts` (`{surface: share}`, or a list when the shares are not
+  published), `reverse_of`, `shakedown`, `sources`, `confidence`
+  (`high`: two sources agree; `medium`: one good source; `low`: inferred
+  or missing), `note`; DiRT's add `start_z`, ACR's `track`/`config`. Keys:
+  DiRT `dirt:<round(length)>:<round(start z, -1)>` (the key a measured run
+  gets, so old rows merge), the others `<game>:<location>:<stage>` in
+  ASCII lower-case words. Matching, in order:
+  - **DiRT**: the length it sends and the start z against the table (±2 m,
+    ±15 m), before the stored stages.
+  - **WRC Generations** names no stage but sends its length (field 3, in
+    km, where DiRT has progress; field 61 stays 0): the Length of the
+    route in the game's `RALLIESMETRICS.CFG`, to the float (Media Luna
+    3.9796488285065 km was sent as 3979.6488285064697 m). At the start of
+    a run it is matched against `length_m` and `alt_codes` within 0.5 m;
+    of those, only the ones within 5 mm of the nearest stay (the closest
+    two stages, Sävar and its reverse, are 5.2 mm apart), so a stage and
+    its reverse are told apart by the float alone. Should two ever stay,
+    the start decides as below (the table has no start positions, and
+    only the elevation range of each route, which cannot place a start).
+    Where no length is sent, at the run's end, when it finished (progress
+    ≥ 0.99) or the game sends no progress at all, the distance to the
+    finish is matched against the lengths within 1 %. The finish is where
+    progress crossed 0.99, else where the stage clock stopped while the
+    car rolled on for 1 s (after 500 m), else the run's last distance.
+    Two or more stages that close (a stage and its reverse are often
+    within 1 %) are told apart by where earlier runs of each started
+    (within 50 m in x and z; a stage whose runs all started elsewhere is
+    out). Still open, the run keeps a start cell key, with the location
+    when the candidates share one, and the surface when they share one
+    (the game tier, with the candidates as evidence).
+  - **Assetto Corsa Rally**: the shared memory's `track` name as the bridge
+    sends it (ASCII, others `_`, 31 characters) against the table's
+    `track`; two of one name (`Alsace For_t`) by the length sent (its
+    `trackSplineLength`) against each one's published length and its last
+    pace note along the road spline (`pacenote_last_m`), the nearest
+    wins: the spline is longer than the published length, and a cut
+    stage's pace notes are measured along its parent route's spline, so
+    its spline length may be the whole route's. v2 bridges (`acpmf`) are
+    tried too.
+
+## 6. Capture and replay
+
+### 6.1 File format (`oversteer/telemetry_capture.py`)
+
+```
+<data>/oversteer/captures/YYYYmmdd-HHMMSS.ovcap.gz      gzip stream
+  b'OVCAP1\n'
+  one JSON line: {"started": <epoch>, "port": 5310, "oversteer": "<version>", "note": ""}
+  records: struct '<dIH' (t since start as float64, source IPv4 as u32, length) + bytes
+```
+
+- `CaptureWriter(path, port, note, version)`: `.write(now, addr, data)`
+  (any clock; stored from the first packet on), `.close()`. In the app a
+  `Recorder` drives it on its own thread (the listener only enqueues, as
+  built in run 4: the plan had the drive-log thread write it, but then
+  recording would need a database, and a slow gzip flush would delay the
+  SQLite commits). A file per stretch of driving, closed after 60 s
+  without telemetry. Source addresses are IPv4; anything else is stored
+  as 0.0.0.0.
+- `replay(records, learner)`: the records through `Telemetry.handle` with
+  a `NullLeds`, on the capture's clock from t = 1000 s, then idle.
+- `read_capture(path) -> (meta, iterator of (t, addr, data))` tolerates a
+  truncated tail (a crash mid-write): `EOFError` and a short record end
+  the iterator quietly.
+- A sidecar `<file>.json` holds the labels once set (§8.6), so a capture
+  copied elsewhere (a test fixture, a bug report) describes itself.
+- Size: ≈ 20 KB/s raw at 60 Hz, ≈ 5 KB/s gzipped (simulated EA WRC
+  stages: 15 KB/s raw, 1.6 KB/s gzipped; real data is noisier). Cap 1 GB
+  in total (preference `telemetry_capture_cap`, in GB); the oldest
+  **unlabelled** captures go first, checked each time a file opens or
+  closes, so a lower cap applies from the next drive rather than deleting
+  at a click. Recording is off by default, switched in the tab.
+
+### 6.2 Tools
+
+- `scripts/telemetry-capture.py [port] [--write FILE]`: as now, plus writing
+  a capture file with the same format.
+- `scripts/telemetry-replay.py FILE [--db PATH] [--profile NAME]
+  [--send HOST:PORT [--realtime]]`: feeds a capture through
+  `Telemetry.handle` with a null LED object and the capture's own clock into
+  a database (default: a temporary one) and prints the learnt cars, runs and
+  verdicts; or re-sends it over UDP to a running Oversteer (for trying the
+  web page or the tab without the game).
+- `scripts/telemetry-calibrate.py [--db PATH] [--game GAME]`: prints the
+  per-class feature distributions of labelled segments and the held-out
+  accuracy, and stores the model (§8.6).
+
+### 6.3 Captures the user is asked for (they settle the "verify" items)
+
+1. FH6: 2 minutes free roam, one road event, a hill at constant speed
+   (accelerometer kind), a left turn (yaw sign), neutral with the H-pattern.
+2. DiRT Rally 2.0: a stage start with a pause, a left turn, reverse.
+3. WRC Generations: any stage (packet length, rpm units, g units, reverse).
+4. EA SPORTS WRC with `oversteer.json` enabled: one stage start to finish,
+   with a pause and a restart.
+5. ACR with bridge v3 `--verbose`: a stage including reverse.
+Each capture, once labelled, becomes a fixture in `tests/data/` if under
+~1 MB (cut to the useful seconds by `telemetry-replay.py --cut A:B`).
+
+## 7. Data model (SQLite, schema v2)
+
+### 7.1 Conventions
+
+- File `~/.local/share/oversteer/telemetry.db` (as now). `PRAGMA
+  journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
+- Version in `PRAGMA user_version`: 0 with a `cars` table = v1 (today), 1 =
+  v1 with the Codemasters rescale done (Step A, §7.3 step 2), 2 = this
+  design. Migrations run in one transaction at open; the old file is
+  first copied to `telemetry.db.v1.bak` (once).
+- Times are Unix epoch seconds (REAL). JSON columns hold things whose shape
+  will change with calibration (feature vectors, evidence), never things
+  that are queried.
+
+### 7.2 Schema
+
+```sql
+CREATE TABLE cars (
+    id INTEGER PRIMARY KEY,
+    profile TEXT NOT NULL,
+    game TEXT NOT NULL,
+    key TEXT NOT NULL,              -- '<game>/<id>'
+    name TEXT,
+    user_named INTEGER DEFAULT 0,
+    car_class TEXT, drivetrain TEXT,
+    model TEXT NOT NULL,            -- CarModel.to_dict() as JSON (version 2)
+    updated REAL,
+    UNIQUE (profile, key)
+);
+CREATE TABLE tunes (                -- a setup epoch: one gearing (and what else is measurable)
+    id INTEGER PRIMARY KEY,
+    car INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+    first_seen REAL NOT NULL, last_seen REAL NOT NULL,
+    ratios TEXT NOT NULL,           -- JSON {gear: rpm per m/s}
+    change TEXT,                    -- 'first', 'final-drive', 'gears:3,4', 'user'
+    tyre_radius REAL, ride_height_f REAL, ride_height_r REAL, brake_bias REAL,
+    hub_rest TEXT,                  -- JSON per-wheel resting hub position (EA WRC)
+    note TEXT
+);
+CREATE TABLE stages (
+    key TEXT PRIMARY KEY,           -- §5.4
+    game TEXT NOT NULL,
+    name TEXT, location TEXT,
+    length REAL,
+    surface_prior TEXT, surface_prior_source TEXT,       -- 'table', 'user', 'learnt'
+    discipline_prior TEXT, discipline_prior_source TEXT,
+    runs INTEGER DEFAULT 0
+);
+CREATE TABLE sessions (
+    id INTEGER PRIMARY KEY,
+    profile TEXT NOT NULL,
+    car INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+    tune INTEGER REFERENCES tunes(id) ON DELETE SET NULL,
+    game TEXT,
+    started REAL NOT NULL, ended REAL,
+    track TEXT,                     -- as the game names it (v1 column)
+    stage TEXT REFERENCES stages(key),
+    game_mode TEXT,
+    discipline TEXT, discipline_conf TEXT,   -- majority of the runs
+    surface TEXT, surface_conf TEXT, wet TEXT,
+    shifter TEXT,                   -- 'h-pattern', 'sequential', 'paddles', 'auto', 'mixed', NULL
+    distance REAL DEFAULT 0, moving_time REAL DEFAULT 0,
+    limiter_time REAL DEFAULT 0
+);
+CREATE TABLE runs (                 -- one stage attempt, one lap session, one stretch of free driving
+    id INTEGER PRIMARY KEY,
+    session INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    n INTEGER NOT NULL,
+    started REAL NOT NULL, ended REAL,
+    stage TEXT REFERENCES stages(key),
+    start_pos TEXT,                 -- JSON [x, y, z]
+    distance REAL, duration REAL, moving_time REAL,
+    finished INTEGER,               -- NULL unknown, 0 restarted/abandoned, 1 reached the end
+    result_time REAL,
+    discipline TEXT, discipline_conf TEXT, discipline_evidence TEXT,   -- evidence: JSON list of sentences
+    surface TEXT, surface_conf TEXT, surface_evidence TEXT,
+    wet TEXT, wet_evidence TEXT,
+    detector_version INTEGER        -- which calibration produced the verdicts
+);
+CREATE TABLE traces (               -- kept apart so list queries on runs never page through blobs
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL,
+    data BLOB NOT NULL              -- zlib(array('f')) at 10 Hz, see TRACE_CHANNELS
+);
+CREATE TABLE laps (
+    id INTEGER PRIMARY KEY,
+    run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    n INTEGER NOT NULL, time REAL, distance REAL, valid INTEGER
+);
+CREATE TABLE segments (             -- ~200 m of a run
+    id INTEGER PRIMARY KEY,
+    run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    d0 REAL NOT NULL, d1 REAL NOT NULL, t0 REAL, t1 REAL,
+    features TEXT NOT NULL,         -- JSON, §8.6
+    pushed INTEGER,                 -- the grip limit was reached (votes on surface)
+    surface TEXT, margin REAL
+);
+CREATE TABLE corners (
+    id INTEGER PRIMARY KEY,
+    run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    d REAL NOT NULL,                -- distance at the slowest point
+    direction INTEGER,              -- 1 left, -1 right
+    entry_speed REAL, min_speed REAL, exit_speed REAL,
+    gear_min INTEGER, heading_change REAL, duration REAL,
+    counter_steer REAL,             -- fraction of the corner steering against the yaw
+    handbrake INTEGER, exit_spin REAL
+);
+CREATE TABLE shifts (
+    id INTEGER PRIMARY KEY,
+    session INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    run INTEGER REFERENCES runs(id) ON DELETE SET NULL,
+    at REAL NOT NULL,
+    gear INTEGER NOT NULL,          -- changed from
+    gear_to INTEGER,                -- v1 rows: gear + 1
+    direction TEXT DEFAULT 'up',
+    rpm REAL NOT NULL,              -- peak over the last 0.3 s in the old gear
+    best REAL, best_low REAL, best_high REAL,
+    throttle REAL,                  -- max over the same window
+    method TEXT,                    -- 'h-pattern', 'sequential', 'paddles', 'auto', NULL
+    neutral_time REAL,              -- s between leaving and engaging
+    engage_rpm REAL,
+    flat_out INTEGER,               -- counts for shift-point coaching
+    slip REAL,                      -- driven-wheel slip at the change, when known
+    flags TEXT                      -- 'missed', 'skip', 'over-rev', 'double-tap'
+);
+CREATE TABLE metrics (
+    id INTEGER PRIMARY KEY,
+    session INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    run INTEGER REFERENCES runs(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,             -- §9.1
+    value REAL NOT NULL, count INTEGER NOT NULL,
+    gear INTEGER, method TEXT,
+    discipline TEXT, surface TEXT   -- copied from the run; rewritten by "Re-check old runs"
+);
+CREATE TABLE labels (               -- what the user says a run was: calibration ground truth
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    discipline TEXT, surface TEXT, wet TEXT, shifter TEXT, note TEXT,
+    set_at REAL NOT NULL
+);
+CREATE TABLE captures (
+    id INTEGER PRIMARY KEY,
+    path TEXT UNIQUE NOT NULL,
+    started REAL, ended REAL, bytes INTEGER, packets INTEGER, games TEXT,
+    session INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    keep INTEGER DEFAULT 0
+);
+CREATE TABLE calibration (
+    game TEXT NOT NULL, kind TEXT NOT NULL,   -- 'surface', 'discipline'
+    version INTEGER NOT NULL,
+    model TEXT NOT NULL,            -- JSON: classes, means, variances, thresholds
+    trained REAL, runs INTEGER, segments INTEGER,
+    holdout REAL,                   -- leave-one-run-out accuracy
+    deployed INTEGER NOT NULL,      -- 1 when holdout >= 0.90 (calibrate)
+    PRIMARY KEY (game, kind)
+);
+CREATE TABLE coach_state (
+    profile TEXT NOT NULL,
+    car INTEGER NOT NULL DEFAULT 0, -- 0 = about the driver, not one car
+    tip TEXT NOT NULL,              -- tip id, e.g. 'shift.early:h-pattern:gravel'
+    first_shown REAL, last_shown REAL, times INTEGER DEFAULT 0,
+    value REAL,                     -- the metric when last shown
+    quiet INTEGER DEFAULT 0,
+    PRIMARY KEY (profile, car, tip)
+);
+CREATE INDEX sessions_car ON sessions (profile, car, started);
+CREATE INDEX runs_session ON runs (session);
+CREATE INDEX runs_stage ON runs (stage, started);
+CREATE INDEX shifts_session ON shifts (session);
+CREATE INDEX metrics_name ON metrics (name, discipline, surface, session);
+CREATE INDEX metrics_session ON metrics (session, name);
+CREATE INDEX segments_run ON segments (run);
+CREATE INDEX corners_run ON corners (run);
+```
+
+`TRACE_CHANNELS = ('t', 'distance', 'speed', 'rpm', 'gear', 'throttle',
+'brake', 'clutch', 'handbrake', 'steer', 'a_long', 'a_lat', 'yaw_rate',
+'slip_drive', 'susp_rms', 'x', 'y', 'z')`, NaN where not sent. (*Fixed while
+building:* the first list had no position, yet topology, elevation and
+start cells are worked out from the trace and must re-run from it.) Traces are capped at 200 MB
+in total (**preference**); the oldest `traces` rows are dropped first, their
+runs, metrics and verdicts stay.
+
+`runs.stage` and `sessions.stage` reference `stages(key)` with
+`foreign_keys=ON`, so `start_run` upserts the stage row first, in the same
+transaction, then inserts the run.
+
+### 7.3 Migration v1 → v2
+
+In one transaction, after the backup copy:
+
+1. `cars`: create the new table, copy rows: `game` from the old key prefix
+   (`forza-` → `forza`, `codemasters-` → `codemasters`, `acpmf-` →
+   `acpmf`, `outgauge-beam` → `beamng`, other `outgauge-` → `lfs`), new key
+   `<game>/<rest>`; the adoption rule (§5.4) later moves `forza/…` to
+   `forza-fh/…` and so on.
+2. **Codemasters units (D2).** For each `codemasters` car, take the game's
+   max from the key (`codemasters-<max>-<idle>-<gears>`, where max was
+   `floats[63] × 10` rounded), not the stored limiter: that one is often a
+   launch-learnt rpm bouncing on the limiter (7215) and never round. If
+   `key_max / 10 × 30/π` is within 2 rpm of a multiple of 50, the car was
+   recorded in rad/s × 10; rescale by `f = 3/π` (0.95493) the
+   model's `limiter, top_seen`, every `upshifts` value, every `ratios`
+   value, and re-bin `power` bands (the band's middle × f, merging lists); rescale that
+   car's `shifts.rpm` and `shifts.best`; rebuild the key with the corrected
+   rpm rounded to 10. Otherwise leave the car as it is and log it (a WRCG
+   car whose unit was right).
+   Step A ships the decoder fix on schema v1, so this rescale runs there
+   first as a one-off on the v1 tables (renaming the key in `cars` and in
+   `sessions.car`, then `PRAGMA user_version = 1`) and is skipped here when
+   already done.
+3. `sessions`: add the new columns; `car` TEXT → the new car id by (profile,
+   key); rows whose car no longer exists are dropped (they have no model).
+4. `shifts`: add the new columns; `gear_to = gear + 1`, `direction = 'up'`,
+   `flat_out = throttle IS NULL OR throttle >= 0.8`.
+5. Create the new tables; `PRAGMA user_version = 2`.
+6. `CarModel.from_dict` accepts model version 1 (pooled power only) and
+   upgrades on save (§8.1).
+
+Tested with a v1 database built from today's `SCHEMA` and rows in
+`tests/test_store.py`.
+
+### 7.4 Access (`oversteer/telemetry_store.py`)
+
+- `open_store(path) -> sqlite3.Connection` (writer; migrates) and
+  `open_reader(path)` (read-only URI).
+- Writer API used by the drive-log thread only: `upsert_car`, `save_model`,
+  `forget_model` (resets `cars.model` and deletes the car's tunes; sessions,
+  runs, labels and metrics stay, because labels are the only calibration
+  ground truth and weeks of them should not go with one mis-learnt car),
+  `start_session`, `end_session`, `start_run` (upserts the stage first),
+  `end_run`, `add_segment`,
+  `add_corners`, `add_shift`, `add_metrics`, `add_tune`, `touch_tune`,
+  `set_label`, `add_capture`, `save_calibration`, `coach_seen`.
+- Reader API used by GTK and web: `cars(profile)`, `car(profile, key)`,
+  `sessions(car_id, limit)`, `session(id)` (with runs, verdicts, evidence),
+  `metric_series(profile, name, car=None, discipline=None, surface=None,
+  method=None, limit=50)`, `stage(key)`, `tunes(car_id)`, `labels_for(game)`.
+
+## 8. Learners and detectors
+
+### 8.1 Shift points (`shift_learner.py`)
+
+Keep the method (crossover of P(rpm) with P(rpm × r_{n+1}/r_n)); change:
+
+1. **Power per (gear, band)** in `CarModel.power_g[(gear, band)]`, pooled
+   `power[band]` kept for gears with no overlap. `best_shift(gear)` compares
+   `P_gear(rpm)` with `P_{gear+1}(rpm × step)` when both are known (same
+   road speed, so drag and slope cancel), else the pooled curve.
+2. **Slope-free acceleration.** With `accel_kind == 'specific'`, use
+   `accel[0]`; with only a velocity vector, `a = dv/dt + g·sin(grade)`,
+   `grade = asin(v_up / |v|)`; else dv/dt as now. Power stays
+   `(a + C0 + C2·v²)·v`.
+3. **Gates** on power samples: driven-wheel slip ≤ 0.08 where wheel speeds
+   exist (**calibrate** per game), brake < 0.05, throttle ≥ 0.95 **held**
+   for `BOOST_HOLD` = 0.8 s (**calibrate**; later learnt per car as the rise
+   time of acceleration after throttle-on).
+4. **Band estimate**: P75 of the band when slope-corrected, median
+   otherwise (downhill would inflate a high quantile).
+5. **H-pattern window fix.** A 0.3 s ring buffer of (t, rpm, throttle): a
+   change up records the **peak rpm and the maximum throttle** over the
+   window before the old gear was left. Today's rule drops most H-pattern
+   shifts because the driver has already lifted.
+6. **Limiter precedence by source**: `feed(..., limiter, limiter_source)`
+   with `'launch' > 'game' > 'seen'`; a launch-learnt figure replaces a
+   game one even when lower (WRCG over-reports).
+7. **Confidence band**: 20 bootstrap resamples of each band's samples →
+   (P10, P90) of the crossover → `best_low`, `best_high` in the snapshot;
+   computed on the drive-log thread at most every 10 s per car. Each
+   resample computes its per-band estimates once and interpolates from
+   them, rather than calling `power_at` (which re-medians 40 samples) for
+   every rpm step of the crossover search.
+8. **Drag fit** (optional, Step D): fit C0, C2 per car by minimising the
+   disagreement of `P_gear` between gears in their overlapping rpm range.
+   Validated on Forza captures, where the game's power figure is truth.
+9. `CarModel.to_dict()` gains `version: 2`, `power_g`, `limiter_source`,
+   `boost_hold`, `drag`.
+10. **Memory, by design.** `SHIFTS_KEEP` and `POWER_KEEP` keep the 40
+   most recent samples per band and gear, so the model follows the car as
+   it is now and forgets older data; that is what lets a re-tune relearn.
+   The tab says "learnt from your recent driving". A re-tune also resets
+   `top_seen` for the changed gears.
+
+Advice sentences stay in `CarModel.advice` style but move to the coach
+(§9), which knows method, surface and history.
+
+### 8.2 Shifts and the shifter
+
+- **Method** per shift comes from the **physical input**, because whether
+  telemetry shows neutral between gears depends on the game's transmission
+  model, not on the shifter (a sequential car in DR2 driven on the H-gate
+  mapped to gear buttons never shows neutral; an H-pattern car in AC
+  driven on paddles does). In `GtkController.process_events`, every EV_KEY
+  press is classified with the loaded combined spec
+  (`_load_combined_spec()`): a code in the wheel's gear codes
+  (`G29_GEAR_CODES`, where the shifter's gears land) → `'gear'`, the
+  sequential plate's buttons (`KNOWN_SHIFTERS` indexes 8, 9) →
+  `'sequential'`, the paddles (292/293) → `'paddle'`; it sets
+  `launch_inputs['shift_press'] = (monotonic, kind)`, which `telemetry.py`
+  already passes to the learner. A shift with a press within 0.6 s takes
+  its method from it (gear → `h-pattern`, sequential → `sequential`,
+  paddle → `paddles`); without one, `auto` when the game says (AC
+  `autoShifterOn`), else `h-pattern` when neutral was seen between gears
+  (fallback only), else NULL. About 30 lines; in Step A because every
+  per-method metric depends on it.
+- **Downshifts** recorded too, with `engage_rpm`: over-rev when
+  `engage_rpm > 0.95 × limiter`.
+- **H-pattern flags**: `neutral_time`; `missed` when neutral lasts > 0.5 s
+  on an upshift under throttle; `skip` for n → n+2 on an upshift attempt
+  (or n → n−1).
+- **Sequential flags**: `double-tap` when two changes in the same direction
+  come < 0.25 s apart and the second is reverted within 1 s
+  (**calibrate**).
+- Session `shifter` = the method of ≥ 80 % of the session's shifts, else
+  `mixed`.
+
+### 8.3 Gear ratios, tunes and tune detection
+
+- **Learning a ratio** (rpm per m/s per gear) uses only samples where
+  slip is near zero: throttle < 0.5, brake = 0, clutch out, steady speed.
+  Full-throttle samples feed the power curve only, and only when they sit
+  on the learnt ratio. Today every full-throttle sample is taken while a
+  gear has no ratio yet (`known is None` in `_feed_locked`): 400 samples
+  of 2nd at a steady 6 % slip on gravel learn 349.8 instead of 330.0,
+  clean samples are then rejected as off-ratio for good, and the first
+  steady part-throttle samples fire `_check_retune` and wipe the gear. A
+  6 % ratio error moves the crossover by ~400 rpm at 7000, more than the
+  ±200 rpm "spot on" window. Where the game sends driven-wheel speed (DiRT
+  25–28, EA `vehicle_transmission_speed` / contact-patch speed, Forza
+  wheel rotation × tyre radius, ACR via bridge v3), the ratio is rpm ÷
+  driven-wheel speed, which spin cannot distort.
+- **Re-tune rules**: a new ratio is accepted only in the first 60 s or
+  2 km of a session (setups change in menus, which end sessions in every
+  supported game), from the same low-slip samples, brake = 0, spanning ≥ 2
+  speed bins 5 m/s wide; a shorter ratio (higher rpm/m/s, what spin also
+  produces) needs twice the samples.
+- **Tune classification**: all gears changed by the same factor ±1 % →
+  `final-drive`; some gears only → `gears:<list>`. A new tune row opens a
+  new setup epoch; its ratios become the car's current ones, and the shift
+  points of the changed gears are relearnt (as today).
+- **Measured per tune**: tyre radius (speed / undriven-wheel rad/s: Forza,
+  AC static), ride height (AC1/ACC), brake bias (ACC/ACR), resting hub
+  positions at rest on flat ground (EA WRC, as a ride-height *change* only,
+  low confidence). The tune shows these; nothing is inferred beyond them.
+  None of the user's rally games sends ride height (ACR does not publish
+  it; EA WRC, WRCG and DiRT have none): the tab says "not sent by this
+  game" instead of an empty cell.
+- A tune is one ratio set per car, nothing more. "On this stage you ran
+  the 3.9 final drive last time" comes from `sessions.tune` of the last
+  session on that stage.
+
+### 8.4 Runs, segments, corners (`oversteer/drive_log.py`)
+
+`RunTracker.feed(now, sample)` (listener thread, O(1)) and
+`RunTracker.close_*` (drive-log thread):
+
+- **Session** = telemetry from one car without a silence longer than
+  `SESSION_GAP` = 120 s. (The 2 s idle still resets the LEDs and the launch
+  limiter; it no longer ends the session, so a Forza pause does not split a
+  stage.)
+- **Run boundaries**: a teleport (> 50 m between consecutive positions, or
+  an implied speed > 100 m/s; *run 5:* both beyond what the car's own
+  speed explains, since Forza passes 100 m/s), the game's own signals (EA `SESS`/`SESE`,
+  `stage_time` or `lap_distance` going back to 0, Forza race time reset), a
+  silence > 2 s followed by a position jump. A pause (EA `SESP`, DiRT
+  repeated packets, Forza silence without a jump) suspends the run.
+  *As built:* `lap_distance` going back is a lap in DiRT's multi-lap
+  events, so only the stage clock going back without the lap counter
+  moving is a restart; a game with no position ends a run after 10 s of
+  silence. A run starts when the car first reaches 3 m/s (the stand
+  before it is the launch evidence), so menus make no runs, and runs
+  under 100 m are dropped.
+- **Distance**: the game's stage/lap distance when sent, else speed
+  integrated.
+- **Segments** every 200 m (or 10 s if no distance): features in §8.6,
+  computed on the drive-log thread from the segment's 60 Hz buffer.
+- **Corners**: yaw rate (or heading rate from the forward vector) smoothed
+  over 0.5 s; a corner is |yaw rate| > 0.15 rad/s for ≥ 1 s or a heading
+  change ≥ 30° (**calibrate**); the slowest point is the apex; entry and
+  exit speeds 2 s either side; counter-steer fraction = time with steer sign
+  opposite to yaw rate (both positive left, §5.2; a test drives a simulated
+  left-hand corner with and without a slide).
+- **Trace** at 10 Hz (§7.2).
+- **Start-cell stage key** for games that name no stage (Forza Horizon,
+  BeamNG, AC practice): `cell:<game>:<x/50>:<z/50>:<heading/45°>` of the
+  run's start, completed by the run length rounded to 100 m once it ends.
+  Used only to compare runs of the same route and to build priors; two
+  routes from the same start stay apart by length. A new start is matched
+  against the neighbouring cells and headings first (§5.4).
+
+### 8.5 Discipline (`oversteer/drive_detect.py`)
+
+Classes: `rally-stage`, `hillclimb`, `circuit`, `rallycross`, `drift`,
+`free-roam`, `time-attack`, `unknown`.
+
+```python
+class Verdict:
+    value: str            # a class or 'unknown'
+    confidence: str|None  # 'game', 'high', 'medium', 'low'; None with unknown
+    evidence: list[str]   # sentences shown to the user
+    missing: list[str]    # what would have been needed
+
+def classify_discipline(run, history, calibration) -> Verdict
+```
+
+Tiers, in order; the first that fires with enough data decides:
+
+1. **Game fields** (`game`): EA WRC session packets → rally stage
+   (shakedown noted); ACC `session_type`; DiRT `laps > 1` → circuit family,
+   and with lap length < 1.5 km on a loose surface → rallycross; FM
+   `TrackOrdinal` with laps → circuit.
+2. **Topology** (`high` with ≥ 2 closures, `medium` with one): positions
+   hashed into 10 m cells; a loop closure is a revisit after ≥ 500 m of path
+   with heading within ±45°; laps between closures within ±30 % (jokers).
+   Zero closures over ≥ 2 km → point-to-point family. *Fixed while
+   building:* a closure is a return to the run's **start** (within one
+   cell, the same way round, ≥ 500 m after the last): with "any revisit",
+   every point of a second lap revisits the first and closures count
+   points, not laps.
+3. **Elevation** (`medium`): hillclimb when net grade ≥ 4 % over ≥ 2 km and
+   the descending fraction < 10 %.
+4. **Dynamics**: dropped until labelled captures exist (§3.2 #6). Its
+   body-slip thresholds could not be calibrated, β needs a car-frame
+   velocity BeamNG does not send, and for the user's games tiers 1–3 and 5
+   already decide: `game` settles EA WRC, WRCG, DiRT and ACR (DR2 laps > 1
+   → rallycross), ACC and FM; topology and the start signature handle FH6.
+5. **Start signature**: a launch hold then one continuous 2–15 min run with
+   no stops → stage; a rolling start into loops → time attack.
+
+The **Oversteer profile** is always an evidence line ("profile 'rally'"),
+since the user keeps a rally profile and a circuit one. It is a name, not
+a measurement: it decides only when no tier fired, at `low`, and only when
+the name contains a class word (rally, circuit, drift, hillclimb).
+
+Needs ≥ 90 s and ≥ 2 km moving; below that, or when tiers disagree →
+unknown with the reason ("BeamNG through OutGauge sends no position").
+After a stage key has three runs classified alike, that becomes its prior
+("usually a rally stage here"), shown separately; each run is still
+classified.
+
+### 8.6 Surface and wet
+
+Classes `tarmac`, `gravel`, `snow`, `ice`; composite answers `mixed:<a>,<b>`
+(second surface ≥ 25 % of voting segments) and `loose-low` (snow or wet
+gravel, a pair that does not separate); `unknown`. Wet ∈ `dry`, `wet`,
+`unknown`, separately.
+
+Tiers, as for discipline:
+
+1. **Game** (confidence `game`, Step C): the stage key names a route on a
+   single-surface location in the shipped route table
+   (`data/telemetry/stages/*.json`, §5.4): per stage, the entry's surface;
+   a `mixed` one whose other parts are each under 25 % counts as its main
+   surface (a gravel stage with 2 % tarmac is gravel), otherwise it is a
+   prior only. Without an entry, the location: EA WRC by name
+   (`LOCATION_SURFACES`: Sweden snow; Croatia, Japan, Iberia,
+   Mediterraneo tarmac; the gravel locations), or the one surface all the
+   table's stages of that location share. DiRT Rally 2.0 from dr2_logger's
+   table (MIT, both notices kept in the file). **Confirm per route**
+   against the game where a location has both. Mixed locations
+   (Monte-Carlo, Central Europe) fall through. Games that send the
+   surface outright (ACC rain, AC `surfaceGrip`, Forza puddles for wet)
+   decide here too.
+2. **Measured** (Step D, after the §6.3 captures): the classifier below.
+   Until it is deployed for a game, only the segment features are
+   computed and stored (cheap), so it can be trained on past runs later.
+
+A learnt prior ("usually gravel here", from past runs of a start cell or a
+mixed location) stays separate from both and never decides.
+
+**Segment features** (per ~200 m, JSON in `segments.features`):
+
+| Feature | Definition | Sources |
+|---|---|---|
+| `mu_p95`, `mu_p50` | P95 and P50 of √(a_lat² + a_long²)/g in the 10–25 m/s bin | accelerometer; else v·yaw rate and slope-corrected dv/dt |
+| `spin` | fraction of full-throttle time in gear ≥ 3 with drive slip > κ₀ (**calibrate** per game) | wheel speeds / slip ratio / contact-patch speed |
+| `rough` | RMS of 5–25 Hz suspension velocity ÷ speed | DiRT 21–24, Forza travel differenced, AC travel differenced, EA hub velocity; Forza `surface_rumble` as its own feature |
+| `lr_corr` | correlation of front-left and front-right suspension velocity | same |
+| `post_peak` | slope of a_lat vs slip angle beyond the peak | Forza, ACC/ACR slip angle; else β from vectors |
+| `mu_wheel` | P95 of √(fx²+fy²)/load at the slip peak | ACR/ACC via bridge v3 |
+| `puddle`, `rain`, `grip` | direct hints | Forza, ACC, AC |
+| `n`, `speed_mean` | sample count, mean speed | all |
+
+**Limit gate**: a segment votes only if `mu_p95 ≥ 1.5 × mu_p50` and it has
+≥ 120 samples above 10 m/s (**calibrate**); otherwise `pushed = 0` ("never
+near the grip limit"). A run needs ≥ 5 voting segments, else unknown.
+
+**Classifier** per game: diagonal Gaussian per class on standardised
+features. Reject when the best class's Mahalanobis² exceeds the χ²(d)
+99 % point (≈ 15.1 for 5 features): unlike anything calibrated → unknown.
+When the two best log-likelihoods differ by < ln 4 (**calibrate**): the
+pair (`loose-low` for snow/wet gravel, else unknown). Run answer from the
+voting segments; confidence `high` when ≥ 80 % agree with a margin ≥ 2× the
+ambiguity margin and ≥ 10 votes, `medium` when ≥ 60 %, else `low` (shown as
+"maybe"). Wet: Forza puddles and ACC rain override; otherwise smooth +
+low μ̂ = wet tarmac only when tarmac is the prior.
+
+**Route table and priors** (`data/telemetry/stages/*.json`, loaded into
+`stages`): per route, the surface when the location has one (game
+evidence, tier 1) or `mixed:<list>` (a prior only). The tab shows "gravel
+(game: Wales)" or "measured gravel (high) · usually gravel here"; a
+measured answer disagreeing with the table is highlighted for the user to
+label.
+
+**Calibration** (`calibrate(game) -> CalibrationResult`, Step D): from
+labelled runs (`labels`) and their segments. Needs ≥ 3 labelled runs per class and
+≥ 2 classes; leave-one-run-out segment accuracy ≥ 0.90 (**calibrate**) to
+deploy. Undeployed or missing → the measured tier answers unknown with
+"not calibrated for <game> yet: label a few stages of each surface" (or the
+current holdout figure); the game tier still answers where it can. Only calibrated classes can be answered; the reject
+rule keeps an uncalibrated surface from being forced into a known one. Each
+recalibration bumps `version`; runs keep their `detector_version`, and
+"Re-check old runs" re-classifies from stored segments.
+
+Labels come from the tab (Step C) and the web page never writes them.
+
+## 9. Coaching engine (`oversteer/coach.py`)
+
+### 9.1 Metrics (per run, stored in `metrics`)
+
+| Name | Unit | Counted when | Weight / gate |
+|---|---|---|---|
+| `shift.error` (per gear, per method) | rpm, signed vs best | flat-out upshifts with a known best | full on tarmac/circuit; low on gravel/snow (traction-limited, short-shifting can be right); silent when surface unknown and the car is traction-limited (slip at the shift > κ₀); with the game tier (§8.6) that is rare in the user's rally games |
+| `shift.in_band` | fraction within the confidence band ±100 rpm | same | same |
+| `limiter.per_km` | s/km, gears below top | always | all disciplines |
+| `limiter.top` | s per run in top gear | always | goes to tuning (§10), not driving |
+| `launch.t50` | s from release to 50 km/h | launch detected | rally, rallycross, drag |
+| `launch.slip` | peak drive slip in the first 2 s | wheel speeds sent | per surface |
+| `launch.bog` / `launch.stall` | count | rpm < 60 % of launch rpm / 0 | all |
+| `pedal.overlap` | fraction with throttle and brake > 20 % | always | reported only on circuit or tarmac and only with a slower exit than the driver's best there (left-foot braking is technique on loose surfaces) |
+| `pedal.coast` | s/km with both < 5 % above 10 m/s | always | compared with the driver's own runs of the same stage, never absolute |
+| `hpattern.neutral` | median s per shift | H-pattern shifts | per method |
+| `hpattern.missed`, `hpattern.skip` | per 100 shifts | H-pattern | |
+| `downshift.over_rev` | per 100 downshifts | engage rpm known | |
+| `seq.double_tap` | per 100 shifts | sequential/paddles | |
+| `handbrake.per_km` | pulls/km | handbrake known | rally, drift |
+| `counter_steer` | fraction of cornering time | steer + yaw rate | technique on loose, habit or setup on tarmac |
+| `consistency.split_sd` | s, SD of splits at every 10 % of the stage | ≥ 3 runs of the stage | per stage |
+| `corner.loss` | s lost in the 3 worst corners vs own best run | ≥ 2 runs of the stage | per stage |
+
+### 9.2 Over time
+
+- **Series**: `metric_series(...)` sliced by car, discipline, surface and
+  method. A metric is compared only within the same slice.
+- **Growth**: the most recent sessions against the ones before, each side
+  pooled by `count` (a 3-minute stage and an hour of free roam weigh by
+  their events, not as one session each) and holding ≥ 20 counted events;
+  reported only past an effect size per metric
+  (**calibrate**; starting values: shift error median moved > 150 rpm,
+  limiter s/km halved, neutral time −20 %).
+- **Habit**: a metric beyond its threshold in ≥ 70 % of ≥ 5 sessions in a
+  slice. One **focus** habit at a time: the one with the largest estimated
+  time cost (shift error × drive lost, limiter time), ties broken by count.
+- **Rate limiting** (`coach_state`): at most 3 tips and 1 praise per view;
+  a tip is re-shown when its value got worse by ≥ 20 %, after 14 days, or
+  when the user asks ("Show all"); after two showings without change it
+  becomes a quiet "still:" line (*run 5:* a showing is a sitting: views
+  within 6 h of the last counted one are the same showing) at the bottom, at most 3 of those, oldest
+  dropped. The same limits apply to praise and to "Still learning the
+  engine"; today's per-gear "spot on" on every refresh goes.
+- **Phrasing**: observation + number + consequence + one action, in the
+  sentence style of today's `CarModel.advice`. Praise carries a number too.
+  Examples:
+  - "2→3 with the H-pattern: you change up at 6400 rpm, 500 early; 3rd gives
+    9 % less drive there. Hold it to about 6900."
+  - "With the H-pattern you change up 400 rpm earlier than with the
+    paddles." (shifter comparison, needs ≥ 10 shifts each)
+  - "Better: 4 of your last 5 stages had your 2→3 within 100 rpm of the
+    best; two weeks ago you were 500 early."
+- **Gating**: coaching that depends on discipline or surface is silent when
+  either is unknown, and says so once ("tips about short-shifting wait until
+  the surface is known").
+
+`Coach(reader).tips(profile, car_id=None, limit=3) -> list[Tip]` with
+`Tip(id, kind ('focus', 'tip', 'praise', 'still'), text, evidence,
+value)`; `Coach.seen(tips)` updates `coach_state` (drive-log thread).
+*As built:* `coach.seen(store, profile, car_id, tips)`, a function, since
+it writes through the drive log's store while `Coach` only reads; kind
+`note` for the surface gate (said once).
+
+## 10. Tuning advice (`oversteer/tuning.py`)
+
+Keyed by (car, tune, surface, stage), falling back to the car when the
+surface is unknown. Each rule returns an observation, the setup levers as a
+family (never click counts) and whether it is a setup or a driving matter.
+
+| Observation | Rule (**calibrate** all numbers) | Advice |
+|---|---|---|
+| Final drive too short | `limiter.top` > 1 s per run on ≥ 3 runs of the same stage (a Rally2 on one long tarmac straight is normal) | lengthen final drive / top gear, if the setup allows |
+| Final drive too long | top gear used > 5 % of the time but never above 85 % of the limiter, on ≥ 3 runs of the same stage | shorten final drive, if the setup allows |
+| A gear too long for the stage | rpm 1 s after throttle reapplication after corners in gear n below the power band on > 50 % of exits | shorten gear n, or use n−1 there |
+| Bottoming | travel saturating (Forza normalised 1.0, AC `suspensionMaxTravel`, DiRT/EA saturation) per km, split into landings (vertical accel spike) and compressions; for DiRT and WRCG only once their suspension units are verified by capture | ride height up / springs or bump stiffer |
+| Spring/damper balance | travel histogram piled at one end; > 1.5 oscillations after a hit | softer/stiffer; more damping |
+| Understeer/oversteer | sign and change between tunes of the steer-vs-a_lat gradient (arbitrary units: steering lock unknown); counter-steer fraction per surface | rear/front anti-roll bar, springs, differential |
+| Open differential | inside-wheel spin on > 30 % of hairpin exits | lock the differential more |
+| Brake balance | front vs rear locking under braking (wheel speeds) | brake bias |
+
+Gearing is class-limited or fixed for many cars in EA WRC and WRCG, so
+every setup lever is phrased "if the setup allows", and where a driving
+alternative exists it comes first ("use n−1 there", "lift before the
+limiter in top").
+
+Driver-fitted: a counter-steering driver in a car that measures oversteer on
+tarmac gets the setup hint; a neutral car with a sliding driver gets the
+driving hint. Tuning advice needs ≥ 3 runs on the tune, otherwise it says
+what it is still collecting.
+
+## 11. Web page (`oversteer/telemetry_web.py`)
+
+- `TelemetryWeb(port=5301, bind='0.0.0.0', live=callable, reader_path=...,
+  profile=callable)`: a `ThreadingHTTPServer` subclass with
+  `daemon_threads = True`, served from a daemon thread; `start()` returns
+  False with the error when the port is taken; `stop()` shuts it down.
+  Each request opens its own read-only connection and closes it (a
+  per-thread cache would leak with one thread per request).
+- **Step B** serves what exists today: the live sample, the learnt cars
+  and shift tables (`ShiftLearner.snapshot`/`load_snapshot`) and the
+  per-car history (`ShiftLearner.history`). Sessions, verdicts and coaching
+  endpoints are added in Step C when the data behind them exists.
+- **Off by default.** App preferences (`config.ini` DEFAULT section):
+  `telemetry_web` (0/1), `telemetry_web_port` (5301), `telemetry_web_bind`
+  (`lan` → 0.0.0.0, `local` → 127.0.0.1).
+- **Read-only**: only GET and HEAD; everything else 405. No cookies, no
+  CORS headers (so pages on other origins cannot read the JSON with fetch),
+  at most 8 requests in flight (503 beyond), 10 s socket timeout, request
+  logging at debug level only. Every response carries
+  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
+  'self'` (the page's inline CSS and JS by their sha256 hashes, computed
+  when the page is loaded, never `'unsafe-inline'`; `media-src 'self'
+  blob:` for the keep-awake video; nothing external) and
+  `Referrer-Policy: no-referrer`.
+- **Host check** against DNS rebinding: requests whose `Host` is not an IP
+  literal (IPv4, or IPv6 in brackets like `[fe80::1]:5301`), `localhost`,
+  the machine's hostname or `<hostname>.local` get 421.
+- Endpoints (JSON, UTF-8, `Cache-Control: no-store`):
+  - `GET /` → `index.html`, one self-contained file (inline CSS and JS, no
+    external resources) from `data/telemetry/web/`, installed with the other
+    telemetry data.
+  - `GET /api/v1/status` → version, profile, listening port, game, car,
+    session id, and the stage being driven (`current_stage()`: the stage
+    the current run was matched to, else the game's own stage key, named
+    from the stage tables, else the track as the game names it; `null`
+    when nothing says). Not the telemetry source address: it would tell
+    anyone on the network which machine runs the game.
+  - `GET /api/v1/live` → the last sample (gear, rpm, speed, shift target
+    and whether it is learnt, limiter, stage distance and length,
+    progress, stage key, track) or `null`; the page polls it every 250 ms
+    while telemetry arrives, every second otherwise.
+  - `GET /api/v1/cars` → cars in the current profile.
+  - `GET /api/v1/cars/<id>` → the shift table (best, band, your average per
+    method), current tune, tuning advice.
+  - `GET /api/v1/cars/<id>/sessions?limit=20` → sessions with discipline,
+    surface, confidence and evidence, and `stage_name` from the stage
+    tables.
+  - `GET /api/v1/sessions/<id>` → runs, metrics, verdicts, laps.
+  - `GET /api/v1/coach?car=<id>` → focus, tips, praise, growth. The web page
+    does not mark tips as seen (read-only); only the GTK tab does.
+- The page, for a phone or laptop next to the rig: dark only (it sits
+  beside a screen), phone first, no horizontal scroll at any width.
+  - **Live panel** first, to read at arm's length: 15 shift lights (green,
+    amber, red up to the change-up point from 60 % of it, all flashing
+    above it, as the wheel's), the gear huge, speed and rpm large,
+    "Change up at" the point for this gear (learnt, or the profile's), the
+    stage by name with its distance and a progress bar. A grey panel with
+    "No telemetry arriving" when nothing arrives.
+  - Then **coaching** (focus first, then tips, praise, the quiet lines),
+    the **shift points** of the car (followed from the live car until you
+    pick another; the gear being driven highlighted), the **setup** and
+    **recent sessions** with expandable evidence.
+  - Portrait phone: one column. Landscape phone (height ≤ 540 px): gear on
+    the left, numbers on the right, the live panel in one screen. 900 px
+    and wider: the live panel sticky on the left, the cards on the right.
+  - A sticky top bar with two chips: the connection (green receiving from
+    <game>, amber waiting on UDP <port>, red Oversteer not answering) and
+    the screen.
+- **Keeping the screen on** while the page is open:
+  - The Screen Wake Lock API (`navigator.wakeLock.request('screen')`) when
+    the browser offers it, which is only in a secure context: HTTPS, or
+    `localhost` (a laptop opening the page on the rig itself). The lock is
+    released when the page is hidden and taken again on
+    `visibilitychange`.
+  - The page is plain HTTP on the LAN, so on a phone the API is missing.
+    The fallback, after the first tap or key press anywhere (browsers let
+    video play only then): a tiny muted, inline, looping video made in the
+    page. A 16 px canvas is painted twice a second and its
+    `captureStream()` plays at once; a second of it is recorded with
+    `MediaRecorder` and then looped from a `blob:` URL, a real video file
+    as the long-standing keep-awake libraries play. It sits in the sticky
+    top bar as the chip's dot, in view, since some browsers only keep
+    awake for visible video. Nothing is fetched for it; the CSP allows
+    `media-src 'self' blob:`.
+  - The chip says "Screen on", "Tap to keep screen on" (a gesture is
+    needed) or "Screen may sleep" (neither is possible: set the phone's
+    screen timeout instead). Tapping the chip retries.
+  - Expected: wake lock in Chrome, Edge, Firefox (126+) and Safari (16.4+)
+    over HTTPS or on localhost; over LAN HTTP the video keeps Chrome on
+    Android and Safari on iOS awake in most versions, which is what the
+    keep-awake libraries rely on. Verified in headless Firefox (lock
+    taken on localhost; with the API turned off, the video plays from its
+    `blob:` after a tap); not yet verified on a real phone.
+- **What no authentication implies** (shown next to the switch): anyone on
+  the same network can read the driving history, car and profile names,
+  when you drive, and the live telemetry while you drive; nobody can change
+  anything. On a public or shared network, use "this computer only" or leave
+  it off. The Flatpak already has network access; a host firewall
+  (firewalld, ufw) may need TCP 5301 opened, and the tab says so when the
+  page is on but has never been reached from another address.
+- Binding `lan` means every interface, VPNs, Docker bridges and Tailscale
+  included, so the tab lists **every address actually bound** as a URL
+  (IPv4 addresses from `/proc/net/fib_trie` local entries, loopback left
+  out; if that cannot be read, the address found by connecting a UDP
+  socket to a TEST-NET address, no packet sent), and says the page is
+  plain HTTP: anything on the path can read it.
+
+## 12. GTK Telemetry tab
+
+What shows first is what requirement 1 asks for: the car and what has
+been learnt about it. The tab looks like the others (framed lists, rows of
+a title with a dim line under it on the left and the control on the right,
+70 px high, 12 px margins) and is split in two views by a switcher at its
+top.
+
+**Car and coaching**, top to bottom:
+
+1. **Car bar**: the car picker, and Rename… and Forget… (insensitive until
+   a car is known). Forget's confirmation says what it does: "Relearn
+   this car from scratch? Its sessions and your labels are kept."
+2. **Live line**, compact: a dot (grey not listening, amber waiting on the
+   UDP port, green receiving), then the car in bold, gear, rpm, km/h,
+   "lights at the learnt … rpm" and "2.3 of 9.8 km" through a stage
+   (`telemetry_view.live_status()`).
+3. **Shift points**: the limiter and how much of the power curve is known,
+   then the table in a frame: Change (1→2 … 5 (top)) | Best upshift (bold)
+   | Known to (its range, dimmed) | of limiter | You change up | a column
+   per way of changing once used (H-pattern, Sequential, Paddles) | rpm
+   per km/h | Samples (the last two dimmed). Figures right-aligned in
+   tabular digits.
+4. **Coaching**: one row per tip with its kind as a coloured tag (Focus,
+   Tip, Better); the car's own advice until the coach has any; the quiet
+   "still" lines behind "Also noted (n)".
+5. **Sessions**: the last session's context line (discipline and surface
+   with confidence and prior, stage, shifter) with "Why Oversteer thinks
+   so" (the evidence) and "Label…"; then one row per recent session (10):
+   date, stage and discipline/surface, and dimmed on the right the changes
+   up with their error and the limiter s/km (`telemetry_view.session_rows()`).
+6. **Setup**: the current tune (ratios, change type, measured ride height /
+   tyre radius / brake bias; "not sent by this game" where the game has
+   none) and the tuning notes, one row each.
+
+**Settings**, in four framed lists:
+
+1. **Receiving telemetry**: UDP port (saved with the profile), "Learn from
+   game telemetry" (D4, for every profile), the shared-memory games' Steam
+   launch options with Copy, and "EA SPORTS WRC: turn on its telemetry"
+   folded (target paths and the two copy buttons, §5.3).
+2. **Rev lights** (saved with the profile): the switch with Test LEDs and
+   the listener's status under it, "Shift at" with its unit, "Learn the
+   limiter at each launch", "Shift lights at the learnt best upshift". The
+   widgets come from main.ui (their handlers are there) and are placed in
+   rows of their own here.
+3. **Web page** (for every profile): the switch with the bound URLs and
+   the notes of §11 under it; TCP port and "Every network" / "This
+   computer only".
+4. **Recording**: "Record raw telemetry" with the capture folder and size
+   under it; "Keep at most … GB".
+
+Every view has an empty state from the start (not listening, nothing
+learnt yet, no session, no setup) before the controller has read anything.
+
+The label dialog: discipline, surface, wet, shifter (preset from the
+detected ones), note; saved to `labels` for every run of the session.
+
+View code stays thin: `telemetry_view.py` (pure functions building rows and
+strings from snapshots) is unit-tested; `gtk_ui.py` only places widgets.
+
+## 13. Testing
+
+- `pytest -q tests` stays green at every commit; no test touches /sys,
+  /dev or the GUI.
+- **Decoders** (`tests/test_formats.py`): packets built with `struct` per
+  layout; regression tests for every research fix (rad/s, the true-rpm and
+  rpm/10 branches, Forza gear 11, DiRT gear 10, EA 237 bytes not taken for
+  DiRT, EA 4CC structure, OVST v3 with NaN fields and its size accepted,
+  v1/v2 still decode), plus two behaviours that are right today but
+  untested: OutGauge gear byte 0 decodes to -1, and Forza `IsRaceOn = 0`
+  yields no car key (menus never open a session).
+- **Simulator** (`tests/sim.py`, Step C): the simulated car now in
+  `test_shift_learner.py` moves there and gains a grade profile, a steady
+  drive-slip setting and a left-hand corner; `encode(sample, fmt)` exists
+  only for formats a test actually drives end to end: `eawrc_packet()`
+  (run 2) and `forza_packet()`/`forza_packets()` (run 4).
+  Surfaces, roughness spectra and driver models wait until measured
+  detectors need them.
+- **Learner corrections**, each with a test: slope (a hilly stage still
+  finds the analytic shift within 100 rpm), slip gate, turbo lag, H-pattern
+  window, limiter precedence, re-tune rules (a steady spin on snow is not a
+  re-tune), **spin first on gravel** (400 full-throttle samples of 2nd at
+  6 % slip before any clean one: the ratio is still learnt within 1 % and
+  no re-tune fires), confidence band contains the analytic answer.
+- **Shifter**: press classification from a combined spec (gear code,
+  sequential plate, paddle) and the method it gives a shift, with the
+  neutral fallback only when no press was seen.
+- **Listener**: source lock (a second address is ignored until idle), the
+  5300 probe hint.
+- **Detectors**: honest-unknown tests (no route and no calibration →
+  unknown; OutGauge → unknown "no position"); surface game tier from the
+  route table (Sweden → snow, Monte-Carlo → falls through); stage key
+  tolerance (DiRT start z 104.9 and 105.1 are one stage); counter-steer on
+  a simulated left-hand corner; topology on a simulated circuit vs stage.
+  Step D adds: cruising on ice → unknown "never near the limit",
+  calibration round trip reaching the holdout gate, the reject rule.
+- **Store**: v1 → v2 migration from a real v1 file built with today's
+  schema, including the Codemasters rescale decided from the key's max
+  (with a launch-learnt limiter like 7215 in the model); forget keeps
+  sessions and labels; `start_run` on a new stage; WAL reader alongside
+  the writer.
+- **Coach**: synthetic metric histories → habits, growth, rate limiting,
+  gating by discipline/surface/method, phrasing snapshots.
+- **Web**: server on port 0, GET each endpoint, POST → 405, bad Host →
+  421 (an IPv6 literal Host passes), 9th concurrent request → 503, the
+  security headers present, no source address in `/api/v1/status`.
+- **Captures**: write/read round trip, truncated tail, replay determinism
+  (same capture → same database contents).
+- **Recorded captures** (`tests/data/*.ovcap.gz`, when the user provides
+  them): decode without unknown packets; the verdicts match the labels, or
+  the test documents the known miss.
+- `tests/bench_telemetry.py`: per-packet cost (outside pytest).
+
+## 14. Build plan
+
+Four steps, each a vertical slice that ships on its own: if a run stops
+after any step, the user has a working feature and this document says what
+comes next. Each step ends green, with small commits, and updates the
+checklist below.
+
+**Step A: fixes and the shifter, on today's schema v1.**
+1. Tab order: shift table first, the rev light switches in a Settings
+   expander; README no longer says the rev lights are in the Tools tab.
+2. Decoder fixes with regression tests: Forza gear 11 → neutral, DiRT
+   reverse, Codemasters rpm units (three-branch rule, §5.3) with the one-off
+   rescale of stored Codemasters cars decided from the key's max (§7.3
+   step 2); tests for OutGauge reverse and Forza `IsRaceOn = 0`.
+3. Ratio learning from low-slip samples only (§8.3); `top_seen` reset on a
+   re-tune; the spin-first test.
+4. Shift-press wiring in `process_events` from the combined spec; method
+   from the press, neutral as fallback (§8.2); per-method columns in the
+   shift table (v1 `shifts.method` already exists).
+5. `Telemetry.handle(now, data, addr)` refactor (no behaviour change) and
+   the source lock (§4).
+6. D1: port 5310 with the 5300 probe and hint; `oversteer-run`, bridge
+   usage text; CHANGELOG entry.
+7. GTK thread: `load_snapshot()` cached by `updated`, history queried on
+   car change, session end and tab shown only; praise and "still" lines
+   limited (§9.2).
+8. EA SPORTS WRC: `telemetry_formats.py` split out of `telemetry.py`
+   first (no behaviour change), then the shipped structure file, the 4CC
+   and default 237-byte decoders filling today's `Sample` fields plus
+   `game` and `stage`, the id → name table, the copy buttons (§5.3).
+9. *Brought forward from Step D (done in Step A):* the capture format,
+   `CaptureWriter`/`read_capture()`/`replay()` in `telemetry_capture.py`,
+   `telemetry-capture.py --write` and `telemetry-replay.py` (learn,
+   `--send`, `--cut`), so the §6.3 captures can be recorded now, while
+   the rest is built, and settle the "verify" items early. Recording from
+   the app (the tab's switch, the drive-log thread writing) stays in
+   Step D.
+
+**Step B: the read-only web page over today's data.**
+1. `telemetry_web.py` (§11: limits, Host check, headers, a connection per
+   request) serving status, live, cars, shift tables and history from
+   today's `ShiftLearner`; `data/telemetry/web/index.html`; meson install.
+2. App preferences `telemetry_web*`; the switch, port, bind, the bound
+   URLs and the notes in the Settings expander.
+3. Tests (§13 Web).
+
+**Step C: database v2, sessions and runs, game-tier verdicts, coaching.**
+1. Drive-log thread; the per-shift INSERT and 20 s save leave the
+   listener lock (first commit).
+2. `telemetry_store.py`: schema v2 (§7.2), migration with backup, writer
+   and reader APIs, `forget_model`; car keys `<game>/<id>` with adoption;
+   stage keys with tolerance matching.
+3. `Sample` v2 fields the runs need (inputs, position, motion, wheel
+   speeds) for Forza, Codemasters and EA WRC; sessions (`SESSION_GAP`),
+   runs, segment features stored, corners, traces.
+4. Shift learner changes 1–7 and 10 (§8.1); shifts with downshifts and
+   flags (§8.2); tunes as one ratio set per car and the re-tune rules.
+5. `drive_detect.py`: `Verdict`, discipline tiers 1–3 and 5 with the
+   profile line; surface game tier from the route table and the game's own
+   hints; wet from game hints; unknown otherwise.
+6. `coach.py` (metrics with discipline/surface/method, series, habits,
+   growth, `coach_state`, tips) and `tuning.py` (§10); the web endpoints
+   for sessions and coaching; the tab's context line, coaching, tuning,
+   recent sessions, label dialog; learn without LEDs (D4).
+7. `tests/sim.py` (§13); tests for all of it; bench.
+
+**Step D: capture and replay, bridge v3, measured detectors.**
+1. `telemetry_capture.py`, capture and replay scripts, the capture switch
+   and folder size in the tab; per-format encoders in `tests/sim.py` for
+   the formats tested end to end.
+2. Bridge v3 (C) built with `ziglang` from a scratch venv, and its
+   decoder (`OVST3_SIZE`). If it cannot be built, stop and record why.
+3. BeamNG MotionSim (optional).
+4. Once the §6.3 captures exist: limit gate, measured surface classifier,
+   reject rule, calibration and `telemetry-calibrate.py`, "Re-check old
+   runs"; revisit the dropped dynamics tier with the same data.
+5. Drag fit and `BOOST_HOLD` per car (optional).
+6. README section, CHANGELOG, this document.
+
+## 15. Deferred and open
+
+- Automatic splitting of colliding DiRT cars and BeamNG cars (§5.4): needs
+  real data; the user splits by hand meanwhile.
+- AC1 UDP remote telemetry (port 9996): the bridge covers AC1 already.
+- EA WRC v1.8 channels: after a capture confirms them.
+- EA WRC id → name table (`data/telemetry/eawrc/ids.json`): needs the
+  game's `readme/ids.json` and a check of its terms; ids show as numbers.
+- Writing EA WRC's `config.json` for the user: the tab shows the lines
+  instead.
+- Learning `BOOST_HOLD` per car and fitting drag per car (§8.1 items 3, 8):
+  optional, in Step D.
+- Tuning rules that need more of the trace (§10): bottoming, spring and
+  damper balance (per-wheel suspension travel, verified units), open
+  differential and brake balance (per-wheel speeds). The trace carries
+  one drive-slip channel and a suspension RMS; adding the per-wheel
+  channels means a trace version 2 (old traces stay readable as v1).
+- A QR code for the web URL (no stdlib encoder; would need ~300 lines).
+- Every **calibrate** threshold stays a default until labelled captures
+  exist; the first calibration pass needs the captures of §6.3.
+- The measured surface classifier and the dynamics discipline tier (§8.5
+  tier 4): until the captures exist to calibrate them (§3.2 #5, #6). The
+  classifier and `calibrate()` exist (run 2); what waits is labelled data,
+  the label dialog (tab), `telemetry-calibrate.py` and "Re-check old runs".
+- Route-table data for the surface game tier: EA SPORTS WRC's location
+  names are in `drive_detect.LOCATION_SURFACES` but its ids need
+  `ids.json`; DiRT Rally 2.0's stage table (dr2_logger's, MIT) could not
+  be fetched in run 2. Until then the surface game tier answers unknown.
+- The tab's "This is a different car" (§12 item 5): it needs the
+  fingerprint split of colliding cars (§5.4), deferred above for want of
+  real data. The "learnt from your recent driving" wording and learning
+  without LEDs (D4) were done in run 3.
+- The coach's thresholds and time costs (§9.2) and the tuning thresholds
+  (§10) are starting values, **calibrate**; the balance fit's unit
+  depends on the wheel's rotation setting, so only its sign and its
+  change between tunes are used.
+- Read access to the game's Proton prefix in the Flatpak manifest: not
+  planned; copy buttons and a shipped id table instead (§3.2 #8).
+- The `captures` table (§7.2): not written yet (run 4). The capture folder
+  and its label sidecars are the record; "Re-check old runs" (Step D item
+  4) is the first thing that needs the table, and can fill it from the
+  folder then. The tab shows the folder's path but has no "Open folder"
+  button: opening a folder from the Flatpak goes through the OpenURI
+  portal, which could not be tried here without running the app.
+- Listening on 5300 and 5310 at once: rejected, 5300 is the port FH6 may
+  need for its own socket (§3.2 #17).
+
+## 16. Progress
+
+Design revised after the independent review (§3.2): done.
+
+### Step A
+Done (acb5ba0 … this commit), 65 tests green. The build prompt described
+Step A as "decoding + `Sample` fidelity + capture/replay tooling", the
+order before the review re-cut the steps; the re-cut Step A below was
+built, and the decoding fidelity (Step C item 3) and capture tooling
+(Step D item 1, minus recording from the app) were brought forward,
+since they are self-contained and let the §6.3 captures start now.
+- [x] Tab order (car bar, shift table, coaching, live line, then a collapsed "Settings: rev lights and telemetry" expander holding the rev light rows and the launch options); README fixed
+- [x] Forza gear 11, DiRT reverse; OutGauge reverse and Forza `IsRaceOn = 0` tests (`tests/test_formats.py`)
+- [x] Codemasters rpm units (three branches, `codemasters_unit()`) and rescale of stored cars from the key's max (`rescale_codemasters()`, `user_version` 1, `telemetry.db.v0.bak`)
+- [x] Ratios from low-slip samples (throttle < 0.5, brake ≤ 0.02 or a little throttle when no brake is sent, |a| ≤ 2 m/s²); `top_seen` reset on re-tune; spin-first test. Driven-wheel speed as the ratio source (the wheel speeds are decoded now) is left to the re-tune work of Step C, which needs the drivetrain to pick the driven wheels
+- [x] Shift-press wiring (`shift_button_kinds()` in `proxy/equipment.py`, `update_shift_buttons()` every 5 s with the handbrake check) and method from the press (`shift_method()`); per-method columns from `ShiftLearner.method_shifts()`, re-read on car change, session end (`sessions_ended`) and tab shown
+- [x] `Telemetry.handle()` refactor; source lock (locked to (address, `Sample.game`); `Sample` gains `game`, `brake`, `stage` now)
+- [x] UDP default port 5310 (D1) with the probe and hint (symmetric, see §3.1 D1); CHANGELOG entries for Step A. Bridge .c default left at 5300 until it is rebuilt
+- [x] GTK: snapshot cache (`load_snapshot()` keyed by (profile, key, `updated`); rename bumps `updated`), history on events only (`method_shifts()`), advice limited to 3 tips by size, 1 praise line, 1 re-tune line, 1 "still learning" line. The quiet "still:" lines and re-showing rules need `coach_state` (Step C)
+- [x] `telemetry_formats.py` split (acb5ba0); EA SPORTS WRC decoder (both structures), shipped structure file, copy buttons with the target folder. **Deferred:** the id → name table (game's `ids.json` and its terms not available here, §5.3)
+- [x] `Sample` v2 decoded for Forza, Codemasters, EA WRC (and OutGauge time/boost), one private function per format (`_ovst`, `_forza`, `_outgauge`, `_codemasters`, `_eawrc`); brought forward from Step C item 3. As built: `accel_kind` is `'kinematic'` for all three until a hill capture says otherwise; Codemasters' "pitch" vector (14–16) is taken as forward and the "roll" vector (11–13) as left, up = forward × left (verify handedness); suspension mm → m (verify); DiRT g × 9.80665, WRCG taken as m/s² (verify); steer negated to positive-left in every game (verify); Forza yaw rate = −ω_y (verify). Decode costs 8–13 µs a packet, `Telemetry.handle` with the learner 0.02 ms mean on this machine. Nothing reads the new fields yet (Step C)
+- [x] Capture format, writer, reader, replay through `Telemetry.handle`; `telemetry-capture.py --write`, `telemetry-replay.py` (brought forward from Step D; `tests/test_capture.py`)
+
+Run 2 (done, 112 tests green): the build prompt's "Step B" is "database v2 +
+sessions/segments + learners (shift, tune, discipline/surface scaffolding
+with calibration hooks) + tests", the order before the review re-cut the
+steps. That is this document's Step C items 1–5 and 7, so those are built
+now and ticked under Step C below; the web page (Step B here) is left for
+a later run, and Step C item 6 (coach, tuning advice, tab sections) too.
+
+Run 3 (done, 150 tests green): the build prompt's "Step C" is "coaching
+engine + tuning advice + web server/page + tests": Step C item 6 here,
+and Step B (the web page), which run 2 left for later, since the
+coaching endpoints need the server. Built in that order: metrics written
+at run end, the coach, tuning advice, the web server and page, then the
+tab. Steps B and C are complete; what they leave is listed in §15 and
+under Step D. The GTK code was exercised off-screen (the tab built with
+a stub controller under GDK's broadway backend, the gui's web methods on
+a stub), never by running the app.
+
+Run 4 (done, 161 tests green): the build prompt's "Step D" is "GTK Telemetry tab
+integration, preferences (web on/off, port), docs/README/CHANGELOG +
+tests", the order before the review re-cut the steps. Most of it came
+with run 3 (the tab sections, the web preferences); what §12 still
+lacks is built now: the shift table's best-change range (± band) with
+its rows built in `telemetry_view` (tested), recording raw telemetry
+from the app (this document's Step D item 1: the switch, the folder,
+its size and cap, the labels' sidecar), the telemetry preferences read
+and written by one tested function, a second encoder in `tests/sim.py`
+with an end-to-end test, and the README section. Bridge v3, BeamNG
+MotionSim and the measured detectors (Step D items 2–5) are not part of
+this run: they need a Windows toolchain run or the §6.3 captures.
+As built, besides the items ticked under Step D: `telemetry_view.shift_table()`
+and `shift_summary()` (the tab's table, redrawn only when its text
+changed; the best change up as "7100 rpm (6950–7200)", the 10–90 %
+bootstrap range the web page shows too); `read_preferences()` /
+`write_preferences()` over `PREFERENCES` (attribute, config key, default;
+numbers clamped, unknown choices back to the default); each setting's
+status line now sits in the Settings list under its own switch. Checked
+off-screen: the tab built under GDK's broadway backend with a stub
+controller and rendered to an image, and the gui's recording and
+preference methods on a stub, never by running the app.
+
+Run 5 (done, 180 tests green; bench mean 0.042 ms, p99 0.065 ms, worst 4.5 ms): two independent reviews (Opus, Fable) of
+`v0.13.1..HEAD`. Every finding is checked against the code; the ones
+found real are fixed with a test where one makes sense, the others are
+listed with the reason. The checklist is the recovery point:
+- [x] O1 learnt shift point at or near the limiter never flashes: fixed (544adc2): the learnt point is capped at LEARNT_FLASH (99.5 %) of the limiter / 1.03, so the flash starts before it
+- [x] O2 one over-rev packet raises the launch limiter for good; launch at speed; `set_limiter` never lowers a launch figure: fixed (544adc2): raised on the move only when held flat out, clutch out, in gear for LAUNCH_RAISE_HOLD (0.5 s) without climbing; a launch needs speed ≤ LAUNCH_SPEED; `set_limiter` lets a launch replace a launch either way
+- [x] O3 `ceiling()` falls back to `top_seen`: early shifters locked in, false limiter coaching: fixed (0d69860): `CarModel.known_limiter()` (launch or game); `ceiling()` falls back to `top_seen` only when no limiter is known, and then "pulls to the limiter" is never answered; `car_context` passes the known limiter; limiter time and the over-rev/skip flags use it too. A game that over-reports its maximum (WRCG) now needs a launch for its pull-to-the-limiter gears; the percentage rule stands in meanwhile
+- [x] O4 tips go quiet after two tab refreshes, not two sessions: fixed (0d69860): `coach.SHOWING` (6 h): views within it of the last counted showing change nothing
+- [x] O5 / F-low web slots held by idle keep-alive connections: fixed (1998e69): `Connection: close` on every answer; clients with a global address are refused too (`verify_request`, Fable's LAN hardening; CGNAT tailnets pass)
+- [x] O6 / F-low migration drops a merged car's sessions and shifts: fixed (1998e69): the longest model is kept, the other key's sessions and shifts go to it, logged
+- [x] O7 a rolled-back commit leaves stale row ids in memory: fixed: `DriveLog.batch` and `on_rollback`; the learner forgets the session and run rows written in the rolled-back batch and starts the session again (`_session_lost`)
+- [x] O8 `*/unknown` cars (BeamNG, AC pmf) share one model and drive the lights: fixed (0d69860): `shared_car()`: `*/unknown` keys learn nothing about the car (limiter, ratios, power) and give no learnt shift point; sessions, runs and shifts are still written
+- [x] F1 Forza above 100 m/s restarts the run every packet: fixed: `jump > TELEPORT + speed × gap` or implied speed above max(100 m/s, 3 × the car's speed)
+- [x] F2 `shift.error` measured against a best the lights would not trust: fixed (0d69860): `SHIFT_COVERAGE` (0.6) gates the stored best, the coach's best and the live advice
+- [x] F3 limiter below top gear counts top gear when the game sends no gear count: fixed (0d69860): the highest gear learnt stands in for top in `limiter.per_km` only; `limiter.top`, `top.share`, `top.peak` still need the game's count; with neither, no limiter metric
+- [x] F4 / O-low migration backups miss the WAL: fixed (1998e69): `_backup()` through `Connection.backup()`
+- [x] F5 / O-low segment rows grow while paused or parked: fixed: paused or frozen packets add no segment or trace row; a segment closes at `SEGMENT_ROWS` (3600) rows however short. The design's "10 s if no distance" cut is this row cap
+- [x] Lows and nits, fixed: `DriveLog.call` sets `done` in a `finally`; `DriveLog.close()` and `Recorder.close()` leave the connection or file to a thread that outlived the join; Forza's car-less menu packets call `learner.idle()` once and `learner.tick()` each (the socket never times out); pedals read once a packet; no `'launch'` source once the option is off; a failing learner logs once a minute; `open_reader` quotes the path; the unit cache starts over when full; `SHIFT_THROTTLE` for the literal 0.8; `_corner.at()` by bisection; run rows dropped once their run ended; old profiles with no shift point keep 97 %; CHANGELOG (the launch switch; both switches on for old profiles); `SCHEMA_V1`'s comment; the label tooltips no longer claim learning today; EA WRC logs a gear index it does not understand (once each, 25d6567)
+- Rejected or deferred, with the reason:
+  - Port probe racing FH6's bind (O-low): kept as designed (§3.1 D1, review item 17, agreed with the user): the probe holds 5300 for one second in sixty and only while nothing has been heard; a game sending to 5310 stops it at its first packet. Worth a look if FH6 ever fails to start its Data Out with Oversteer open.
+  - Codemasters rpm / 10 maxima read as rad/s (O-low): deferred to a WRC Generations capture (§6.3). Tightening the rad/s tolerance would fix the 4 % of rpm / 10 maxima that also land within 1 rpm of a round figure in rad/s, but the migration (`rescale_codemasters`) reads keys rounded to 0.1 and relies on the loose tolerance, and nothing says WRCG sends rpm / 10 at all.
+  - Recorder takes datagrams from any sender (F-low): rejected. A capture shows everything that arrived by design (a second source is what the source lock has to be debugged against); the size cap bounds it, recording is off by default, and a host that can reach the UDP port can already drive the listener.
+  - "Learn from labels" (O-nit): the tooltips were reworded rather than wiring `calibrate_game()` in: its thresholds wait for the §6.3 captures (§15).
+- Still open after run 5: Codemasters and OutGauge encoders for end-to-end tests; the GTK pedal→launch wiring checked by reading only; the EA WRC gear convention (a capture); a game that over-reports its maximum (WRCG) learns its pull-to-the-limiter gears only from a launch now that the highest rpm seen is not taken for the limiter.
+
+### Step B
+- [x] Web server (read-only, limits, Host check, headers) and page (run 3, built over the v2 database directly, so the Step C endpoints came with it: `telemetry_web.py`, `data/telemetry/web/index.html`, installed to `share/oversteer/telemetry/web/`). As built: the CSP carries sha256 hashes of the page's one inline script and one style block (no `'unsafe-inline'`), so the page sets styles through the DOM only; `status` gives the UDP port, whether telemetry arrives, the game and the session number, never an address; `/cars` lists ids so the other endpoints take `cars/<id>`, and every car and session is checked against the current profile (404 otherwise); `live` is `live_dict(telemetry)`, read without locks. A NaN metric is not written (it cannot be stored and is no measurement). The page rebuilds its sections only when the data changed, so an open "Why" stays open. Checked in a headless Firefox at phone width
+- [x] Web preferences and Settings controls, bound URLs (`telemetry_web`, `telemetry_web_port`, `telemetry_web_bind` in `config.ini`; "Every network" / "This computer only"; the addresses from `/proc/net/fib_trie`; the notes of §11 and the firewall hint until the page has been opened from another device, `telemetry_view.web_status()`)
+- [x] Web tests (`tests/test_web.py`: every endpoint, another profile's data refused, 405 with `Allow`, 421 and the IPv6 literal, the 9th request → 503 and the slots given back, headers, a taken port, no database yet, the bound URLs)
+
+### Step C
+- [x] Drive-log thread; SQLite writes off the listener lock (`drive_log.DriveLog`: events are a function and its arguments run on the thread with the only writer; batches committed every 5 s or when an event asks; `threaded=False` runs them inline for tests and replays, and a test checks both write the same). The learner lock is an `RLock` held only for in-memory work and model copies; the listener reads a car's model once when it first sees it (read-only connection), never writes. Sessions end after `SESSION_GAP` without telemetry (`ShiftLearner.tick()` from the listener's idle loop), not at the 2 s idle; the GUI's refresh counter is `history_changed`. `snapshot()` returns what the drive-log thread published (`publish()` once a second) or works it out from a copy
+- [x] Schema v2, migration with backup, reader/writer APIs, `forget_model` (`telemetry_store.py`, `tests/test_store.py`). As built: the Codemasters rescale moved here and works on the model JSON; the migration rebuilds `cars`, `sessions`, `shifts` with `foreign_keys` off in one transaction; `TRACE_CHANNELS` gains `x, y, z` (topology and elevation re-run from traces); a car only glimpsed (no gear learnt, no session left) gets no row
+- [x] Car keys `<game>/<id>` with adoption; stage keys with tolerance (`legacy_keys()`: `forza/…` → `forza-fh|fm/…`, `codemasters/…` → `dirt|wrcg/…`, found by the reader and renamed by the writer on first save; `match_stage()` for measured (length, start z) keys, `match_cell()` for start cells)
+- [x] `Sample` v2 fields for Forza, Codemasters, EA WRC (done in Step A with the decoders; see the Step A note)
+- [x] Sessions, runs, segment features, corners, traces (`drive_log.RunTracker`, fed by the learner under its lock; `tests/test_drive_log.py`). As built: a run starts when the car first reaches 3 m/s (standing time and a held throttle before it are the launch evidence), so menus and a parked car make none, and runs under 100 m are dropped; boundaries: session end, EA `start`, a jump > 50 m or > 100 m/s implied, the stage clock going back > 1 s without a lap done, 10 s of silence where no position is sent; EA `end` ends it (and nothing starts until the next `start`), pauses (EA `pause`, DiRT's frozen packets) are not counted. `d` along the run is the game's stage distance where sent (the same stretch gets the same d every run), else the distance driven. `finished` from progress ≥ 0.99 (`result_time` the stage clock then) or EA's end packet; laps from the lap counter (time and distance since the last). Segment features as §8.6 plus `fast` (samples above 10 m/s, for the limit gate); `pushed` from the gate. Corners from the 10 Hz trace (yaw rate, or heading rate from positions); `heading_change` in degrees. Stage keys at run start for DiRT/WRCG (`match_stage`), start cells at run end for games naming no stage. Sessions get distance, moving time and the discipline/surface most of their distance had (`summarise_session`)
+- [x] Shift learner §8.1 items 1–7, 10 (per-gear power `power_g`; slope-free acceleration from `accel_kind == 'specific'`, the forward vector's height, or the climb rate from positions; gates: `BOOST_HOLD`, brake < 0.05, driven-wheel slip from `drive_slip()`; P75 when slope-free; 0.3 s window for the change's peak rpm and throttle; `set_limiter()` with launch > game > seen, passed by the listener; `best_bands()` with 20 seeded bootstrap resamples, worked out at most every 10 s per car on the drive-log thread or when a snapshot is asked for; model version 2). **Found while building:** the acceleration is a 0.3 s regression, so it belongs to the window's middle rpm, not the last sample's: at 3000 rpm/s in 2nd that was 500 rpm off and put the per-gear crossovers 350 rpm late; power samples are now binned by the window's mean rpm and speed (shifts now land within 25 rpm of the analytic answer in the simulator, 150 before). Item 10's tab wording ("learnt from your recent driving") waits for the tab work
+- [x] Shifts with downshifts and flags (§8.2): every change between forward gears within 1.5 s is written, held 1 s first (`_pending`) so a quick correction can flag it and `engage_rpm` is the peak of the new gear's first 0.3 s; flags `missed`, `skip` (n → n+2, or flat out above 90 % of the limiter and down one), `over-rev`, `double-tap`; `slip` from `drive_slip()` where wheel speeds are sent; session `shifter` at session end (≥ 80 % one method, else `mixed`). `auto` waits for bridge v3 (`autoShifterOn`)
+- [x] Tunes and re-tune rules. Driven-wheel speed as the ratio source (`DrivenWheels`): wheel speeds (or Forza's rotation × a tyre radius learnt at low slip) are believed only once their median agrees with the car's speed within 2 % over 60 low-slip samples (a wrong unit or sign never becomes a ratio); the driven axle is the game's, or learnt from which axle stays locked to the engine through the ratio while the wheels spin (60 samples, 80 %). Re-tune window: the first 60 s on the move or 2 km of a session, whichever ends first (read as "whichever first": a long wait on the start line should not keep it open, a stage start should not close it), 2 speed bins, twice the samples for a shorter ratio unless the wheels gave them. Tunes are written at session end: `first`, then a new row when a gear re-tuned (`classify_tune()`: `final-drive` when ≥ 2 gears changed by one factor ±1 %, else `gears:…`), otherwise touched with gears learnt since; `sessions.tune` set; `tyre_radius` from Forza. The fingerprint split ("this is a different car") needs the tab
+- [x] Discipline tiers 1–3, 5 and the profile line; surface and wet game tier (`drive_detect.py`, `tests/test_detect.py`; verdicts written at run end with evidence and what was missing; stage priors after 3 runs alike, source `learnt`). As built: tier 1 decides even a short run (the game's word does not need 2 km); the ≥ 90 s / 2 km minimum applies to the measured tiers. Topology counts returns to the run's start (within 10 m, the same way round, after 500 m) rather than any revisit: every point of a second lap revisits the first, so counting revisits counts points, not laps. A standing start then loops is `circuit`, a rolling one `time-attack`; point to point with a launch or standing start, no stop and 2–15 min is `rally-stage` (`medium`); hillclimb (`medium`) wins over rally-stage, which it is a kind of; with ≥ 2 stops and no launch `free-roam` (`low`), a class the plan named but gave no rule for. **Surface game tier: the mechanism is built but has no data to fire on yet** — the route table is by location name (`LOCATION_SURFACES`, EA WRC names from memory, to check against `ids.json`), and EA WRC sends ids whose names wait for `ids.json` (deferred, §5.3); DiRT's stage table (dr2_logger's) could not be fetched here. Wet: Forza puddles only; no puddles is `unknown`, not dry.
+- [x] Calibration hooks, brought forward from Step D: `calibrate()` (diagonal Gaussians on standardised features present in ≥ 80 % of segments, leave-one-run-out holdout, deploy at ≥ 0.90 with ≥ 3 labelled runs of ≥ 2 surfaces), `classify_segment()` with the χ² 99 % reject and the ln 4 ambiguity (`loose-low` for snow/gravel), run votes with `mixed:` at ≥ 25 %, `calibrate_game(store, game)`; deployed calibrations classify segments at run end and set `detector_version`. Not yet: `telemetry-calibrate.py`, "Re-check old runs", the limit-gate thresholds' calibration (all need the §6.3 captures and labels from the tab)
+- [x] Coach metrics, habits, growth, rate limiting (`coach.py`, `tests/test_coach.py`; run 3). Metrics are written at run end (`RunTracker._write_metrics`), after the run's pending changes of gear are flushed. As built: counts are changes for the shift metrics, kilometres for the per-km ones (so a long stage weighs more), 1 for per-run ones; `launch.t50` is timed from moving off (the run starts at 3 m/s, so the tracker keeps when the car began to roll); the top gear is the game's gear count (`Sample.gears`), not the highest gear learnt, and without it `limiter.top` is not measured. **Added to §9.1:** `shift.slip` (driven-wheel slip at the change, which lets an early change on an unknown surface be coached when the wheels did not spin), `top.share` and `top.peak` (for the final-drive rules of §10), `exit.low` per gear (exits whose revs 1 s after the throttle went back on were below the power band: 85 % of peak power) and `balance.gradient` (the fit steer = a·curvature + K·lateral g; K > 0 understeer). Pedal overlap on tarmac is gated on the stage's `corner.loss` (> 0.5 s against the best run) standing in for "a slower exit than the driver's best there". Time cost (to pick the focus) is a rough s per 10 km per family, **calibrate**. Kinds gain `note` (the surface gate, said once). Praise re-shows only when it grew 20 % more
+- [x] Tuning rules (§10; `tuning.py`, `tests/test_tuning.py`): final drive short (`limiter.top` > 1 s on ≥ 3 runs of the stage) and long (`top.share` > 5 % with `top.peak` < 85 %), a gear too long out of corners (`exit.low` > 50 % of ≥ 10 exits; the driving alternative first), balance fitted to the driver (tarmac counter-steer > 30 % with the fit saying oversteer → setup; with a balanced car → driving; understeer from the fit alone; the change against the tune before). Only the current tune's runs count (sessions not closed yet count from the tune's first sight). `tune_summary()` gives the tune for display with "not sent by this game" / "not measured yet". **Deferred:** bottoming and spring/damper balance (suspension travel is not in the trace, and DiRT/WRCG units are unverified), open differential and brake balance (they need each wheel's speed in the trace: a trace version 2); see §15
+- [x] Web endpoints for sessions and coaching (with Step B above); tab sections, label dialog; learn without LEDs (D4). As built: `telemetry_view.py` builds every string of the context line (with a "Why" expander of the runs' evidence), coaching (quiet lines under "Show all"; the car's own live advice stands in until the coach has something new), setup (the tune and up to 2 notes) and recent sessions, and `gather()` reads them on events only (car change, `history_changed`, the tab shown, a label or a forget). Tips are marked seen (`coach.seen()` posted to the drive-log thread) only when the tab is on screen and the window active. "Label last session…" labels every run of the shown car's last session (`Store.label_session()`), preset from the detections. D4: "Learn from game telemetry" (app-wide, off by default) runs the listener with `telemetry.NoLeds`, also with no wheel. Forget's confirmation says what it keeps; the summary says "learnt from your recent driving" (§8.1 item 10)
+- [x] `tests/sim.py`; tests; bench within budget. `tests/sim.py`: the simulated car, a `Road` with a grade profile and turbo lag, `Course` (stages and circuits every metre, corners with an optional slide), `course_samples()`, and `eawrc_packet()`, the one encoder so far (the bench and the determinism test go through the real decoder). `tests/bench_telemetry.py`: ten minutes of EA SPORTS WRC stages through `Telemetry.handle` with the drive-log thread: mean 0.041 ms, p99 0.065 ms, worst 5 ms per packet on this machine, nothing dropped (budget 0.3 / 2 ms); a loose pytest check and a replay-determinism test (same capture → same tables) in `tests/test_drive_log.py`. `telemetry-replay.py` prints runs, verdicts and evidence
+
+### Step D
+- [x] Capture switch and folder size in the tab (run 4). As built: `telemetry_capture.Recorder` writes on **its own thread**, not the drive-log thread the plan named: recording then works with no database (rev lights alone, a database that failed to open) and a slow gzip flush never delays the SQLite commits; the listener only queues (`Telemetry.recorder`, every datagram before decoding, unknown ones included; 4096 queued, then dropped and counted). A file per stretch of driving, closed after 60 s without telemetry (a session ends after 120 s, so a capture sits inside its session). Preferences `telemetry_capture` (0/1) and `telemetry_capture_cap` (GB, 1–100, default 1); the oldest unlabelled captures go first (`prune()`). "Label last session…" writes the label to the sidecar of every capture overlapping the session (`label_captures()`), which keeps them. The `captures` table is not written yet: the folder and its sidecars are the record until "Re-check old runs" needs the table
+- [x] Encoders in `tests/sim.py` for the formats tested end to end (run 4): `forza_packet()` (FM 2023's 331 bytes, Horizon's 324 with `size`) and `forza_packets()`, whose race clock and distance run over the whole race as Forza's do (a per-lap clock split every lap into its own run: correct for a game with a per-lap clock and no lap counter, so the encoder, not the tracker, was wrong). `test_forza_motorsport_laps_through_the_live_path`: three laps through decoder and listener, one circuit run (`game` tier) with its laps and left corners, ratios within 1 %, tyre radius 0.33 m from the wheels. Codemasters and OutGauge have no encoder: nothing drives them end to end yet
+- [ ] OVST v3 bridge (C) built, and decoder
+- [ ] BeamNG MotionSim (optional)
+- [ ] Measured surface classifier, calibration, `telemetry-calibrate.py` (needs §6.3 captures)
+- [ ] Drag fit, `BOOST_HOLD` per car (optional)
+- [x] README, CHANGELOG, this document (run 4: the README's telemetry section covers the history, coaching, setup advice, the web page, learning without LEDs, recording and EA SPORTS WRC; the surface is said to stay mostly unknown until labels exist)
+
+### Stage tables
+
+Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
+
+- `dirt.json`: DiRT Rally 2.0, 170 entries: all 156 rally stages (12 per
+  location, 13 locations), 13 rallycross tracks and DirtFish. Names,
+  lengths (the float the game sends) and start z from dr2_logger
+  (`ErlerPhilipp/dr2_logger`, `source/dirt_rally/track_data_dr2.py`,
+  5e5fcbe), which adapted `soong-construction/dirt-rally-time-recorder`
+  (`resources/setup-dr2.sql`): every rally length is the same float in
+  both; start z within 1 m for most, up to 18.6 m apart for three
+  (Taylor Farm Sprint, Rockton Plains, Chandlers Creek; the time
+  recorder's value is kept as `start_z_alt`). Both MIT notices are in
+  the file. Confidence high for the rally stages, medium for rallycross
+  and DirtFish (dr2_logger alone). Surfaces are per location (the
+  sources have none): Monte Carlo mixed tarmac/snow/ice (a prior only;
+  no per-stage shares published), Sweden snow, Spain and Germany tarmac,
+  the rest gravel, rallycross mixed. `reverse_of` is set only where the
+  name says so (29); many other stages are reverses in the game.
+  The installed game could not check them: its stage database
+  (`catalogues/base.ctpk`), English text (`language/language_eng.lng`),
+  surfaces (`surface_materials.xml`) and route progress data are in the
+  encrypted `game/game*.dat` volumes, and the `locations/*.nefs` headers
+  are encrypted too; only the plain NeFS headers in `dirtrally2.exe`
+  (file names) are readable. Those agree on the counts: 13 countries of
+  2 location files × 6 routes (156), 13 rallycross tracks of one route
+  each, and DirtFish (`usa/twin_peaks`) with three routes, of which the
+  table has one (which one is unknown). DiRT 4 is not installed (only a
+  Feral log), so nothing about its fixed or "Your Stage" routes came
+  from files; it sends the same Codemasters packet, and a Your Stage
+  route, generated from a seed, has no fixed length to put in a table:
+  it gets a measured `dirt:<length>:<start z>` key like any unknown
+  stage, which matches only reruns of the same route.
+- `wrcg.json`: WRC Generations, 165 entries (21 rallies: 21 shakedowns,
+  96 specials, 38 long stages and 10 super specials), built from the
+  installed game by `scripts/stage-tables.py wrcg` (plain text files
+  under `Common/`, identical to the vanilla files):
+  - `Tuning/RALLIESMETRICS.CFG`: every route of every level
+    (`LEVELS/<level>/<level>.PLM`): `SSn_RaceTrack`, its reverse
+    `SSnR_RaceTrack`, long stages `ES…`, the shakedown `<cc>_Short_01`
+    (`IsShakedown`), a super special's `RaceTrack` and `VersusRaceTrack`
+    (its head-to-head layout, kept as `alt_codes`), each with `Length`
+    (km, the float the game sends), `ElevationMin/Max`, `SlopeUp/Down`
+    (total climb and descent, m; `Elevation` is their sum) and `LoadId`.
+  - `Tuning/FACTORIES/RALLIES.CFG`, `BONUS_RALLIES.CFG`: the rallies and
+    their specials: name key (`LocalesId.STAGENAME_…`), `SelectiveLoadId`
+    (the route whose `LoadId` is `1 << SelectiveLoadId` in the rally's
+    level; a super special names its own `Level`), `Reverse`, the rounded
+    length the menus show (`menu_length_m`; not what is driven: Media
+    Luna says 4.007 km and is 3.980 km), and the surface: `Surface`,
+    `SurfaceRatio` (% of it) and `Surface2`.
+  - Names: `SCRIPTS/LOCALISATION.LUA` gives each `LocalesId` its index;
+    `LOCALISATION/LOCALISATION_EN.PLOC` is a 4-byte header and then the
+    strings in index order (UTF-16LE, NUL-ended). So every special's name
+    is exact, accents included (Autódromo de León, Agnières-en-Devoluy).
+    A shakedown has no name key in the rally data: its name is the
+    string of `STAGENAME_<country>_SHK_01` (by the convention of the
+    other keys; `name_source` says which).
+  - Surfaces: the game's own for every special (`surface_source: game`);
+    it changed 13 from the earlier web table: Autódromo de León 80 %
+    tarmac, Harju 79 % tarmac, Marmaris and Great Orme tarmac, Elva,
+    Kanepi, Brenig and Dyfi part tarmac. Shakedowns have none in the game
+    files and keep the earlier table's (WRC Generations fandom wiki,
+    TechBriefly), `confidence: medium`; everything else is `high`.
+  - The earlier table's lengths (fandom wiki, WRC 8) were off by up to
+    0.56 km (Parque Tematico) and swapped some forward and reverse
+    figures (Media Luna 4010/3980 m; the game has 3979.65/3932.12 m); 37
+    stages had none. Names corrected: Grdanjci, Kostanjevac, Cuchilla
+    Nevada; shakedowns are "<country> shakedown" as in the game (their
+    keys changed). Rally Sweden is the Umeå map (Sävar, Brattby,
+    Kroksjö, Örträsk). Routes in no rally are listed in the table's
+    notes (Sarsjöliden, Japan's and New Zealand's ES1, Karlstad, three
+    Estonia onboarding routes, two short Mexico routes; a second
+    Ibarrilla reverse route, 0.5 m shorter, is kept as `alt_codes`).
+  - Location names stay the earlier table's (the keys); the game's full
+    rally name is `rally`.
+- `acr.json`: Assetto Corsa Rally to update 0.6 (2026-09-10), 46 stages
+  in Alsace, Wales, Monte Carlo, Greece and the Livigno ice circuit, the
+  game's own lengths (0.1 km) as two community dumps of its data table
+  read them (PacenotePal, acr-live-timing), agreeing on all 46; press
+  lists agree rounded. `track` is the shared-memory name as PacenotePal
+  builds it, in English.
+  Checked against the installed game (build of 2026-09-12; nothing is
+  encrypted, the data is Oodle-compressed IoStore/pak): `pakchunk1`'s
+  `DT_TracksVariants` (46 rows) and `DT_Pacenote*` (44 tables), and
+  `pakchunk0`'s `Localization/Game/<lang>/Game.locres`. All 46 variant
+  ids, English names, lengths (`Length`, 0.1 km) and surfaces agree, and
+  every English `track` string is the locres location name plus the
+  variant's short name, as PacenotePal builds it. Added from the game:
+  `elevation_start_m`, `sectors_km`, `pacenote_first_m` and
+  `pacenote_last_m`. The game's own lengths are rough: in 24 rows the
+  sectors do not add up to `Length`, and Elatia (Cut1 forward) says
+  4.9 km with sectors of 6.3 km and notes over 6.47 km (confidence
+  lowered to medium). The one known `trackSplineLength` (Cwmbiga - Afon
+  Biga, 12077.95 m) is 156 m past its last note (11921.5 m). `track`
+  collides only on `Alsace For_t` in English (and de, es, fr, it); in
+  Chinese the bridge's ASCII turns nearly every name to `_`, 10 groups
+  collide, and names cannot identify a stage.
+
+Matching: DiRT by length and start z against the table first; WRCG by
+the length it sends, to the float (0.5 m, nearest within 5 mm), else by
+the distance to the finish within 1 % (start positions of earlier runs
+to tell apart stages of one length; the location and surface when they
+stay open); ACR by its shared-memory track name. Tests in
+`tests/test_store.py` and `tests/test_drive_log.py`.
+
+Unverified (needs the §6.3 captures):
+- [x] WRCG sends the stage length (field 3, km, the table's float);
+  field 61 stays 0. Verified on marth's capture 20260925-145356: Media
+  Luna (forward, SS1_RaceTrack) and Autódromo de León (RaceTrack).
+- [ ] WRCG: whether its stage clock (field 1) stops at the finish line
+  and whether it sends progress anywhere (only needed where no length
+  is sent); that its lap distance (field 2) is the distance along the
+  stage.
+- [ ] WRCG: that every other route sends its Length the same way (two
+  routes seen); whether a head-to-head super special sends its
+  `VersusRaceTrack` length; the shakedown surfaces (web, not the game).
+- [ ] ACR: that the game builds `track` as PacenotePal says (the rule is
+  in its C++ shared-memory writer, not in data; Livigno untested), what
+  `trackConfiguration` holds (nothing documents it), and what
+  `trackSplineLength` is for a cut stage (its own or its parent
+  route's; only one value is known). No ACR capture yet.
+- [ ] DiRT: rallycross and DirtFish entries (one source); starting grid
+  places may put a rallycross start more than 15 m from the table's z.
+  Nothing in `dirt.json` is checked against the game's own data (it is
+  encrypted); two DirtFish routes are missing.
+- [ ] DiRT 4: its stages are not in the table (DR2 only); what a Your
+  Stage run sends (length, start) and whether reruns of one route match.
+
+## 17. Appendix: format research findings
+
+Checked against `telemetry.py` and the bridge at 8bcd348. Confidence: H =
+official documentation or proven from the numbers, M = several independent
+community decoders, L = one source or inference.
+
+| # | Finding | Conf. |
+|---|---|---|
+| 1 | FH6's doc says to avoid UDP 5200–5300 (its own outgoing socket); 5300 can collide | H |
+| 2 | DiRT Rally 1/2 engine rate, max and idle (37, 63, 64) are rad/s, not rpm/10: ×10 overstates rpm by 4.72 % | H |
+| 3 | WRC Generations copies the layout; g-forces probably m/s², reverse = 10, rpm unit unverified | M/L |
+| 4 | Forza gear 11 = neutral (decoded as None today), 0 = reverse | M |
+| 5 | Codemasters reverse = 10 (some titles negative), decoded as None today | M |
+| 6 | DiRT car keys (max, idle, gears) collide: 82 cars, 66 keys | H |
+| 7 | EA SPORTS WRC's default `wrc` packet is 237 bytes and not decoded | H |
+| 8 | The Codemasters catch-all would take any 4-aligned 256–512-byte packet, EA custom ones included | M |
+| 9 | BeamNG OutGauge always sends car `"beam"`: every BeamNG car shares one learnt car | H |
+| 10 | Bridge `maxRpm` (static 412) may be missing in ACR; physics `currentMaxRpm` 588 (int32) exists in ACC/ACR | M |
+| 11 | ACR's static `track` is often empty; `trackSplineLength` (520) identifies the stage | M/L |
+| 12 | Bridge `gear - 1` is right for AC, ACC and ACR | H/M-H |
+| 13 | Bridge views (64/416 B) must grow for new fields: physics 580 (AC1) / 800 (ACC/ACR), static 684 / 820 | M |
+| 14 | The `acpmf` car key does not record which of AC, ACC, ACR it came from | M |
+| 15 | The Codemasters car name's "rpm" carries the unit error of #2 | H |
+
+Sources: FH6 and FM Data Out articles (support.forza.net), EA WRC's own
+`readme.txt`/`channels.json`, the AC and ACC shared-memory PDFs, dr2_logger
+(MIT), vAzhureRacingHub, pithsim, theRTB/ForzaShiftTone,
+albertowd/live-telemetry-evo, nobonobo/ac-telemetry, the BeamNG protocols
+documentation.

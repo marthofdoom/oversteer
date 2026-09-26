@@ -45,7 +45,7 @@
   <object class="GtkAdjustment" id="rev_leds_port_adjustment">
     <property name="lower">1024</property>
     <property name="upper">65535</property>
-    <property name="value">5300</property>
+    <property name="value">5310</property>
     <property name="step-increment">1</property>
     <property name="page-increment">100</property>
   </object>
@@ -3208,6 +3208,8 @@
                                   <item id="percent" translatable="yes">% of max</item>
                                   <item id="rpm" translatable="yes">RPM</item>
                                 </items>
+                                <property name="tooltip-text" translatable="yes">% of max: of the car's maximum RPM, the limiter learnt at a launch when there is one, otherwise what the game reports.
+RPM: a fixed engine speed.</property>
                                 <signal name="changed" handler="on_rev_leds_shift_unit_changed" swapped="no"/>
                               </object>
                               <packing>

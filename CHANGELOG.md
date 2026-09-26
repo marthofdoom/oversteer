@@ -1,5 +1,149 @@
 # Changelog
 
+## 0.14.0 — 2026-09-25
+
+### Added
+- Rev lights: **Learn the limiter at each launch**. A rally stage starts
+  with clutch in, handbrake up and the throttle floored, which holds the
+  engine on its limiter; Oversteer learns that RPM at every standing
+  launch and the % shift point applies to it, so each car on each stage
+  gets its own shift light even when the game reports no maximum or the
+  wrong one. It is raised if the car is later held on a higher limiter
+  flat out (a launch control capping the revs at the line), never by a
+  moment past it, and forgotten when the telemetry stops between stages.
+  With no handbrake fitted, clutch in and throttle floored is the launch.
+- Rev lights: **Shift lights at the learnt best upshift for each gear**:
+  once Oversteer knows the car's power curve and gearing, the lights
+  complete where the next gear starts pulling harder; a gear that pulls
+  to the limiter still flashes as it gets there.
+- Telemetry tab: the shift table has a column per way of changing gear
+  (H-pattern, sequential, paddles) once you have used it. How each change
+  was made comes from the control you pressed: a shifter gear, the
+  sequential plate or a paddle.
+- EA SPORTS WRC telemetry: the game's default structure, or Oversteer's own
+  (car and stage ids, session start/end/pause), set up with two Copy
+  buttons under the Telemetry tab's Settings.
+- `scripts/telemetry-capture.py --write` records raw telemetry to a file;
+  `scripts/telemetry-replay.py` plays it back through the shift learner,
+  re-sends it over UDP, or cuts a piece out of it.
+- Telemetry history: every drive is kept as runs (a stage attempt, a lap
+  session, a stretch of free driving) with their corners, a 10 Hz trace
+  and every change of gear up or down, flagged when a gate was missed,
+  a gear skipped, the engine over-revved or a paddle double-tapped. Each
+  run is judged a discipline (rally stage, hillclimb, circuit,
+  rallycross, time attack, free roam) with the evidence that decided it,
+  or left unknown when there is none. Each gearing a car was driven with
+  is kept as a tune.
+- Coaching from that history in the Telemetry tab: what the last session
+  was and why Oversteer thinks so, the habit to work on first, up to
+  three tips with their numbers (changing up early or late per gear and
+  way of changing, the limiter, missed gates and double taps, bogged
+  launches, both pedals at once on tarmac, coasting and corners against
+  your best run of a stage) and praise when a habit improves. A tip
+  shown on two occasions (hours apart) goes quiet until it gets worse. Changing up early waits
+  until the surface is known, since short-shifting on gravel can be
+  right.
+- Tuning advice from the runs on the car's current setup: a final drive
+  too short or too long for a stage, a gear too long out of corners, and
+  oversteer or understeer fitted to how you drive, always "if the setup
+  allows" and with the driving alternative first.
+- "Label last session…" in the Telemetry tab: say what a session was
+  (discipline, surface, wet, shifter), for Oversteer to learn surfaces
+  from.
+- A read-only web page for a phone or another computer (off by default,
+  TCP 5301, under the Telemetry tab's Settings): the live gear and revs
+  against the shift point, the shift tables, coaching, setup advice and
+  recent sessions with their evidence. Nothing can be changed from it;
+  anyone on the same network can read it, so it can be limited to this
+  computer. Clients with a public address are refused.
+- "Learn from game telemetry": learn shift points and keep the history
+  with the rev lights off, or with a wheel that has none.
+- "Record raw telemetry" under the Telemetry tab's Settings (off by
+  default): what the game sends is kept as it arrived, a file per drive,
+  in Oversteer's data folder, up to a size you choose (1 GB by default;
+  the oldest go first). Labelling a session also labels its captures and
+  keeps them.
+- Telemetry tab: the best upshift of each gear shows the range it is
+  known to.
+- Stage tables for WRC Generations (all 21 rallies, 165 stages), Assetto
+  Corsa Rally (46 stages to update 0.6) and DiRT Rally 2.0 (every rally
+  stage, rallycross track and DirtFish): a run on a known stage has its
+  name, rally and surface from the first drive, without labelling. The
+  WRC Generations and Assetto Corsa Rally tables come from the games'
+  own data (exact lengths, names, surface shares); WRC Generations sends
+  each stage's exact length, which identifies it, stage and reverse
+  alike. DiRT Rally 2.0's data is encrypted: its table is the community
+  one, checked against the game's stage counts.
+- The Assetto Corsa family bridge (`oversteer-run`) sends more: the
+  stage's length and the progress along it, wheel speeds, suspension
+  travel and the game's current rev limit. `OVERSTEER_BRIDGE_VERBOSE=1`
+  in a game's launch options logs the rest once a second, for checking a
+  game's layout.
+- Oversteer reopens the profile last used when it starts (unless
+  `--profile` or a setting on the command line says otherwise): cars
+  and history are kept per profile, and starting on none showed an
+  empty Telemetry tab.
+
+### Changed
+- Profiles saved before this version get both new rev light switches
+  (the launch limiter, the learnt upshifts) turned on, as new profiles
+  do: the lights then follow the car rather than the fixed percentage.
+  Untick them under the Telemetry tab's Settings for the old behaviour.
+  A profile that never stored a shift point keeps 97 %; new ones start
+  at 95 %.
+- The shift learner compares each gear's own power curve where it knows
+  both, takes the slope out of the acceleration where the game says
+  which way is up, ignores turbo lag and wheelspin, and gives each best
+  change up a range. Its database moves to a new layout (a copy of the
+  old file is kept as `telemetry.db.v1.bak`), and writing it no longer
+  happens on the telemetry thread.
+- A driving session now ends after two minutes without telemetry, not
+  two seconds, so pausing mid-stage no longer splits it. Forgetting a car
+  starts its learning over but keeps its history.
+- The telemetry port is now **UDP 5310** for new profiles and
+  `oversteer-run`. Forza Horizon 6 binds its own socket in 5200–5300 and
+  asks Data Out to stay clear of that range. Profiles that saved 5300 keep
+  it. When nothing arrives, Oversteer listens on the other port for a
+  second now and then and says so if a game is sending there.
+- The listener takes telemetry from one source at a time (the first one
+  heard, until it goes quiet), so a bridge left running next to a game
+  no longer mixes two cars.
+- The Telemetry tab is laid out like the other tabs, in two views.
+  **Car and coaching**: the car, a one-line live status with a coloured
+  dot, the shift points in a framed table (the best upshift in bold),
+  coaching one row per tip with a Focus / Tip / Better tag, the last
+  session with "Why Oversteer thinks so" and "Label…", recent sessions
+  one row each, the setup. **Settings**: framed lists for receiving
+  telemetry, the rev lights (no longer one crowded row), the web page
+  and recording, each row a title with a short explanation or its status
+  under it.
+- The web page is a dark live dashboard for a phone or laptop next to
+  the rig: shift lights, the gear huge, speed, rpm, where to change up in
+  this gear and the stage by name with its progress, updated four times
+  a second; then coaching, the shift points with the current gear
+  highlighted, the setup and recent sessions. It fits portrait and
+  landscape phones and puts the live panel beside the rest on a laptop.
+  It keeps the screen on: with the browser's wake lock where allowed
+  (HTTPS or the same computer), otherwise after a first tap with a tiny
+  muted video made in the page. A chip at the top says whether the screen
+  is being kept on.
+
+### Fixed
+- Telemetry packets arriving in a burst, or a reset after a crash, were
+  taken for a teleport and split one stage into several runs.
+- WRC Generations sends its stage's length where DiRT sends progress: it
+  was read as progress, so no stage finished.
+- DiRT Rally 2.0 (and DiRT Rally, DiRT 4): engine rpm was read 4.7 % too
+  high (the game sends rad/s, not rpm / 10), and with it the shift light
+  and everything learnt. Cars already learnt are corrected once when the
+  telemetry database opens (a backup is kept as `telemetry.db.v0.bak`).
+- Reverse in DiRT Rally and WRC Generations, and neutral in Forza, were
+  read as "unknown gear"; H-pattern changes through neutral are now seen
+  in Forza Horizon.
+- Gear ratios are learnt only at part throttle, where the tyres barely
+  slip: a first run spinning up gravel no longer leaves a car with wrong
+  ratios and a false "re-tuned" note.
+
 ## 0.13.1 — 2026-09-24
 
 ### Fixed

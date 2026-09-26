@@ -75,3 +75,19 @@ window#overlay-window .overlay-leds levelbar:nth-child(5) block.filled {
     border-color: #e00000;
     background-color: #e00000;
 }
+/* The Telemetry tab */
+.telemetry-tag {
+    border-radius: 4px;
+    border: 1px solid currentColor;
+    padding: 1px 6px;
+    font-size: smaller;
+    font-weight: bold;
+}
+.telemetry-focus { color: #e66100; }
+.telemetry-praise { color: #2ec27e; }
+.telemetry-tip { color: #3584e4; }
+.telemetry-dot { color: alpha(currentColor, 0.4); }
+.telemetry-dot.telemetry-waiting { color: #e5a50a; }
+.telemetry-dot.telemetry-live { color: #2ec27e; }
+.telemetry-header { font-size: smaller; padding-bottom: 6px; }
+.telemetry-cell { padding: 3px 0; }
