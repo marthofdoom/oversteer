@@ -43,6 +43,38 @@ def test_session_lines():
                          '9.8 km, 0.5 s/km on the limiter')
 
 
+def test_coaching_items():
+    tips = [Tip('a', 'focus', 'Change up later.'), Tip('b', 'tip', 'Brake earlier.'), Tip('c', 'still', 'Still: x.')]
+    assert view.coaching_items(tips) == [('Focus', 'Change up later.', 'focus'), ('', 'Brake earlier.', 'tip'),
+                                         ('', 'Still: x.', 'still')]
+    assert view.coaching_items(tips[2:], ['Live advice.'])[0] == ('', 'Live advice.', 'tip')
+
+
+def test_session_rows():
+    [row] = view.session_rows([{'started': 1.7e9, 'stage': 'Col de Turini', 'discipline': 'rally-stage',
+                                'surface': 'gravel', 'shifts': 30, 'error': -120.0, 'distance': 9800.0,
+                                'limiter_time': 4.9}])
+    assert row[1:] == ('Col de Turini  ·  Rally stage gravel',
+                       '30 changes up, -120 rpm from the best  ·  9.8 km, 0.5 s/km on the limiter')
+    [row] = view.session_rows([{'started': 1.7e9}])
+    assert row[1:] == ('', '')
+
+
+def test_live_status():
+    from oversteer.telemetry_formats import Sample
+    state, text = view.live_status(None)
+    assert state == 'off' and 'Learn from game telemetry' in text
+    assert view.live_status(5300) == ('waiting', 'Waiting for telemetry on UDP 5300.')
+    sample = Sample(6120.0, 7500.0, gear=3, speed=26.7, car='eawrc/17')
+    sample.car_name, sample.distance, sample.stage_length = 'Fabia <R5>', 2300.0, 9800.0
+    state, text = view.live_status(5300, sample, 6650.0)
+    assert state == 'live'
+    assert text == ('<b>Fabia &lt;R5&gt;</b>  ·  gear 3  ·  6120 rpm  ·  96 km/h  ·  lights at the learnt 6650 rpm'
+                    '  ·  2.3 of 9.8 km')
+    sample.gear, sample.distance = -1, None
+    assert 'gear R' in view.live_status(5300, sample)[1] and 'km  ·' not in view.live_status(5300, sample)[1]
+
+
 def test_web_status():
     assert view.web_status(False, None, [], False, 'lan', 5301).startswith('Off.')
     assert 'could not start: in use' in view.web_status(False, 'in use', [], False, 'lan', 5301)
@@ -73,13 +105,14 @@ def test_shift_table():
     snapshot = {'limiter': 7500.0, 'gears': gears, 'power_bands': 30, 'power_source': 'game',
                 'methods': {1: {'h-pattern': (6790.0, 10)}}}
     headers, rows = view.shift_table(snapshot)
-    assert headers == ('Gear', 'rpm per km/h', 'Best upshift', 'of limiter', 'You change up', 'H-pattern', 'Samples')
-    assert rows[0] == ('1', '100.0', '7100 rpm (6950–7200)', '95 %', '6800 rpm (12)', '6790 rpm (10)', '80')
-    assert rows[1][2:5] == ('learning…', '', '—') and rows[2][2] == 'top gear'
+    assert headers == ('Change', 'Best upshift', 'Known to', 'of limiter', 'You change up', 'H-pattern',
+                       'rpm per km/h', 'Samples')
+    assert rows[0] == ('1→2', '7100 rpm', '6950–7200', '95 %', '6800 rpm (12)', '6790 rpm (10)', '100.0', '80')
+    assert rows[1][1:5] == ('learning…', '', '', '—') and rows[2][:2] == ('3 (top)', 'top gear')
     # No band yet, no method used: the plain figure and no method columns
     gears[0].update(best_low=None, best_high=None)
     headers, rows = view.shift_table(dict(snapshot, methods={}))
-    assert 'H-pattern' not in headers and rows[0][2] == '7100 rpm'
+    assert 'H-pattern' not in headers and rows[0][1:3] == ('7100 rpm', '')
     assert view.shift_summary(snapshot).startswith('Limiter 7500 rpm  ·  30 rev bands of power known (engine power '
                                                    'from the game)')
     assert view.shift_summary(None).startswith('Nothing learnt yet')

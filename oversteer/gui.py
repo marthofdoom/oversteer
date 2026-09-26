@@ -938,23 +938,11 @@ class Gui:
 
     def refresh_telemetry_view(self):
         """Once a second: the live line, and the shown car's learning."""
+        from .telemetry_view import live_status
         telemetry = self.telemetry
         sample = telemetry.live if telemetry is not None else None
-        if telemetry is None:
-            live = _("Turn on the rev lights or \"Learn from game telemetry\" (in Settings below) to read game "
-                     "telemetry and learn from it.")
-        elif sample is None:
-            live = _("Waiting for telemetry on UDP {}.").format(telemetry.port)
-        else:
-            parts = [GLib.markup_escape_text(sample.car_name or sample.car or _("unknown car"))]
-            if sample.gear is not None:
-                parts.append(_("gear {}").format({-1: 'R', 0: 'N'}.get(sample.gear, sample.gear)))
-            parts.append('{:.0f} rpm'.format(sample.rpm))
-            if sample.speed is not None:
-                parts.append('{:.0f} km/h'.format(sample.speed * 3.6))
-            if telemetry.using_learnt:
-                parts.append(_("lights at the learnt {:.0f} rpm").format(telemetry.using_learnt))
-            live = '<b>{}</b>'.format('  ·  '.join(parts))
+        live = live_status(telemetry.port if telemetry is not None else None, sample,
+                           telemetry.using_learnt if telemetry is not None else None)
         key = self.shift_learner.car.key if self.shift_learner.car else None
         if key != self.telemetry_car_live:
             self.telemetry_car_live = key

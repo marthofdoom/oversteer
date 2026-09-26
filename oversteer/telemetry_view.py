@@ -5,6 +5,7 @@ settings are read from and written to config.ini here too."""
 
 import time
 from locale import gettext as _
+from xml.sax.saxutils import escape
 
 DISCIPLINES = {
     'rally-stage': _("Rally stage"), 'hillclimb': _("Hillclimb"), 'circuit': _("Circuit"),
@@ -48,36 +49,39 @@ SHIFT_METHODS = (('h-pattern', _("H-pattern")), ('sequential', _("Sequential")),
 
 
 def shift_table(snapshot):
-    """(headers, rows of cells) for the shift table: per gear its
-    gearing, the best change up with the range it is known to (the
-    bootstrap band), where you change up, per way of changing once that
-    way has been used, and the samples behind the gearing."""
+    """(headers, rows of cells) for the shift table: per gear the change
+    up it is about, the best rpm for it and the range that is known to
+    (the bootstrap band: narrow once the power curve around it is well
+    measured), its share of the limiter, where you change up, per way of
+    changing once that way has been used, then the gearing and the
+    samples behind it."""
     limiter = snapshot['limiter']
     methods = snapshot.get('methods') or {}
     used = [(m, name) for m, name in SHIFT_METHODS if any(m in v for v in methods.values())]
-    headers = ((_("Gear"), _("rpm per km/h"), _("Best upshift"), _("of limiter"), _("You change up"))
-               + tuple(name for _m, name in used) + (_("Samples"),))
+    headers = ((_("Change"), _("Best upshift"), _("Known to"), _("of limiter"), _("You change up"))
+               + tuple(name for _m, name in used) + (_("rpm per km/h"), _("Samples")))
     rows = []
     for row in snapshot['gears']:
+        band = ''
         if row['last']:
-            best, share = _("top gear"), ''
-        elif row['best'] is None:
-            best, share = _("learning…"), ''
+            change, best, share = _("{} (top)").format(row['gear']), _("top gear"), ''
         else:
-            best = '{:.0f} rpm'.format(row['best'])
-            # The range the best change up is known to: a narrow one
-            # means the power curve around it is well measured
-            low, high = row.get('best_low'), row.get('best_high')
-            if low is not None and high is not None and high - low >= 1.0:
-                best += ' ({:.0f}–{:.0f})'.format(low, high)
-            share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
+            change = '{}→{}'.format(row['gear'], row['gear'] + 1)
+            if row['best'] is None:
+                best, share = _("learning…"), ''
+            else:
+                best = '{:.0f} rpm'.format(row['best'])
+                low, high = row.get('best_low'), row.get('best_high')
+                if low is not None and high is not None and high - low >= 1.0:
+                    band = '{:.0f}–{:.0f}'.format(low, high)
+                share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
         mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
         per_method = []
         for method, _name in used:
             average = methods.get(row['gear'], {}).get(method)
             per_method.append('{:.0f} rpm ({})'.format(*average) if average else '—')
-        rows.append((str(row['gear']), '{:.1f}'.format(row['ratio'] / 3.6), best, share, mine)
-                    + tuple(per_method) + (str(row['ratio_samples']),))
+        rows.append((change, best, band, share, mine) + tuple(per_method)
+                    + ('{:.1f}'.format(row['ratio'] / 3.6), str(row['ratio_samples'])))
     return headers, rows
 
 
@@ -117,19 +121,24 @@ def context_line(session, runs, stage):
     return '  ·  '.join(parts), evidence
 
 
-def coaching_lines(tips, advice=None):
-    """The coach's tips as (line, kind); `advice` (the live car's own
-    lines) when the coach has nothing new to say, as before a run has
-    ended."""
-    lines = []
+def coaching_items(tips, advice=None):
+    """The coach's tips as (badge, text, kind), the badge naming the kind
+    ('' for a plain tip); `advice` (the live car's own lines) when the
+    coach has nothing new to say, as before a run has ended."""
+    items = []
     for tip in tips:
         kind = tip['kind'] if isinstance(tip, dict) else tip.kind
         text = tip['text'] if isinstance(tip, dict) else tip.text
-        label = KINDS.get(kind, '')
-        lines.append(('{}: {}'.format(label, text) if label else text, kind))
-    if advice and not any(kind != 'still' for _, kind in lines):
-        lines = [(text, 'tip') for text in advice] + lines
-    return lines
+        items.append((KINDS.get(kind, ''), text, kind))
+    if advice and not any(kind != 'still' for _b, _t, kind in items):
+        items = [('', text, 'tip') for text in advice] + items
+    return items
+
+
+def coaching_lines(tips, advice=None):
+    """coaching_items() as (line, kind), the badge before the text."""
+    return [('{}: {}'.format(badge, text) if badge else text, kind)
+            for badge, text, kind in coaching_items(tips, advice)]
 
 
 def tuning_lines(tune, notes):
@@ -163,27 +172,61 @@ def tuning_lines(tune, notes):
     return lines
 
 
-def session_lines(history):
-    """One line per recent session (reader.history): date, stage,
-    discipline and surface, shift error and limiter time per km."""
-    lines = []
+def session_rows(history):
+    """Per recent session (reader.history): (when, where, facts): the
+    date, the stage with the discipline and surface, then the changes up
+    with their error and the time on the limiter per km."""
+    rows = []
     for h in history:
-        parts = [time.strftime('%x %H:%M', time.localtime(h['started']))]
+        when = time.strftime('%x %H:%M', time.localtime(h['started']))
+        where = []
         if h.get('stage') or h.get('track'):
-            parts.append(h.get('stage') or h.get('track'))
+            where.append(h.get('stage') or h.get('track'))
         found = [DISCIPLINES.get(h.get('discipline'), '') if h.get('discipline') not in (None, 'unknown') else '',
                  surface_name(h.get('surface')) or '']
         if any(found):
-            parts.append(' '.join(x for x in found if x))
+            where.append(' '.join(x for x in found if x))
+        facts = []
         if h.get('shifts'):
             error = h.get('error')
-            parts.append(_("{} changes up, {:+.0f} rpm from the best").format(h['shifts'], error)
+            facts.append(_("{} changes up, {:+.0f} rpm from the best").format(h['shifts'], error)
                          if error is not None else _("{} changes up").format(h['shifts']))
         km = (h.get('distance') or 0.0) / 1000.0
         if km >= 0.5:
-            parts.append(_("{:.1f} km, {:.1f} s/km on the limiter").format(km, (h.get('limiter_time') or 0.0) / km))
-        lines.append('  ·  '.join(parts))
-    return lines
+            facts.append(_("{:.1f} km, {:.1f} s/km on the limiter").format(km, (h.get('limiter_time') or 0.0) / km))
+        rows.append((when, '  ·  '.join(where), '  ·  '.join(facts)))
+    return rows
+
+
+def session_lines(history):
+    """One line per recent session: session_rows() joined."""
+    return ['  ·  '.join(part for part in row if part) for row in session_rows(history)]
+
+
+def live_status(port, sample=None, learnt=None):
+    """(state, markup) of the line about the telemetry arriving now:
+    'off' without a listener (`port` None), 'waiting' while nothing
+    arrives on it, 'live' with the car, gear, revs, speed, where the
+    lights end when learnt, and the way through the stage."""
+    if port is None:
+        return 'off', escape(
+            _("Not listening. Turn on the rev lights or \"Learn from game telemetry\" in Settings to read the "
+              "game's telemetry and learn from it."))
+    if sample is None:
+        return 'waiting', escape(_("Waiting for telemetry on UDP {}.").format(port))
+    parts = ['<b>{}</b>'.format(escape(sample.car_name or sample.car or _("unknown car")))]
+    if sample.gear is not None:
+        parts.append(_("gear {}").format({-1: 'R', 0: 'N'}.get(sample.gear, sample.gear)))
+    parts.append('{:.0f} rpm'.format(sample.rpm))
+    if sample.speed is not None:
+        parts.append('{:.0f} km/h'.format(sample.speed * 3.6))
+    if learnt:
+        parts.append(_("lights at the learnt {:.0f} rpm").format(learnt))
+    distance = getattr(sample, 'distance', None)
+    length = getattr(sample, 'stage_length', None)
+    if distance is not None and length:
+        parts.append(_("{:.1f} of {:.1f} km").format(max(0.0, distance) / 1000.0, length / 1000.0))
+    return 'live', '  ·  '.join(parts)
 
 
 def web_status(running, error, addresses, remote_seen, bind, port):
@@ -298,5 +341,5 @@ def gather(reader, profile, key, show_all=False):
     notes = tuning.advice(reader, profile, car['id'], surface)
     return {'car_id': car['id'], 'context': context_line(session, runs, stage), 'tips': tips,
             'tuning': tuning_lines(tuning.tune_summary(reader, car['id'], car['game']), notes),
-            'sessions': session_lines(reader.history(profile, car['key'], 10)),
+            'sessions': session_rows(reader.history(profile, car['key'], 10)),
             'last_session': session}
