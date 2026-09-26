@@ -397,8 +397,8 @@ def test_ovst_v3_stage_and_wheels():
     sample = decode_sample(packet)
     assert sample.game == 'acr' and sample.car == 'acr/rally_car'
     assert sample.stage_length == 8123.0 and sample.progress == 0.25
-    # distanceTraveled counts the session: the distance along the stage is the progress
-    assert sample.distance is None and abs(sample.lap_distance - 2030.75) < 0.01
+    # ACR: its distanceTraveled is the position along the stage's spline
+    assert sample.distance is None and sample.lap_distance == 2030.0
     assert sample.max_rpm == 7650.0                       # the game's current limit beats the static figure
     assert all(abs(w - 78.0 * 0.32) < 1e-4 for w in sample.wheel_speed)
     assert abs(sample.susp_norm[2] - 0.5) < 1e-6 and sample.pos == (120.0, 30.0, -450.0)
@@ -414,3 +414,13 @@ def test_ovst_v3_from_an_unnamed_game_stays_acpmf():
     from oversteer.telemetry_formats import decode_sample
     sample = decode_sample(_ovst3(game=0))
     assert sample.game == 'acpmf' and sample.car == 'acpmf/rally_car'
+    # AC's distance counts the session: only progress gives the distance along
+    assert abs(decode_sample(_ovst3(game=1)).lap_distance - 0.25 * 8123.0) < 0.01
+
+
+def test_ovst_v3_before_the_game_names_the_car():
+    from oversteer.telemetry_formats import decode_sample
+    sample = decode_sample(_ovst3(name=b''))
+    assert sample.car is None and sample.rpm == 6100.0      # the rev lights still work
+    stuck = decode_sample(_ovst3(spline=0.0))                 # ACR leaves the spline position at 0
+    assert stuck.progress is None and stuck.lap_distance == 2030.0

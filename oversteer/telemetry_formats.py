@@ -277,6 +277,11 @@ def _ovst3(sample, v):
         sample.game = game
         if sample.car and sample.car.startswith('acpmf/') and sample.car != 'acpmf/unknown':
             sample.car = '{}/{}'.format(game, sample.car_name)
+    if sample.car == 'acpmf/unknown':
+        # The first packets of a stage come before the game has filled in
+        # the car's name: no car yet, rather than a session started for an
+        # unknown one (seen on marth's ACR captures)
+        sample.car = None
     at = 3 + 2 + 9                                   # past game, flags2, reserved, clutch/steer, three vectors
     slip, rot, travel = v[at:at + 4], v[at + 4:at + 8], v[at + 8:at + 12]
     at += 16                                         # and the wheel loads
@@ -294,11 +299,15 @@ def _ovst3(sample, v):
         sample.max_rpm = current_max_rpm
     if math.isfinite(track_length) and track_length > 100:
         sample.stage_length = track_length
-    if math.isfinite(spline_pos) and 0.0 <= spline_pos <= 1.0:
-        sample.progress = spline_pos
-    # distanceTraveled counts the whole session, not the stage: the
-    # distance along the stage is the progress along its spline
-    if sample.progress is not None and sample.stage_length:
+    if math.isfinite(spline_pos) and 0.0 < spline_pos <= 1.0:
+        sample.progress = spline_pos                 # ACR leaves it at 0 throughout
+    # ACR's distanceTraveled is the position along the stage's road spline
+    # (a capture of Wales Afon Bidno: 238 m at the start line, rising to
+    # 5518 m): the distance along the stage. Elsewhere, the progress along
+    # the spline when the game fills it in.
+    if game == 'acr' and math.isfinite(distance) and distance > 0.0:
+        sample.lap_distance = distance
+    elif sample.progress is not None and sample.stage_length:
         sample.lap_distance = sample.progress * sample.stage_length
     sample.laps = laps if laps >= 0 else None
     sample.pos = _vector(world)
