@@ -1558,6 +1558,20 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   no per-stage shares published), Sweden snow, Spain and Germany tarmac,
   the rest gravel, rallycross mixed. `reverse_of` is set only where the
   name says so (29); many other stages are reverses in the game.
+  The installed game could not check them: its stage database
+  (`catalogues/base.ctpk`), English text (`language/language_eng.lng`),
+  surfaces (`surface_materials.xml`) and route progress data are in the
+  encrypted `game/game*.dat` volumes, and the `locations/*.nefs` headers
+  are encrypted too; only the plain NeFS headers in `dirtrally2.exe`
+  (file names) are readable. Those agree on the counts: 13 countries of
+  2 location files × 6 routes (156), 13 rallycross tracks of one route
+  each, and DirtFish (`usa/twin_peaks`) with three routes, of which the
+  table has one (which one is unknown). DiRT 4 is not installed (only a
+  Feral log), so nothing about its fixed or "Your Stage" routes came
+  from files; it sends the same Codemasters packet, and a Your Stage
+  route, generated from a seed, has no fixed length to put in a table:
+  it gets a measured `dirt:<length>:<start z>` key like any unknown
+  stage, which matches only reruns of the same route.
 - `wrcg.json`: WRC Generations, 165 entries (21 rallies: 21 shakedowns,
   96 specials, 38 long stages and 10 super specials), built from the
   installed game by `scripts/stage-tables.py wrcg` (plain text files
@@ -1633,6 +1647,10 @@ Unverified (needs the §6.3 captures):
   to match ACR).
 - [ ] DiRT: rallycross and DirtFish entries (one source); starting grid
   places may put a rallycross start more than 15 m from the table's z.
+  Nothing in `dirt.json` is checked against the game's own data (it is
+  encrypted); two DirtFish routes are missing.
+- [ ] DiRT 4: its stages are not in the table (DR2 only); what a Your
+  Stage run sends (length, start) and whether reruns of one route match.
 
 ## 17. Appendix: format research findings
 
