@@ -2,109 +2,201 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0d10">
 <title>Oversteer telemetry</title>
 <style>
 :root {
-  --bg: #f6f6f4; --card: #ffffff; --text: #1d1f21; --dim: #62666b; --line: #dcdcd8;
-  --accent: #2f6fdb; --good: #1f8a4c; --warn: #b8660b; --bad: #c0392b; --bar: #e7e7e3;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #151618; --card: #1f2124; --text: #e8e8e6; --dim: #9a9ea3; --line: #33363a;
-    --accent: #6aa0ff; --good: #4cc37e; --warn: #e3a044; --bad: #ff6b5b; --bar: #2c2f33;
-  }
+  --bg: #0b0d10; --card: #14171c; --raised: #1b1f26; --text: #f2f4f7; --dim: #98a1ac; --faint: #5d6570;
+  --line: #262b33; --accent: #4c9dff; --good: #3ddc84; --warn: #ffb020; --bad: #ff4d4d; --off: #242933;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
-  margin: 0; background: var(--bg); color: var(--text);
-  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
+  margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden;
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
-main { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
-header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-h1 { font-size: 18px; margin: 4px 0; }
-h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 8px; }
-.status { color: var(--dim); font-size: 13px; }
-section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 12px; }
-.live { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 14px; align-items: center; }
-.gear { font-size: 56px; font-weight: 700; line-height: 1; min-width: 1.2ch; text-align: center; font-variant-numeric: tabular-nums; }
-.rpm { font-variant-numeric: tabular-nums; }
-.speed { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-.speed small { font-size: 13px; color: var(--dim); font-weight: 400; }
-.meter { position: relative; height: 14px; background: var(--bar); border-radius: 7px; overflow: hidden; margin-top: 4px; }
-.meter .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
-.meter .fill.hot { background: var(--bad); }
-.meter .mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); display: none; }
-.progress { grid-column: 1 / -1; color: var(--dim); font-size: 13px; }
-select { width: 100%; font: inherit; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
-.scroll { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th:first-child, td:first-child { text-align: left; }
-th { font-weight: 600; color: var(--dim); font-size: 13px; }
-td .band { color: var(--dim); font-size: 12px; }
+button { font: inherit; color: inherit; }
+main { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; }
+
+/* The bar at the top: connection and screen, always in view */
+.top {
+  position: sticky; top: 0; z-index: 2; background: var(--bg);
+  display: flex; align-items: center; gap: 8px; padding: 10px 0 8px;
+  padding-top: max(10px, env(safe-area-inset-top));
+}
+.brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; margin-right: auto; white-space: nowrap; flex: none; }
+.chip {
+  display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; flex: 0 1 auto; min-width: 0;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--card);
+  font-size: 13px; line-height: 1; color: var(--dim); white-space: nowrap;
+}
+.chip > span:last-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+@media (max-width: 420px) { .brand { display: none; } #conn { margin-right: auto; } }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+.chip.st-live .dot { background: var(--good); }
+.chip.st-waiting .dot { background: var(--warn); }
+.chip.st-down .dot { background: var(--bad); }
+#wake { cursor: pointer; flex-shrink: 0; }
+#wake.tap { color: var(--text); border-color: var(--accent); }
+#wake.on { color: var(--dim); }
+#wake video { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--faint); object-fit: cover; }
+#wake .sun { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--faint); flex: none; }
+#wake.on .sun { border-color: var(--good); background: var(--good); }
+#wake.tap .sun { border-color: var(--accent); }
+
+/* Live: the numbers to read at arm's length */
+.live {
+  display: grid; gap: 10px 16px; align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "lights lights" "gear speed" "gear rpm" "shift shift" "stage stage";
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+}
+.lights { grid-area: lights; display: grid; grid-template-columns: repeat(15, 1fr); gap: 4px; height: 26px; }
+.lights i { border-radius: 4px; background: var(--off); transition: background .08s; }
+.lights i.g { background: var(--good); } .lights i.y { background: var(--warn); } .lights i.r { background: var(--bad); }
+.lights.flash i { background: var(--accent); animation: flash .25s steps(2) infinite; }
+@keyframes flash { 50% { background: var(--off); } }
+.gear {
+  grid-area: gear; font-size: clamp(110px, 34vw, 230px); font-weight: 800; line-height: .9;
+  text-align: center; letter-spacing: -.04em;
+}
+.gear.hot { color: var(--bad); }
+.num { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; }
+.num b { font-size: clamp(40px, 12vw, 84px); font-weight: 700; line-height: 1; }
+.num span { color: var(--dim); font-size: 14px; }
+.speed { grid-area: speed; } .rpm { grid-area: rpm; }
+.rpm b { font-size: clamp(30px, 9vw, 60px); }
+.shift { grid-area: shift; display: flex; align-items: baseline; gap: 4px 12px;
+  border-top: 1px solid var(--line); padding-top: 10px; flex-wrap: wrap; }
+.shift .k { color: var(--dim); font-size: 14px; }
+.shift b { font-size: clamp(24px, 7vw, 40px); }
+.shift .src { color: var(--dim); font-size: 14px; margin-left: auto; }
+.stage { grid-area: stage; }
+.stage .name { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; }
+.stage .name span:first-child { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage .name span:last-child { color: var(--dim); white-space: nowrap; }
+.bar { height: 6px; background: var(--off); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+.bar div { height: 100%; width: 0; background: var(--accent); }
+.idle { color: var(--dim); }
+.live.idle-state .gear { color: var(--faint); }
+
+/* Cards below */
+.cols { display: grid; gap: 14px; margin-top: 14px; }
+section.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.row h2 { margin: 0; }
+select { font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--raised); color: var(--text); max-width: 100%; min-width: 0; flex: 1 1 180px; }
 ul.tips { list-style: none; margin: 0; padding: 0; }
-ul.tips li { padding: 8px 0; border-bottom: 1px solid var(--line); }
-ul.tips li:last-child { border-bottom: 0; }
-.badge { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-  padding: 1px 6px; border-radius: 4px; margin-right: 6px; border: 1px solid currentColor; vertical-align: 1px; }
+ul.tips li { padding: 10px 0; border-top: 1px solid var(--line); font-size: 17px; }
+ul.tips li:first-child { border-top: 0; padding-top: 2px; }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  padding: 2px 7px; border-radius: 5px; margin-right: 8px; vertical-align: 2px; border: 1px solid currentColor; }
 .k-focus { color: var(--bad); } .k-tip { color: var(--accent); } .k-praise { color: var(--good); }
 .k-still, .k-note, .k-driving { color: var(--dim); } .k-setup { color: var(--warn); }
-.still { color: var(--dim); }
-details { margin-top: 4px; }
-summary { cursor: pointer; color: var(--dim); font-size: 13px; }
-details ul { margin: 4px 0 0; padding-left: 18px; color: var(--dim); font-size: 13px; }
-.session { padding: 8px 0; border-bottom: 1px solid var(--line); }
-.session:last-child { border-bottom: 0; }
-.session .when { font-weight: 600; }
-.session .facts { color: var(--dim); font-size: 13px; }
+li.still { color: var(--dim); font-size: 15px; }
+details { margin-top: 6px; }
+summary { cursor: pointer; color: var(--dim); font-size: 14px; }
+details ul { margin: 4px 0 0; padding-left: 18px; color: var(--dim); font-size: 14px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: right; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-weight: 600; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+td { font-size: 17px; }
+td.best { font-weight: 700; font-size: 19px; }
+td .band { display: block; color: var(--dim); font-size: 12px; font-weight: 400; }
+td.dim { color: var(--dim); }
+tr.now td { background: var(--raised); }
+tr.now td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr:last-child td { border-bottom: 0; }
+.wide { overflow-x: auto; }
+.note { color: var(--dim); font-size: 14px; margin: 10px 0 0; }
+.session { padding: 10px 0; border-top: 1px solid var(--line); }
+.session:first-child { border-top: 0; padding-top: 2px; }
+.session .when { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.session .when b { font-weight: 600; }
+.session .when span { color: var(--dim); font-size: 14px; }
+.session .facts { color: var(--dim); font-size: 14px; }
+.facts-line { color: var(--dim); font-size: 15px; margin: 0 0 8px; }
 .empty { color: var(--dim); }
-footer { color: var(--dim); font-size: 12px; margin-top: 16px; }
+footer { color: var(--faint); font-size: 12px; margin-top: 18px; }
+
+/* A laptop or a tablet: the live panel on the left, cards beside it */
+@media (min-width: 900px) {
+  .layout { display: grid; grid-template-columns: minmax(360px, 5fr) 7fr; gap: 14px; align-items: start; }
+  .layout > .live { position: sticky; top: 56px; }
+  .cols { margin-top: 0; }
+}
+/* A phone on its side: gear left, numbers right, all in one screen */
+@media (orientation: landscape) and (max-height: 540px) {
+  .live {
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "lights lights lights" "gear speed rpm" "gear shift shift" "stage stage stage";
+    padding: 10px 14px; gap: 6px 16px;
+  }
+  .gear { font-size: clamp(96px, 36vh, 170px); padding: 0 8px; }
+  .num b { font-size: clamp(36px, 15vh, 64px); }
+  .lights { height: 20px; }
+}
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 900px) {
+  .layout { display: block; }
+  .layout > .live { position: static; }
+  .cols { margin-top: 14px; grid-template-columns: 1fr 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .lights.flash i { animation: none; } }
 </style>
 </head>
 <body>
 <main>
-  <header>
-    <h1>Oversteer telemetry</h1>
-    <span class="status" id="status">Connecting…</span>
-  </header>
+  <div class="top">
+    <span class="brand">Oversteer</span>
+    <span class="chip" id="conn"><span class="dot"></span><span id="status">Connecting…</span></span>
+    <button type="button" class="chip" id="wake" title="Keep this screen on while the page is open"><span class="sun"></span><span id="wake-text">Screen</span></button>
+  </div>
 
-  <section aria-label="Live">
-    <div class="live">
+  <div class="layout">
+    <section class="live idle-state" id="live" aria-label="Live">
+      <div class="lights" id="lights" aria-hidden="true"></div>
       <div class="gear" id="gear">–</div>
-      <div>
-        <div class="rpm" id="rpm">No telemetry arriving</div>
-        <div class="meter"><div class="fill" id="fill"></div><div class="mark" id="mark"></div></div>
+      <div class="num speed"><b id="speed">–</b><span>km/h</span></div>
+      <div class="num rpm"><b id="rpm">–</b><span>rpm</span></div>
+      <div class="shift"><span class="k">Change up at</span><b id="shift">–</b><span class="src" id="shift-src"></span></div>
+      <div class="stage" id="stage-box">
+        <div class="name"><span id="stage">No telemetry arriving</span><span id="km"></span></div>
+        <div class="bar"><div id="progress"></div></div>
       </div>
-      <div class="speed" id="speed">–<small> km/h</small></div>
-      <div class="progress" id="progress"></div>
+    </section>
+
+    <div class="cols">
+      <section class="card">
+        <h2>Coaching</h2>
+        <ul class="tips" id="coach"><li class="empty">Loading…</li></ul>
+      </section>
+
+      <section class="card">
+        <div class="row"><h2>Shift points</h2><select id="car" aria-label="Car"></select></div>
+        <div class="wide"><table id="shifts"></table></div>
+        <p class="note" id="shifts-note"></p>
+      </section>
+
+      <section class="card">
+        <h2>Setup</h2>
+        <p class="facts-line" id="tune"></p>
+        <ul class="tips" id="tuning"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Recent sessions</h2>
+        <div id="sessions"></div>
+      </section>
     </div>
-  </section>
-
-  <section>
-    <h2>Car</h2>
-    <select id="car" aria-label="Car"></select>
-    <div class="scroll"><table id="shifts"></table></div>
-    <p class="empty" id="shifts-empty"></p>
-  </section>
-
-  <section>
-    <h2>Coaching</h2>
-    <ul class="tips" id="coach"></ul>
-  </section>
-
-  <section>
-    <h2>Setup</h2>
-    <p id="tune" class="facts"></p>
-    <ul class="tips" id="tuning"></ul>
-  </section>
-
-  <section>
-    <h2>Recent sessions</h2>
-    <div id="sessions"></div>
-  </section>
+  </div>
 
   <footer>Read-only: nothing here can change Oversteer. Plain HTTP on your network: anyone on it can read this page.</footer>
 </main>
@@ -112,7 +204,11 @@ footer { color: var(--dim); font-size: 12px; margin-top: 16px; }
 "use strict";
 const $ = (id) => document.getElementById(id);
 const METHODS = {"h-pattern": "H-pattern", "sequential": "Sequential", "paddles": "Paddles"};
-let carId = null, sessionSeen = null, carFollowsLive = true;
+const GAMES = {"forza-fh": "Forza Horizon", "forza-fm": "Forza Motorsport", "forza": "Forza", "dirt": "DiRT",
+  "wrcg": "WRC Generations", "eawrc": "EA SPORTS WRC", "acpmf": "Assetto Corsa", "acr": "Assetto Corsa Rally",
+  "beamng": "BeamNG.drive", "lfs": "Live for Speed"};
+const LIGHTS = 15;
+let carId = null, sessionSeen = null, carFollowsLive = true, cars = [], liveGear = null, stageName = null;
 
 function el(tag, text, cls) {
   const e = document.createElement(tag);
@@ -129,51 +225,81 @@ async function get(path) {
   return r.json();
 }
 
+// -- live --
+
+for (let i = 0; i < LIGHTS; i++) $("lights").appendChild(el("i"));
+
+function lights(value, target) {
+  // The first light at 60 % of the change-up point, the last one at it;
+  // all flash above it, as the wheel's own lights do
+  const box = $("lights"), cells = box.children;
+  const on = target ? Math.max(0, Math.min(LIGHTS, Math.ceil(LIGHTS * (value - 0.6 * target) / (0.4 * target)))) : 0;
+  const over = target && value >= target;
+  box.classList.toggle("flash", !!over);
+  for (let i = 0; i < LIGHTS; i++) cells[i].className = over || i >= on ? "" : i < LIGHTS * 0.5 ? "g" : i < LIGHTS * 0.8 ? "y" : "r";
+}
+
+let liveTimer = null;
 async function live() {
-  if (document.hidden) return;
   let s = null;
-  try { s = await get("/api/v1/live"); } catch (e) { s = null; }
+  if (!document.hidden) {
+    try { s = await get("/api/v1/live"); } catch (e) { s = null; }
+    showLive(s);
+  }
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(live, s ? 250 : 1000);
+}
+
+function showLive(s) {
+  $("live").classList.toggle("idle-state", !s);
   if (!s) {
-    $("gear").textContent = "–"; $("rpm").textContent = "No telemetry arriving";
-    $("speed").firstChild.textContent = "–"; $("fill").style.width = "0"; $("mark").style.display = "none";
-    $("progress").textContent = "";
+    $("gear").textContent = "–"; $("speed").textContent = "–"; $("rpm").textContent = "–";
+    $("shift").textContent = "–"; $("shift-src").textContent = ""; $("gear").classList.remove("hot");
+    $("stage").textContent = "No telemetry arriving"; $("km").textContent = ""; $("progress").style.width = "0";
+    lights(0, 0);
+    if (liveGear !== null) { liveGear = null; markGear(); }
     return;
   }
   $("gear").textContent = s.gear == null ? "–" : s.gear < 0 ? "R" : s.gear === 0 ? "N" : String(s.gear);
-  const top = s.limiter || Math.max(s.rpm || 0, 1);
-  $("rpm").textContent = rpm(s.rpm) + " rpm" + (s.shift_rpm ? " · change up at " + rpm(s.shift_rpm) + (s.learnt ? " (learnt)" : "") : "");
-  $("speed").firstChild.textContent = s.speed == null ? "–" : Math.round(s.speed * 3.6);
-  const fill = $("fill");
-  fill.style.width = Math.min(100, 100 * (s.rpm || 0) / top) + "%";
-  fill.className = "fill" + (s.shift_rpm && s.rpm >= s.shift_rpm ? " hot" : "");
-  const mark = $("mark");
-  if (s.shift_rpm && top) { mark.style.display = "block"; mark.style.left = Math.min(100, 100 * s.shift_rpm / top) + "%"; }
-  else mark.style.display = "none";
-  let p = "";
-  if (s.distance != null && s.stage_length) p = (s.distance / 1000).toFixed(2) + " of " + (s.stage_length / 1000).toFixed(2) + " km";
-  else if (s.distance != null) p = (s.distance / 1000).toFixed(2) + " km";
-  $("progress").textContent = p;
+  $("speed").textContent = s.speed == null ? "–" : Math.round(s.speed * 3.6);
+  $("rpm").textContent = rpm(s.rpm);
+  $("shift").textContent = s.shift_rpm ? rpm(s.shift_rpm) : "–";
+  $("shift-src").textContent = s.shift_rpm ? (s.learnt ? "learnt for this gear" : "the profile's shift point") : "";
+  $("gear").classList.toggle("hot", !!(s.shift_rpm && s.rpm >= s.shift_rpm));
+  lights(s.rpm || 0, s.shift_rpm || s.limiter || 0);
+  let km = "";
+  if (s.distance != null && s.stage_length) km = (Math.max(0, s.distance) / 1000).toFixed(1) + " / " + (s.stage_length / 1000).toFixed(1) + " km";
+  else if (s.distance != null) km = (Math.max(0, s.distance) / 1000).toFixed(1) + " km";
+  $("km").textContent = km;
+  const share = s.progress != null ? s.progress : s.distance != null && s.stage_length ? s.distance / s.stage_length : null;
+  $("progress").style.width = share == null ? "0" : Math.max(0, Math.min(100, share * 100)) + "%";
+  $("stage").textContent = stageName || (km ? "Stage" : "Driving");
+  if (s.gear !== liveGear) { liveGear = s.gear; markGear(); }
   if (carFollowsLive && s.car) followCar(s.car);
 }
 
-let cars = [];
 function followCar(key) {
   const found = cars.find((c) => c.key === key);
   if (found && found.id !== carId) { carId = found.id; $("car").value = String(carId); loadCar(); }
 }
 
 async function status() {
+  const chip = $("conn");
   try {
     const s = await get("/api/v1/status");
-    const parts = [];
-    if (s.profile) parts.push("profile " + s.profile);
-    parts.push(s.receiving ? "receiving" + (s.game ? " from " + s.game : "") : "waiting for telemetry" + (s.udp_port ? " on UDP " + s.udp_port : ""));
-    $("status").textContent = parts.join(" · ");
+    const game = s.game ? GAMES[s.game] || s.game : "";
+    chip.className = "chip " + (s.receiving ? "st-live" : "st-waiting");
+    $("status").textContent = s.receiving ? (game || "Receiving") : "Waiting" + (s.udp_port ? " on UDP " + s.udp_port : "");
+    chip.title = (s.profile ? "Profile " + s.profile + ". " : "") + (s.receiving ? "Receiving telemetry" + (game ? " from " + game : "") : "No telemetry arriving");
+    stageName = s.stage && s.stage.name ? s.stage.name + (s.stage.location ? ", " + s.stage.location : "") : null;
     if (s.session !== sessionSeen) { sessionSeen = s.session; await loadCars(); }
   } catch (e) {
+    chip.className = "chip st-down";
     $("status").textContent = "Oversteer is not answering";
   }
 }
+
+// -- the car: shift points, coaching, setup, sessions --
 
 async function loadCars() {
   try { cars = await get("/api/v1/cars"); } catch (e) { cars = []; }
@@ -202,7 +328,7 @@ function evidence(list, label) {
 
 function tipItem(t, kind) {
   const li = el("li", null, t.kind === "still" ? "still" : "");
-  li.appendChild(el("span", kind, "badge k-" + (t.kind || "tip")));
+  if (kind) li.appendChild(el("span", kind, "badge k-" + (t.kind || "tip")));
   li.appendChild(document.createTextNode(t.text));
   const why = evidence(t.evidence);
   if (why) li.appendChild(why);
@@ -211,7 +337,7 @@ function tipItem(t, kind) {
 
 let shown = null;
 async function loadCar() {
-  const table = $("shifts"), empty = $("shifts-empty"), coach = $("coach"), tuningList = $("tuning");
+  const table = $("shifts"), note = $("shifts-note"), coach = $("coach"), tuningList = $("tuning");
   let car = null, c = null, list = null;
   if (carId != null) {
     [car, c, list] = await Promise.all([
@@ -224,58 +350,76 @@ async function loadCar() {
   if (key === shown) return;
   shown = key;
   clear(table); clear(coach); clear(tuningList); clear($("sessions"));
-  empty.textContent = ""; $("tune").textContent = "";
-  if (carId == null) { empty.textContent = "Drive with telemetry on and Oversteer learns each car's shift points."; return; }
-  if (car) { shiftTable(car, table, empty); tune(car); }
-  else empty.textContent = "Could not read this car.";
+  note.textContent = ""; $("tune").textContent = "";
+  if (carId == null) {
+    note.textContent = "Drive with telemetry on and Oversteer learns each car's shift points.";
+    coach.appendChild(el("li", "Coaching starts once Oversteer has seen you drive.", "empty"));
+    $("sessions").appendChild(el("p", "No sessions yet.", "empty"));
+    $("tune").textContent = "No setup seen yet.";
+    return;
+  }
+  if (car) { shiftTable(car, table, note); tune(car); }
+  else note.textContent = "Could not read this car.";
   if (c) {
-    const names = {focus: "Focus", tip: "Tip", praise: "Better", still: "Still", note: "Note"};
-    for (const t of c.tips) coach.appendChild(tipItem(t, names[t.kind] || t.kind));
+    const names = {focus: "Focus", tip: "Tip", praise: "Better", still: "", note: ""};
+    const order = {focus: 0, praise: 2, still: 3};
+    const tips = c.tips.slice().sort((a, b) => (order[a.kind] ?? 1) - (order[b.kind] ?? 1));
+    for (const t of tips) coach.appendChild(tipItem(t, names[t.kind] ?? t.kind));
     if (!c.tips.length) coach.appendChild(el("li", "Nothing to say yet: coaching starts once a run ends.", "empty"));
   } else coach.appendChild(el("li", "Could not read the coaching.", "empty"));
   if (list) sessions(list);
   else $("sessions").appendChild(el("p", "Could not read the sessions.", "empty"));
 }
 
-function shiftTable(car, table, empty) {
+function markGear() {
+  for (const tr of $("shifts").querySelectorAll("tr[data-gear]")) tr.classList.toggle("now", Number(tr.dataset.gear) === liveGear);
+}
+
+function shiftTable(car, table, note) {
   const gears = car.gears || [];
-  if (!gears.length) { empty.textContent = "Nothing learnt yet about this car's gears."; return; }
+  if (!gears.length) { note.textContent = "Nothing learnt yet about this car's gears: drive some full-throttle pulls through them."; return; }
   const methods = Object.keys(METHODS).filter((m) => gears.some((g) => g.methods && g.methods[m]));
   const head = el("tr");
-  for (const h of ["Gear", "Best", "You"].concat(methods.map((m) => METHODS[m]))) head.appendChild(el("th", h));
+  for (const h of ["Change", "Best", "You"].concat(methods.map((m) => METHODS[m]))) head.appendChild(el("th", h));
   table.appendChild(head);
   for (const g of gears) {
     const tr = el("tr");
+    tr.dataset.gear = String(g.gear);
     tr.appendChild(el("td", g.last ? g.gear + " (top)" : g.gear + "→" + (g.gear + 1)));
-    const best = el("td", g.last ? "" : rpm(g.best));
-    if (g.best_low != null && g.best_high != null) best.appendChild(el("div", rpm(g.best_low) + "–" + rpm(g.best_high), "band"));
+    const best = el("td", g.last ? "" : g.best == null ? "learning…" : rpm(g.best), "best");
+    if (!g.last && g.best_low != null && g.best_high != null && g.best_high - g.best_low >= 1) best.appendChild(el("span", rpm(g.best_low) + "–" + rpm(g.best_high), "band"));
     tr.appendChild(best);
-    tr.appendChild(el("td", g.shifts ? rpm(g.average_shift) + " (" + g.shifts + ")" : ""));
+    tr.appendChild(el("td", g.shifts ? rpm(g.average_shift) : "–", "dim"));
     for (const m of methods) {
       const v = g.methods && g.methods[m];
-      tr.appendChild(el("td", v ? rpm(v.rpm) + " (" + v.count + ")" : ""));
+      tr.appendChild(el("td", v ? rpm(v.rpm) : "–", "dim"));
     }
     table.appendChild(tr);
   }
-  if (car.limiter) empty.textContent = "Limiter " + rpm(car.limiter) + " rpm" + (car.limiter_source ? " (" + car.limiter_source + ")" : "") + ". Learnt from your recent driving.";
+  markGear();
+  const parts = [];
+  if (car.limiter) parts.push("Limiter " + rpm(car.limiter) + " rpm" + (car.limiter_source ? " (" + car.limiter_source + ")" : "") + ".");
+  parts.push("Best: where the next gear pulls harder, with the range it is known to. You: your average change up.");
+  note.textContent = parts.join(" ");
 }
 
 function tune(car) {
   const t = car.tune;
   const parts = [];
   if (t) {
-    const ratios = Object.keys(t.ratios).sort((a, b) => a - b).map((g) => g + ": " + Number(t.ratios[g]).toFixed(0));
-    parts.push("Gearing (rpm per m/s) " + ratios.join(", "));
-    parts.push(t.change === "first" ? "first seen " + new Date(t.first_seen * 1000).toLocaleDateString() : "changed: " + t.change.replace("gears:", "gears ") + ", " + new Date(t.first_seen * 1000).toLocaleDateString());
-    parts.push("ride height " + (typeof t.ride_height_f === "number" ? t.ride_height_f.toFixed(3) + " m" : t.ride_height_f));
-    parts.push("brake bias " + (typeof t.brake_bias === "number" ? (t.brake_bias * 100).toFixed(0) + " %" : t.brake_bias));
+    const ratios = Object.keys(t.ratios).sort((a, b) => a - b).map((g) => g + ": " + (Number(t.ratios[g]) / 3.6).toFixed(1));
+    parts.push("Gearing (rpm per km/h) " + ratios.join(", "));
+    const when = new Date(t.first_seen * 1000).toLocaleDateString();
+    parts.push(t.change === "first" ? "first seen " + when : "changed " + String(t.change).replace("gears:", "gears ") + ", " + when);
+    for (const [field, name] of [["ride_height_f", "ride height"], ["brake_bias", "brake bias"]]) {
+      const v = t[field];
+      if (typeof v === "number") parts.push(name + " " + (field === "brake_bias" ? (v * 100).toFixed(0) + " %" : v.toFixed(3) + " m"));
+      else if (v) parts.push(name + ": " + v);
+    }
   } else parts.push("No setup seen yet.");
   $("tune").textContent = parts.join(" · ");
   const list = $("tuning");
-  for (const n of car.tuning || []) {
-    const li = tipItem({kind: n.kind, text: n.text, evidence: n.evidence}, n.kind === "setup" ? "Setup" : "Driving");
-    list.appendChild(li);
-  }
+  for (const n of car.tuning || []) list.appendChild(tipItem({kind: n.kind, text: n.text, evidence: n.evidence}, n.kind === "setup" ? "Setup" : "Driving"));
 }
 
 function verdict(value, conf) {
@@ -289,7 +433,10 @@ function sessions(list) {
   for (const s of list) {
     const div = el("div", null, "session");
     const when = new Date(s.started * 1000);
-    div.appendChild(el("div", when.toLocaleDateString() + " " + when.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) + (s.stage ? " · " + s.stage : s.track ? " · " + s.track : ""), "when"));
+    const top = el("div", null, "when");
+    top.appendChild(el("b", s.stage_name || s.stage || s.track || words(s.discipline && s.discipline !== "unknown" ? s.discipline : "session")));
+    top.appendChild(el("span", when.toLocaleDateString() + " " + when.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})));
+    div.appendChild(top);
     const facts = [verdict(s.discipline, s.discipline_conf), verdict(s.surface, s.surface_conf)];
     if (s.shifter) facts.push(METHODS[s.shifter] || s.shifter);
     if (s.distance) facts.push((s.distance / 1000).toFixed(1) + " km");
@@ -306,15 +453,134 @@ function sessions(list) {
   }
 }
 
+// -- keeping the screen on --
+// The Screen Wake Lock API where the browser allows it: only in a secure
+// context (HTTPS or localhost), and this page is plain HTTP on the LAN.
+// Elsewhere, after a tap, a tiny muted looping video made in the page:
+// playing video keeps most mobile browsers awake. It is recorded from a
+// canvas (MediaRecorder, a blob: URL), or played straight from the
+// canvas's stream while that is not ready or not possible. Nothing is
+// fetched for it.
+
+const wake = {want: false, lock: null, video: null, state: "", recorded: null};
+
+function showWake(state) {
+  wake.state = state;
+  const button = $("wake");
+  const text = {on: "Screen on", video: "Screen on", tap: "Tap to keep screen on", off: "Screen may sleep"}[state] || "Screen";
+  button.className = "chip " + (state === "video" ? "on" : state);
+  $("wake-text").textContent = text;
+  button.title = {on: "The screen stays on while this page is open (Wake Lock)",
+    video: "The screen is kept on by a tiny muted video while this page is open",
+    tap: "Tap anywhere to keep the screen on while this page is open",
+    off: "This browser cannot be kept awake from here: set the screen timeout in its settings"}[state] || "";
+}
+
+async function lockScreen() {
+  if (!("wakeLock" in navigator) || !window.isSecureContext) return false;
+  try {
+    wake.lock = await navigator.wakeLock.request("screen");
+    wake.lock.addEventListener("release", () => { wake.lock = null; if (!document.hidden && wake.state === "on") showWake("tap"); });
+    showWake("on");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function canvasStream() {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 16;
+  if (!canvas.captureStream) return null;
+  const g = canvas.getContext("2d");
+  let n = 0;
+  const draw = () => { n++; g.fillStyle = n % 2 ? "#3ddc84" : "#35c877"; g.fillRect(0, 0, 16, 16); };
+  draw();
+  setInterval(draw, 500);                     // a stream sends frames only when the canvas changes
+  return canvas.captureStream(4);
+}
+
+function record(stream) {
+  // A second of the canvas as a real video file, looped: closest to what
+  // the long-standing keep-awake libraries play
+  if (!window.MediaRecorder) return;
+  const type = ["video/webm;codecs=vp8", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  let recorder;
+  try { recorder = new MediaRecorder(stream, type ? {mimeType: type, videoBitsPerSecond: 20000} : undefined); } catch (e) { return; }
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    if (!chunks.length) return;
+    wake.recorded = URL.createObjectURL(new Blob(chunks, {type: recorder.mimeType || type || "video/webm"}));
+    const v = wake.video;
+    v.srcObject = null;
+    v.src = wake.recorded;
+    v.loop = true;
+    v.play().catch(() => {});
+  };
+  recorder.start();
+  setTimeout(() => { try { recorder.stop(); } catch (e) {} }, 1500);
+}
+
+async function playVideo() {
+  let v = wake.video;
+  if (!v) {
+    const stream = canvasStream();
+    if (!stream && !window.MediaRecorder) return false;
+    v = wake.video = document.createElement("video");
+    v.muted = true; v.defaultMuted = true; v.playsInline = true; v.loop = true;
+    v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("aria-hidden", "true");
+    // In view (the top bar is sticky): browsers keep awake for video that is visible
+    const sun = $("wake").querySelector(".sun");
+    if (sun) sun.replaceWith(v);
+    if (stream) { v.srcObject = stream; record(stream); }
+  }
+  try { await v.play(); return true; } catch (e) { return false; }
+}
+
+async function keepAwake() {
+  wake.want = true;
+  if (await lockScreen()) return;
+  if (await playVideo()) { showWake("video"); return; }
+  showWake(("wakeLock" in navigator && window.isSecureContext) || window.HTMLCanvasElement ? "tap" : "off");
+}
+
+function firstTap() {
+  document.removeEventListener("pointerup", firstTap, true);
+  document.removeEventListener("keydown", firstTap, true);
+  keepAwake();
+}
+
+async function startWake() {
+  // A wake lock may be granted without a tap; the video needs one
+  if (await lockScreen()) { wake.want = true; return; }
+  const canPlay = !!(document.createElement("canvas").captureStream || window.MediaRecorder);
+  if (!canPlay && !("wakeLock" in navigator && window.isSecureContext)) { showWake("off"); return; }
+  showWake("tap");
+  document.addEventListener("pointerup", firstTap, true);
+  document.addEventListener("keydown", firstTap, true);
+}
+
+$("wake").addEventListener("click", () => keepAwake());
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  status(); live();
+  // A wake lock is released when the page is hidden; take it again
+  if (wake.want && !wake.lock) {
+    if (wake.video) wake.video.play().then(() => showWake(wake.state === "on" ? "on" : "video")).catch(() => showWake("tap"));
+    lockScreen();
+  }
+});
+
 $("car").addEventListener("change", (e) => {
   const id = parseInt(e.target.value, 10);
   if (!isNaN(id)) { carId = id; carFollowsLive = false; loadCar(); }
 });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { status(); live(); } });
 
 status();
 live();
-setInterval(live, 1000);
+startWake();
 setInterval(status, 5000);
 setInterval(() => { if (!document.hidden && carId != null) loadCar(); }, 30000);
 </script>

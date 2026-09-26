@@ -53,7 +53,7 @@ def test_every_endpoint(served):
     web, h, session, other, _ = served
     status = get_json(web, '/api/v1/status')
     assert status == {'version': '0.14', 'profile': 'rally', 'web_port': web.port, 'udp_port': 5310,
-                      'receiving': True, 'game': 'eawrc', 'session': 7}
+                      'receiving': True, 'game': 'eawrc', 'session': 7, 'stage': None}
     assert '127.0.0.1' not in json.dumps(status)                 # never the telemetry source's address
     assert get_json(web, '/api/v1/live') == {'gear': 3, 'rpm': 6500.0, 'speed': 30.0, 'shift_rpm': None}
     [car] = get_json(web, '/api/v1/cars')
@@ -85,6 +85,13 @@ def test_the_page_and_its_headers(served):
     csp = response.getheader('Content-Security-Policy')
     assert "default-src 'self'" in csp and "script-src 'sha256-" in csp and "style-src 'sha256-" in csp
     assert 'unsafe-inline' not in csp
+    # The keep-awake video is made in the page: blob: media, nothing fetched
+    assert "media-src 'self' blob:" in csp
+    page = body.decode('utf-8')
+    assert "navigator.wakeLock.request(\"screen\")" in page and 'visibilitychange' in page
+    assert 'captureStream' in page and 'MediaRecorder' in page
+    for external in ('src="http', "src='http", 'href="http', '@import', 'url('):
+        assert external not in page
     for name, value in (('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'no-referrer'),
                         ('Cache-Control', 'no-store')):
         assert response.getheader(name) == value
@@ -160,6 +167,38 @@ def test_bound_urls(monkeypatch):
     assert telemetry_web.urls('local', 5301) == ['http://localhost:5301/']
 
 
+def test_the_stage_being_driven(served):
+    web, h, session, _, _ = served
+    h.store.begin()
+    h.store.upsert_stage('eawrc:4:12', 'eawrc', 9800.0, 'Col de Turini', 'Monte-Carlo')
+    h.store.commit()
+    live = {'gear': 3, 'rpm': 6500.0, 'stage': 'eawrc:4:12'}
+    web.live = lambda: live
+    assert get_json(web, '/api/v1/status')['stage'] == {'key': 'eawrc:4:12', 'name': 'Col de Turini',
+                                                         'location': 'Monte-Carlo', 'length': 9800.0}
+    live = {'gear': 3, 'rpm': 6500.0, 'stage': None, 'track': 'Monza'}
+    assert get_json(web, '/api/v1/status')['stage']['name'] == 'Monza'
+    live = None
+    assert get_json(web, '/api/v1/status')['stage'] is None
+    # The recent sessions carry the stage's name
+    sessions = get_json(web, '/api/v1/cars/{}/sessions?limit=1'.format(h.car))
+    assert sessions[0]['stage'] == 'eawrc:4:12' and sessions[0]['stage_name'] == 'Col de Turini'
+
+
+def test_the_stage_of_the_run_going_on(tmp_path):
+    """The run's matched stage wins over the game's key."""
+    from types import SimpleNamespace
+    h = History(tmp_path / 't.db')
+    session = h.session([error(2, 450.0)], stage='dirt:1')
+    h.store.begin()
+    h.store.upsert_stage('dirt:1', 'dirt', 5000.0, 'Kakaristo')
+    h.store.commit()
+    [run] = h.store.runs(session)
+    learner = SimpleNamespace(runs=SimpleNamespace(run=1, run_rows={1: run['id']}))
+    stage = telemetry_web.current_stage(h.store, learner, {'stage': 'other'})
+    assert stage['name'] == 'Kakaristo'
+
+
 def test_live_from_the_listener():
     from oversteer.telemetry import Telemetry, Sample
     telemetry = Telemetry(None, learner=None)
@@ -169,6 +208,7 @@ def test_live_from_the_listener():
     telemetry.live = sample
     live = telemetry_web.live_dict(telemetry)
     assert live['gear'] == 3 and live['distance'] == 1200.0 and live['shift_rpm'] > 0 and live['car'] == 'eawrc/17'
+    assert live['stage'] is None and 'track' in live
 
 
 def test_open_pages_do_not_hold_the_slots(served):

@@ -146,7 +146,30 @@ def live_dict(telemetry):
             'learnt': bool(telemetry.using_learnt), 'limiter': limiter, 'game': sample.game, 'car': sample.car,
             'distance': sample.distance if sample.distance is not None else sample.lap_distance,
             'stage_length': sample.stage_length, 'progress': sample.progress, 'throttle': sample.throttle,
-            'brake': sample.brake}
+            'brake': sample.brake, 'stage': sample.stage, 'track': sample.track}
+
+
+def current_stage(reader, learner, live):
+    """The stage being driven, for the page's live panel: the stage the
+    current run was matched to (drive_log), else the game's own stage
+    key, named from the stage tables; else the track as the game names
+    it. None when nothing says."""
+    key = None
+    runs = getattr(learner, 'runs', None) if learner is not None else None
+    number = getattr(runs, 'run', None)
+    if number is not None:
+        row = runs.run_rows.get(number)
+        session = reader.run_session(row) if row is not None else None
+        if session is not None:
+            key = next((r['stage'] for r in reader.runs(session) if r['id'] == row), None)
+    live = live or {}
+    key = key or live.get('stage')
+    stage = reader.stage(key) if key else None
+    if stage is not None and stage.get('name'):
+        return {'key': key, 'name': stage['name'], 'location': stage.get('location'), 'length': stage.get('length')}
+    if live.get('track'):
+        return {'key': key, 'name': live['track'], 'location': None, 'length': None}
+    return None
 
 
 class TelemetryWeb(http.server.ThreadingHTTPServer):
@@ -182,8 +205,10 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                 text = f.read()
             self._page = text.encode('utf-8')
             scripts, styles = _hashes(text, 'script'), _hashes(text, 'style')
+            # media-src blob:: the keep-awake video, recorded in the page
+            # from a canvas (no file is fetched for it)
             self._csp = ("default-src 'self'; script-src {}; style-src {}; img-src 'self' data:; "
-                         "frame-ancestors 'none'; base-uri 'none'; form-action 'none'").format(
+                         "media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'").format(
                              ' '.join(scripts) or "'none'", ' '.join(styles) or "'none'")
         hostname = socket.gethostname().lower()
         self.names = {'localhost', hostname, hostname + '.local', hostname.split('.')[0],
@@ -260,6 +285,14 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             body = {'version': self.version, 'profile': None if profile == '_no_profile' else profile,
                     'web_port': self.port}
             body.update(self.status() or {})
+            reader = self.reader()
+            if reader is not None:
+                try:
+                    body['stage'] = current_stage(reader, self.learner, self.live())
+                except Exception as e:
+                    logging.debug("telemetry web page: no stage: %s", e)
+                finally:
+                    reader.close()
             return 200, body
         if path == 'live':
             return 200, self.live()
@@ -284,8 +317,13 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             if parts[2:] == ['sessions']:
                 limit = max(1, min(100, _int(query.get('limit'), 20)))
                 sessions = reader.sessions(car['id'], limit)
+                names = {}
                 for session in sessions:
                     session['runs'] = reader.runs(session['id'])
+                    key = session['stage'] or next((r['stage'] for r in session['runs'] if r['stage']), None)
+                    if key and key not in names:
+                        names[key] = (reader.stage(key) or {}).get('name')
+                    session['stage_name'] = names.get(key) if key else None
                 return 200, sessions
             return 404, {'error': 'not found'}
         if parts[0] == 'sessions' and len(parts) == 2:
