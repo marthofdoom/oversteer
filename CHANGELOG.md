@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.1 — 2026-09-26
+
+### Fixed
+- Assetto Corsa Rally: the distance along the stage is read (it was
+  always 0), and steering, clutch, acceleration, speed and yaw are
+  decoded with signs confirmed on real stages, so counter-steer and the
+  car's balance are measured. The first packets of a stage, before the
+  game names the car, no longer start a session for an unknown car.
+- When a game sends to the other telemetry port (5300 or 5310), the
+  Telemetry tab's live line says so and how to fix it; it was only
+  shown under Settings, and noticed rarely.
+
+### Added
+- The web page accepts this computer's Tailscale name, so
+  `tailscale serve` can give it real HTTPS, which a phone's browser
+  needs to keep the screen on.
+
 ## 0.14.0 — 2026-09-25
 
 ### Added

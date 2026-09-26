@@ -47,6 +47,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.14.1" date="2026-09-26">
+      <description><ul><li>Assetto Corsa Rally: distance along the stage, steering, clutch, acceleration and yaw read correctly</li><li>A game sending to the other telemetry port is pointed out in the Telemetry tab</li><li>The web page works behind tailscale serve (HTTPS)</li></ul></description>
+    </release>
     <release version="0.14.0" date="2026-09-25">
       <description><ul><li>Telemetry tab: each car's best upshift per gear learnt from your driving, coaching from your history (shift timing per gear and shifter, the limiter, launches, pedals, corners), and setup advice</li><li>Rev lights can learn the limiter at each launch and complete at the learnt best upshift</li><li>Known stages of WRC Generations, Assetto Corsa Rally and DiRT Rally 2.0 named, with their surface, from the first run</li><li>A read-only web page for a phone or laptop: live gear, revs and shift point, coaching and sessions, keeping the screen on</li><li>Default telemetry port UDP 5310 (clear of Forza Horizon 6); raw telemetry recording; the last profile reopens at start</li></ul></description>
     </release>
