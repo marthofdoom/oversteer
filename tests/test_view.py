@@ -65,6 +65,8 @@ def test_live_status():
     state, text = view.live_status(None)
     assert state == 'off' and 'Learn from game telemetry' in text
     assert view.live_status(5300) == ('waiting', 'Waiting for telemetry on UDP 5300.')
+    state, text = view.live_status(5300, elsewhere=5310)
+    assert state == 'waiting' and 'arriving on UDP 5310' in text and 'save the profile' in text
     sample = Sample(6120.0, 7500.0, gear=3, speed=26.7, car='eawrc/17')
     sample.car_name, sample.distance, sample.stage_length = 'Fabia <R5>', 2300.0, 9800.0
     state, text = view.live_status(5300, sample, 6650.0)

@@ -25,7 +25,7 @@ from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 DEFAULT_PORT = 5310
 LEGACY_PORT = 5300                                   # the default before 0.14: games may still send there
 PROBE_AFTER = 10.0                                   # seconds of nothing before looking at the other port
-PROBE_EVERY = 60.0
+PROBE_EVERY = 15.0                                   # a bridge sends only while on a stage: look often
 PROBE_LISTEN = 1.0                                   # seconds the other port is held: FH6 may want 5300
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
 LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point

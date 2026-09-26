@@ -402,8 +402,14 @@ def test_ovst_v3_stage_and_wheels():
     assert sample.max_rpm == 7650.0                       # the game's current limit beats the static figure
     assert all(abs(w - 78.0 * 0.32) < 1e-4 for w in sample.wheel_speed)
     assert abs(sample.susp_norm[2] - 0.5) < 1e-6 and sample.pos == (120.0, 30.0, -450.0)
-    # waiting for a capture to confirm their signs: not decoded
-    assert sample.steer is None and sample.accel is None and sample.yaw_rate is None
+    # ACR's signs, from captures: steer -1 is full left, x left / y up / z forward
+    assert abs(sample.steer + 0.1) < 1e-6
+    assert abs(sample.clutch - 0.0) < 1e-6                    # 1.0 sent: engaged, pedal up
+    assert abs(sample.accel[0] - 0.2 * 9.80665) < 1e-4 and abs(sample.accel[1] - 0.1 * 9.80665) < 1e-4
+    assert abs(sample.vel[0] - 25.0) < 1e-4 and abs(sample.yaw_rate - 0.3) < 1e-6
+    # AC and ACC: not confirmed yet, not decoded
+    ac = decode_sample(_ovst3(game=1))
+    assert ac.steer is None and ac.accel is None and ac.yaw_rate is None
     # an AC1 page without the stage length, or a wrong size, still decodes sensibly
     ac1 = decode_sample(_ovst3(game=1, track_length=float('nan'), spline=float('nan')))
     assert ac1.game == 'ac' and ac1.stage_length is None and ac1.progress is None

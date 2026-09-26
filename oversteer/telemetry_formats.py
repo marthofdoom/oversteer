@@ -282,6 +282,20 @@ def _ovst3(sample, v):
         # the car's name: no car yet, rather than a session started for an
         # unknown one (seen on marth's ACR captures)
         sample.car = None
+    if game == 'acr':
+        # Confirmed on marth's ACR captures: steer is -1 at full left lock;
+        # in a left-hand corner accG x and the angular velocity about y are
+        # positive, so its car frame is x left, y up, z forward; accG reads
+        # 0 at rest (no gravity); clutch is 1 engaged, 0 disengaged
+        clutch, steer = v[3], v[4]
+        accg, local_vel, ang = v[5:8], v[8:11], v[11:14]
+        sample.steer = _finite(-steer)
+        sample.clutch = _finite(1.0 - clutch)
+        if all(math.isfinite(a) for a in accg):
+            sample.accel = (accg[2] * G, accg[0] * G, accg[1] * G)
+            sample.accel_kind = 'kinematic'
+        sample.vel = _vector((local_vel[2], local_vel[0], local_vel[1]))
+        sample.yaw_rate = _finite(ang[1])
     at = 3 + 2 + 9                                   # past game, flags2, reserved, clutch/steer, three vectors
     slip, rot, travel = v[at:at + 4], v[at + 4:at + 8], v[at + 8:at + 12]
     at += 16                                         # and the wheel loads
