@@ -477,8 +477,13 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
     (the game tier, with the candidates as evidence).
   - **Assetto Corsa Rally**: the shared memory's `track` name as the bridge
     sends it (ASCII, others `_`, 31 characters) against the table's
-    `track`; two of one name (`Alsace For_t`) by the nearer published
-    length. v2 bridges (`acpmf`) are tried too.
+    `track`; two of one name (`Alsace For_t`) by the length sent (its
+    `trackSplineLength`) against each one's published length and its last
+    pace note along the road spline (`pacenote_last_m`), the nearest
+    wins: the spline is longer than the published length, and a cut
+    stage's pace notes are measured along its parent route's spline, so
+    its spline length may be the whole route's. v2 bridges (`acpmf`) are
+    tried too.
 
 ## 6. Capture and replay
 
@@ -1621,6 +1626,22 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   read them (PacenotePal, acr-live-timing), agreeing on all 46; press
   lists agree rounded. `track` is the shared-memory name as PacenotePal
   builds it, in English.
+  Checked against the installed game (build of 2026-09-12; nothing is
+  encrypted, the data is Oodle-compressed IoStore/pak): `pakchunk1`'s
+  `DT_TracksVariants` (46 rows) and `DT_Pacenote*` (44 tables), and
+  `pakchunk0`'s `Localization/Game/<lang>/Game.locres`. All 46 variant
+  ids, English names, lengths (`Length`, 0.1 km) and surfaces agree, and
+  every English `track` string is the locres location name plus the
+  variant's short name, as PacenotePal builds it. Added from the game:
+  `elevation_start_m`, `sectors_km`, `pacenote_first_m` and
+  `pacenote_last_m`. The game's own lengths are rough: in 24 rows the
+  sectors do not add up to `Length`, and Elatia (Cut1 forward) says
+  4.9 km with sectors of 6.3 km and notes over 6.47 km (confidence
+  lowered to medium). The one known `trackSplineLength` (Cwmbiga - Afon
+  Biga, 12077.95 m) is 156 m past its last note (11921.5 m). `track`
+  collides only on `Alsace For_t` in English (and de, es, fr, it); in
+  Chinese the bridge's ASCII turns nearly every name to `_`, 10 groups
+  collide, and names cannot identify a stage.
 
 Matching: DiRT by length and start z against the table first; WRCG by
 the length it sends, to the float (0.5 m, nearest within 5 mm), else by
@@ -1640,11 +1661,11 @@ Unverified (needs the §6.3 captures):
 - [ ] WRCG: that every other route sends its Length the same way (two
   routes seen); whether a head-to-head super special sends its
   `VersusRaceTrack` length; the shakedown surfaces (web, not the game).
-- [ ] ACR: the `track` strings (only English; the game localises them;
-  the Livigno ones are extrapolated), what `trackConfiguration` holds,
-  and how the spline length compares with the published lengths (one
-  value known: 12077.95 m for an 11.3 km stage, so lengths are not used
-  to match ACR).
+- [ ] ACR: that the game builds `track` as PacenotePal says (the rule is
+  in its C++ shared-memory writer, not in data; Livigno untested), what
+  `trackConfiguration` holds (nothing documents it), and what
+  `trackSplineLength` is for a cut stage (its own or its parent
+  route's; only one value is known). No ACR capture yet.
 - [ ] DiRT: rallycross and DirtFish entries (one source); starting grid
   places may put a rallycross start more than 15 m from the table's z.
   Nothing in `dirt.json` is checked against the game's own data (it is

@@ -302,6 +302,14 @@ def test_assetto_corsa_rally_by_its_track_name(tmp_path, monkeypatch):
     # as the bridge sends them: ASCII, cut to 31 characters
     assert store.match_track('Monte Carlo St. Geniez - Sister') == 'acr:monte-carlo:st-geniez-sisteron'
     assert store.match_track('Alsace For_t', 7300.0) == 'acr:alsace:foret-de-munster'    # the nearer length
+    # the shipped table: a cut stage's spline may be its whole route's
+    from oversteer.stage_tables import load
+    monkeypatch.setattr(stage_tables, '_tables', load())
+    assert store.match_track('Alsace For_t', 10900.0) == 'acr:alsace:foret-de-munster'   # Munster's spline
+    assert store.match_track('Alsace For_t', 6900.0) == 'acr:alsace:foret-de-munster'    # its own
+    assert store.match_track('Alsace For_t', 9450.0) == 'acr:alsace:foret-de-saverne'
+    assert store.match_track('Wales Cwmbiga', 12077.95) == 'acr:wales:cwmbiga-afon-biga'
+    monkeypatch.setattr(stage_tables, '_tables', tables)
     assert store.match_track('Alsace For_t') is None                                   # one name, two stages
     assert store.match_track('Imola') is None
 

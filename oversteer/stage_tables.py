@@ -10,7 +10,9 @@ has `location`, `stage`, `length_m`, `surface` ('gravel', 'tarmac',
 share}, or a list, larger part first, where the shares are not known),
 `reverse_of`, `shakedown`, `sources` and `confidence`; DiRT's also
 `start_z` (its stages are told apart by the length the game sends and
-where they start), Assetto Corsa Rally's `track` and `config` where known.
+where they start), Assetto Corsa Rally's `track` and `config` where known
+and, from the game, `elevation_start_m`, `sectors_km` and
+`pacenote_first_m`/`pacenote_last_m` (along the road spline).
 WRC Generations' come from the game's files (scripts/stage-tables.py):
 `code` and `level` (its route), `length_m` (the float it sends),
 `alt_codes` (other layouts of the stage, [{code, length_m}]),
