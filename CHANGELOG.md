@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 — 2026-09-25
 
 ### Added
 - Rev lights: **Learn the limiter at each launch**. A rally stage starts
@@ -65,13 +65,24 @@
   keeps them.
 - Telemetry tab: the best upshift of each gear shows the range it is
   known to.
-- Stage tables for DiRT Rally 2.0 (every rally stage, rallycross track
-  and DirtFish), WRC Generations (all 21 rallies and 165 stages, 128
-  with a published length) and Assetto Corsa Rally (46 stages to update
-  0.6): a run on a known stage has its name, rally and surface from the
-  first drive, without labelling. WRC Generations names no stage, so a
-  run to the finish is matched by its distance (within 1 %) and, for a
-  stage and its reverse of one length, by where earlier runs started.
+- Stage tables for WRC Generations (all 21 rallies, 165 stages), Assetto
+  Corsa Rally (46 stages to update 0.6) and DiRT Rally 2.0 (every rally
+  stage, rallycross track and DirtFish): a run on a known stage has its
+  name, rally and surface from the first drive, without labelling. The
+  WRC Generations and Assetto Corsa Rally tables come from the games'
+  own data (exact lengths, names, surface shares); WRC Generations sends
+  each stage's exact length, which identifies it, stage and reverse
+  alike. DiRT Rally 2.0's data is encrypted: its table is the community
+  one, checked against the game's stage counts.
+- The Assetto Corsa family bridge (`oversteer-run`) sends more: the
+  stage's length and the progress along it, wheel speeds, suspension
+  travel and the game's current rev limit. `OVERSTEER_BRIDGE_VERBOSE=1`
+  in a game's launch options logs the rest once a second, for checking a
+  game's layout.
+- Oversteer reopens the profile last used when it starts (unless
+  `--profile` or a setting on the command line says otherwise): cars
+  and history are kept per profile, and starting on none showed an
+  empty Telemetry tab.
 
 ### Changed
 - Profiles saved before this version get both new rev light switches
@@ -118,6 +129,10 @@
   is being kept on.
 
 ### Fixed
+- Telemetry packets arriving in a burst, or a reset after a crash, were
+  taken for a teleport and split one stage into several runs.
+- WRC Generations sends its stage's length where DiRT sends progress: it
+  was read as progress, so no stage finished.
 - DiRT Rally 2.0 (and DiRT Rally, DiRT 4): engine rpm was read 4.7 % too
   high (the game sends rad/s, not rpm / 10), and with it the shift light
   and everything learnt. Cars already learnt are corrected once when the
