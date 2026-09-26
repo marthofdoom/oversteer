@@ -195,7 +195,7 @@ def tune_summary(reader, car_id, game):
     if not tunes:
         return None
     tune = tunes[-1]
-    measured = game in ('acpmf', 'acc', 'ac')
+    measured = game in ('acpmf', 'acc', 'ac', 'acr')
     out = {'id': tune['id'], 'ratios': tune['ratios'], 'change': tune['change'], 'first_seen': tune['first_seen'],
            'last_seen': tune['last_seen'], 'tunes': len(tunes)}
     for field in ('tyre_radius', 'ride_height_f', 'ride_height_r', 'brake_bias'):

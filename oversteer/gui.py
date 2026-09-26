@@ -109,7 +109,7 @@ class Gui:
         self.keyboard_needs_bind = False
         self.keyboard_session_failed = False
         self.global_hotkeys = {}
-        self.last_profile = ''                  # reopened at start (preferences)          # hotkeys.GLOBAL_ACTIONS bindings, from the preferences
+        self.last_profile = ''                  # reopened at start (preferences)
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
 
@@ -914,7 +914,7 @@ class Gui:
             cars[snapshot['key']] = snapshot['name']
         active = self.telemetry_car_selected or (snapshot['key'] if snapshot else None)
         if active is None and cars:
-            active = sorted(cars.items(), key=lambda kv: kv[1])[0][0]
+            active = sorted(cars.items(), key=lambda kv: kv[1].lower())[0][0]
         self.ui.set_telemetry_cars(sorted(cars.items(), key=lambda kv: kv[1].lower()), active)
         return False
 
@@ -1202,7 +1202,7 @@ class Gui:
         shutil.copyfile(profile_file, path)
 
     def load_preferences(self):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)    # a profile name may hold a %
         config_file = os.path.join(self.config_path, 'config.ini')
         config.read(config_file)
         self.check_permissions = True
@@ -1246,7 +1246,7 @@ class Gui:
         self.save_preferences()
 
     def save_preferences(self):
-        config = configparser.ConfigParser()
+        config = configparser.ConfigParser(interpolation=None)    # a profile name may hold a %
         config['DEFAULT'] = {
             'locale': self.locale,
             'check_permissions': '1' if self.check_permissions else '0',

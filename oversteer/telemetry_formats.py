@@ -296,7 +296,10 @@ def _ovst3(sample, v):
         sample.stage_length = track_length
     if math.isfinite(spline_pos) and 0.0 <= spline_pos <= 1.0:
         sample.progress = spline_pos
-    sample.distance = _finite(distance)
+    # distanceTraveled counts the whole session, not the stage: the
+    # distance along the stage is the progress along its spline
+    if sample.progress is not None and sample.stage_length:
+        sample.lap_distance = sample.progress * sample.stage_length
     sample.laps = laps if laps >= 0 else None
     sample.pos = _vector(world)
 

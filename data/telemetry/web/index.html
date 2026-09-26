@@ -205,7 +205,7 @@ footer { color: var(--faint); font-size: 12px; margin-top: 18px; }
 const $ = (id) => document.getElementById(id);
 const METHODS = {"h-pattern": "H-pattern", "sequential": "Sequential", "paddles": "Paddles"};
 const GAMES = {"forza-fh": "Forza Horizon", "forza-fm": "Forza Motorsport", "forza": "Forza", "dirt": "DiRT",
-  "wrcg": "WRC Generations", "eawrc": "EA SPORTS WRC", "acpmf": "Assetto Corsa", "acr": "Assetto Corsa Rally",
+  "wrcg": "WRC Generations", "eawrc": "EA SPORTS WRC", "acpmf": "Assetto Corsa", "ac": "Assetto Corsa", "acc": "Assetto Corsa Competizione", "acr": "Assetto Corsa Rally",
   "beamng": "BeamNG.drive", "lfs": "Live for Speed"};
 const LIGHTS = 15;
 let carId = null, sessionSeen = null, carFollowsLive = true, cars = [], liveGear = null, stageName = null;
@@ -526,7 +526,7 @@ async function playVideo() {
   let v = wake.video;
   if (!v) {
     const stream = canvasStream();
-    if (!stream && !window.MediaRecorder) return false;
+    if (!stream) return false;
     v = wake.video = document.createElement("video");
     v.muted = true; v.defaultMuted = true; v.playsInline = true; v.loop = true;
     v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("aria-hidden", "true");

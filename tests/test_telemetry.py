@@ -396,7 +396,9 @@ def test_ovst_v3_stage_and_wheels():
     assert len(packet) == OVST3_SIZE == 324
     sample = decode_sample(packet)
     assert sample.game == 'acr' and sample.car == 'acr/rally_car'
-    assert sample.stage_length == 8123.0 and sample.progress == 0.25 and sample.distance == 2030.0
+    assert sample.stage_length == 8123.0 and sample.progress == 0.25
+    # distanceTraveled counts the session: the distance along the stage is the progress
+    assert sample.distance is None and abs(sample.lap_distance - 2030.75) < 0.01
     assert sample.max_rpm == 7650.0                       # the game's current limit beats the static figure
     assert all(abs(w - 78.0 * 0.32) < 1e-4 for w in sample.wheel_speed)
     assert abs(sample.susp_norm[2] - 0.5) < 1e-6 and sample.pos == (120.0, 30.0, -450.0)
@@ -406,3 +408,9 @@ def test_ovst_v3_stage_and_wheels():
     ac1 = decode_sample(_ovst3(game=1, track_length=float('nan'), spline=float('nan')))
     assert ac1.game == 'ac' and ac1.stage_length is None and ac1.progress is None
     assert decode_sample(packet[:-4]) is None
+
+
+def test_ovst_v3_from_an_unnamed_game_stays_acpmf():
+    from oversteer.telemetry_formats import decode_sample
+    sample = decode_sample(_ovst3(game=0))
+    assert sample.game == 'acpmf' and sample.car == 'acpmf/rally_car'

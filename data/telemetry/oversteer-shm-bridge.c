@@ -303,7 +303,7 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
     rd_floats(phys, phys_size, PHYS_WHEEL_LOAD, pkt->wheel_load, 4);
     rd_floats(phys, phys_size, PHYS_RIDE_HEIGHT, pkt->ride_height, 2);
     rd_floats(phys, phys_size, PHYS_BRAKE_BIAS, &pkt->brake_bias, 1);
-    if (game != GAME_AC) {
+    if (game == GAME_ACC || game == GAME_ACR) {
         rd_floats(phys, phys_size, PHYS_FX, pkt->fx, 4);
         rd_floats(phys, phys_size, PHYS_FY, pkt->fy, 4);
         pkt->current_max_rpm = phys_size >= PHYS_MAX_RPM_NOW + 4 ? (float)rd_i32(phys, PHYS_MAX_RPM_NOW) : nan_f();
@@ -322,6 +322,10 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
     if (game == GAME_AC) {
         rd_floats(graph, graph_size, GRAPH_AC_COORDS, pkt->world_pos, 3);
         rd_floats(graph, graph_size, GRAPH_AC_GRIP, &pkt->surface_grip, 1);
+    } else if (game == 0) {
+        /* Which layout the graphics page has is unknown: nothing from it */
+        rd_floats(NULL, 0, 0, pkt->world_pos, 3);
+        rd_floats(NULL, 0, 0, &pkt->surface_grip, 1);
     } else {
         /* ACC/ACR list every car; the player's entry is the one whose id
          * matches playerCarID */
@@ -441,8 +445,8 @@ int main(int argc, char **argv)
             }
             stat = open_sized(static_names, &hstat, static_sizes, &stat_size, NULL);
             graph = open_sized(graphics_names, &hgraph, graph_sizes, &graph_size, NULL);
-            if (!game)
-                game = phys_size >= 800 ? GAME_ACC : GAME_AC;   /* the layout, when the name didn't say */
+            /* A game the executable didn't name stays unknown (0): the
+             * pages' sizes can't tell (a section is whole pages) */
             /* Don't re-send the packet that was there before: a paused
              * game keeps the same id until it resumes. */
             last_packet = rd_i32(phys, PHYS_PACKET_ID);

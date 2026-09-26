@@ -497,7 +497,7 @@ class RunTracker:
         if row is None:
             return
         store = learner.log.store
-        if stage is None and game in ('acr', 'acpmf') and track:
+        if stage is None and game in ('acr', 'acc', 'acpmf') and track:
             # Assetto Corsa Rally names the stage in its shared memory (the
             # bridge before version 3 does not say which AC game it is)
             stage = store.match_track(track, stage_length)
