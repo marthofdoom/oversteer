@@ -334,4 +334,40 @@ def test_the_coach_uses_the_cars_model(tmp_path):
     assert abs(best - analytic_shift(2)) < 150
     assert tip.text.startswith('2→3 with the H-pattern: you change up at {:.0f} rpm, 800 early. Gear 3 gives '.format(
         best - 800))
-    assert tip.text.endswith('% less drive there. Hold it to about {:.0f}.'.format(best))
+    assert tip.text.endswith('% less drive there. Hold it to about {:.0f}: the best learnt from your '
+                             'driving.'.format(best))
+
+
+def fabia_history(tmp_path, surface, grip=11000.0):
+    """A Fabia whose model knows the game's data and, on `surface`, its
+    grip in each gear (1st held to `grip` newtons)."""
+    from tests.test_shift_learner import fabia_pulls, FABIA
+    learner = ShiftLearner(str(tmp_path / 't.db'), profile='rally')
+    fabia_pulls(learner, grip=grip, surface=surface)
+    learner.close()
+    h = History(tmp_path / 't.db')
+    h.car = h.store.car_id('rally', FABIA, 'acr')
+    return h
+
+
+def test_early_changes_on_gravel_are_coached_against_the_game_data(tmp_path):
+    """On gravel, 2→3 800 rpm early is coached against the game's engine
+    data; 1→2, measured grip-limited there, is not, and that is said once."""
+    h = fabia_history(tmp_path, 'gravel')
+    h.session([error(1, -1500.0), error(2, -800.0)], surface='gravel')
+    tips = h.tips()
+    [tip] = [t for t in tips if t.kind == 'tip']
+    assert tip.id == 'shift.early:2:h-pattern:rally-stage:gravel'
+    assert tip.text.startswith('2→3 with the H-pattern: you change up at 6700 rpm, 800 early. Gear 3 gives ')
+    assert tip.text.endswith("Hold it to about 7500: the best from the game's engine data.")
+    [note] = [t for t in tips if t.kind == 'note']
+    assert note.id == 'grip:1:gravel' and '1st is grip-limited there' in note.text
+    h.show(tips)
+    assert not [t for t in h.tips() if t.kind == 'note']              # said once
+
+
+def test_the_game_data_coaches_even_before_the_surface_is_known(tmp_path):
+    h = fabia_history(tmp_path, 'tarmac', grip=1e9)
+    h.session([error(3, -900.0)], surface='unknown')
+    [tip] = h.tips()
+    assert tip.kind == 'tip' and "the game's engine data" in tip.text
