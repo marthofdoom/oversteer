@@ -217,6 +217,7 @@ class RunTracker:
     def _reset(self):
         self.run = None
         self._finish_line = None                     # ACR: the last pace note along the spline
+        self._start_d = self._acr_start = None
         self._last_t = None
         self._last_pos = None
         self._last_stage_time = None
@@ -307,12 +308,13 @@ class RunTracker:
         # Another stage, or the stage started again: in Assetto Corsa Rally,
         # which sends no position or stage clock the checks above could use,
         # the distance along the stage jumps back to the start line
-        if sample.track and self._last_track and sample.track != self._last_track:
-            return 'restart'
-        distance, last_distance = sample.lap_distance, self._last_lap_distance
-        if distance is not None and last_distance is not None and not (sample.laps and sample.laps > 1) \
-                and distance < last_distance - DISTANCE_BACK:
-            return 'restart'
+        # (ACR only: AC and ACC lap distances wrap at the line with laps 0)
+        if sample.game == 'acr':
+            if sample.track and self._last_track and sample.track != self._last_track:
+                return 'restart'
+            distance, last_distance = sample.lap_distance, self._last_lap_distance
+            if distance is not None and last_distance is not None and distance < last_distance - DISTANCE_BACK:
+                return 'restart'
         stage_time, last_time = sample.stage_time, self._last_stage_time
         if stage_time is not None and last_time is not None and stage_time < last_time - RESTART_DROP:
             laps, lap = sample.laps, sample.lap
@@ -363,15 +365,16 @@ class RunTracker:
         self._stood = self._launch = self._launch_rpm = 0.0
         self._rolling = None
         # Assetto Corsa Rally sends no stage clock or progress: the run has
-        # finished once it passes the stage's last pace note
+        # finished once it crosses the stage's last pace note (looked up in
+        # _track, as the track's name may arrive after the first packet).
+        # The start tells two stages of one name apart only from standing:
+        # a run split mid-stage starts anywhere.
         self._finish_line = None
-        if sample.game == 'acr' and sample.track:
-            stage = stage_tables.acr_stage(sample.track, sample.lap_distance, sample.stage_length)
-            if stage is not None and stage.get('pacenote_last_m'):
-                self._finish_line = stage['pacenote_last_m']
+        self._start_d = sample.lap_distance
+        self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
                          sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track,
-                         sample.lap_distance)
+                         self._acr_start)
 
     def _clock(self, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
@@ -442,8 +445,12 @@ class RunTracker:
                 self._finish_d = d
             self._progress = sample.progress
         self._clock(sample, d, dt, speed)
-        if self._finish_line is not None and self._finished is None and sample.lap_distance is not None \
-                and sample.lap_distance >= self._finish_line:
+        if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
+            stage = stage_tables.acr_stage(sample.track, self._acr_start, sample.stage_length)
+            self._finish_line = (stage or {}).get('pacenote_last_m') or False
+        if self._finish_line and self._finished is None and sample.lap_distance is not None \
+                and sample.lap_distance >= self._finish_line \
+                and (self._start_d is None or self._start_d < self._finish_line):
             # The run's own clock: ACR's stage clock isn't in what the bridge reads
             self._finished, self._result_time = 1, self._duration
             self._finish_d = d

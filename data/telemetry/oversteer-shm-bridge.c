@@ -369,6 +369,9 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
             player = 0;
         if (player >= 0)
             rd_floats(graph, graph_size, GRAPH_ACC_COORDS + 12 * player, pkt->world_pos, 3);
+        /* An entry left at the origin (loading, a reset) is no position */
+        if (pkt->world_pos[0] == 0.0f && pkt->world_pos[1] == 0.0f && pkt->world_pos[2] == 0.0f)
+            rd_floats(NULL, 0, 0, pkt->world_pos, 3);
         else
             rd_floats(NULL, 0, 0, pkt->world_pos, 3);
         rd_floats(graph, graph_size, GRAPH_ACC_GRIP, &pkt->surface_grip, 1);
@@ -409,8 +412,8 @@ int main(int argc, char **argv)
             watch = argv[++i];
         else if (!strcmp(argv[i], "--log") && i + 1 < argc)
             logfile = fopen(argv[++i], "a");
-        else if (!strcmp(argv[i], "--dump") && i + 1 < argc)
-            dumpfile = fopen(argv[++i], "wb");
+        else if (!strcmp(argv[i], "--dump") && i + 1 < argc && !dumpfile)
+            dumpfile = fopen(argv[++i], "ab");   /* oversteer-run restarts the bridge: keep what was dumped */
         else {
             fprintf(stderr, "usage: %s [--host H] [--port N] [--rate HZ] [--exit-when-gone] [--watch GAME.exe] [--log FILE] [--dump FILE] [--verbose]\n", argv[0]);
             return 2;

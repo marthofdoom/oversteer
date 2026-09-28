@@ -1038,10 +1038,10 @@ class Gui:
         shift = self.model.get_rev_leds_shift()
         unit = self.model.get_rev_leds_shift_unit()
         if self.model.get_rev_leds_learnt():
-            # Auto: gears not learnt yet use the % point (95 % if the stored
-            # one is an RPM figure, which means nothing for another car)
-            fallback = shift if unit == 'percent' and shift else 95
-            return {'shift': fallback / 100.0, 'launch': self.model.get_rev_leds_launch()}
+            # Auto: gears not learnt yet at 95 % of the limiter (what the
+            # choice says: the stored point is hidden, and an RPM figure
+            # means nothing for another car)
+            return {'shift': 0.95, 'launch': self.model.get_rev_leds_launch()}
         if unit == 'rpm':
             return {'shift_rpm': shift or 7000}
         return {'shift': (shift or 95) / 100.0, 'launch': self.model.get_rev_leds_launch()}

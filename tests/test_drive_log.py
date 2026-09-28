@@ -508,3 +508,18 @@ def test_acr_stages_of_one_name_told_apart_by_the_start():
     assert stage_tables.acr_stage('Alsace For_t', start=3773.0, length=10927.0)['stage'] == 'Forêt de Munster'
     assert stage_tables.acr_stage('Alsace For_t', start=100.0, length=10927.0)['stage'] == 'Forêt de Saverne'
     assert stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['stage'] == 'Afon Bidno - Severn'
+
+
+def test_acc_laps_are_not_restarts(tmp_path):
+    # AC and ACC: the lap distance wraps at the line with numberOfLaps 0 in
+    # practice; the ACR restart rule must not cut such a session per lap
+    laps = []
+    t = 0.0
+    for lap in range(3):
+        drive = acr_drive(t, 0.0, 3000.0, track='Monza', car='acc/ferrari_296_gt3')
+        for _, s, _throttle in drive:
+            s.game = 'acc'
+        laps += drive[20:] if lap else drive
+        t = laps[-1][0] + 0.1
+    learner, reader, session = drive_runs(tmp_path, laps)
+    assert len([r for r in session['runs'] if r['distance'] > 300]) == 1

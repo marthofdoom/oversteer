@@ -449,11 +449,6 @@ class Model:
     def get_rev_leds_learnt(self):
         return self.data['rev_leds_learnt'] is not False
 
-    def get_rev_leds_shift_display_unit(self):
-        """What the Shift at choice shows: 'auto' while the learnt points
-        are used, else the unit of the fixed point."""
-        return 'auto' if self.get_rev_leds_learnt() else self.get_rev_leds_shift_unit()
-
     def get_rev_leds_shift_unit(self):
         return self.data['rev_leds_shift_unit'] or 'percent'
 
