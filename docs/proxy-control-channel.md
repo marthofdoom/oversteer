@@ -127,8 +127,10 @@ Two things to make this reliable:
   sees no socket and uses the pkexec path, which is what it must do anyway
   with no service. After the first install the GUI tells the user once that
   a restart of Oversteer makes later changes instant (only in the Flatpak,
-  only when the socket is missing but the status file says a daemon with
-  `control` is running).
+  and only when `/run/oversteer` is empty inside the sandbox while the
+  host's `/etc/oversteer/proxies`, visible through `host-etc`, has enabled
+  specs: the status file is behind the same missing mount, so it cannot be
+  the evidence).
 
 Verification on the rig is step 5 of the build plan: `connect()` from inside
 the Flatpak through the `:ro` mount. Fallback if it fails for a reason not
