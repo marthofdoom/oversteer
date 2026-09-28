@@ -361,6 +361,12 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
                 }
             }
         }
+        /* ACR leaves activeCars and the ids at 0 and keeps the player's
+         * position in the first entry (a dump from marth's rig: it moves
+         * with the car's velocity to within 1.4 %) */
+        if (player < 0 && game == GAME_ACR && graph && graph_size >= GRAPH_ACC_COORDS + 12
+            && rd_i32(graph, GRAPH_ACC_ACTIVE) <= 0)
+            player = 0;
         if (player >= 0)
             rd_floats(graph, graph_size, GRAPH_ACC_COORDS + 12 * player, pkt->world_pos, 3);
         else
