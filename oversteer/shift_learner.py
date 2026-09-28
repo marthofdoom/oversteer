@@ -632,11 +632,14 @@ class CarModel:
         """The best change up from `gear` on `surface` (None: whatever the
         surface): {'rpm', 'coverage', 'source' ('game': from the game's
         engine data, 'learnt'), 'surface' (the one it was checked on, or
-        None), 'grip_limited' (True, False, or None where not measured)},
-        or None when not known. The engine's best, from the game's data
-        where shipped, else learnt; on a surface where `gear` is measured
-        grip-limited, the lowest rpm from which gear + 1 reaches the same
-        grip limit (the drive lost changing up there is none)."""
+        None), 'grip_limited' (True, False, or None where not measured),
+        'engine_rpm' (the engine's best)}, or None when not known. The
+        engine's best, from the game's data where shipped, else learnt; on
+        a surface where `gear` is measured grip-limited, the lowest rpm
+        from which gear + 1 reaches the same grip limit (the drive lost
+        changing up there is none). From there up to the engine's best
+        both gears are held to the grip limit, so a change anywhere in
+        between costs nothing (measured_against())."""
         rpm = self.game_best(gear)
         if rpm is not None:
             found = {'rpm': rpm, 'coverage': 1.0, 'source': 'game'}
@@ -647,7 +650,7 @@ class CarModel:
             if best is None:
                 return None
             found = {'rpm': best[0], 'coverage': best[1], 'source': 'learnt'}
-        found.update(surface=None, grip_limited=None)
+        found.update(surface=None, grip_limited=None, engine_rpm=found['rpm'])
         if surface is None:
             return found
         grip = self.grip(gear, surface)
@@ -703,6 +706,7 @@ class CarModel:
                 'game_ratio': self.game_ratio(gear, surface),
                 'ratio_samples': len(self.ratios.get(gear, [])),
                 'best': best['rpm'] if best else None,
+                'engine_best': best['engine_rpm'] if best else None,
                 'best_low': band[0] if band else None,
                 'best_high': band[1] if band else None,
                 'coverage': best['coverage'] if best else 0.0,
@@ -740,11 +744,18 @@ class CarModel:
             if best is None or best['coverage'] < SHIFT_COVERAGE or average is None or average[1] < 3 or not step:
                 continue
             best_rpm, (shift_rpm, count) = best['rpm'], average
+            engine_rpm = best['engine_rpm']              # above the lowered best, up to here: the same drive
             change = '{}→{}'.format(gear, gear + 1)
             source = ' (the game\'s engine data)' if best['source'] == 'game' else ''
+            if best['grip_limited'] and engine_rpm > best_rpm:
+                grip_limited.append('{} from {:.0f} to {:.0f} rpm'.format(change, best_rpm, engine_rpm))
             if shift_rpm < best_rpm - 200:
                 if best['grip_limited']:
-                    grip_limited.append(change)
+                    # Below where the next gear reaches the grip limit too
+                    tips.append((best_rpm - shift_rpm, '{}: you change up around {:.0f} rpm, {:.0f} early; hold it '
+                                 'to about {:.0f} (lowered for grip on {}).'.format(change, shift_rpm,
+                                                                                   best_rpm - shift_rpm, best_rpm,
+                                                                                   surface)))
                     continue
                 if surface in LOOSE and best['grip_limited'] is None:
                     waiting.append(change)
@@ -753,7 +764,8 @@ class CarModel:
                 tips.append((best_rpm - shift_rpm, '{}: you change up around {:.0f} rpm, {:.0f} early; hold it to '
                              'about {:.0f}{}.{}'.format(change, shift_rpm, best_rpm - shift_rpm, best_rpm, source,
                                                        cost)))
-            elif shift_rpm > best_rpm + 200:
+            elif shift_rpm > engine_rpm + 200:
+                best_rpm = engine_rpm
                 if best_rpm >= ceiling * 0.99:
                     tips.append((shift_rpm - best_rpm, '{}: you change up around {:.0f} rpm, on the limiter; this car '
                                  'pulls to the limiter in {}, so change as the lights flash.'.format(
@@ -781,8 +793,8 @@ class CarModel:
             lines.append('Spot on: {} within 200 rpm of the best ({} changes).'.format(
                 _listed(names), sum(count for _, count in spot_on)))
         if grip_limited:
-            lines.append('{} on {}: the lower gear is grip-limited there, so changing up early costs nothing.'.format(
-                _listed(grip_limited), surface))
+            lines.append('On {} the lower gear is grip-limited, so changing up anywhere in the range gives the same '
+                         'drive: {}.'.format(surface, _listed(grip_limited)))
         if waiting:
             lines.append('{} on {}: early, but not coached until the grip of the lower gear there is measured (a few '
                          'full-throttle pulls in it): on a loose surface short-shifting can be right.'.format(
@@ -815,6 +827,18 @@ class CarModel:
             return ''
         return ' At that speed gear {} gives {:.0f} % less drive than staying in {}.'.format(
             gear + 1, (1 - after / stay) * 100, gear)
+
+
+def measured_against(best, rpm):
+    """(the rpm a change up at `rpm` is measured against, low, high) for a
+    best from best_for(). Where the gear is grip-limited, anything from the
+    lowered best to the engine's is on target: the change itself there,
+    else the nearer end, and (low, high) is that range; otherwise the best,
+    and None, None."""
+    low, high = best['rpm'], best.get('engine_rpm') or best['rpm']
+    if high <= low:
+        return low, None, None
+    return min(max(rpm, low), high), low, high
 
 
 def _listed(names):
@@ -1639,8 +1663,12 @@ class ShiftLearner:
         best = best if best is not None and best['coverage'] >= SHIFT_COVERAGE else None
         band = (self._bands.get(car.key, (0, {}))[1].get(start)
                 if best and best['source'] == 'learnt' and not best['grip_limited'] else None)
+        against = None
+        if best is not None:
+            against, low, high = measured_against(best, peak)
+            band = (low, high) if low is not None else band
         shift = {'_t': now, 'at': self.wall(now), 'gear': start, 'gear_to': to, 'direction': 'up' if up else 'down',
-                 'rpm': peak, 'best': best['rpm'] if best else None, 'best_low': band[0] if band else None,
+                 'rpm': peak, 'best': against, 'best_low': band[0] if band else None,
                  'best_high': band[1] if band else None, 'throttle': throttle,
                  'method': shift_method(getattr(self, '_press', None), left_at, now, via_neutral),
                  'neutral_time': now - left_at if via_neutral else 0.0, 'engage_rpm': engage_rpm,

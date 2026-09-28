@@ -82,6 +82,9 @@ def shift_table(snapshot):
             else:
                 best = '{:.0f} rpm'.format(row['best'])
                 if row.get('grip_limited'):
+                    # Anywhere up to the engine's best gives the same drive
+                    if (row.get('engine_best') or 0) > row['best']:
+                        best = '{:.0f}–{:.0f} rpm'.format(row['best'], row['engine_best'])
                     best += ' ' + _("(grip)")
                 elif row.get('source') == 'game':
                     best += ' ' + _("(game)")

@@ -125,6 +125,8 @@ def test_shift_table():
     headers, rows = view.shift_table(shipped)
     assert headers[1] == 'Best upshift (gravel)'
     assert rows[0][1] == '7500 rpm (game)' and rows[1][1] == '5200 rpm (grip)' and rows[1][-2] == '—'
+    gears[1].update(engine_best=7500.0)                     # on target up to the engine's best
+    assert view.shift_table(snapshot)[1][1][1] == '5200–7500 rpm (grip)'
     assert view.shift_summary(shipped) == ("Limiter 7500 rpm  ·  best changes up from the game's engine data  ·  "
                                            "checked for grip on gravel")
 

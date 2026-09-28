@@ -15,7 +15,7 @@ import math
 import statistics
 import time
 
-from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SHIFT_COVERAGE, SURFACES
+from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SHIFT_COVERAGE, SURFACES, measured_against
 
 # -- metrics of one run (section 9.1) --
 
@@ -112,7 +112,9 @@ def against_best(car, shifts, surface):
     against the best for the run's surface and that gear, now that the
     surface is settled (a change is recorded against what was known as it
     happened: maybe nothing yet, or the best whatever the surface). The
-    game's data or a grip-limited gear leave no bootstrap range."""
+    game's data leaves no bootstrap range; a grip-limited gear's range is
+    from its lowered best to the engine's, all of it on target
+    (measured_against)."""
     if car is None:
         return shifts
     out = []
@@ -120,8 +122,11 @@ def against_best(car, shifts, surface):
         if s['direction'] == 'up' and s['gear_to'] == s['gear'] + 1:
             best = car.best_for(s['gear'], surface)
             if best is not None and best['coverage'] >= SHIFT_COVERAGE:
-                s = dict(s, best=best['rpm'])
-                if best['source'] != 'learnt' or best['grip_limited'] or s['best_low'] is None:
+                against, low, high = measured_against(best, s['rpm'])
+                s = dict(s, best=against)
+                if low is not None:
+                    s['best_low'], s['best_high'] = low, high
+                elif best['source'] != 'learnt' or best['grip_limited'] or s['best_low'] is None:
                     s['best_low'] = s['best_high'] = None
         out.append(s)
     return out
@@ -667,40 +672,46 @@ class Coach:
                     SHIFT_OFF, 'late' if error > 0 else 'early', bad_ones, all_ones))
             per_10km = _per_10km(rows, sum(r['count'] for r in rows))
             cost = abs(error) / 1000.0 * COST_SHIFT * per_10km
+            limited = best is not None and best['grip_limited']
+            if limited and best['engine_rpm'] > best_rpm:
+                notes.append(Tip('grip:{}:{}'.format(gear, surface), 'note',
+                                 '{} on {}: {} is grip-limited there (measured), so changing up anywhere from {:.0f} '
+                                 'to {:.0f} rpm gives the same drive.'.format(change, surface, _ordinal(gear),
+                                                                            best_rpm, best['engine_rpm'])))
             if error < -SHIFT_OFF:
-                # Early: right where the gear is grip-limited on this surface
-                # (measured); on a loose surface (a mixed one too), only where
-                # the gear's grip there is measured over several pulls and
-                # found not to limit; with the surface unknown, only against
-                # the game's data for a gear measured grip-limited nowhere, or
-                # with the wheels seen not to spin
-                if best is not None and best['grip_limited']:
-                    notes.append(Tip('grip:{}:{}'.format(gear, surface), 'note',
-                                     '{} on {}: {} is grip-limited there (measured), so changing up early costs '
-                                     'nothing; not coached.'.format(change, surface, _ordinal(gear))))
-                    continue
+                # Early: on a loose surface (a mixed one too), only where the
+                # gear's grip there is measured over several pulls (below
+                # the lowered best where it limits: the next gear is short of
+                # the grip limit there); with the surface unknown, only
+                # against the game's data for a gear measured grip-limited
+                # nowhere, or with the wheels seen not to spin
                 engine_says = (best is not None and best['source'] == 'game'
                                and not model.grip_limited_anywhere(gear))
-                if loose(surface) and not (best is not None and best['grip_limited'] is False):
+                if loose(surface) and not (best is not None and best['grip_limited'] is not None):
                     waiting = True
                     continue
                 if surface in (None, 'unknown') and not engine_says and not (slip is not None
                                                                              and slip[0] < SPIN_SHIFT):
                     gated = True
                     continue
-                if slip is not None:
+                if slip is not None and not limited:
                     evidence.append('Driven wheels slipped {:.0f} % at those changes: traction was not the '
                                     'limit.'.format(slip[0] * 100))
                 if best_rpm:
                     text = '{}{}: you change up at {:.0f} rpm, {:.0f} early.{} Hold it to about {:.0f}{}.'.format(
                         change, _with(method), best_rpm + error, -error,
-                        self._drive_lost(model, gear, best_rpm + error), best_rpm, source)
+                        '' if limited else self._drive_lost(model, gear, best_rpm + error), best_rpm, source)
                 else:
                     text = '{}{}: you change up about {:.0f} rpm early. Hold the gear longer.'.format(
                         change, _with(method), -error)
                 candidates.append(Tip('shift.early:' + key, 'focus' if is_habit else 'tip', text, evidence,
                                       error, cost, count))
             elif error > SHIFT_OFF:
+                # Late: past the engine's best (a grip-limited gear's lowered
+                # best up to there is all on target, measured_against)
+                if best is not None:
+                    best_rpm = best['engine_rpm']
+                    source = self._source(dict(best, grip_limited=False))
                 if best_rpm and model.ceiling() and best_rpm >= model.ceiling() * 0.99:
                     text = ('{}{}: you change up on the limiter; this car pulls to the limiter in {}{}, so '
                             'change as the lights flash.'.format(change, _with(method), gear,
@@ -738,7 +749,7 @@ class Coach:
         if best is None:
             return ''
         if best['grip_limited']:
-            return ': where the next gear reaches the grip limit on {} too'.format(best['surface'])
+            return ': lowered for grip on {}, where the next gear reaches the grip limit too'.format(best['surface'])
         return ": the best from the game's engine data" if best['source'] == 'game' else \
             ': the best learnt from your driving'
 

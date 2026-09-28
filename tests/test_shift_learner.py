@@ -886,3 +886,28 @@ def test_advice_waits_for_the_grip_on_a_loose_surface():
     lines = car.advice(surface='gravel')
     assert not any('1000 early' in line for line in lines)
     assert any(line.startswith('3→4 on gravel: early, but not coached until the grip') for line in lines)
+
+
+def test_a_grip_limited_gear_is_on_target_up_to_the_engine_best(tmp_path):
+    """From where 2nd reaches the grip limit on gravel up to the engine's
+    best both gears are held to it: 1st changed up at 6500 is spot on, not
+    "3000 late", and recorded as on target, with the range; below the
+    lowered best it is early against it."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t = fabia_pulls(learner)
+    car = learner.car
+    best = car.best_for(1, 'gravel')
+    assert best['grip_limited'] and best['rpm'] < 4500 and best['engine_rpm'] == 7500.0
+    assert car.best_for(2, 'gravel')['engine_rpm'] == car.best_for(2, 'gravel')['rpm'] == 7500.0
+    car.upshifts[1] = [6500.0] * 5
+    lines = car.advice(surface='gravel')
+    assert lines[0].startswith('Spot on: 1→2') and not any('late' in line for line in lines)
+    assert any('1→2 from {:.0f} to 7500 rpm'.format(best['rpm']) in line for line in lines)
+    car.upshifts[1] = [best['rpm'] - 800] * 5
+    assert car.advice(surface='gravel')[0].endswith('hold it to about {:.0f} (lowered for grip on gravel).'.format(
+        best['rpm']))
+    learner._shift_locked(car, (1, 6500.0, 1.0, t, False, None), 2, 4000.0, t + 0.1)
+    shift = learner._pending[-1]
+    assert shift['best'] == 6500.0 and (shift['best_low'], shift['best_high']) == (best['rpm'], 7500.0)
+    rows = {row['gear']: row for row in learner.snapshot()['gears']}
+    assert rows[1]['best'] == best['rpm'] and rows[1]['engine_best'] == 7500.0
