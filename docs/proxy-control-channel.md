@@ -929,3 +929,61 @@ service working as before if the run stops there.
 | Q8 | A game that opened a device's hidraw node before the grab keeps reading it; accept and document? | Accept and document | step 8 |
 | Q9 | When the combined device is enabled over the channel while a companion is already running, the companion enumerates first. Stop and restart the companions to keep the wheel first, or leave them and tell the user to restart the game? | Restart the companions after the wheel; owner's call because it drops a companion device a running game holds | step 7 |
 | Q10 | Should a device folded at runtime be made "permanent" (a static hide rule for boot ordering) by the next install, offered as a button, or never? | Offered as a button on the Devices tab ("Hide from games at boot", one prompt) | step 11 |
+
+## 16. Status: stowed (2026-09-27), and the review to apply first
+
+The owner stowed this work on 2026-09-27: not worth the effort for now.
+An adversarial review of this design (same day) found the core sound
+(socket with SO_PEERCRED, typed verbs naming only objects the daemon has,
+daemon-issued handles, trust from sysfs topology, root-owned state; a
+test confirmed connect() works through a read-only bind mount and that
+uid 0 in a user namespace is seen as the host uid). Before building,
+apply:
+
+Must fix:
+1. Hiding by fchmod doesn't last: udev re-applies MODE/GROUP/ACL on every
+   `change` event (the installer's own `_reapply_permissions` sends them),
+   giving hidraw back to games. Let udev own the mode: a generic rule
+   keyed on a daemon-written flag (e.g. `TEST=="/run/oversteer/hide%p"`);
+   hide = grab, flag, `change`; release = unflag, `change`. The flag
+   doubles as a write-ahead journal.
+2. The trust rule admits classic Bluetooth HID (hci sits under the
+   controller's USB interface). Judge the nearest transport: skipping
+   input and hid ancestors, the first must be a usb_interface; a hid
+   ancestor must be bus 0003. Optionally refuse vhci_hcd/dummy_hcd roots.
+3. "Installed" includes the disabled built-ins the installer copies:
+   the channel may enable only specs the owner enabled at install
+   (record it explicitly).
+4. A spec disabled (or a source unfolded) at runtime leaves its devices
+   hidden by the static rules after a reboot with nothing grabbing them:
+   at start, release every statically hidden device the effective specs
+   won't grab. (Also fix §7.4's inverted sentence.)
+5. No supplementary groups from /proc/<pid>/status (pid race); use
+   SO_PEERGROUPS if groups are ever wanted. Validate the policy file with
+   exact types (True is not a uid), O_NOFOLLOW, root-owned, not writable
+   by others.
+6. Candidates exclude devices any running proxy holds or matches; an
+   EVIOCGRAB failure aborts the attach before any permission change.
+7. The hardware-backed check comes before any open (Equipment opens nodes
+   today; _scan_sources opens every event node).
+8. validate() checks syntax and types only; existence is checked again
+   under the manager's lock when applying.
+9. A change applied after the reply timed out: reply `pending` and have
+   the client re-read, so GUI, user spec and daemon agree.
+
+Should fix: a start limit and a safe mode (start without the overlay after
+repeated early crashes: RestartSec=3s never trips systemd's default limit);
+node identity after replug (sysfs dev + USEC_INITIALIZED, HIDIOCGRAWINFO);
+hide only hidraw siblings under the same hid parent; O_PATH for hidraw;
+fold on VID:PID + exact name, never a regex; the classifier must agree on
+the kind before an auto-fold; PKEXEC_UID is the invoking user (document);
+remove() deletes /run/oversteer.
+
+Simpler: persist only invert, enabled and excluded; known equipment
+re-folds itself on every plug, a manual fold lasts the session, and
+keeping it is the one-prompt install (Q10).
+
+Answers the owner hadn't given when it was stowed: Q1-Q10 and whether
+folding a daemon-listed device the user picked meets "booleans and known
+source kinds, never new identities" (the review: the letter yes, the
+spirit to be confirmed).
