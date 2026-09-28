@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Assetto Corsa Rally: Oversteer ships each of the game's 18 cars' engine
+  and gearing, derived from the game's own files (torque curve, limiter,
+  gear sets, final drive, tyre radius, mass, drivetrain, the game's own
+  shift-light rpms). The best upshift per gear is then exact from the
+  first drive: for the Skoda Fabia RS Rally2, the limiter in every gear.
+  The learnt gear ratios pick the gear set in use and stay as a check.
+- Best upshifts per surface: a gear whose measured drive at full throttle
+  stays well below what the engine gives in it (1st on gravel, say) is
+  grip-limited there, and its best upshift is lowered to where the next
+  gear reaches the same grip. The rev lights in Auto use the best for the
+  surface of the stage being driven (from the stage tables), the
+  Telemetry tab's shift table says which surface it shows and marks each
+  best as from the game's data or lowered for grip.
+
+### Changed
+- Coaching measures each change up against the best for the run's
+  surface and that gear, and says whether that best comes from the game's
+  engine data or was learnt. Early changes on gravel are no longer muted
+  wholesale: only those from a gear measured grip-limited there, which it
+  says once.
+
+### Fixed
+- The learnt best upshift of a car driven where the game sends no slope
+  (the Fabia's 5100–5200 rpm, 800 rpm below where it should be): power is
+  no longer pooled over the gears unless the slope is taken out, bands
+  need more samples while hills are left in, and the slope now also comes
+  from how the car's position climbs (Assetto Corsa Rally sends it now).
+- Gear ratios are no longer learnt while coasting or braking.
+
 ## 0.14.1 — 2026-09-26
 
 ### Fixed
