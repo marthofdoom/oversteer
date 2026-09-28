@@ -60,6 +60,8 @@ install_subdir('telemetry/stages',
 install_subdir('telemetry/cars',
   install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry')
 )
+# How each coaching aspect is derived and what each game gives: oversteer/coaching_matrix.py
+install_subdir('telemetry/coaching', install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry'))
 # The read-only telemetry web page (served by oversteer/telemetry_web.py
 # when the Telemetry tab turns it on)
 install_data('telemetry/web/index.html',
