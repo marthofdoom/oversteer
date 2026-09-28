@@ -55,6 +55,11 @@ install_data('telemetry/eawrc/oversteer.json',
 install_subdir('telemetry/stages',
   install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry')
 )
+# The shipped car data (Assetto Corsa Rally: torque curves, gearing and
+# limiters from the game's files): oversteer/car_data.py
+install_subdir('telemetry/cars',
+  install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry')
+)
 # The read-only telemetry web page (served by oversteer/telemetry_web.py
 # when the Telemetry tab turns it on)
 install_data('telemetry/web/index.html',
