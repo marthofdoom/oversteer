@@ -706,9 +706,22 @@ def test_the_slope_comes_from_the_position_where_no_forward_vector_is_sent(tmp_p
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     road = Positioned(grade=hill, forward=False)
     t = exits(learner, road=road, runs=3)
-    drive(learner, road=road, t=t)
+    t = drive(learner, road=road, t=t)
     assert learner.car.slope_free and learner.car.power
     assert learnt_error(learner) <= 100, [(g, learner.car.best_shift(g)) for g in (1, 2, 3, 4)]
+    # Below about 24 km/h the car covers too little ground in the window for
+    # a slope: those samples are left out, and the car stays slope-free
+    pooled = {band: len(v) for band, v in learner.car.power.items()}
+    t, speed, x = t + 10.0, 5.5, 0.0
+    for _ in range(120):
+        t += 1 / 60
+        speed += 0.5 / 60
+        x += speed / 60
+        sample = Sample(RATIOS[1] * speed, LIMITER, gear=1, speed=speed, car='test-car')
+        sample.pos, sample.brake = (x, 0.0, 0.0), 0.0
+        learner.feed(t, sample, LIMITER, 1.0, 0.0)
+        assert learner.car.slope_free
+    assert {band: len(v) for band, v in learner.car.power.items()} == pooled
 
 
 def test_hills_left_in_keep_the_gears_apart(tmp_path):

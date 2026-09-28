@@ -1561,10 +1561,16 @@ class ShiftLearner:
         else:
             if car.power_source == 'game' or drive is None or accel <= 0:
                 return
+            if car.slope_free and not slope_free:
+                # The slope is known for this car, only not here (too slow to
+                # tell it from the positions, or none sent a moment): no
+                # sample, rather than one with a hill in it or the car's
+                # pooling flickering off
+                return
             car.power_source = 'accel'
-            car.slope_free = slope_free
+            car.slope_free = bool(slope_free)
             rpm = mid_rpm
-            power, pooled = drive * mid_speed, slope_free
+            power, pooled = drive * mid_speed, bool(slope_free)
         if power <= 0:
             return
         band = int(rpm // POWER_BIN)
@@ -1700,7 +1706,8 @@ class ShiftLearner:
         change of speed plus what the slope takes, from the car's forward
         vector (world y up) or from how much its position climbed over the
         distance it travelled; otherwise the change of speed alone (False:
-        a hill is in it)."""
+        a hill is in it; None: positions came, but the car went too short
+        a way for its climb to be a slope)."""
         if sample.accel_kind == 'specific' and sample.accel is not None:
             return sample.accel[0], True
         accel = self._acceleration()
@@ -1711,7 +1718,7 @@ class ShiftLearner:
         grade = self._grade()
         if grade is not None:
             return accel + G * grade, True
-        return accel, False
+        return accel, None if len(self._positions) >= ACCEL_MIN_POINTS else False
 
     def _grade(self):
         """The sine of the road's slope over the recent window, from the
