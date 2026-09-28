@@ -525,9 +525,10 @@ class CarModel:
         until enough is measured. The measured drive (acceleration plus
         what drag and rolling take) over the engine's at those revs is
         compared with the same in the other gears on the surface, the
-        highest of which stands for "all the engine gives" (it cancels the
-        car's mass, the efficiency and the tyre): a gear clearly below it
-        spins or slides its drive away."""
+        highest of the higher gears stands for "all the engine gives" (it
+        cancels the car's mass, the efficiency and the tyre): a gear
+        clearly below it spins or slides its drive away. The top gear has
+        nothing to be compared with and is never grip-limited."""
         samples = self.drive.get((surface, gear))
         if not samples or len(samples) < DRIVE_MIN:
             return None
@@ -546,9 +547,14 @@ class CarModel:
                 if len(found) >= DRIVE_MIN:
                     medians[g] = _median(found)
         own = medians.pop(gear, None)
-        if own is None or not medians:
+        higher = [m for g, m in medians.items() if g > gear]
+        if own is None or not higher:
             return None
-        reference = max(medians.values())
+        # Only a higher gear stands for the engine: grip caps the force at
+        # the wheels, which is highest in the low gears, while a resistance
+        # the model underestimates (loose gravel, drag) takes most, as a
+        # share, from the high gears' smaller drive
+        reference = max(higher)
         if reference <= 0:
             return None
         cap = _median([drive for _, _, drive in samples]) / reference

@@ -909,7 +909,7 @@ class Coach:
 
     def _model_notes(self, model, now, candidates):
         """What the car's model says it is still learning."""
-        from .shift_learner import POWER_BIN, POWER_MIN
+        from .shift_learner import POWER_BIN
         recent_tunes = sorted(g for g, at in model.retuned.items() if now - at < 7 * DAY)
         if recent_tunes:
             candidates.append(Tip('retuned:' + ','.join(str(g) for g in recent_tunes), 'tip', '{} re-tuned; {} shift '
@@ -919,8 +919,8 @@ class Coach:
                                       'its' if len(recent_tunes) == 1 else 'their'), value=0.0, cost=0.01))
         ceiling = model.ceiling()
         needed = int(ceiling * 0.5 / POWER_BIN) if ceiling else 0
-        bands = sum(1 for v in model.power.values() if len(v) >= POWER_MIN)
-        if needed and bands < needed * 0.8:
+        bands = model.known_bands()
+        if not model.shipped and needed and bands < needed * 0.8:            # the game's data needs no learning
             candidates.append(Tip('learning', 'tip', 'Still learning the engine ({} of about {} rev bands known): '
                                   'full-throttle pulls from low revs, out of slow corners, fill it in fastest.'.format(
                                       bands, needed), value=0.0, cost=0.0))

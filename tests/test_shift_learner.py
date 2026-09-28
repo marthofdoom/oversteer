@@ -665,6 +665,20 @@ def test_first_gear_is_grip_limited_on_gravel_only(tmp_path):
     assert again.best_for(1, 'gravel')['rpm'] == first['rpm'] and again.last_surface == 'gravel'
 
 
+def test_a_high_gear_short_of_its_drive_is_not_grip_limited():
+    """Gravel's rolling resistance or drag the model underestimates takes
+    most, as a share, from the high gears' small drive: only a higher gear
+    stands for the engine, so 4th reading low against 2nd is not grip."""
+    from oversteer import car_data
+    car = CarModel(FABIA)
+    entry = car_data.entry(FABIA)
+    for gear, share in ((2, 1.0), (3, 0.9), (4, 0.5), (5, 0.45)):
+        car.drive[('gravel', gear)] = [(rpm, 20.0, share * car_data.torque(entry, rpm) * FABIA_GEARS[gear - 1])
+                                       for rpm in range(5000, 7500, 50)]
+    assert car.best_for(4, 'gravel')['grip_limited'] is False and car.best_for(4, 'gravel')['rpm'] == 7500.0
+    assert car.grip(5, 'gravel') is None                     # top gear: nothing to compare with
+
+
 def test_with_enough_grip_no_gear_is_lowered(tmp_path):
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     fabia_pulls(learner, grip=1e9, surface='tarmac')

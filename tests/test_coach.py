@@ -369,5 +369,5 @@ def test_early_changes_on_gravel_are_coached_against_the_game_data(tmp_path):
 def test_the_game_data_coaches_even_before_the_surface_is_known(tmp_path):
     h = fabia_history(tmp_path, 'tarmac', grip=1e9)
     h.session([error(3, -900.0)], surface='unknown')
-    [tip] = h.tips()
+    [tip] = h.tips()                                               # and no "still learning the engine"
     assert tip.kind == 'tip' and "the game's engine data" in tip.text
