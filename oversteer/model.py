@@ -406,7 +406,22 @@ class Model:
         (the limiter learnt at a launch when there is one) or 'rpm'.
         `value` is the converted shift point in the new unit (the
         controller supplies it when it can), otherwise the unit's default."""
+        if unit == 'auto':
+            # Each gear's learnt best upshift; the stored point stays as the
+            # fallback for gears not learnt yet
+            if self.set_if_changed('rev_leds_learnt', True) and self.ui is not None:
+                self.ui.set_rev_leds(self.data['rev_leds'], None, self.data['rev_leds_shift'], 'auto')
+                self.ui.controller.update_rev_leds_shift()
+            return
         unit = 'rpm' if unit == 'rpm' else 'percent'
+        if self.data['rev_leds_learnt'] is not False:
+            # A fixed point chosen: the learnt ones are no longer used
+            self.set_if_changed('rev_leds_learnt', False)
+            if self.data['rev_leds_shift_unit'] == unit:
+                if self.ui is not None:
+                    self.ui.set_rev_leds(self.data['rev_leds'], None, self.data['rev_leds_shift'], unit)
+                    self.ui.controller.update_rev_leds_shift()
+                return
         if self.data['rev_leds_shift_unit'] == unit:
             return
         # Value first, so the save button reflects both keys
@@ -433,6 +448,11 @@ class Model:
 
     def get_rev_leds_learnt(self):
         return self.data['rev_leds_learnt'] is not False
+
+    def get_rev_leds_shift_display_unit(self):
+        """What the Shift at choice shows: 'auto' while the learnt points
+        are used, else the unit of the fixed point."""
+        return 'auto' if self.get_rev_leds_learnt() else self.get_rev_leds_shift_unit()
 
     def get_rev_leds_shift_unit(self):
         return self.data['rev_leds_shift_unit'] or 'percent'
@@ -530,7 +550,9 @@ class Model:
         self.ui.set_friction_level(data['friction_level'])
         self.ui.set_rumble_level(data['rumble_level'])
         self.ui.set_ffb_leds(data['ffb_leds'])
-        self.ui.set_rev_leds(data['rev_leds'], data['rev_leds_port'], data['rev_leds_shift'], data['rev_leds_shift_unit'])
+        self.ui.set_rev_leds(data['rev_leds'], data['rev_leds_port'], data['rev_leds_shift'],
+                             'auto' if data['rev_leds'] is not None and data['rev_leds_learnt'] is not False
+                             else data['rev_leds_shift_unit'])
         self.ui.set_rev_leds_options(data['rev_leds_launch'], data['rev_leds_learnt'])
         self.ui.set_ffb_overlay(data['ffb_overlay'])
         self.ui.set_range_overlay(data['range_overlay'])
