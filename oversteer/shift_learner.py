@@ -99,11 +99,14 @@ BANDS_EVERY = 10.0               # seconds between working the bands out again, 
 SAVE_EVERY = 20.0                # seconds between saves while learning
 SESSION_GAP = 120.0              # seconds without telemetry that end a session (a pause does not)
 TIPS_SHOWN = 3                   # coaching tips at a time, the biggest first
-DRIVE_KEEP = 300                 # full-throttle drive samples kept per surface and gear
-DRIVE_MIN = 40                   # samples before a gear's grip on a surface is judged
+DRIVE_KEEP = 300                 # full-throttle drive samples kept per surface and gear (30 s of pulling)...
+DRIVE_EVERY = 0.1                # ...one every this many seconds
+DRIVE_MIN = 20                   # samples before a gear's grip on a surface is judged...
+DRIVE_PULLS = 3                  # ...from at least this many pulls
 GRIP_SHARE = 0.8                 # measured drive below this share of the engine's: the gear is grip-limited
 GRIP_TOLERANCE = 0.02            # the next gear within this of the grip limit counts as reaching it
 SURFACES = ('tarmac', 'gravel', 'snow', 'ice')     # the surfaces the best changes up are kept for
+LOOSE = ('gravel', 'snow', 'ice')
 
 
 G = 9.80665
@@ -209,7 +212,8 @@ class CarModel:
         self.wheels_ok = None
         self.tyre_radius = {}            # wheel index -> [m], Forza: speed / wheel rotation at low slip
         self.radii = None                # their medians, once each has enough
-        self.drive = {}                  # (surface, gear) -> [(rpm, m/s, drive m/s^2)] at full throttle
+        self.drive = {}                  # (surface, gear) -> [(rpm, m/s, drive m/s^2, pull)] at full throttle
+        self.pulls = 0                   # full-throttle pulls seen (numbers the drive samples' pulls)
         self.last_surface = None         # the surface last driven on: what the tab shows between drives
         self._shipped = False            # car_data entry, looked up once (False: not yet)
         self._cache = {}                 # name -> (fingerprint of what it was worked out from, value)
@@ -239,6 +243,7 @@ class CarModel:
             'wheel_check': list(self.wheel_check),
             'tyre_radius': {str(i): list(v) for i, v in self.tyre_radius.items()},
             'drive': {'{}:{}'.format(surface, g): [list(x) for x in v] for (surface, g), v in self.drive.items()},
+            'pulls': self.pulls,
             'last_surface': self.last_surface,
         }
 
@@ -284,8 +289,13 @@ class CarModel:
         drive = {}
         for key, v in (data.get('drive') or {}).items():
             surface, gear = key.rsplit(':', 1)
-            drive[(surface, int(gear))] = [tuple(float(x) for x in item) for item in v][-DRIVE_KEEP:]
+            # Samples without their pull were kept at every packet and only
+            # on the gear's ratio (no wheelspin): measured again
+            kept = [tuple(float(x) for x in item) for item in v if len(item) == 4][-DRIVE_KEEP:]
+            if kept:
+                drive[(surface, int(gear))] = kept
         car.drive = drive
+        car.pulls = int(data.get('pulls') or 0)
         car.last_surface = data.get('last_surface')
         return car
 
@@ -566,7 +576,8 @@ class CarModel:
     def grip(self, gear, surface):
         """(grip-limited, grip limit in engine_drive units, drive measured
         against the engine's, samples) of `gear` on `surface`, or None
-        until enough is measured. The measured drive (acceleration plus
+        until enough is measured (DRIVE_MIN samples from DRIVE_PULLS
+        pulls, in this gear and a higher one). The measured drive (acceleration plus
         what drag and rolling take) over the engine's at those revs is
         compared with the same in the other gears on the surface, the
         highest of the higher gears stands for "all the engine gives" (it
@@ -587,9 +598,9 @@ class CarModel:
         engine_drive = self._drive_fn()
         medians = {}
         for (s, g), values in self.drive.items():
-            if s == surface and len(values) >= DRIVE_MIN:
+            if s == surface and len(values) >= DRIVE_MIN and len({v[3] for v in values}) >= DRIVE_PULLS:
                 found = []
-                for rpm, _speed, drive in values:
+                for rpm, _speed, drive, _pull in values:
                     engine = engine_drive(g, rpm)
                     if engine:
                         found.append(drive / engine)
@@ -608,7 +619,12 @@ class CarModel:
             if reference <= 0:
                 continue
             samples = self.drive[(surface, gear)]
-            cap = _median([drive for _, _, drive in samples]) / reference
+            cap = _median([drive for _, _, drive, _ in samples]) / reference
+            # The limit shows only where the engine could pull past it: at
+            # low revs the gear is short of it on the engine's account
+            capped = [drive for rpm, _, drive, _ in samples if (engine_drive(gear, rpm) or 0.0) > cap]
+            if len(capped) >= DRIVE_MIN // 2:
+                cap = _median(capped) / reference
             out[gear] = (own < GRIP_SHARE * reference, cap, own / reference, len(samples))
         return out
 
@@ -714,6 +730,7 @@ class CarModel:
         tips = []                        # (weight, sentence): the biggest first
         spot_on = []
         grip_limited = []
+        waiting = []                     # early on a loose surface whose grip in the gear is not measured
         ceiling = self.ceiling()
         top = self.top_gear()
         for gear in range(1, (top or 0)):
@@ -728,6 +745,9 @@ class CarModel:
             if shift_rpm < best_rpm - 200:
                 if best['grip_limited']:
                     grip_limited.append(change)
+                    continue
+                if surface in LOOSE and best['grip_limited'] is None:
+                    waiting.append(change)
                     continue
                 cost = self.drive_lost(gear, shift_rpm)
                 tips.append((best_rpm - shift_rpm, '{}: you change up around {:.0f} rpm, {:.0f} early; hold it to '
@@ -763,6 +783,10 @@ class CarModel:
         if grip_limited:
             lines.append('{} on {}: the lower gear is grip-limited there, so changing up early costs nothing.'.format(
                 _listed(grip_limited), surface))
+        if waiting:
+            lines.append('{} on {}: early, but not coached until the grip of the lower gear there is measured (a few '
+                         'full-throttle pulls in it): on a loose surface short-shifting can be right.'.format(
+                             _listed(waiting), surface))
         if self.retuned:
             retuned = sorted(self.retuned)
             lines.append('{} re-tuned; {} shift points are being learnt again.'.format(
@@ -1018,6 +1042,8 @@ class ShiftLearner:
         self._recent = collections.deque()       # (t, rpm, throttle) over SHIFT_WINDOW in a forward gear
         self._slip = None                        # driven-wheel slip of the last sample in a forward gear
         self._flat_since = None                  # when the throttle went to the floor
+        self._drive_at = None                    # when the last drive sample was kept
+        self._drive_pull = None                  # the _flat_since of the pull it came from
 
     # -- storage (the listener side posts, the drive log writes) --
 
@@ -1521,9 +1547,6 @@ class ShiftLearner:
             # re-tuned, if it stays that way
             self._check_retune(car, gear, learnt, speed, now, wheels is not None)
             return
-        if not on_ratio:
-            # Wheelspin or a jump, or a gear not learnt yet: no power from it
-            return
         if not flat_out or now - self._flat_since < car.boost_hold:
             # Power counts once the throttle has been floored a moment: a
             # turbo builds boost after the pedal goes down
@@ -1543,14 +1566,10 @@ class ShiftLearner:
             mid_speed = sum(p[1] for p in points) / len(points)
             c0, c2 = car.drag
             drive = accel + c0 + c2 * mid_speed * mid_speed
-            surface = self.surface
-            if surface in SURFACES:
-                # What the drive achieves on this surface, spin and slides
-                # included: whether the gear is grip-limited here
-                samples = car.drive.setdefault((surface, gear), [])
-                samples.append((mid_rpm, mid_speed, drive))
-                del samples[:-DRIVE_KEEP]
-                car.last_surface = surface
+            self._drive_sample(car, now, gear, mid_rpm, mid_speed, drive)
+        if not on_ratio:
+            # Wheelspin or a jump, or a gear not learnt yet: no power from it
+            return
         slip = drive_slip(sample, car.drivetrain)
         if slip is not None and slip[0] > SLIP_POWER[slip[1]]:
             return                                   # spinning: the drive is not reaching the road
@@ -1582,6 +1601,25 @@ class ShiftLearner:
                 car.power_g.setdefault((gear, band), []),):
             values.append(power)
             del values[:-POWER_KEEP]
+
+    def _drive_sample(self, car, now, gear, rpm, speed, drive):
+        """What the drive achieves on the surface driven on, wheelspin and
+        slides included (taken before a sample off the gear's ratio is
+        dropped): whether the gear is grip-limited there. Kept every
+        DRIVE_EVERY seconds (the acceleration is a window's, so the
+        samples of one moment say the same) with the pull they came from:
+        grip is judged from several pulls, not one run up the revs."""
+        surface = self.surface
+        if surface not in SURFACES or (self._drive_at is not None and now - self._drive_at < DRIVE_EVERY):
+            return
+        if self._drive_pull != self._flat_since:
+            self._drive_pull = self._flat_since
+            car.pulls += 1
+        self._drive_at = now
+        samples = car.drive.setdefault((surface, gear), [])
+        samples.append((rpm, speed, drive, car.pulls))
+        del samples[:-DRIVE_KEEP]
+        car.last_surface = surface
 
     def _shift_locked(self, car, left, to, engage_rpm, now):
         """A change from a forward gear to another: kept pending for

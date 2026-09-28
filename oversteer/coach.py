@@ -639,7 +639,7 @@ class Coach:
     # -- the families of tips --
 
     def _shift_tips(self, slices, model, candidates, praise, notes):
-        gated = False
+        gated = waiting = False
         for (name, gear, method, discipline, surface), rows in sorted(
                 slices.items(), key=lambda kv: tuple('' if x is None else str(x) for x in kv[0])):
             if name != 'shift.error' or gear is None:
@@ -669,11 +669,11 @@ class Coach:
             cost = abs(error) / 1000.0 * COST_SHIFT * per_10km
             if error < -SHIFT_OFF:
                 # Early: right where the gear is grip-limited on this surface
-                # (measured); on a loose surface whose grip in this gear is
-                # not measured, only against the game's engine data; with
-                # the surface unknown, only against the game's data for a
-                # gear measured grip-limited nowhere, or with the wheels
-                # seen not to spin
+                # (measured); on a loose surface (a mixed one too), only where
+                # the gear's grip there is measured over several pulls and
+                # found not to limit; with the surface unknown, only against
+                # the game's data for a gear measured grip-limited nowhere, or
+                # with the wheels seen not to spin
                 if best is not None and best['grip_limited']:
                     notes.append(Tip('grip:{}:{}'.format(gear, surface), 'note',
                                      '{} on {}: {} is grip-limited there (measured), so changing up early costs '
@@ -681,8 +681,8 @@ class Coach:
                     continue
                 engine_says = (best is not None and best['source'] == 'game'
                                and not model.grip_limited_anywhere(gear))
-                if loose(surface) and not (best is not None and (best['grip_limited'] is False
-                                                                 or best['source'] == 'game')):
+                if loose(surface) and not (best is not None and best['grip_limited'] is False):
+                    waiting = True
                     continue
                 if surface in (None, 'unknown') and not engine_says and not (slip is not None
                                                                              and slip[0] < SPIN_SHIFT):
@@ -727,6 +727,10 @@ class Coach:
         if gated:
             notes.append(Tip('gate.surface', 'note', 'Tips about changing up early wait until the surface is '
                              'known: on a loose surface, short-shifting can be right.'))
+        if waiting:
+            notes.append(Tip('gate.grip', 'note', 'Tips about changing up early on a loose surface wait until '
+                             'the grip of that gear there is measured (a few full-throttle pulls in it): '
+                             'short-shifting can be right when the tyres cannot take the drive.'))
 
     @staticmethod
     def _source(best):

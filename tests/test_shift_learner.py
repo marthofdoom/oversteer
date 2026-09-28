@@ -573,7 +573,7 @@ FABIA_WHEEL = 4.231 * 0.922 / 0.325                  # N at the wheels per Nm pe
 FABIA_RPM_PER_MS = 4.231 * 60 / (2 * math.pi * 0.325)
 
 
-def fabia_pulls(learner, grip=11000.0, surface='gravel', runs=3, t=0.0, mass=1300.0):
+def fabia_pulls(learner, grip=11000.0, surface='gravel', runs=5, t=0.0, mass=1300.0):
     """Full-throttle pulls from 2500 rpm in every gear of a simulated
     Fabia (the game's torque curve and gearing), its drive held to `grip`
     newtons (the tyres slide past it), each after a stretch of part
@@ -673,8 +673,8 @@ def test_a_high_gear_short_of_its_drive_is_not_grip_limited():
     car = CarModel(FABIA)
     entry = car_data.entry(FABIA)
     for gear, share in ((2, 1.0), (3, 0.9), (4, 0.5), (5, 0.45)):
-        car.drive[('gravel', gear)] = [(rpm, 20.0, share * car_data.torque(entry, rpm) * FABIA_GEARS[gear - 1])
-                                       for rpm in range(5000, 7500, 50)]
+        car.drive[('gravel', gear)] = [(rpm, 20.0, share * car_data.torque(entry, rpm) * FABIA_GEARS[gear - 1],
+                                        rpm % 3) for rpm in range(5000, 7500, 50)]
     assert car.best_for(4, 'gravel')['grip_limited'] is False and car.best_for(4, 'gravel')['rpm'] == 7500.0
     assert car.grip(5, 'gravel') is None                     # top gear: nothing to compare with
 
@@ -779,8 +779,8 @@ def _busy_car(key='fh5/busy', seed=1):
         return band * 1000.0 * (1 - (band - 60) ** 2 / 3600) + rng.gauss(0, 100)
     for gear, ratio in enumerate([150, 105, 80, 64, 53, 45], 1):
         car.ratios[gear] = [ratio * (1 + rng.gauss(0, 0.003)) for _ in range(200)]
-        car.drive[('tarmac', gear)] = [(rng.uniform(3000, 7500), 20.0, rng.uniform(2, 8) / gear)
-                                       for _ in range(300)]
+        car.drive[('tarmac', gear)] = [(rng.uniform(3000, 7500), 20.0, rng.uniform(2, 8) / gear, i // 30)
+                                       for i in range(300)]
         for band in range(20, 80):
             car.power_g[(gear, band)] = [power(band) for _ in range(40)]
     for band in range(20, 80):
@@ -812,7 +812,7 @@ def test_the_bests_are_quick_to_work_out():
     for gear, ratio in enumerate(FABIA_GEARS, 1):
         fabia.ratios[gear] = [ratio * FABIA_RPM_PER_MS] * 200
         fabia.drive[('gravel', gear)] = [(3000.0 + 15 * i, 20.0, car_data.torque(car_data.entry(FABIA), 3000.0 + 15 * i)
-                                          * ratio) for i in range(300)]
+                                          * ratio, i // 30) for i in range(300)]
     fabia = fabia.to_dict()
     assert _timed(lambda: CarModel.from_dict(fabia).best_for(1, 'gravel')) < 0.020
     assert _timed(lambda: ShiftLearner._snapshot_of(CarModel.from_dict(fabia), 0.0, {}, 'gravel')) < 0.150
@@ -841,3 +841,48 @@ def test_the_listener_never_works_a_best_out(tmp_path, monkeypatch):
     assert learner.shift_rpm(2) == 7500.0 and learner.shift_rpm(1) == 7500.0
     learner._shift_locked(learner.car, (2, 7000.0, 1.0, t, False, None), 3, 5000.0, t + 0.1)
     assert learner._pending[-1]['best'] == 7500.0 and calls == []
+
+
+def test_grip_is_judged_from_several_pulls_with_their_wheelspin(tmp_path):
+    """The drive samples keep the wheelspin (a sample off the gear's ratio
+    is no power sample, but it is what the gear achieves on the surface),
+    ten a second, each with its pull; one long pull is not enough to judge
+    a gear's grip, and samples of before (every packet, spin left out) are
+    measured again."""
+    from oversteer.shift_learner import DRIVE_EVERY, DRIVE_PULLS
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    t = fabia_pulls(learner, runs=DRIVE_PULLS - 1)
+    car = learner.car
+    assert car.drive and all(car.grip(g, 'gravel') is None for g in range(1, 5))     # long pulls, but two
+    fabia_pulls(learner, runs=1, t=t)
+    assert car.grip(3, 'gravel') is not None
+    # 2nd at full throttle, the revs 15 % over its ratio: spinning on gravel
+    power = {k: len(v) for k, v in car.power_g.items()}
+    before = len(car.drive[('gravel', 2)])
+    t, speed = t + 100.0, 12.0
+    start = t
+    per_ms = FABIA_GEARS[1] * FABIA_RPM_PER_MS
+    for _ in range(120):
+        t += 1 / 60
+        speed += 2.0 / 60
+        sample = Sample(per_ms * speed * 1.15, 7500.0, gear=2, speed=speed, car=FABIA)
+        sample.forward = (1.0, 0.0, 0.0)
+        learner.feed(t, sample, 7500.0, 1.0, 0.0)
+        learner.run_surface.setdefault(learner.runs.run, 'gravel')
+    kept = car.drive[('gravel', 2)][before:]
+    assert kept and len(kept) <= (t - start) / DRIVE_EVERY + 1
+    assert all(rpm > per_ms * s * 1.1 for rpm, s, _d, _p in kept) and len({p for *_x, p in kept}) == 1
+    assert {k: len(v) for k, v in car.power_g.items()} == power                          # still no power
+    old = dict(car.to_dict(), drive={'gravel:2': [[5000.0, 20.0, 3.0]] * 50})
+    assert CarModel.from_dict(old).drive == {}
+
+
+def test_advice_waits_for_the_grip_on_a_loose_surface():
+    """The game's data alone: early changes are coached on tarmac, and on
+    gravel only once the gear's grip there is measured."""
+    car = CarModel(FABIA)
+    car.upshifts[3] = [6500.0] * 5
+    assert any(line.startswith('3→4: you change up around 6500 rpm, 1000 early') for line in car.advice(surface='tarmac'))
+    lines = car.advice(surface='gravel')
+    assert not any('1000 early' in line for line in lines)
+    assert any(line.startswith('3→4 on gravel: early, but not coached until the grip') for line in lines)

@@ -224,10 +224,12 @@ def test_a_late_change_every_session_is_the_focus(tmp_path):
 
 
 def test_changing_up_early_depends_on_the_surface(tmp_path):
-    """Short-shifting can be right on a loose surface: silent on gravel,
-    a note once when the surface is unknown, a tip on tarmac or when the
-    wheels were seen not to spin."""
-    for surface, slip, expected in (('gravel', None, []), ('unknown', None, ['note']), ('tarmac', None, ['tip']),
+    """Short-shifting can be right on a loose surface: on gravel (or a
+    mixed stage) whose grip in the gear is not measured, a note once; the
+    same when the surface is unknown; a tip on tarmac or when the wheels
+    were seen not to spin."""
+    for surface, slip, expected in (('gravel', None, ['note']), ('mixed:gravel,tarmac', None, ['note']),
+                                    ('unknown', None, ['note']), ('tarmac', None, ['tip']),
                                     ('unknown', 0.02, ['tip'])):
         h = History(tmp_path / '{}-{}.db'.format(surface, slip))
         metrics = [error(2, -500.0)]
@@ -236,8 +238,11 @@ def test_changing_up_early_depends_on_the_surface(tmp_path):
         h.session(metrics, surface=surface)
         tips = h.tips()
         assert [t.kind for t in tips] == expected, surface
-        if expected == ['note']:
+        if expected == ['note'] and surface == 'unknown':
             assert tips[0].id == 'gate.surface' and 'wait until the surface is known' in tips[0].text
+        elif expected == ['note']:
+            assert tips[0].id == 'gate.grip' and 'wait until the grip of that gear there is measured' in tips[0].text
+        if expected == ['note']:
             h.show(tips)
             assert h.tips() == []                                   # said once
 
@@ -371,3 +376,15 @@ def test_the_game_data_coaches_even_before_the_surface_is_known(tmp_path):
     h.session([error(3, -900.0)], surface='unknown')
     [tip] = h.tips()                                               # and no "still learning the engine"
     assert tip.kind == 'tip' and "the game's engine data" in tip.text
+
+
+def test_the_game_data_alone_does_not_coach_early_changes_on_gravel(tmp_path):
+    """The game's engine data says what the engine gives, not what gravel
+    lets through: 3→4 early on gravel waits until 3rd's grip there is
+    measured (here only tarmac was driven), and says so once."""
+    h = fabia_history(tmp_path, 'tarmac', grip=1e9)
+    h.session([error(3, -900.0)], surface='gravel')
+    [note] = h.tips()
+    assert note.kind == 'note' and note.id == 'gate.grip'
+    h.show([note])
+    assert h.tips() == []
