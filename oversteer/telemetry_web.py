@@ -371,7 +371,7 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
         if snapshot is None and car['model'].get('key'):
             try:
                 model = CarModel.from_dict(dict(car['model'], key=car['key']))
-                snapshot = model.snapshot()
+                snapshot = model.snapshot(surface=model.last_surface)
             except (ValueError, KeyError, TypeError, AttributeError):
                 snapshot = None
         methods = reader.method_shifts(profile, car['key'])
@@ -384,6 +384,7 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
         surface = sessions[0]['surface'] if sessions else None
         return {'id': car['id'], 'key': car['key'], 'name': car['name'] or car['key'], 'game': car['game'],
                 'limiter': (snapshot or {}).get('limiter'), 'limiter_source': (snapshot or {}).get('limiter_source'),
+                'shift_surface': (snapshot or {}).get('surface'), 'power_source': (snapshot or {}).get('power_source'),
                 'gears': gears, 'tune': tuning.tune_summary(reader, car['id'], car['game']),
                 'tuning': [n.to_dict() for n in tuning.advice(reader, profile, car['id'], surface)]}
 

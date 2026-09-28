@@ -118,6 +118,15 @@ def test_shift_table():
     assert view.shift_summary(snapshot).startswith('Limiter 7500 rpm  ·  30 rev bands of power known (engine power '
                                                    'from the game)')
     assert view.shift_summary(None).startswith('Nothing learnt yet')
+    # The game's own data, for a surface: where each best comes from
+    gears[0].update(best=7500.0, source='game', grip_limited=False)
+    gears[1].update(best=5200.0, source='game', grip_limited=True, ratio=None)
+    shipped = dict(snapshot, methods={}, surface='gravel', power_source='game data')
+    headers, rows = view.shift_table(shipped)
+    assert headers[1] == 'Best upshift (gravel)'
+    assert rows[0][1] == '7500 rpm (game)' and rows[1][1] == '5200 rpm (grip)' and rows[1][-2] == '—'
+    assert view.shift_summary(shipped) == ("Limiter 7500 rpm  ·  best changes up from the game's engine data  ·  "
+                                           "checked for grip on gravel")
 
 
 def test_capture_status():
