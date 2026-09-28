@@ -1561,12 +1561,13 @@ class ShiftLearner:
         else:
             if car.power_source == 'game' or drive is None or accel <= 0:
                 return
-            if car.slope_free and not slope_free:
-                # The slope is known for this car, only not here (too slow to
-                # tell it from the positions, or none sent a moment): no
-                # sample, rather than one with a hill in it or the car's
-                # pooling flickering off
-                return
+            if slope_free is None:
+                if car.slope_free:
+                    # The positions give this car's slope, only not while it
+                    # goes this slowly: no sample, rather than one with a
+                    # hill in it and the car's pooling flickering off
+                    return
+                slope_free = False
             car.power_source = 'accel'
             car.slope_free = bool(slope_free)
             rpm = mid_rpm
