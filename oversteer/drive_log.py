@@ -19,7 +19,7 @@ import threading
 import time
 
 from . import coach, drive_detect, stage_tables
-from .shift_learner import drive_slip
+from .shift_learner import SURFACES, drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
 QUEUE_SIZE = 8192
@@ -326,6 +326,9 @@ class RunTracker:
         learner = self.learner
         self._runs += 1
         self.run = self._runs
+        for number in list(learner.run_surface):
+            if number < self.run - 1:
+                learner.run_surface.pop(number, None)
         self._session = session
         n = self._n_in_session.get(session, 0) + 1
         self._n_in_session = {session: n}
@@ -448,6 +451,9 @@ class RunTracker:
         if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
             stage = stage_tables.acr_stage(sample.track, self._acr_start, sample.stage_length)
             self._finish_line = (stage or {}).get('pacenote_last_m') or False
+            surface = stage_tables.surface_of(stage)[0] if stage else None
+            if surface is not None and self.learner.run_surface.get(self.run) is None:
+                self.learner.run_surface[self.run] = surface       # the learner's best points are per surface
         if self._finish_line and self._finished is None and sample.lap_distance is not None \
                 and sample.lap_distance >= self._finish_line \
                 and (self._start_d is None or self._start_d < self._finish_line):
@@ -551,6 +557,9 @@ class RunTracker:
             stage = store.match_stage(game, stage_length, start_pos[2])
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
         self.run_batch[number] = learner.log.batch
+        surface = stage_surface(store, game, stage)
+        if surface is not None and learner.run_surface.get(number) is None:
+            learner.run_surface[number] = surface
 
     def _write_lap(self, number, n, lap_time, distance):
         run = self.run_rows.get(number)
@@ -620,7 +629,9 @@ class RunTracker:
             car = learner._models.get(summary.get('car'))
             car = car.copy() if car is not None else None
         context = coach.car_context(car)
-        metrics = coach.run_metrics(summary, trace, TRACE_CHANNELS, store.run_shifts(run), corners, context)
+        surface = verdicts.get('surface')
+        shifts = coach.against_best(car, store.run_shifts(run), surface if surface in SURFACES else None)
+        metrics = coach.run_metrics(summary, trace, TRACE_CHANNELS, shifts, corners, context)
         metrics += coach.stage_metrics(store, run, summary.get('stage'), trace, TRACE_CHANNELS, corners,
                                        verdicts.get('finished'))
         # A value the trace could not give (NaN) is no measurement
@@ -630,6 +641,22 @@ class RunTracker:
         session = store.run_session(run)
         if session is not None and metrics:
             store.add_metrics(session, run, metrics)
+
+
+def stage_surface(store, game, stage):
+    """The one surface a stage is on, as far as known before driving it:
+    the shipped table's word (a stage mostly on one surface counts as it,
+    stage_tables.surface_of), else what its earlier runs taught (the
+    stage's learnt prior). None for a mixed or unknown one."""
+    if stage is None:
+        return None
+    row = store.stage(stage)
+    surface, _prior = drive_detect.route_surface(game, row.get('location') if row else None, stage)
+    if surface in SURFACES:
+        return surface
+    if row and row.get('surface_prior') in SURFACES and row.get('surface_prior_source') in ('learnt', 'user'):
+        return row['surface_prior']
+    return None
 
 
 def start_cell(trace):

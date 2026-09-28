@@ -107,6 +107,26 @@ def shift_metrics(shifts):
     return out
 
 
+def against_best(car, shifts, surface):
+    """The run's changes with each flat-out change up by one measured
+    against the best for the run's surface and that gear, now that the
+    surface is settled (a change is recorded against what was known as it
+    happened: maybe nothing yet, or the best whatever the surface). The
+    game's data or a grip-limited gear leave no bootstrap range."""
+    if car is None:
+        return shifts
+    out = []
+    for s in shifts:
+        if s['direction'] == 'up' and s['gear_to'] == s['gear'] + 1:
+            best = car.best_for(s['gear'], surface)
+            if best is not None and best['coverage'] >= SHIFT_COVERAGE:
+                s = dict(s, best=best['rpm'])
+                if best['source'] != 'learnt' or best['grip_limited'] or s['best_low'] is None:
+                    s['best_low'] = s['best_high'] = None
+        out.append(s)
+    return out
+
+
 def _km_count(distance):
     """The weight of a per-km metric when runs are pooled: its kilometres
     (at least one), so a long stage weighs more than a short one."""

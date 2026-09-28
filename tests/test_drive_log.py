@@ -523,3 +523,20 @@ def test_acc_laps_are_not_restarts(tmp_path):
         t = laps[-1][0] + 0.1
     learner, reader, session = drive_runs(tmp_path, laps)
     assert len([r for r in session['runs'] if r['distance'] > 300]) == 1
+
+
+def test_a_run_knows_its_surface_from_the_stage(tmp_path):
+    """The learner's best points are per surface: an Assetto Corsa Rally
+    run on Greece Elatia (85 % gravel) is on gravel from the stage table,
+    a DiRT run on a stage its earlier runs taught nothing about on none."""
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    surfaces = []
+    for t, sample, throttle in acr_drive(0.0, 100.0, 600.0, track='Greece Elatia'):
+        learner.feed(t, sample, 7500.0, throttle, 0.0)
+        surfaces.append(learner.surface)
+    assert surfaces[0] is None and surfaces[-1] == 'gravel'
+    assert learner.car.last_surface in (None, 'gravel')
+    learner.save()
+    other = ShiftLearner(str(tmp_path / 'other.db'))
+    feed_course(other, course_samples(Course(STAGE)))
+    assert other.surface is None

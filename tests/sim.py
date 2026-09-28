@@ -35,9 +35,10 @@ def hill(distance):
 
 
 class Road:
-    """Where the simulated car is on a road with a grade profile, and the
-    sample it sends: its forward vector tilts with the slope (world y up)
-    when `forward` is set, as Codemasters and EA WRC send it."""
+    """Where the simulated car is on a road with a grade profile (flat
+    without one), and the sample it sends: its forward vector tilts with
+    the slope (world y up) when `forward` is set, as Codemasters and EA WRC
+    send it."""
 
     def __init__(self, grade=None, forward=True, lag=0.0):
         self.grade, self.forward, self.lag = grade, forward, lag
@@ -59,8 +60,8 @@ class Road:
     def sample(self, rpm, speed, gear, car, dt):
         self.distance += speed * dt
         sample = Sample(rpm, LIMITER, gear=gear, speed=speed, car=car)
-        if self.grade and self.forward:
-            slope = self.grade(self.distance)
+        if self.forward:
+            slope = self.grade(self.distance) if self.grade else 0.0
             sample.forward = (math.sqrt(1 - slope * slope), slope, 0.0)
         return sample
 
