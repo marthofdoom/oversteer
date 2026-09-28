@@ -950,22 +950,17 @@ class Store(Reader):
             candidates = near or unknown
         return (candidates[0]['key'] if len(candidates) == 1 else None), candidates
 
-    def match_track(self, track, length=None, game='acr'):
+    def match_track(self, track, length=None, game='acr', start=None):
         """The shipped stage whose shared-memory track name `track` is, as
         the bridge sends it (Assetto Corsa Rally), or None. Two of one name
         (the bridge cuts names and replaces accents) are told apart by the
         length the game sent (its spline, longer than the published length
         and for a cut stage maybe its parent route's): the nearest of each
         one's published length and last pace note along the spline."""
-        if not track:
+        if game != 'acr':
             return None
-        found = [e for e in stage_tables.tables().get(game, {}).values()
-                 if e.get('track') and stage_tables.bridge_track(e['track']) == track]
-        if len(found) > 1 and length:
-            found.sort(key=lambda e: min(abs(v - length) for v in (e.get('length_m') or 0.0,
-                                                                     e.get('pacenote_last_m') or 0.0)))
-            return found[0]['key']
-        return found[0]['key'] if len(found) == 1 else None
+        found = stage_tables.acr_stage(track, start, length)
+        return found['key'] if found else None
 
     def match_stage(self, game, length, start_z=None):
         """The key of a stage that a measured (length, start z) is, within

@@ -3207,6 +3207,7 @@
                                 <items>
                                   <item id="percent" translatable="yes">% of max</item>
                                   <item id="rpm" translatable="yes">RPM</item>
+                                  <item id="auto" translatable="yes">Auto (learnt per gear)</item>
                                 </items>
                                 <property name="tooltip-text" translatable="yes">% of max: of the car's maximum RPM, the limiter learnt at a launch when there is one, otherwise what the game reports.
 RPM: a fixed engine speed.</property>

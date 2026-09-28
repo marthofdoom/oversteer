@@ -47,6 +47,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.14.2" date="2026-09-28">
+      <description><ul><li>Assetto Corsa Rally: each car's best upshift from the game's own engine data, finished stages and restarts recognised, the car's position read</li><li>Shift points per surface; a gear held back by grip on gravel is learnt from your driving</li><li>Shift at: Auto uses each gear's best upshift</li><li>Coaching measures your changes against the best for the surface and says where the best comes from</li></ul></description>
+    </release>
     <release version="0.14.1" date="2026-09-26">
       <description><ul><li>Assetto Corsa Rally: distance along the stage, steering, clutch, acceleration and yaw read correctly</li><li>A game sending to the other telemetry port is pointed out in the Telemetry tab</li><li>The web page works behind tailscale serve (HTTPS)</li></ul></description>
     </release>

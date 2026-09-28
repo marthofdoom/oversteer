@@ -136,6 +136,29 @@ struct ovst_packet {
 static int verbose = 0;
 static int exit_when_gone = 0;
 static FILE *logfile = NULL;
+/* --dump FILE: the raw physics and graphics pages, four times a second,
+ * for finding where a game keeps what the published structs don't say
+ * (records: "OVDP", tick, physics size, graphics size, then the bytes) */
+static FILE *dumpfile = NULL;
+static DWORD last_dump = 0;
+
+static void dump_pages(DWORD now, const void *phys, size_t phys_size, const void *graph, size_t graph_size)
+{
+    uint32_t head[4];
+    if (!dumpfile || now - last_dump < 250)
+        return;
+    last_dump = now;
+    memcpy(head, "OVDP", 4);
+    head[1] = now;
+    head[2] = phys ? (uint32_t)phys_size : 0;
+    head[3] = graph ? (uint32_t)graph_size : 0;
+    fwrite(head, sizeof(head), 1, dumpfile);
+    if (phys)
+        fwrite(phys, phys_size, 1, dumpfile);
+    if (graph)
+        fwrite(graph, graph_size, 1, dumpfile);
+    fflush(dumpfile);
+}
 
 static void logmsg(const char *fmt, ...)
 {
@@ -338,8 +361,17 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
                 }
             }
         }
+        /* ACR leaves activeCars and the ids at 0 and keeps the player's
+         * position in the first entry (a dump from marth's rig: it moves
+         * with the car's velocity to within 1.4 %) */
+        if (player < 0 && game == GAME_ACR && graph && graph_size >= GRAPH_ACC_COORDS + 12
+            && rd_i32(graph, GRAPH_ACC_ACTIVE) <= 0)
+            player = 0;
         if (player >= 0)
             rd_floats(graph, graph_size, GRAPH_ACC_COORDS + 12 * player, pkt->world_pos, 3);
+        /* An entry left at the origin (loading, a reset) is no position */
+        if (pkt->world_pos[0] == 0.0f && pkt->world_pos[1] == 0.0f && pkt->world_pos[2] == 0.0f)
+            rd_floats(NULL, 0, 0, pkt->world_pos, 3);
         else
             rd_floats(NULL, 0, 0, pkt->world_pos, 3);
         rd_floats(graph, graph_size, GRAPH_ACC_GRIP, &pkt->surface_grip, 1);
@@ -380,8 +412,10 @@ int main(int argc, char **argv)
             watch = argv[++i];
         else if (!strcmp(argv[i], "--log") && i + 1 < argc)
             logfile = fopen(argv[++i], "a");
+        else if (!strcmp(argv[i], "--dump") && i + 1 < argc && !dumpfile)
+            dumpfile = fopen(argv[++i], "ab");   /* oversteer-run restarts the bridge: keep what was dumped */
         else {
-            fprintf(stderr, "usage: %s [--host H] [--port N] [--rate HZ] [--exit-when-gone] [--watch GAME.exe] [--log FILE] [--verbose]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--host H] [--port N] [--rate HZ] [--exit-when-gone] [--watch GAME.exe] [--log FILE] [--dump FILE] [--verbose]\n", argv[0]);
             return 2;
         }
     }
@@ -481,6 +515,7 @@ int main(int argc, char **argv)
                 rd_name(stat, STATIC_TRACK, pkt.track, sizeof(pkt.track));
             }
             fill_v3(&pkt, game, phys, phys_size, stat, stat_size, graph, graph_size);
+            dump_pages(now, phys, phys_size, graph, graph_size);
             if (verbose && now - last_detail >= 1000) {
                 /* For confirming the offsets and signs on a real capture */
                 last_detail = now;

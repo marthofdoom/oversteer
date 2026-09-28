@@ -576,7 +576,8 @@ class Gui:
                     telemetry.port)
             else:
                 text = _("waiting for telemetry on UDP {}").format(telemetry.port)
-            if shown['source'] and self.model.get_rev_leds_launch() and self.model.get_rev_leds_shift_unit() != 'rpm':
+            if shown['source'] and self.model.get_rev_leds_launch() and \
+                    (self.model.get_rev_leds_learnt() or self.model.get_rev_leds_shift_unit() != 'rpm'):
                 text += '  ·  ' + (_("limiter {} rpm (from the launch)").format(int(round(shown['limiter'])))
                                    if shown['limiter'] else _("launch to learn the limiter"))
             self.ui.set_rev_leds_status(text)
@@ -1036,6 +1037,11 @@ class Gui:
     def _shift_kwargs(self):
         shift = self.model.get_rev_leds_shift()
         unit = self.model.get_rev_leds_shift_unit()
+        if self.model.get_rev_leds_learnt():
+            # Auto: gears not learnt yet at 95 % of the limiter (what the
+            # choice says: the stored point is hidden, and an RPM figure
+            # means nothing for another car)
+            return {'shift': 0.95, 'launch': self.model.get_rev_leds_launch()}
         if unit == 'rpm':
             return {'shift_rpm': shift or 7000}
         return {'shift': (shift or 95) / 100.0, 'launch': self.model.get_rev_leds_launch()}
@@ -1053,6 +1059,9 @@ class Gui:
     def change_rev_leds_shift_unit(self, unit):
         """Switch the shift point between % of max RPM and an RPM figure,
         converting the value when the game has told us the max RPM."""
+        if unit == 'auto':
+            self.model.set_rev_leds_shift_unit('auto')
+            return
         value = None
         max_rpm = self.telemetry.reference_max() if self.telemetry is not None else 0.0
         current = self.model.get_rev_leds_shift()

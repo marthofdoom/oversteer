@@ -33,16 +33,27 @@ def _confidence(conf):
 
 
 def shift_summary(snapshot):
-    """The line above the shift table: the limiter, how much of the
-    power curve is known and where it comes from."""
+    """The line above the shift table: the limiter, where the best changes
+    up come from (the game's engine data, or how much of the power curve
+    is learnt and from what) and the surface they are for."""
     if snapshot is None:
         return _("Nothing learnt yet: drive with the rev lights or \"Learn from game telemetry\" on and Oversteer "
                  "learns each car's gearing and power.")
     limiter = snapshot['limiter']
+    surface = surface_name(snapshot.get('surface'))
+    if snapshot['power_source'] == 'game data':
+        parts = [_("Limiter {} rpm").format(int(limiter) if limiter else '?'),
+                 _("best changes up from the game's engine data")]
+        parts.append(_("checked for grip on {}").format(surface) if surface else _("on any surface"))
+        return '  ·  '.join(parts)
     source = _("engine power from the game") if snapshot['power_source'] == 'game' else \
         _("engine power estimated from acceleration")
-    return _("Limiter {} rpm  ·  {} rev bands of power known ({})  ·  learnt from your recent driving").format(
+    text = _("Limiter {} rpm  ·  {} rev bands of power known ({})  ·  learnt from your recent driving").format(
         int(limiter) if limiter else '?', snapshot['power_bands'], source)
+    if snapshot.get('gearing_aside'):
+        text += '  ·  ' + _("the game's data set aside: the gearing learnt is {:.0f} % off every gear set it gives "
+                            "this car").format(snapshot['gearing_aside'] * 100)
+    return text + ('  ·  ' + _("for {}").format(surface) if surface else '')
 
 
 SHIFT_METHODS = (('h-pattern', _("H-pattern")), ('sequential', _("Sequential")), ('paddles', _("Paddles")))
@@ -58,7 +69,9 @@ def shift_table(snapshot):
     limiter = snapshot['limiter']
     methods = snapshot.get('methods') or {}
     used = [(m, name) for m, name in SHIFT_METHODS if any(m in v for v in methods.values())]
-    headers = ((_("Change"), _("Best upshift"), _("Known to"), _("of limiter"), _("You change up"))
+    surface = surface_name(snapshot.get('surface'))
+    best_header = _("Best upshift ({})").format(surface) if surface else _("Best upshift")
+    headers = ((_("Change"), best_header, _("Known to"), _("of limiter"), _("You change up"))
                + tuple(name for _m, name in used) + (_("rpm per km/h"), _("Samples")))
     rows = []
     for row in snapshot['gears']:
@@ -71,6 +84,13 @@ def shift_table(snapshot):
                 best, share = _("learning…"), ''
             else:
                 best = '{:.0f} rpm'.format(row['best'])
+                if row.get('grip_limited'):
+                    # Anywhere up to the engine's best gives the same drive
+                    if (row.get('engine_best') or 0) > row['best']:
+                        best = '{:.0f}–{:.0f} rpm'.format(row['best'], row['engine_best'])
+                    best += ' ' + _("(grip)")
+                elif row.get('source') == 'game':
+                    best += ' ' + _("(game)")
                 low, high = row.get('best_low'), row.get('best_high')
                 if low is not None and high is not None and high - low >= 1.0:
                     band = '{:.0f}–{:.0f}'.format(low, high)
@@ -81,7 +101,7 @@ def shift_table(snapshot):
             average = methods.get(row['gear'], {}).get(method)
             per_method.append('{:.0f} rpm ({})'.format(*average) if average else '—')
         rows.append((change, best, band, share, mine) + tuple(per_method)
-                    + ('{:.1f}'.format(row['ratio'] / 3.6), str(row['ratio_samples'])))
+                    + ('{:.1f}'.format(row['ratio'] / 3.6) if row['ratio'] else '—', str(row['ratio_samples'])))
     return headers, rows
 
 

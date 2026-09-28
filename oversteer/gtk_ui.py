@@ -471,6 +471,11 @@ class GtkUi:
             unit = unit or 'percent'
             if shift is None:
                 shift = 7000 if unit == 'rpm' else 97
+        # Auto: each gear's learnt point, no single figure to show or edit
+        auto = unit == 'auto' or (unit is None and self.rev_leds_shift_unit.get_active_id() == 'auto')
+        self.rev_leds_shift.set_no_show_all(True)
+        self.rev_leds_shift.set_visible(not auto)
+        self.rev_leds_shift.set_sensitive(enabled is not None and not auto)
         self.updating_rev_leds = True
         try:
             if port is not None:
@@ -480,7 +485,7 @@ class GtkUi:
                 self.rev_leds_shift.set_adjustment(self.rev_leds_shift_rpm_adjustment if unit == 'rpm'
                                                    else self.rev_leds_shift_percent_adjustment)
                 self.rev_leds_shift_unit.set_active_id(unit)
-            if shift is not None:
+            if shift is not None and not auto:
                 self.rev_leds_shift.set_value(int(shift))
         finally:
             self.updating_rev_leds = False
@@ -1046,7 +1051,8 @@ class GtkUi:
         leds.add(self._setting_row(_("Rev lights from game telemetry"), tooltip=tooltips.get(self.rev_leds),
                                    controls=(self.rev_leds_test, self.rev_leds), status=self.rev_leds_status))
         leds.add(self._setting_row(
-            _("Shift at"), _("Where the last light comes on, until a gear's best upshift is learnt."),
+            _("Shift at"), _("Auto: each gear's best upshift once learnt, 95 % of the limiter until then. "
+                             "Or a fixed point, as % of the limiter or in RPM."),
             tooltips.get(_("Shift at")), (self.rev_leds_shift, self.rev_leds_shift_unit)))
         row, self.rev_leds_launch = self._switch_row(
             _("Learn the limiter at each launch"),
@@ -1063,7 +1069,7 @@ class GtkUi:
               "it doesn't know yet, the shift point above is used."),
             lambda state: self.controller.model.set_rev_leds_learnt(state),
             subtitle=_("Gear by gear, once known; the shift point above until then."))
-        leds.add(row)
+        # Now the Auto choice of Shift at; kept (not shown) for its setter
         self._section(page, _("Rev lights"), leds, _("Saved with the profile."))
 
         web = self._list()

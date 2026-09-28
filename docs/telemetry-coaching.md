@@ -829,6 +829,90 @@ Keep the method (crossover of P(rpm) with P(rpm × r_{n+1}/r_n)); change:
 Advice sentences stay in `CarModel.advice` style but move to the coach
 (§9), which knows method, surface and history.
 
+*As built (after the Fabia ground truth, 2026-09-27):* a check against
+Assetto Corsa Rally's own data for the Skoda Fabia RS Rally2 showed the
+learnt 5125–5200 rpm "best" to be an artefact (the engine-limited best
+is the limiter, 7500, in every gear): no slope in ACR's telemetry, power
+pooled over gears (5th-gear hill samples in bands 4th's answer read),
+sparse noisy bands, a rolling resistance too low for gravel. Hence:
+
+11. **Shipped car data** (`data/telemetry/cars/<game>.json`,
+    `oversteer/car_data.py`, installed like the stage tables). For ACR,
+    all 18 cars from the game's own data assets (decoded by name through
+    acr.exe's reflection tables; the tooling stays out of the tree):
+    torque curve (rpm, Nm, linear), `EngineData.Limiter`, every gear set
+    (default marked), final drive, gearbox efficiency, tyre radius per
+    surface, mass, drivetrain, the game's `RpmThresholds` and auto
+    upshift. Derived numbers only. Keyed by the car's name as the bridge
+    sends it: the asset's ScreenName (confirmed for the Fabia and the 208
+    on marth's captures), ASCII with `_` for other characters, cut to 31
+    (`stage_tables.bridge_track`). The Peugeot 206 WRC uses the Xsara's
+    torque curve (the game's own reference).
+12. **The game's best** (`CarModel.game_best`, `best_for`): with shipped
+    data the best change up from gear n is the lowest rpm from which
+    `T(rpm × step)·g_{n+1} ≥ T(rpm)·g_n` all the way to the limiter, else
+    the limiter; coverage 1, source `game`. The gear set in use is the
+    one whose steps between gears fit the learnt ratios best
+    (`car_data.match_set`); the learnt ratios are the check, the game's
+    are used. Only the steps matter: the final drive and tyre scale every
+    gear alike. Where the learnt ratios, scaled by the highest learnt
+    gear, are more than 4 % off the set (`car_data.unexplained_miss`: the
+    lowest gears reading short below two top gears that fit are wheelspin,
+    not a miss), the game's data is set aside for the bests
+    (`CarModel.game_data()` None, `gearing_aside` in the snapshot) and they
+    are learnt; its limiter still stands.
+13. **Grip per surface** (`CarModel.drive`, `grip`, `best_for(gear,
+    surface)`). Full-throttle samples past the boost hold and off the
+    brake, before the check that drops a sample off its gear's ratio (spin
+    included: that is the point), keep (rpm, speed, a + C0 + C2·v², pull)
+    under (run surface, gear), one per 0.1 s, 300 per key (30 s of
+    pulling). A gear's share = median(drive / engine drive in it) (engine
+    drive: torque × gear from the game's data, else learnt power / speed
+    from a slope-free pooled curve); it is grip-limited on the surface
+    when its share is below 0.8 of the best share of the **higher** gears
+    there (≥ 20 samples from ≥ 3 pulls each; a resistance the model
+    underestimates takes most, as a share, from the high gears, so a low
+    gear is never the reference and the top gear is never grip-limited).
+    Its grip limit is its median drive, over the samples where the engine
+    could give more, over that reference share; its best is then the
+    lowest rpm from which gear n+1, held to the same limit, gives at
+    least 98 % of gear n's held drive to the limiter, and `engine_rpm` the
+    engine's best: both gears are held to the limit in between, so a
+    change anywhere there is on target (`measured_against`: error 0 and
+    the range as its band; outside it, against the nearer end). Unmeasured
+    on a surface: the car's result (engine best), `grip_limited` None. The
+    model keeps what it works out (ratio medians, gear set, curves, a
+    surface's grip table) until a fingerprint of the samples behind it
+    changes.
+14. **The run's surface** (`ShiftLearner.surface`): set per run on the
+    drive-log thread once the stage is known (`drive_log.stage_surface`:
+    the table's word via `drive_detect.route_surface`, a stage mostly on
+    one surface counting as it; else the stage's learnt or user prior),
+    and for ACR on the listener as soon as the track name arrives. The
+    rev lights (`shift_rpm`) and the best recorded with each change read
+    the bests `publish()` works out for it once a second on the drive-log
+    thread (never on the listener: none for up to a second after a car
+    or surface change, the percentage rule meanwhile); the
+    snapshot (`surface`; between drives the car's `last_surface`) and
+    the advice use it. At a run's end `coach.against_best` measures its
+    changes up against the best for the settled surface verdict.
+15. **Without shipped data**: slope also from the position (the climb
+    over the path length travelled in the window, y up) where no forward
+    vector comes; power pooled over gears only when slope-free (or the
+    game's power figure); a band needs 8 samples while hills are left in
+    (4 otherwise); models are saved as version 3, dropping a pooled curve
+    learnt on hills.
+
+Replaying marth's ACR recordings (seven captures, Wales Afon Bidno,
+Greece Loutraki and Elatia in the Fabia, Alsace Forêt in the 208):
+Fabia bests 7500 in every gear on gravel and anywhere; 2nd–4th measured
+engine-limited on gravel (shares 1.13, 1.81, 1.30 of the gears above:
+the high values are hills and resistance, not engine), 1st not measured
+(1st is over before the 0.8 s boost hold); the coach: 2→3 870, 3→4
+1030, 4→5 790 rpm early against the game's data. The 208 (tarmac): the
+torque curve falls away, bests 6300 / 6200 / 6100 / 6100 below its 6750
+limiter, and marth's 2→3 to 4→5 are within 200 rpm of them.
+
 ### 8.2 Shifts and the shifter
 
 - **Method** per shift comes from the **physical input**, because whether
@@ -874,6 +958,12 @@ Advice sentences stay in `CarModel.advice` style but move to the coach
   25–28, EA `vehicle_transmission_speed` / contact-patch speed, Forza
   wheel rotation × tyre radius, ACR via bridge v3), the ratio is rpm ÷
   driven-wheel speed, which spin cannot distort.
+- *As built:* ratio samples need throttle ≥ 0.2 (coasting slips the
+  tyres the other way), brake off and clutch out, also on the wheel-speed
+  path. On marth's ACR recordings the learnt ratios of the Fabia stay
+  ~6 % off the game's for 1st and 2nd relative to the others, as before
+  the change (wheel-speed path, AWD); the game's gear set is used and the
+  learnt ones only checked.
 - **Re-tune rules**: a new ratio is accepted only in the first 60 s or
   2 km of a session (setups change in menus, which end sessions in every
   supported game), from the same low-slip samples, brake = 0, spanning ≥ 2
@@ -1115,6 +1205,18 @@ Labels come from the tab (Step C) and the web page never writes them.
 - **Gating**: coaching that depends on discipline or surface is silent when
   either is unknown, and says so once ("tips about short-shifting wait until
   the surface is known").
+- *As built (per surface):* `shift.error` is measured against
+  `best_for(gear, run surface)` (§8.1 items 13–14) and the tip names the
+  source ("the best from the game's engine data", "the best learnt from
+  your driving", or "lowered for grip on gravel, where the next gear
+  reaches the grip limit too"). Late means past the engine's best;
+  a grip-limited gear's range up to it is on target, which a note says
+  once (`grip:<gear>:<surface>`), and early is below its lowered best.
+  Early changes on a loose or mixed surface are muted until that gear's
+  grip there is measured, whatever the best's source, with a note said
+  once (`gate.grip`). With the surface unknown, a best from the game's
+  data is coached for a gear measured grip-limited nowhere. The rate
+  limiting (`coach_state`) is unchanged.
 
 `Coach(reader).tips(profile, car_id=None, limit=3) -> list[Tip]` with
 `Tip(id, kind ('focus', 'tip', 'praise', 'still'), text, evidence,

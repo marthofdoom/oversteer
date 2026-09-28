@@ -224,10 +224,12 @@ def test_a_late_change_every_session_is_the_focus(tmp_path):
 
 
 def test_changing_up_early_depends_on_the_surface(tmp_path):
-    """Short-shifting can be right on a loose surface: silent on gravel,
-    a note once when the surface is unknown, a tip on tarmac or when the
-    wheels were seen not to spin."""
-    for surface, slip, expected in (('gravel', None, []), ('unknown', None, ['note']), ('tarmac', None, ['tip']),
+    """Short-shifting can be right on a loose surface: on gravel (or a
+    mixed stage) whose grip in the gear is not measured, a note once; the
+    same when the surface is unknown; a tip on tarmac or when the wheels
+    were seen not to spin."""
+    for surface, slip, expected in (('gravel', None, ['note']), ('mixed:gravel,tarmac', None, ['note']),
+                                    ('unknown', None, ['note']), ('tarmac', None, ['tip']),
                                     ('unknown', 0.02, ['tip'])):
         h = History(tmp_path / '{}-{}.db'.format(surface, slip))
         metrics = [error(2, -500.0)]
@@ -236,8 +238,11 @@ def test_changing_up_early_depends_on_the_surface(tmp_path):
         h.session(metrics, surface=surface)
         tips = h.tips()
         assert [t.kind for t in tips] == expected, surface
-        if expected == ['note']:
+        if expected == ['note'] and surface == 'unknown':
             assert tips[0].id == 'gate.surface' and 'wait until the surface is known' in tips[0].text
+        elif expected == ['note']:
+            assert tips[0].id == 'gate.grip' and 'wait until the grip of that gear there is measured' in tips[0].text
+        if expected == ['note']:
             h.show(tips)
             assert h.tips() == []                                   # said once
 
@@ -334,4 +339,79 @@ def test_the_coach_uses_the_cars_model(tmp_path):
     assert abs(best - analytic_shift(2)) < 150
     assert tip.text.startswith('2→3 with the H-pattern: you change up at {:.0f} rpm, 800 early. Gear 3 gives '.format(
         best - 800))
-    assert tip.text.endswith('% less drive there. Hold it to about {:.0f}.'.format(best))
+    assert tip.text.endswith('% less drive there. Hold it to about {:.0f}: the best learnt from your '
+                             'driving.'.format(best))
+
+
+def fabia_history(tmp_path, surface, grip=11000.0):
+    """A Fabia whose model knows the game's data and, on `surface`, its
+    grip in each gear (1st held to `grip` newtons)."""
+    from tests.test_shift_learner import fabia_pulls, FABIA
+    learner = ShiftLearner(str(tmp_path / 't.db'), profile='rally')
+    fabia_pulls(learner, grip=grip, surface=surface)
+    learner.close()
+    h = History(tmp_path / 't.db')
+    h.car = h.store.car_id('rally', FABIA, 'acr')
+    return h
+
+
+def test_early_changes_on_gravel_are_coached_against_the_game_data(tmp_path):
+    """On gravel, 2→3 800 rpm early is coached against the game's engine
+    data; 1→2, measured grip-limited there, is on target anywhere from its
+    lowered best to the engine's, and that is said once."""
+    h = fabia_history(tmp_path, 'gravel')
+    h.session([error(1, 0.0), error(2, -800.0)], surface='gravel')
+    tips = h.tips()
+    [tip] = [t for t in tips if t.kind == 'tip']
+    assert tip.id == 'shift.early:2:h-pattern:rally-stage:gravel'
+    assert tip.text.startswith('2→3 with the H-pattern: you change up at 6700 rpm, 800 early. Gear 3 gives ')
+    assert tip.text.endswith("Hold it to about 7500: the best from the game's engine data.")
+    [note] = [t for t in tips if t.kind == 'note']
+    assert note.id == 'grip:1:gravel' and '1st is grip-limited there' in note.text and 'to 7500 rpm' in note.text
+    h.show(tips)
+    assert not [t for t in h.tips() if t.kind == 'note']              # said once
+
+
+def test_a_grip_limited_gear_is_on_target_up_to_the_engine_best(tmp_path):
+    """1st on gravel reaches the grip limit, and 2nd with it, from about
+    3950 rpm: a change at 6500 costs nothing (no "late" tip, and measured
+    as on target), one below the lowered best is early against it."""
+    from oversteer.coach import against_best, shift_metrics
+    from tests.test_shift_learner import fabia_pulls
+    learner = ShiftLearner(str(tmp_path / 'pulls.db'))
+    fabia_pulls(learner)
+    best = learner.car.best_for(1, 'gravel')
+    assert best['grip_limited'] and best['rpm'] < 4500 and best['engine_rpm'] == 7500.0
+    shift = {'direction': 'up', 'gear': 1, 'gear_to': 2, 'rpm': 6500.0, 'best': 7500.0, 'best_low': None,
+             'best_high': None, 'flat_out': 1, 'method': 'sequential', 'slip': None, 'flags': None,
+             'neutral_time': 0.0, 'engage_rpm': 5000.0}
+    [measured] = against_best(learner.car, [shift], 'gravel')
+    assert measured['best'] == 6500.0 and (measured['best_low'], measured['best_high']) == (best['rpm'], 7500.0)
+    metrics = {m['name']: m['value'] for m in shift_metrics([measured])}
+    assert metrics['shift.error'] == 0.0 and metrics['shift.in_band'] == 1.0
+    [early] = against_best(learner.car, [dict(shift, rpm=best['rpm'] - 1000)], 'gravel')
+    assert early['best'] == best['rpm']
+    h = fabia_history(tmp_path, 'gravel')
+    h.session([error(1, -1000.0)], surface='gravel')
+    [tip] = [t for t in h.tips() if t.kind == 'tip']
+    assert tip.text.endswith('Hold it to about {:.0f}: lowered for grip on gravel, where the next gear reaches '
+                             'the grip limit too.'.format(best['rpm']))
+
+
+def test_the_game_data_coaches_even_before_the_surface_is_known(tmp_path):
+    h = fabia_history(tmp_path, 'tarmac', grip=1e9)
+    h.session([error(3, -900.0)], surface='unknown')
+    [tip] = h.tips()                                               # and no "still learning the engine"
+    assert tip.kind == 'tip' and "the game's engine data" in tip.text
+
+
+def test_the_game_data_alone_does_not_coach_early_changes_on_gravel(tmp_path):
+    """The game's engine data says what the engine gives, not what gravel
+    lets through: 3→4 early on gravel waits until 3rd's grip there is
+    measured (here only tarmac was driven), and says so once."""
+    h = fabia_history(tmp_path, 'tarmac', grip=1e9)
+    h.session([error(3, -900.0)], surface='gravel')
+    [note] = h.tips()
+    assert note.kind == 'note' and note.id == 'gate.grip'
+    h.show([note])
+    assert h.tips() == []

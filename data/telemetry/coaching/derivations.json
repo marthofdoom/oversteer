@@ -1,0 +1,4224 @@
+{
+ "schema_version": 1,
+ "title": "Coaching derivations: what each coaching aspect needs from telemetry, and what each game gives",
+ "reference_game": "acr",
+ "notes": "Three layers: channels (canonical quantities, units and conventions of oversteer/telemetry_formats.py Sample, plus derived basics and the rig inputs Oversteer reads itself), games (per game: how each channel is available, and static data from the game files), aspects (every coaching aspect: derivations in order of preference, gates, outputs, validation, implementation). A game channel not listed is resolved from the channel's derive_from alternatives, else absent. Statuses: confirmed (on a real capture), decoded (in code from published docs), derivable, absent. Static: shipped, in_game_files, planned, absent. Loader: oversteer/coaching_matrix.py; readable form: docs/coaching-derivations.md.",
+ "statuses": {
+  "channel": [
+   "confirmed",
+   "decoded",
+   "derivable",
+   "absent"
+  ],
+  "static": [
+   "shipped",
+   "in_game_files",
+   "planned",
+   "absent"
+  ],
+  "validation": [
+   "validated",
+   "sim-tested",
+   "untested"
+  ],
+  "implementation": [
+   "implemented",
+   "partial",
+   "planned"
+  ],
+  "derivation": [
+   "implemented",
+   "planned"
+  ],
+  "acr_coverage": [
+   "validated",
+   "implemented",
+   "planned",
+   "impossible"
+  ]
+ },
+ "channels": {
+  "rpm": {
+   "kind": "sample",
+   "unit": "rpm",
+   "description": "Engine speed.",
+   "convention": ">= 0",
+   "rate": "packet"
+  },
+  "max_rpm": {
+   "kind": "sample",
+   "unit": "rpm",
+   "description": "The limiter as the game reports it (ACR/ACC: physics currentMaxRpm).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "static:car_data"
+    ],
+    [
+     "rpm"
+    ]
+   ]
+  },
+  "shift": {
+   "kind": "sample",
+   "unit": "bool",
+   "description": "The game's own shift light.",
+   "rate": "packet"
+  },
+  "gear": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Selected gear.",
+   "values": "-1 reverse, 0 neutral, 1.. forward",
+   "rate": "packet"
+  },
+  "speed": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "Road speed.",
+   "convention": ">= 0",
+   "rate": "packet"
+  },
+  "car": {
+   "kind": "sample",
+   "unit": "key",
+   "description": "'<game>/<id>': the car within its game.",
+   "rate": "per session"
+  },
+  "car_name": {
+   "kind": "sample",
+   "unit": "text",
+   "description": "The car as the game names it.",
+   "rate": "per session"
+  },
+  "throttle": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Throttle as the game sees it.",
+   "rate": "packet"
+  },
+  "clutch": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Clutch pedal pressed fraction (1 = pressed, drive disengaged).",
+   "rate": "packet"
+  },
+  "power": {
+   "kind": "sample",
+   "unit": "W",
+   "description": "Engine power (Forza).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "static:car_data",
+     "rpm"
+    ]
+   ]
+  },
+  "track": {
+   "kind": "sample",
+   "unit": "text",
+   "description": "Track or stage name as the game sends it.",
+   "rate": "per session"
+  },
+  "game": {
+   "kind": "sample",
+   "unit": "id",
+   "description": "Which game sent the packet.",
+   "rate": "per session"
+  },
+  "brake": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Brake as the game sees it.",
+   "rate": "packet"
+  },
+  "stage": {
+   "kind": "sample",
+   "unit": "key",
+   "description": "Stage key where the game identifies the stage or route.",
+   "rate": "per run",
+   "derive_from": [
+    [
+     "track",
+     "stage_length",
+     "static:stage_table"
+    ],
+    [
+     "stage_length",
+     "pos",
+     "static:stage_table"
+    ]
+   ]
+  },
+  "packet": {
+   "kind": "sample",
+   "unit": "id",
+   "description": "EA SPORTS WRC packet kind: 'start', 'update', 'end', 'pause', 'resume'.",
+   "rate": "packet"
+  },
+  "idle_rpm": {
+   "kind": "sample",
+   "unit": "rpm",
+   "description": "Idle engine speed.",
+   "rate": "per session",
+   "derive_from": [
+    [
+     "rpm",
+     "speed"
+    ]
+   ]
+  },
+  "gears": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Forward gear count.",
+   "rate": "per session",
+   "derive_from": [
+    [
+     "static:car_data"
+    ]
+   ]
+  },
+  "car_class": {
+   "kind": "sample",
+   "unit": "text",
+   "description": "The game's class of the car.",
+   "rate": "per session"
+  },
+  "drivetrain": {
+   "kind": "sample",
+   "unit": "id",
+   "description": "'fwd', 'rwd' or 'awd'.",
+   "rate": "per session",
+   "derive_from": [
+    [
+     "static:car_data"
+    ],
+    [
+     "wheel_speed",
+     "rpm",
+     "gear"
+    ]
+   ]
+  },
+  "stage_length": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Length of the stage or track (ACR: the road spline, longer than the published length).",
+   "rate": "per run",
+   "derive_from": [
+    [
+     "static:stage_table",
+     "stage"
+    ]
+   ]
+  },
+  "game_time": {
+   "kind": "sample",
+   "unit": "s",
+   "description": "The game's own clock.",
+   "rate": "packet"
+  },
+  "running": {
+   "kind": "sample",
+   "unit": "bool",
+   "description": "False in menus or paused, where the game says.",
+   "rate": "packet"
+  },
+  "handbrake": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Handbrake as the game sees it.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "rig_handbrake"
+    ]
+   ]
+  },
+  "steer": {
+   "kind": "sample",
+   "unit": "-1..1",
+   "description": "Steering input, normalised to the wheel lock.",
+   "convention": "positive left (ISO 8855); -1 full right, +1 full left",
+   "rate": "packet"
+  },
+  "pos": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "World position.",
+   "convention": "world frame, y up",
+   "rate": "packet"
+  },
+  "vel": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "Velocity in the car frame.",
+   "convention": "car frame x forward, y left, z up (ISO 8855)",
+   "rate": "packet"
+  },
+  "accel": {
+   "kind": "sample",
+   "unit": "m/s^2",
+   "description": "Acceleration in the car frame.",
+   "convention": "car frame x forward, y left, z up; see accel_kind",
+   "rate": "packet"
+  },
+  "accel_kind": {
+   "kind": "sample",
+   "unit": "id",
+   "description": "'kinematic' (the change of velocity, gravity not read at rest) or 'specific' (accelerometer).",
+   "rate": "per session"
+  },
+  "yaw_rate": {
+   "kind": "sample",
+   "unit": "rad/s",
+   "description": "Angular velocity about the vertical axis.",
+   "convention": "positive turning left",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "pos"
+    ]
+   ]
+  },
+  "forward": {
+   "kind": "sample",
+   "unit": "unit vector",
+   "description": "The car's forward direction.",
+   "convention": "world frame",
+   "rate": "packet"
+  },
+  "up": {
+   "kind": "sample",
+   "unit": "unit vector",
+   "description": "The car's up direction.",
+   "convention": "world frame",
+   "rate": "packet"
+  },
+  "wheel_speed": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "Tread speed of each wheel.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "wheel_rot",
+     "tyre_radius"
+    ]
+   ]
+  },
+  "wheel_rot": {
+   "kind": "sample",
+   "unit": "rad/s",
+   "description": "Rotation speed of each wheel.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "slip_ratio": {
+   "kind": "sample",
+   "unit": "ratio",
+   "description": "Longitudinal slip per wheel, as the game computes it (slip_kind says 'raw' or 'normalised', 1 = the grip limit).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "slip_kind": {
+   "kind": "sample",
+   "unit": "id",
+   "description": "'raw' or 'normalised' for slip_ratio.",
+   "rate": "per session"
+  },
+  "slip_angle": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "Tyre slip angle per wheel (Forza: normalised).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "susp": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Suspension displacement.",
+   "convention": "per wheel, ordered FL, FR, RL, RR; compression positive",
+   "rate": "packet"
+  },
+  "susp_vel": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "Suspension velocity.",
+   "convention": "per wheel, ordered FL, FR, RL, RR; compressing positive",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "susp"
+    ]
+   ]
+  },
+  "susp_norm": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Suspension travel as a share of its range.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "puddle": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Wheel in a puddle (FH: 0/1, FM: depth).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "rumble": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Wheel on a rumble strip.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "surface_rumble": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "Surface roughness under each wheel (Forza).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "lap": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Current lap.",
+   "rate": "packet"
+  },
+  "laps": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Laps in the event.",
+   "rate": "packet"
+  },
+  "lap_distance": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Position along the lap or stage (ACR: along the stage road spline).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "progress",
+     "stage_length"
+    ]
+   ]
+  },
+  "distance": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Distance travelled (game counter).",
+   "rate": "packet"
+  },
+  "progress": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Share of the lap or stage done.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "lap_distance",
+     "stage_length"
+    ]
+   ]
+  },
+  "stage_time": {
+   "kind": "sample",
+   "unit": "s",
+   "description": "The game's stage or race clock.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "clock",
+     "lap_distance",
+     "static:stage_table"
+    ]
+   ]
+  },
+  "race_position": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Position in the race.",
+   "rate": "packet"
+  },
+  "game_shift_rpm": {
+   "kind": "sample",
+   "unit": "rpm",
+   "description": "Where the game's own shift lights end.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "static:car_data"
+    ]
+   ]
+  },
+  "boost": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "Turbo boost.",
+   "rate": "packet"
+  },
+  "surface_grip": {
+   "kind": "game",
+   "unit": "0..1",
+   "description": "The game's grip level of the road (AC graphics surfaceGrip).",
+   "rate": "packet"
+  },
+  "clock": {
+   "kind": "derived",
+   "unit": "s",
+   "description": "Oversteer's receive clock (monotonic), on every packet.",
+   "rate": "packet",
+   "derive_from": [
+    []
+   ]
+  },
+  "a_long": {
+   "kind": "derived",
+   "unit": "m/s^2",
+   "description": "Longitudinal acceleration.",
+   "convention": "positive forward",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "accel"
+    ],
+    [
+     "speed"
+    ]
+   ]
+  },
+  "a_lat": {
+   "kind": "derived",
+   "unit": "m/s^2",
+   "description": "Lateral acceleration.",
+   "convention": "positive left",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "accel"
+    ],
+    [
+     "speed",
+     "yaw_rate"
+    ]
+   ]
+  },
+  "a_vert": {
+   "kind": "derived",
+   "unit": "m/s^2",
+   "description": "Vertical acceleration (kinematic: about -9.8 in free fall, 0 at rest).",
+   "convention": "positive up",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "accel"
+    ]
+   ]
+  },
+  "g_total": {
+   "kind": "derived",
+   "unit": "g",
+   "description": "Combined horizontal acceleration: sqrt(a_long^2 + a_lat^2) / 9.80665.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "a_long",
+     "a_lat"
+    ]
+   ]
+  },
+  "body_slip": {
+   "kind": "derived",
+   "unit": "rad",
+   "description": "Body slip angle beta = atan2(vel.y, vel.x), above 5 m/s.",
+   "convention": "positive when the car moves to its left of where it points",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "vel"
+    ],
+    [
+     "pos",
+     "forward"
+    ]
+   ]
+  },
+  "curvature": {
+   "kind": "derived",
+   "unit": "1/m",
+   "description": "Path curvature = yaw_rate / speed (or from positions).",
+   "convention": "positive left",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "yaw_rate",
+     "speed"
+    ],
+    [
+     "pos"
+    ]
+   ]
+  },
+  "grade": {
+   "kind": "derived",
+   "unit": "ratio",
+   "description": "Road gradient: vertical over horizontal travel (vel.z / |vel|, or dy/ds of pos).",
+   "convention": "positive uphill",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "pos",
+     "run_distance"
+    ],
+    [
+     "forward"
+    ],
+    [
+     "vel"
+    ]
+   ]
+  },
+  "tyre_radius": {
+   "kind": "derived",
+   "unit": "m",
+   "description": "Effective rolling radius per wheel: speed / wheel_rot at low slip, or the game data.",
+   "rate": "per car",
+   "derive_from": [
+    [
+     "static:car_data"
+    ],
+    [
+     "wheel_rot",
+     "speed"
+    ]
+   ]
+  },
+  "slip_drive": {
+   "kind": "derived",
+   "unit": "ratio",
+   "description": "Driven-wheel slip: driven wheel speed / road speed - 1 (shift_learner.drive_slip).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "wheel_speed",
+     "speed"
+    ],
+    [
+     "slip_ratio"
+    ]
+   ]
+  },
+  "wheel_slip": {
+   "kind": "derived",
+   "unit": "ratio",
+   "description": "Per-wheel longitudinal slip: wheel_speed / speed - 1 (negative: locking).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "wheel_speed",
+     "speed"
+    ],
+    [
+     "slip_ratio"
+    ]
+   ]
+  },
+  "steer_rate": {
+   "kind": "derived",
+   "unit": "1/s",
+   "description": "Rate of change of steer (smoothed).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "steer",
+     "clock"
+    ]
+   ]
+  },
+  "pedal_rate": {
+   "kind": "derived",
+   "unit": "1/s",
+   "description": "Rate of change of throttle and brake (smoothed).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "throttle",
+     "brake",
+     "clock"
+    ]
+   ]
+  },
+  "run_distance": {
+   "kind": "derived",
+   "unit": "m",
+   "description": "Distance along the run: the game stage distance, else speed integrated.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "lap_distance"
+    ],
+    [
+     "distance"
+    ],
+    [
+     "speed",
+     "clock"
+    ]
+   ]
+  },
+  "run_time": {
+   "kind": "derived",
+   "unit": "s",
+   "description": "Time since the run started, on Oversteer's clock (ACR's result time).",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "clock"
+    ]
+   ]
+  },
+  "airborne": {
+   "kind": "derived",
+   "unit": "bool",
+   "description": "All four wheels off the ground: suspension fully extended and free-fall vertical acceleration.",
+   "rate": "packet",
+   "derive_from": [
+    [
+     "susp",
+     "a_vert"
+    ],
+    [
+     "susp_norm"
+    ],
+    [
+     "a_vert"
+    ]
+   ]
+  },
+  "rig_throttle": {
+   "kind": "rig",
+   "unit": "0..1",
+   "description": "Throttle pedal as Oversteer reads it from the wheel (gui.launch_inputs).",
+   "rate": "event"
+  },
+  "rig_clutch": {
+   "kind": "rig",
+   "unit": "0..1",
+   "description": "Clutch pedal as Oversteer reads it from the wheel.",
+   "rate": "event"
+  },
+  "rig_handbrake": {
+   "kind": "rig",
+   "unit": "0..1",
+   "description": "Handbrake axis as Oversteer reads it (the ANNX through the proxy).",
+   "rate": "event"
+  },
+  "shift_press": {
+   "kind": "rig",
+   "unit": "event",
+   "description": "A gear-change input: 'gear' (H-pattern gate), 'sequential' or 'paddle', timestamped.",
+   "rate": "event"
+  }
+ },
+ "rig": {
+  "note": "Oversteer reads the wheel, pedals, handbrake and shifter itself, whatever the game: these channels exist for every game while Oversteer drives the wheel.",
+  "channels": {
+   "rig_throttle": {
+    "status": "confirmed",
+    "evidence": "marth's rig (G29), launch limiter"
+   },
+   "rig_clutch": {
+    "status": "confirmed",
+    "evidence": "marth's rig (G29), launch limiter"
+   },
+   "rig_handbrake": {
+    "status": "confirmed",
+    "evidence": "marth's rig (ANNX through the proxy)"
+   },
+   "shift_press": {
+    "status": "confirmed",
+    "evidence": "marth's rig (G29 gear codes, T500 RS sequential plate, paddles)"
+   }
+  }
+ },
+ "games": {
+  "acr": {
+   "name": "Assetto Corsa Rally",
+   "format": "OVST v3 from oversteer-shm-bridge (shared memory under Proton)",
+   "rate_hz": 61,
+   "reference": true,
+   "channels": {
+    "rpm": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "max_rpm": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "physics currentMaxRpm; 0 on the first packets of a stage (55-81 % of packets carry it); car data gives the limiter exactly"
+    },
+    "shift": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "gear": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "gear - 1 as for AC; reverse not yet seen on a capture"
+    },
+    "speed": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "car": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "absent on the first packets, before the game names the car"
+    },
+    "car_name": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "throttle": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "brake": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "clutch": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); commit b0534ef",
+     "note": "ACR sends 1 engaged; decoded as 1 - x"
+    },
+    "track": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "the shared memory track name, 31 ASCII characters; two stages share \"Alsace For_t\""
+    },
+    "game": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)"
+    },
+    "stage_length": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "trackSplineLength: the road spline, longer than the published length"
+    },
+    "steer": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); commit b0534ef",
+     "note": "-1 full left in the game, flipped"
+    },
+    "vel": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); commit b0534ef",
+     "note": "game frame x left, y up, z forward, remapped"
+    },
+    "accel": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); commit b0534ef",
+     "note": "accG in g; 0 at rest (kinematic)"
+    },
+    "accel_kind": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "kinematic"
+    },
+    "yaw_rate": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); commit b0534ef",
+     "note": "angular velocity about the game y axis"
+    },
+    "wheel_rot": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); the learnt tyre radius 0.3326 m against the game data 0.325 m (fabia report)"
+    },
+    "susp": {
+     "status": "decoded",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "suspensionTravel; present on every packet, sign and zero not checked against a known compression"
+    },
+    "lap_distance": {
+     "status": "confirmed",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia); commit 0694e92",
+     "note": "distanceTraveled = position along the stage road spline (238 m at the start line of Afon Bidno)"
+    },
+    "laps": {
+     "status": "decoded",
+     "evidence": "marth's ACR captures of 2026-09-25 (Wales Afon Bidno - Severn, Greece Loutraki - Aghii Theodori, Alsace Foret de Munster; Fabia RS Rally2 and 208 Rally4) and 2026-09-27 (Greece Elatia)",
+     "note": "numberOfLaps; no meaning on a stage"
+    },
+    "pos": {
+     "status": "confirmed",
+     "evidence": "bridge graphics-page dump on marth's rig, 2026-09-27 (commit 4a54a23)",
+     "note": "carCoordinates[0]; not in the recorded captures, which predate the fix"
+    },
+    "wheel_speed": {
+     "status": "derivable",
+     "via": [
+      "wheel_rot",
+      "tyre_radius"
+     ],
+     "note": "the bridge sends tyreRadius but ACR leaves it 0; the learner multiplies by the learnt radius, drive_log does not (no slip_drive in the trace)"
+    },
+    "susp_vel": {
+     "status": "derivable",
+     "via": [
+      "susp"
+     ],
+     "note": "differenced; not in the trace today"
+    },
+    "susp_norm": {
+     "status": "absent",
+     "note": "suspensionMaxTravel not filled in by ACR"
+    },
+    "progress": {
+     "status": "derivable",
+     "via": [
+      "lap_distance",
+      "stage_length"
+     ],
+     "note": "normalizedCarPosition stays 0; lap_distance / pacenote_last_m is the better finish"
+    },
+    "handbrake": {
+     "status": "absent",
+     "note": "no handbrake field in the AC-family physics page; the rig reads the handbrake axis itself (rig_handbrake)"
+    },
+    "slip_ratio": {
+     "status": "absent",
+     "note": "the bridge forwards physics wheelSlip; not decoded (meaning unverified)"
+    },
+    "slip_angle": {
+     "status": "absent",
+     "note": "not in the bridge"
+    },
+    "stage_time": {
+     "status": "derivable",
+     "via": [
+      "clock",
+      "lap_distance",
+      "static:stage_table"
+     ],
+     "note": "ACR's stage clock is not in what the bridge reads: the run's own clock from the start to passing the last pace note (commit 4dc4c56)"
+    },
+    "game_time": {
+     "status": "absent"
+    },
+    "running": {
+     "status": "absent",
+     "note": "the bridge sends only while on a stage"
+    },
+    "idle_rpm": {
+     "status": "absent",
+     "note": "no idle figure in the game data either (a throttle model)"
+    },
+    "gears": {
+     "status": "derivable",
+     "via": [
+      "static:car_data"
+     ]
+    },
+    "drivetrain": {
+     "status": "derivable",
+     "via": [
+      "static:car_data"
+     ]
+    },
+    "game_shift_rpm": {
+     "status": "derivable",
+     "via": [
+      "static:car_data"
+     ],
+     "note": "RpmThresholds: prepare, shift, late, over limit"
+    },
+    "power": {
+     "status": "derivable",
+     "via": [
+      "static:car_data",
+      "rpm"
+     ],
+     "note": "full-load torque x rpm; turbo lag on top"
+    },
+    "car_class": {
+     "status": "absent"
+    },
+    "stage": {
+     "status": "derivable",
+     "via": [
+      "track",
+      "stage_length",
+      "static:stage_table"
+     ],
+     "note": "acr_stage(): name, then the start before the first pace note"
+    },
+    "forward": {
+     "status": "absent"
+    },
+    "up": {
+     "status": "absent"
+    },
+    "puddle": {
+     "status": "absent"
+    },
+    "rumble": {
+     "status": "absent"
+    },
+    "surface_rumble": {
+     "status": "absent"
+    },
+    "lap": {
+     "status": "absent"
+    },
+    "distance": {
+     "status": "absent"
+    },
+    "race_position": {
+     "status": "absent"
+    },
+    "boost": {
+     "status": "absent"
+    },
+    "packet": {
+     "status": "absent"
+    },
+    "surface_grip": {
+     "status": "absent",
+     "note": "the bridge forwards graphics surfaceGrip; ACR leaves it 0 (commit 4a54a23)"
+    }
+   },
+   "static": {
+    "car_data": {
+     "status": "shipped",
+     "path": "data/telemetry/cars/acr.json",
+     "module": "oversteer/car_data.py",
+     "provides": [
+      "torque_curve",
+      "limiter_rpm",
+      "gear_sets",
+      "final_drive",
+      "gearbox_efficiency",
+      "tyre_radius_m per surface",
+      "mass_kg",
+      "drivetrain",
+      "shift_lights_rpm",
+      "auto_upshift_rpm",
+      "turbo"
+     ],
+     "note": "18 cars from the game data assets (build of 2026-09-12)"
+    },
+    "stage_table": {
+     "status": "shipped",
+     "path": "data/telemetry/stages/acr.json",
+     "module": "oversteer/stage_tables.py",
+     "provides": [
+      "location",
+      "length_m",
+      "surface",
+      "surface_parts",
+      "reverse_of",
+      "elevation_start_m",
+      "sectors_km",
+      "pacenote_first_m",
+      "pacenote_last_m"
+     ],
+     "note": "46 stages; the pace note ends along the road spline"
+    },
+    "pace_notes": {
+     "status": "in_game_files",
+     "clickup": "86e3faftn",
+     "provides": [
+      "every note: distance along the spline, severity, direction, modifiers"
+     ],
+     "note": "DT_Pacenote* data tables (86-307 notes per stage); distances decoded in the scratchpad tooling, severities not yet; not shipped"
+    },
+    "road_edges": {
+     "status": "absent",
+     "note": "no track width or edge data found in the game files or the shared memory"
+    }
+   },
+   "gaps": [
+    "No road edges: cutting, track use and line width cannot be judged, only compared with own runs (pos).",
+    "No grip figure from the game (surfaceGrip 0): grip is measured (g-g envelope) or taken from the stage table surface.",
+    "No stage clock: result times are Oversteer's own clock from the start to the last pace note.",
+    "No handbrake channel: the rig handbrake axis has to stand in (not wired into the trace yet).",
+    "No wheel speed or slip in the trace: tyreRadius is 0, wheelSlip is undecoded; wheel_rot x the learnt or game radius would give both (launch spin, exit spin, lock-ups).",
+    "No suspension range (suspensionMaxTravel empty): bottoming needs a learnt bump-stop travel.",
+    "No gear count in the packets: the top gear comes from the car data.",
+    "No tyre loads or forces decoded (the bridge forwards wheelLoad, fx, fy): no per-wheel grip use.",
+    "Position only since the 2026-09-27 bridge fix: older captures cannot place the car, so discipline by topology was unknown on them.",
+    "The full pace-note list is in the game files but not shipped (86e3faftn)."
+   ]
+  },
+  "ac": {
+   "name": "Assetto Corsa",
+   "format": "OVST v3 from oversteer-shm-bridge",
+   "rate_hz": 60,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "max_rpm": {
+     "status": "decoded"
+    },
+    "shift": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "track": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "wheel_rot": {
+     "status": "decoded"
+    },
+    "wheel_speed": {
+     "status": "decoded"
+    },
+    "susp": {
+     "status": "decoded"
+    },
+    "susp_norm": {
+     "status": "decoded"
+    },
+    "stage_length": {
+     "status": "decoded"
+    },
+    "progress": {
+     "status": "decoded"
+    },
+    "lap_distance": {
+     "status": "decoded"
+    },
+    "laps": {
+     "status": "decoded"
+    },
+    "pos": {
+     "status": "decoded"
+    },
+    "steer": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "clutch": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "accel": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "vel": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "handbrake": {
+     "status": "absent",
+     "note": "not in the physics page"
+    }
+   },
+   "static": {},
+   "gaps": [
+    "No capture yet: steer, clutch, acceleration, velocity and yaw rate wait on one for their signs."
+   ]
+  },
+  "acc": {
+   "name": "Assetto Corsa Competizione",
+   "format": "OVST v3 from oversteer-shm-bridge",
+   "rate_hz": 60,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "max_rpm": {
+     "status": "decoded"
+    },
+    "shift": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "track": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "wheel_rot": {
+     "status": "decoded"
+    },
+    "wheel_speed": {
+     "status": "decoded"
+    },
+    "susp": {
+     "status": "decoded"
+    },
+    "susp_norm": {
+     "status": "decoded"
+    },
+    "stage_length": {
+     "status": "decoded"
+    },
+    "progress": {
+     "status": "decoded"
+    },
+    "lap_distance": {
+     "status": "decoded"
+    },
+    "laps": {
+     "status": "decoded"
+    },
+    "pos": {
+     "status": "decoded"
+    },
+    "steer": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "clutch": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "accel": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "vel": {
+     "status": "absent",
+     "note": "bridge v3 forwards it; decoded for ACR only until an AC/ACC capture confirms the sign"
+    },
+    "handbrake": {
+     "status": "absent",
+     "note": "not in the physics page"
+    }
+   },
+   "static": {},
+   "gaps": [
+    "No capture yet: steer, clutch, acceleration, velocity and yaw rate wait on one for their signs."
+   ]
+  },
+  "wrcg": {
+   "name": "WRC Generations",
+   "format": "Codemasters extradata 3 layout, longer packet",
+   "rate_hz": 56,
+   "channels": {
+    "rpm": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "max_rpm": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "gear": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "speed": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "throttle": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "brake": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "clutch": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "game": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "car": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "car_name": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "stage_length": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "lap_distance": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "pos": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "progress": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "stage_time": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "game_time": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "gears": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "idle_rpm": {
+     "status": "confirmed",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
+    },
+    "steer": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "vel": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "accel": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "accel_kind": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "forward": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "up": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "wheel_speed": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "susp": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "susp_vel": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "lap": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "laps": {
+     "status": "decoded",
+     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
+     "note": "present; unit or sign still to verify"
+    },
+    "handbrake": {
+     "status": "absent"
+    }
+   },
+   "static": {
+    "stage_table": {
+     "status": "shipped",
+     "path": "data/telemetry/stages/wrcg.json",
+     "note": "lengths to the float, from the game files"
+    }
+   },
+   "gaps": [
+    "Counter-steer on the 2026-09-25 capture came out at 0.55 of cornering time (ACR: 0.09): the steer sign (or the yaw rate from positions) is probably wrong for WRCG; verify before coaching it.",
+    "No handbrake channel.",
+    "Acceleration units (m/s^2 or g) and suspension units unverified."
+   ]
+  },
+  "dirt": {
+   "name": "DiRT Rally 2.0 / DiRT 4",
+   "format": "Codemasters extradata 3 (264 bytes)",
+   "rate_hz": 60,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "max_rpm": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "clutch": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    },
+    "stage_length": {
+     "status": "decoded"
+    },
+    "lap_distance": {
+     "status": "decoded"
+    },
+    "pos": {
+     "status": "decoded"
+    },
+    "progress": {
+     "status": "decoded"
+    },
+    "stage_time": {
+     "status": "decoded"
+    },
+    "game_time": {
+     "status": "decoded"
+    },
+    "gears": {
+     "status": "decoded"
+    },
+    "idle_rpm": {
+     "status": "decoded"
+    },
+    "steer": {
+     "status": "decoded"
+    },
+    "vel": {
+     "status": "decoded"
+    },
+    "accel": {
+     "status": "decoded"
+    },
+    "accel_kind": {
+     "status": "decoded"
+    },
+    "forward": {
+     "status": "decoded"
+    },
+    "up": {
+     "status": "decoded"
+    },
+    "wheel_speed": {
+     "status": "decoded"
+    },
+    "susp": {
+     "status": "decoded"
+    },
+    "susp_vel": {
+     "status": "decoded"
+    },
+    "lap": {
+     "status": "decoded"
+    },
+    "laps": {
+     "status": "decoded"
+    },
+    "handbrake": {
+     "status": "absent"
+    }
+   },
+   "static": {
+    "stage_table": {
+     "status": "shipped",
+     "path": "data/telemetry/stages/dirt.json",
+     "note": "from dr2_logger's table (MIT)"
+    }
+   },
+   "gaps": [
+    "No capture yet.",
+    "No handbrake channel.",
+    "Car keys collide (82 cars, 66 keys)."
+   ]
+  },
+  "eawrc": {
+   "name": "EA SPORTS WRC",
+   "format": "EA's JSON-configured UDP ('oversteer' structure, 252 bytes)",
+   "rate_hz": 60,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "max_rpm": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "gears": {
+     "status": "decoded"
+    },
+    "idle_rpm": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "clutch": {
+     "status": "decoded"
+    },
+    "handbrake": {
+     "status": "decoded"
+    },
+    "steer": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    },
+    "car_class": {
+     "status": "decoded"
+    },
+    "stage": {
+     "status": "decoded"
+    },
+    "track": {
+     "status": "decoded"
+    },
+    "packet": {
+     "status": "decoded"
+    },
+    "running": {
+     "status": "decoded"
+    },
+    "game_time": {
+     "status": "decoded"
+    },
+    "stage_time": {
+     "status": "decoded"
+    },
+    "distance": {
+     "status": "decoded"
+    },
+    "stage_length": {
+     "status": "decoded"
+    },
+    "progress": {
+     "status": "decoded"
+    },
+    "pos": {
+     "status": "decoded"
+    },
+    "forward": {
+     "status": "decoded"
+    },
+    "up": {
+     "status": "decoded"
+    },
+    "vel": {
+     "status": "decoded"
+    },
+    "accel": {
+     "status": "decoded"
+    },
+    "accel_kind": {
+     "status": "decoded"
+    },
+    "wheel_speed": {
+     "status": "decoded"
+    },
+    "game_shift_rpm": {
+     "status": "decoded"
+    }
+   },
+   "static": {
+    "ids": {
+     "status": "planned",
+     "note": "readme/ids.json names; the game is not owned here"
+    }
+   },
+   "gaps": [
+    "Not owned and not expected to run on Linux (EA anti-cheat): the decoder stays untested."
+   ]
+  },
+  "forza-fh": {
+   "name": "Forza Horizon 4/5/6",
+   "format": "Data Out, dash (324 bytes)",
+   "rate_hz": 60,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "max_rpm": {
+     "status": "decoded"
+    },
+    "idle_rpm": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    },
+    "car_class": {
+     "status": "decoded"
+    },
+    "drivetrain": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "running": {
+     "status": "decoded"
+    },
+    "game_time": {
+     "status": "decoded"
+    },
+    "accel": {
+     "status": "decoded"
+    },
+    "accel_kind": {
+     "status": "decoded"
+    },
+    "vel": {
+     "status": "decoded"
+    },
+    "yaw_rate": {
+     "status": "decoded"
+    },
+    "susp_norm": {
+     "status": "decoded"
+    },
+    "slip_ratio": {
+     "status": "decoded"
+    },
+    "slip_kind": {
+     "status": "decoded"
+    },
+    "wheel_rot": {
+     "status": "decoded"
+    },
+    "rumble": {
+     "status": "decoded"
+    },
+    "puddle": {
+     "status": "decoded"
+    },
+    "surface_rumble": {
+     "status": "decoded"
+    },
+    "slip_angle": {
+     "status": "decoded"
+    },
+    "susp": {
+     "status": "decoded"
+    },
+    "power": {
+     "status": "decoded"
+    },
+    "pos": {
+     "status": "decoded"
+    },
+    "boost": {
+     "status": "decoded"
+    },
+    "distance": {
+     "status": "decoded"
+    },
+    "stage_time": {
+     "status": "decoded"
+    },
+    "lap": {
+     "status": "decoded"
+    },
+    "race_position": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "clutch": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "handbrake": {
+     "status": "decoded"
+    },
+    "steer": {
+     "status": "decoded"
+    }
+   },
+   "static": {},
+   "gaps": [
+    "No stage: routes are keyed by a start cell.",
+    "Yaw and steer signs, accel kind: verify on a capture."
+   ]
+  },
+  "forza-fm": {
+   "name": "Forza Motorsport 7 / 2023",
+   "format": "Data Out, dash (311/331 bytes)",
+   "rate_hz": 60,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "max_rpm": {
+     "status": "decoded"
+    },
+    "idle_rpm": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    },
+    "car_class": {
+     "status": "decoded"
+    },
+    "drivetrain": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "running": {
+     "status": "decoded"
+    },
+    "game_time": {
+     "status": "decoded"
+    },
+    "accel": {
+     "status": "decoded"
+    },
+    "accel_kind": {
+     "status": "decoded"
+    },
+    "vel": {
+     "status": "decoded"
+    },
+    "yaw_rate": {
+     "status": "decoded"
+    },
+    "susp_norm": {
+     "status": "decoded"
+    },
+    "slip_ratio": {
+     "status": "decoded"
+    },
+    "slip_kind": {
+     "status": "decoded"
+    },
+    "wheel_rot": {
+     "status": "decoded"
+    },
+    "rumble": {
+     "status": "decoded"
+    },
+    "puddle": {
+     "status": "decoded"
+    },
+    "surface_rumble": {
+     "status": "decoded"
+    },
+    "slip_angle": {
+     "status": "decoded"
+    },
+    "susp": {
+     "status": "decoded"
+    },
+    "power": {
+     "status": "decoded"
+    },
+    "pos": {
+     "status": "decoded"
+    },
+    "boost": {
+     "status": "decoded"
+    },
+    "distance": {
+     "status": "decoded"
+    },
+    "stage_time": {
+     "status": "decoded"
+    },
+    "lap": {
+     "status": "decoded"
+    },
+    "race_position": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "clutch": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "handbrake": {
+     "status": "decoded"
+    },
+    "steer": {
+     "status": "decoded"
+    },
+    "stage": {
+     "status": "decoded",
+     "note": "FM 2023 track ordinal"
+    }
+   },
+   "static": {},
+   "gaps": [
+    "No capture yet."
+   ]
+  },
+  "beamng": {
+   "name": "BeamNG.drive",
+   "format": "OutGauge (92/96 bytes)",
+   "rate_hz": null,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "shift": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "clutch": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "game_time": {
+     "status": "decoded"
+    },
+    "boost": {
+     "status": "decoded"
+    }
+   },
+   "static": {},
+   "gaps": [
+    "Every car is \"beam\": nothing is learnt per car.",
+    "No position, motion or wheels (MotionSim not decoded)."
+   ]
+  },
+  "lfs": {
+   "name": "Live for Speed",
+   "format": "OutGauge (92/96 bytes)",
+   "rate_hz": null,
+   "channels": {
+    "rpm": {
+     "status": "decoded"
+    },
+    "shift": {
+     "status": "decoded"
+    },
+    "gear": {
+     "status": "decoded"
+    },
+    "speed": {
+     "status": "decoded"
+    },
+    "throttle": {
+     "status": "decoded"
+    },
+    "brake": {
+     "status": "decoded"
+    },
+    "clutch": {
+     "status": "decoded"
+    },
+    "game": {
+     "status": "decoded"
+    },
+    "game_time": {
+     "status": "decoded"
+    },
+    "boost": {
+     "status": "decoded"
+    },
+    "car": {
+     "status": "decoded"
+    },
+    "car_name": {
+     "status": "decoded"
+    }
+   },
+   "static": {},
+   "gaps": [
+    "No position, motion or wheels."
+   ]
+  }
+ },
+ "aspects": [
+  {
+   "id": "context.discipline",
+   "name": "Discipline",
+   "category": "context",
+   "description": "What kind of driving the run is (rally stage, circuit, hillclimb, ...): gates most coaching.",
+   "derivations": [
+    {
+     "id": "game",
+     "formula": "The game's own fields (EA session packets, DiRT laps, ACC session type) or a stage-table entry.",
+     "requires": {
+      "channels": [
+       "stage"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_detect.py"
+    },
+    {
+     "id": "topology",
+     "formula": "Loop closures of the position trace; none over 2 km: point to point.",
+     "requires": {
+      "channels": [
+       "pos"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "run_distance"
+      ]
+     },
+     "module": "oversteer/drive_detect.py"
+    },
+    {
+     "id": "start",
+     "formula": "A launch hold then one continuous 2-15 min run: a stage.",
+     "requires": {
+      "channels": [
+       "speed",
+       "clock"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "rig_clutch"
+      ]
+     },
+     "module": "oversteer/drive_detect.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "discipline",
+     "unit": "class"
+    },
+    {
+     "name": "confidence",
+     "unit": "game/high/medium/low"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "ACR stage table tier on marth's captures (commit 4dc4c56); the 2026-09-28 replay of the older captures under a profile named 'ACR' gave unknown (no position then)"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [],
+    "module": "oversteer/drive_detect.py"
+   },
+   "acr": {
+    "coverage": "validated",
+    "note": "by the stage table (a known ACR stage is a rally stage); topology needs the position the bridge sends since 2026-09-27"
+   }
+  },
+  {
+   "id": "context.surface",
+   "name": "Surface",
+   "category": "context",
+   "description": "Tarmac, gravel, snow, ice or mixed, per run: slices every metric and gates shift and pedal advice.",
+   "derivations": [
+    {
+     "id": "stage_table",
+     "formula": "The stage table's surface for a known stage (game tier).",
+     "requires": {
+      "channels": [
+       "stage"
+      ],
+      "static": [
+       "stage_table"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_detect.py"
+    },
+    {
+     "id": "measured",
+     "formula": "Per-segment features (g-g envelope, spin, roughness, slip-angle falloff) through a per-game calibrated classifier.",
+     "requires": {
+      "channels": [
+       "a_long",
+       "a_lat",
+       "speed"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "slip_drive",
+       "susp_vel",
+       "slip_angle",
+       "puddle",
+       "surface_rumble"
+      ]
+     },
+     "module": "oversteer/drive_detect.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "surface",
+     "unit": "class"
+    },
+    {
+     "name": "confidence",
+     "unit": "game/high/medium/low"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: every ACR run got the table surface (Wales and Greece gravel, Alsace tarmac)"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [],
+    "module": "oversteer/drive_detect.py",
+    "clickup": "86e3ewpw1"
+   },
+   "acr": {
+    "coverage": "validated",
+    "note": "game tier from the stage table; the measured tier is uncalibrated"
+   }
+  },
+  {
+   "id": "context.grip_level",
+   "name": "Grip level",
+   "category": "context",
+   "description": "A self-normalising grip level per game and car: where this run's usable grip sits in the driver's own history (low / normal / high), used to slice coaching instead of weather.",
+   "derivations": [
+    {
+     "id": "game_figure",
+     "formula": "The game's grip figure (AC surfaceGrip).",
+     "requires": {
+      "channels": [
+       "surface_grip"
+      ]
+     },
+     "status": "planned"
+    },
+    {
+     "id": "envelope",
+     "formula": "Percentile of the run's P95 combined g (mu_p95 of pushed segments) within the history of the same game and car; bands at the 25th and 75th.",
+     "requires": {
+      "channels": [
+       "a_long",
+       "a_lat",
+       "speed"
+      ],
+      "aspects": [
+       "context.surface"
+      ]
+     },
+     "status": "planned",
+     "module": "oversteer/drive_log.py (segment mu_p95)"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": "pushed segments only"
+   },
+   "outputs": [
+    {
+     "name": "grip_band",
+     "unit": "low/normal/high"
+    },
+    {
+     "name": "grip_percentile",
+     "unit": "0..1"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ewpw1",
+    "note": "marth: ignore weather, track a grip level"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "acceleration confirmed; the game figure reads 0"
+   }
+  },
+  {
+   "id": "context.wet",
+   "name": "Wet",
+   "category": "context",
+   "description": "Whether the road is wet.",
+   "derivations": [
+    {
+     "id": "puddles",
+     "formula": "Share of samples with a wheel in a puddle.",
+     "requires": {
+      "channels": [
+       "puddle"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_detect.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "wet",
+     "unit": "dry/wet/unknown"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [],
+    "module": "oversteer/drive_detect.py",
+    "note": "not pursued further: the grip level stands in (86e3ewpw1)"
+   },
+   "acr": {
+    "coverage": "impossible",
+    "note": "ACR sends no rain or puddle signal; its snow is a stage condition, not a signal"
+   }
+  },
+  {
+   "id": "context.corners",
+   "name": "Corner detection",
+   "category": "context",
+   "description": "The corners of a run: yaw rate over 0.15 rad/s for 1 s or 30 degrees of heading; apex at the slowest point.",
+   "derivations": [
+    {
+     "id": "yaw",
+     "formula": "Smoothed yaw rate thresholds; apex = slowest point.",
+     "requires": {
+      "channels": [
+       "yaw_rate",
+       "speed",
+       "run_distance"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_log.py find_corners"
+    },
+    {
+     "id": "heading",
+     "formula": "Heading change from positions where the game sends no yaw rate.",
+     "requires": {
+      "channels": [
+       "pos",
+       "speed"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_log.py _yaw_rates"
+    },
+    {
+     "id": "pace_notes",
+     "formula": "The stage's pace notes placed by their distance along the spline: every corner the co-driver calls, with its severity.",
+     "requires": {
+      "channels": [
+       "lap_distance"
+      ],
+      "static": [
+       "pace_notes"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "corners",
+     "unit": "list",
+     "note": "d, direction, entry/min/exit speed, gear_min, heading_change, duration"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 405 corners"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [],
+    "module": "oversteer/drive_log.py",
+    "clickup": "86e3faftn",
+    "note": "pace-note corners planned"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "context.stage_result",
+   "name": "Stage finish and time",
+   "category": "context",
+   "description": "Whether a run finished and its time: the base of every per-stage comparison.",
+   "derivations": [
+    {
+     "id": "game_clock",
+     "formula": "The game's progress reaching the end and its stage clock.",
+     "requires": {
+      "channels": [
+       "progress",
+       "stage_time"
+      ]
+     },
+     "status": "implemented",
+     "sent_only": true,
+     "module": "oversteer/drive_log.py"
+    },
+    {
+     "id": "last_note",
+     "formula": "Passing the stage's last pace note along the spline; the run's own clock.",
+     "requires": {
+      "channels": [
+       "lap_distance",
+       "run_time"
+      ],
+      "static": [
+       "stage_table"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_log.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "rally-stage, hillclimb",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "finished",
+     "unit": "bool"
+    },
+    {
+     "name": "result_time",
+     "unit": "s"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "marth's six ACR recordings: 18 attempts, the five finished ones found (commit 4dc4c56)"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [],
+    "module": "oversteer/drive_log.py"
+   },
+   "acr": {
+    "coverage": "validated",
+    "note": "Oversteer's clock, not the game's official time"
+   }
+  },
+  {
+   "id": "shift.upshift",
+   "name": "Upshift timing (per gear, per surface)",
+   "category": "gearbox",
+   "description": "Flat-out changes up against the best change for that gear on that surface: the engine's best, lowered where the gear is measured grip-limited on the surface.",
+   "derivations": [
+    {
+     "id": "game_data",
+     "formula": "Best = the lowest rpm from which gear n+1's torque x ratio at the same road speed beats gear n's to the limiter (game torque curve and gearing); per surface, a gear whose measured full-throttle drive (wheelspin included, 20 samples from 3 pulls at least) stays under 0.8 of the engine's (against the higher gears) is grip-limited and its best drops to where n+1 reaches the same grip limit, anything from there to the engine's best on target. The game's data is set aside (learnt instead) where the learnt gearing is more than 4 % off its gear sets and wheelspin does not explain it. Error = shift rpm - the nearest rpm on target.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "gear",
+       "speed",
+       "throttle",
+       "a_long"
+      ],
+      "static": [
+       "car_data"
+      ],
+      "aspects": [
+       "context.surface"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "slip_drive",
+       "shift_press",
+       "grade"
+      ]
+     },
+     "module": "oversteer/shift_learner.py best_for"
+    },
+    {
+     "id": "learnt",
+     "formula": "Best from the learnt power per gear and band (acceleration x speed plus drag, slope taken out where the grade is known; crossover of P_n(rpm) with P_n+1(rpm x step)), with a bootstrap range; then the same per-surface grip check.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "gear",
+       "speed",
+       "throttle",
+       "a_long"
+      ],
+      "aspects": [
+       "context.surface"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "grade",
+       "slip_drive",
+       "shift_press",
+       "brake"
+      ]
+     },
+     "module": "oversteer/shift_learner.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "per surface; early changes on a loose or mixed surface silent until the gear's grip there is measured (below the lowered best where it limits), and with the surface unknown without game data",
+    "conditions": "flat out (throttle >= 0.95 held), up by one gear"
+   },
+   "outputs": [
+    {
+     "name": "shift.error",
+     "unit": "rpm",
+     "note": "signed vs best, per gear and method"
+    },
+    {
+     "name": "shift.in_band",
+     "unit": "fraction",
+     "note": "within the best range +-100 rpm"
+    },
+    {
+     "name": "shift.slip",
+     "unit": "ratio",
+     "note": "driven-wheel slip at the change"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 234 flat-out upshifts scored (Fabia, 208); the Fabia game-data best (7500, the limiter) checked by hand in the fabia report"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "shift.error",
+     "shift.in_band",
+     "shift.slip"
+    ],
+    "module": "oversteer/coach.py, oversteer/shift_learner.py",
+    "clickup": "86e3fae1g"
+   },
+   "acr": {
+    "coverage": "validated",
+    "note": "game data first (all 18 cars); shift.slip needs wheel speeds in the trace"
+   }
+  },
+  {
+   "id": "shift.downshift",
+   "name": "Downshift over-rev",
+   "category": "gearbox",
+   "description": "Changes down that land the engine past 95 % of the limiter.",
+   "derivations": [
+    {
+     "id": "engage",
+     "formula": "engage rpm after the change > 0.95 x limiter.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "gear"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "max_rpm"
+      ],
+      "static": [
+       "car_data"
+      ]
+     },
+     "module": "oversteer/shift_learner.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "downshift.over_rev",
+     "unit": "per 100 downshifts"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 224 downshifts, 6 over-revs"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "downshift.over_rev"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "shift.hpattern",
+   "name": "H-pattern technique",
+   "category": "gearbox",
+   "description": "Time in neutral per change, missed gates (neutral > 0.5 s under throttle) and skipped gears.",
+   "derivations": [
+    {
+     "id": "press",
+     "formula": "Method from the physical input (a gear-gate press within 0.6 s); neutral time between the old gear and the new.",
+     "requires": {
+      "channels": [
+       "gear",
+       "clock",
+       "shift_press"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "throttle"
+      ]
+     },
+     "module": "oversteer/shift_learner.py"
+    },
+    {
+     "id": "neutral_seen",
+     "formula": "Without the rig input: neutral seen between gears marks an H-pattern change (fallback only).",
+     "requires": {
+      "channels": [
+       "gear",
+       "clock"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "throttle"
+      ]
+     },
+     "module": "oversteer/shift_learner.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": "H-pattern changes only"
+   },
+   "outputs": [
+    {
+     "name": "hpattern.neutral",
+     "unit": "s",
+     "note": "median per change"
+    },
+    {
+     "name": "hpattern.missed",
+     "unit": "per 100 upshifts"
+    },
+    {
+     "name": "hpattern.skip",
+     "unit": "per 100 changes"
+    }
+   ],
+   "validation": {
+    "status": "sim-tested",
+    "evidence": "tests/test_coach.py, tests/test_shift_learner.py"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "hpattern.neutral",
+     "hpattern.missed",
+     "hpattern.skip"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "implemented",
+    "note": "needs an H-pattern car and the rig input; the captures had neither (sequential Fabia and 208, no presses in a replay)"
+   }
+  },
+  {
+   "id": "shift.sequential",
+   "name": "Sequential and paddle double taps",
+   "category": "gearbox",
+   "description": "Two changes the same way within 0.25 s, the second put back within 1 s.",
+   "derivations": [
+    {
+     "id": "press",
+     "formula": "Gear changes timed, method from the rig press.",
+     "requires": {
+      "channels": [
+       "gear",
+       "clock",
+       "shift_press"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/shift_learner.py"
+    },
+    {
+     "id": "gear_only",
+     "formula": "Gear changes timed; method unknown (counted for every method).",
+     "requires": {
+      "channels": [
+       "gear",
+       "clock"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": "sequential or paddles"
+   },
+   "outputs": [
+    {
+     "name": "seq.double_tap",
+     "unit": "per 100 changes"
+    }
+   ],
+   "validation": {
+    "status": "sim-tested",
+    "evidence": "tests/test_coach.py, tests/test_shift_learner.py"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "seq.double_tap"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "implemented",
+    "note": "live with the rig; a replay has no presses, so no method"
+   }
+  },
+  {
+   "id": "engine.limiter",
+   "name": "Limiter time below top gear",
+   "category": "engine",
+   "description": "Seconds per km on the limiter (>= LIMITER_BAND of it, flat out) in any gear below top: drive lost.",
+   "derivations": [
+    {
+     "id": "trace",
+     "formula": "Sum of dt where rpm >= band x limiter, throttle >= 0.95, gear < top; / km.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "throttle",
+       "gear",
+       "run_distance"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "max_rpm",
+       "gears"
+      ],
+      "static": [
+       "car_data"
+      ]
+     },
+     "module": "oversteer/coach.py trace_metrics"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "limiter.per_km",
+     "unit": "s/km"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 20 ACR runs"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "limiter.per_km"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "engine.top_gear",
+   "name": "Top gear use (gearing)",
+   "category": "tuning",
+   "description": "Time on the limiter in top gear, share of time in top, peak revs in top: final drive too short or long.",
+   "derivations": [
+    {
+     "id": "trace",
+     "formula": "As limiter time, for gear == top; share of moving time in top; max rpm in top / limiter.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "throttle",
+       "gear",
+       "gears",
+       "speed"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "max_rpm"
+      ]
+     },
+     "module": "oversteer/coach.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": ">= 3 runs of the same stage on the tune (tuning.py)"
+   },
+   "outputs": [
+    {
+     "name": "limiter.top",
+     "unit": "s per run"
+    },
+    {
+     "name": "top.share",
+     "unit": "fraction"
+    },
+    {
+     "name": "top.peak",
+     "unit": "fraction of limiter"
+    }
+   ],
+   "validation": {
+    "status": "sim-tested",
+    "evidence": "tests/test_coach.py, tests/test_tuning.py; WRCG capture"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "limiter.top",
+     "top.share",
+     "top.peak"
+    ],
+    "module": "oversteer/coach.py, oversteer/tuning.py"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "needs the gear count in the run summary; car data has it but trace_metrics reads summary gears (the replay wrote none for ACR)"
+   }
+  },
+  {
+   "id": "launch.quality",
+   "name": "Launch quality",
+   "category": "launch",
+   "description": "From a held launch: time to 50 km/h, bog (revs under 60 % of the launch revs), stall.",
+   "derivations": [
+    {
+     "id": "trace",
+     "formula": "Launch held >= 0.5 s; t50 = release delay + time to 50 km/h; bog/stall from the revs in the first 2 s.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "speed",
+       "clock"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [
+       "clutch",
+       "rig_clutch",
+       "throttle"
+      ]
+     },
+     "module": "oversteer/coach.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "rally-stage, rallycross, drag",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "launch.t50",
+     "unit": "s"
+    },
+    {
+     "name": "launch.bog",
+     "unit": "0/1"
+    },
+    {
+     "name": "launch.stall",
+     "unit": "0/1"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 20 launches"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "launch.t50",
+     "launch.bog",
+     "launch.stall"
+    ],
+    "module": "oversteer/coach.py, oversteer/telemetry.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "launch.wheelspin",
+   "name": "Launch wheelspin",
+   "category": "launch",
+   "description": "Peak driven-wheel slip in the first 2 s of a launch.",
+   "derivations": [
+    {
+     "id": "slip",
+     "formula": "max(slip_drive) over the first 2 s.",
+     "requires": {
+      "channels": [
+       "slip_drive"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "per surface"
+   },
+   "outputs": [
+    {
+     "name": "launch.slip",
+     "unit": "ratio"
+    }
+   ],
+   "validation": {
+    "status": "sim-tested",
+    "evidence": "tests/test_coach.py; WRCG capture"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "launch.slip"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "slip_drive is derivable (wheel_rot x tyre radius) but drive_log only uses a sent wheel speed"
+   }
+  },
+  {
+   "id": "pedal.coast",
+   "name": "Coasting",
+   "category": "pedals",
+   "description": "Seconds per km with both pedals under 5 % above 10 m/s.",
+   "derivations": [
+    {
+     "id": "trace",
+     "formula": "Sum of dt with throttle < 0.05, brake < 0.05, speed > 10; / km.",
+     "requires": {
+      "channels": [
+       "throttle",
+       "brake",
+       "speed",
+       "run_distance"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": "compared with the driver's own runs of the stage"
+   },
+   "outputs": [
+    {
+     "name": "pedal.coast",
+     "unit": "s/km"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 20 runs"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "pedal.coast"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "pedal.overlap",
+   "name": "Pedal overlap / left-foot braking",
+   "category": "pedals",
+   "description": "Share of moving time with throttle and brake both over 20 %: left-foot braking on loose, a habit on tarmac.",
+   "derivations": [
+    {
+     "id": "trace",
+     "formula": "Time with throttle > 0.2 and brake > 0.2 / moving time.",
+     "requires": {
+      "channels": [
+       "throttle",
+       "brake",
+       "speed"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "technique on loose; a tip on tarmac or circuit only with a slower exit than the best"
+   },
+   "outputs": [
+    {
+     "name": "pedal.overlap",
+     "unit": "fraction"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 20 runs"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "pedal.overlap"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "pedal.throttle_application",
+   "name": "Throttle application",
+   "category": "pedals",
+   "description": "After the apex: time to full throttle, rise rate, and re-lifts (throttle falling > 0.3 after going back on) per corner.",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "Per corner from the apex: t(throttle >= 0.95) - t(apex); count of drops > 0.3 before the exit.",
+     "requires": {
+      "channels": [
+       "throttle",
+       "clock"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "pedal_rate",
+       "slip_drive"
+      ]
+     }
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "throttle.to_full",
+     "unit": "s"
+    },
+    {
+     "name": "throttle.relifts",
+     "unit": "per corner"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "pedal.handbrake",
+   "name": "Handbrake use",
+   "category": "pedals",
+   "description": "Handbrake pulls per km and per corner.",
+   "derivations": [
+    {
+     "id": "game",
+     "formula": "Rising edges past 0.5 of the game handbrake; per corner: pulled or not.",
+     "requires": {
+      "channels": [
+       "handbrake",
+       "run_distance"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py, oversteer/drive_log.py"
+    },
+    {
+     "id": "rig",
+     "formula": "The same from the rig handbrake axis Oversteer reads.",
+     "requires": {
+      "channels": [
+       "rig_handbrake",
+       "run_distance"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "rally, drift",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "handbrake.per_km",
+     "unit": "pulls/km"
+    }
+   ],
+   "validation": {
+    "status": "sim-tested",
+    "evidence": "tests/test_coach.py"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "handbrake.per_km"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "no handbrake in the telemetry; the rig axis would do it"
+   }
+  },
+  {
+   "id": "brake.point",
+   "name": "Braking point",
+   "category": "braking",
+   "description": "Where braking starts before each corner, against the driver's best run of the stage (or the pace note).",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "Per corner: the run distance of the last rising edge of brake past 0.1 before the apex; difference with the best run.",
+     "requires": {
+      "channels": [
+       "brake",
+       "run_distance"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "lap_distance"
+      ]
+     }
+    },
+    {
+     "id": "pace_notes",
+     "formula": "Brake onset relative to the called corner's pace-note distance.",
+     "requires": {
+      "channels": [
+       "brake",
+       "lap_distance"
+      ],
+      "static": [
+       "pace_notes"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": "same stage, >= 2 runs"
+   },
+   "outputs": [
+    {
+     "name": "brake.point",
+     "unit": "m",
+     "note": "before the apex; vs best run"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3faftn"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "brake.consistency",
+   "name": "Braking consistency",
+   "category": "braking",
+   "description": "Spread of the braking point and peak brake pressure per corner across runs of the stage.",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "SD of brake.point and of peak brake per corner over the last 5 runs.",
+     "requires": {
+      "channels": [
+       "brake",
+       "run_distance"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": ">= 3 runs of the stage"
+   },
+   "outputs": [
+    {
+     "name": "brake.point_sd",
+     "unit": "m"
+    },
+    {
+     "name": "brake.peak_sd",
+     "unit": "0..1"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3faftn"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "brake.trail",
+   "name": "Trail braking",
+   "category": "braking",
+   "description": "Braking carried into the turn: brake released progressively while yaw builds.",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "Per corner entry: time with brake > 0.05 and |yaw_rate| > 0.15, and the correlation of falling brake with rising |steer| or |a_lat|.",
+     "requires": {
+      "channels": [
+       "brake",
+       "yaw_rate",
+       "clock"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "steer",
+       "a_lat"
+      ]
+     }
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "tarmac mostly"
+   },
+   "outputs": [
+    {
+     "name": "brake.trail",
+     "unit": "s per corner"
+    },
+    {
+     "name": "brake.release",
+     "unit": "correlation"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "brake.lockup",
+   "name": "Lock-ups",
+   "category": "braking",
+   "description": "Wheels locking under braking; front or rear first.",
+   "derivations": [
+    {
+     "id": "wheels",
+     "formula": "Under brake > 0.3: a wheel speed below 0.8 of road speed for > 0.2 s; axle first.",
+     "requires": {
+      "channels": [
+       "wheel_slip",
+       "brake",
+       "clock"
+      ]
+     },
+     "status": "planned"
+    },
+    {
+     "id": "abs_hint",
+     "formula": "Where the car has ABS (car data), lock-ups don't apply.",
+     "requires": {
+      "channels": [
+       "brake"
+      ],
+      "static": [
+       "car_data"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "brake.lockups",
+     "unit": "per km"
+    },
+    {
+     "name": "brake.lock_axle",
+     "unit": "front/rear"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "note": "also the brake-balance rule in tuning (section 10)"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "wheel_rot confirmed; needs the tyre radius applied"
+   }
+  },
+  {
+   "id": "corner.speeds",
+   "name": "Entry, minimum and exit speed",
+   "category": "corners",
+   "description": "Per corner: speed 2 s before the apex, at the apex, 2 s after; compared with the best run.",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "From the corner list.",
+     "requires": {
+      "channels": [
+       "speed"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_log.py _corner"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "entry_speed",
+     "unit": "m/s"
+    },
+    {
+     "name": "min_speed",
+     "unit": "m/s"
+    },
+    {
+     "name": "exit_speed",
+     "unit": "m/s"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 405 corners"
+   },
+   "implementation": {
+    "status": "partial",
+    "metrics": [],
+    "module": "oversteer/drive_log.py",
+    "note": "stored per corner; no metric or tip yet"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "corner.exit_revs",
+   "name": "Exit revs (gear too long)",
+   "category": "corners",
+   "description": "Revs 1 s after the throttle goes back on past the apex, below the power band: a gear too long there.",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "Share of exits per gear with rpm < power band start (85 % of peak power).",
+     "requires": {
+      "channels": [
+       "rpm",
+       "gear",
+       "throttle",
+       "clock"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "implemented",
+     "optional": {
+      "channels": [],
+      "static": [
+       "car_data"
+      ]
+     },
+     "module": "oversteer/coach.py corner_exits"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "exit.low",
+     "unit": "fraction",
+     "note": "per gear"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 378 exits"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "exit.low"
+    ],
+    "module": "oversteer/coach.py, oversteer/tuning.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "corner.exit_wheelspin",
+   "name": "Wheelspin on exit",
+   "category": "corners",
+   "description": "Peak driven-wheel slip in the 2 s after the apex.",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "max(slip_drive) from the apex to 2 s after.",
+     "requires": {
+      "channels": [
+       "slip_drive"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_log.py _corner"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "per surface"
+   },
+   "outputs": [
+    {
+     "name": "exit_spin",
+     "unit": "ratio"
+    }
+   ],
+   "validation": {
+    "status": "untested",
+    "evidence": "WRCG capture gave values; no test"
+   },
+   "implementation": {
+    "status": "partial",
+    "metrics": [],
+    "module": "oversteer/drive_log.py",
+    "note": "stored per corner; the open-diff rule is planned"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "needs slip_drive in the trace"
+   }
+  },
+  {
+   "id": "corner.loss",
+   "name": "Corner time loss",
+   "category": "corners",
+   "description": "Seconds lost in the three worst corners (50 m either side of the apex) against the best run of the stage.",
+   "derivations": [
+    {
+     "id": "traces",
+     "formula": "Time over the window in this run minus in the best finished run, worst three summed.",
+     "requires": {
+      "channels": [
+       "run_distance",
+       "clock"
+      ],
+      "aspects": [
+       "context.corners",
+       "context.stage_result"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py corner_loss"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": ">= 1 other finished run of the stage"
+   },
+   "outputs": [
+    {
+     "name": "corner.loss",
+     "unit": "s"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 4 runs"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "corner.loss"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "corner.pace_note",
+   "name": "Corners by pace note",
+   "category": "corners",
+   "description": "Every called corner (severity 1-6, hairpin, square...) with its entry/min/exit speed and loss, so coaching can say \"the 3 left after the crest\".",
+   "derivations": [
+    {
+     "id": "notes",
+     "formula": "Place each note by its spline distance on lap_distance; take the corner features in its window.",
+     "requires": {
+      "channels": [
+       "lap_distance",
+       "speed"
+      ],
+      "static": [
+       "pace_notes"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "rally-stage",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "corners_by_note",
+     "unit": "list"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3faftn"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "ACR only: the note distances are along the same spline as lap_distance"
+   }
+  },
+  {
+   "id": "balance.understeer_oversteer",
+   "name": "Understeer / oversteer balance",
+   "category": "balance",
+   "description": "The fit steer = a x curvature + K x lateral g over cornering rows: K > 0 understeer, K < 0 oversteer (units of the wheel lock per g: compared with itself only).",
+   "derivations": [
+    {
+     "id": "fit",
+     "formula": "Least squares with no intercept over rows with |yaw| > 0.1, speed > 8, steer into the turn.",
+     "requires": {
+      "channels": [
+       "steer",
+       "yaw_rate",
+       "a_lat",
+       "speed"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py balance_gradient"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "per surface; between tunes"
+   },
+   "outputs": [
+    {
+     "name": "balance.gradient",
+     "unit": "lock per g"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 20 runs, 14431 rows"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "balance.gradient"
+    ],
+    "module": "oversteer/coach.py, oversteer/tuning.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "balance.counter_steer",
+   "name": "Counter-steer",
+   "category": "balance",
+   "description": "Share of cornering time with steer against the yaw rate (catching a slide).",
+   "derivations": [
+    {
+     "id": "corners",
+     "formula": "Per corner: time with |steer| > 0.02 and steer x yaw < 0 / time steering; weighted by duration.",
+     "requires": {
+      "channels": [
+       "steer",
+       "yaw_rate"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/drive_log.py _corner"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "technique on loose, habit or setup on tarmac"
+   },
+   "outputs": [
+    {
+     "name": "counter_steer",
+     "unit": "fraction"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 405 corners, 0.09 of cornering time"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "counter_steer"
+    ],
+    "module": "oversteer/drive_log.py, oversteer/coach.py, oversteer/tuning.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "balance.slip_angle",
+   "name": "Slip angle management",
+   "category": "balance",
+   "description": "Body slip angle through corners: how much the car is driven sideways, peak and time over a threshold.",
+   "derivations": [
+    {
+     "id": "body",
+     "formula": "beta = atan2(vel.y, vel.x) above 5 m/s; per corner peak |beta| and time over 10 degrees.",
+     "requires": {
+      "channels": [
+       "body_slip"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned"
+    },
+    {
+     "id": "tyres",
+     "formula": "The game's tyre slip angles (Forza, ACC), front vs rear.",
+     "requires": {
+      "channels": [
+       "slip_angle"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "per surface"
+   },
+   "outputs": [
+    {
+     "name": "slip.peak",
+     "unit": "deg"
+    },
+    {
+     "name": "slip.over",
+     "unit": "s per corner"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "local velocity confirmed"
+   }
+  },
+  {
+   "id": "vehicle.jumps",
+   "name": "Jumps and landings",
+   "category": "vehicle",
+   "description": "Airborne time and landing severity (vertical acceleration peak, suspension compression at touchdown); landing with steer or throttle off-line.",
+   "derivations": [
+    {
+     "id": "susp_accel",
+     "formula": "Airborne: all wheels extended and a_vert near -g; landing: the a_vert peak and susp compression after.",
+     "requires": {
+      "channels": [
+       "susp",
+       "a_vert",
+       "clock"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "steer",
+       "throttle"
+      ]
+     }
+    },
+    {
+     "id": "accel_only",
+     "formula": "a_vert near -g for > 0.15 s.",
+     "requires": {
+      "channels": [
+       "a_vert",
+       "clock"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "rally-stage",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "jump.air_time",
+     "unit": "s"
+    },
+    {
+     "name": "jump.landing_g",
+     "unit": "g"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": []
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "susp decoded, vertical acceleration confirmed as kinematic"
+   }
+  },
+  {
+   "id": "vehicle.bottoming",
+   "name": "Bottoming",
+   "category": "tuning",
+   "description": "Suspension hitting its travel limit per km, split into landings and compressions.",
+   "derivations": [
+    {
+     "id": "norm",
+     "formula": "susp_norm >= 0.98, per km; landing when an airborne phase precedes it.",
+     "requires": {
+      "channels": [
+       "susp_norm"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "a_vert"
+      ]
+     }
+    },
+    {
+     "id": "learnt_stop",
+     "formula": "Travel within 2 mm of the highest compression seen on the car (a learnt bump stop).",
+     "requires": {
+      "channels": [
+       "susp"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "a_vert"
+      ]
+     }
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": "suspension units verified per game"
+   },
+   "outputs": [
+    {
+     "name": "bottoming.per_km",
+     "unit": "hits/km"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "module": "oversteer/tuning.py (section 10)"
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "no suspension range in ACR: the learnt bump stop"
+   }
+  },
+  {
+   "id": "consistency.runs",
+   "name": "Consistency across runs",
+   "category": "consistency",
+   "description": "Mean over the stage tenths of the SD of each tenth's time across the last 5 finished runs.",
+   "derivations": [
+    {
+     "id": "splits",
+     "formula": "Split times at every 10 % of the stage length from the traces.",
+     "requires": {
+      "channels": [
+       "run_distance",
+       "clock"
+      ],
+      "aspects": [
+       "context.stage_result"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/coach.py split_sd"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": ">= 3 finished runs of the stage"
+   },
+   "outputs": [
+    {
+     "name": "consistency.split_sd",
+     "unit": "s"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: Afon Bidno, 3 finished runs"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [
+     "consistency.split_sd"
+    ],
+    "module": "oversteer/coach.py"
+   },
+   "acr": {
+    "coverage": "validated"
+   }
+  },
+  {
+   "id": "line.road_use",
+   "name": "Line and road use",
+   "category": "corners",
+   "description": "Where on the road the car is: cutting, using the width, the line through a corner.",
+   "derivations": [
+    {
+     "id": "edges",
+     "formula": "Lateral offset from the road centre line against its edges.",
+     "requires": {
+      "channels": [
+       "pos"
+      ],
+      "static": [
+       "road_edges"
+      ]
+     },
+     "status": "planned"
+    },
+    {
+     "id": "own_runs",
+     "formula": "Lateral offset from the driver's best run's path (positions), per corner.",
+     "requires": {
+      "channels": [
+       "pos"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "line.offset",
+     "unit": "m"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": []
+   },
+   "acr": {
+    "coverage": "planned",
+    "note": "only against own runs: the game gives no road edges"
+   }
+  },
+  {
+   "id": "profile.smoothness",
+   "name": "Driver style: smoothness",
+   "category": "profile",
+   "description": "RMS of steer and pedal rates in corners, normalised by the driver's own history.",
+   "derivations": [
+    {
+     "id": "rates",
+     "formula": "RMS(steer_rate), RMS(pedal_rate) over cornering time.",
+     "requires": {
+      "channels": [
+       "steer_rate",
+       "pedal_rate"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "style.smoothness",
+     "unit": "percentile"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "profile.aggression",
+   "name": "Driver style: aggression",
+   "category": "profile",
+   "description": "How hard the car is pushed: share of pushed segments, P95 combined g against the car's envelope.",
+   "derivations": [
+    {
+     "id": "envelope",
+     "formula": "mu_p95 / the car's best mu_p95 on the surface; share of segments pushed.",
+     "requires": {
+      "channels": [
+       "g_total",
+       "speed"
+      ],
+      "aspects": [
+       "context.surface"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "style.aggression",
+     "unit": "0..1"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "profile.slide",
+   "name": "Driver style: slide",
+   "category": "profile",
+   "description": "How sideways: counter-steer share and body slip angle, per surface.",
+   "derivations": [
+    {
+     "id": "combine",
+     "formula": "counter_steer and slip.peak percentiles.",
+     "requires": {
+      "channels": [
+       "steer",
+       "yaw_rate"
+      ],
+      "aspects": [
+       "balance.counter_steer"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [
+       "body_slip"
+      ]
+     }
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "per surface"
+   },
+   "outputs": [
+    {
+     "name": "style.slide",
+     "unit": "percentile"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "profile.mechanical_sympathy",
+   "name": "Driver style: mechanical sympathy",
+   "category": "profile",
+   "description": "Over-revs, limiter time, stalls, heavy landings.",
+   "derivations": [
+    {
+     "id": "combine",
+     "formula": "Rates of downshift.over_rev, limiter.per_km, launch.stall, jump.landing_g.",
+     "requires": {
+      "channels": [
+       "rpm",
+       "gear"
+      ],
+      "aspects": [
+       "shift.downshift",
+       "engine.limiter"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "style.sympathy",
+     "unit": "percentile"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "profile.strengths",
+   "name": "Strong and weak areas by time cost",
+   "category": "profile",
+   "description": "Corner types and phases (entry, apex, exit) ranked by the time they cost against the driver's best.",
+   "derivations": [
+    {
+     "id": "loss_by_kind",
+     "formula": "corner.loss per corner kind (direction, heading change, pace-note severity) and phase.",
+     "requires": {
+      "channels": [
+       "run_distance",
+       "clock",
+       "speed"
+      ],
+      "aspects": [
+       "corner.loss"
+      ]
+     },
+     "status": "planned",
+     "optional": {
+      "channels": [],
+      "static": [
+       "pace_notes"
+      ]
+     }
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": ">= 3 runs"
+   },
+   "outputs": [
+    {
+     "name": "profile.areas",
+     "unit": "ranked list"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  },
+  {
+   "id": "profile.setup_lean",
+   "name": "Setup lean",
+   "category": "profile",
+   "description": "Whether the driver prefers a loose or a planted car: balance gradient against counter-steer across tunes.",
+   "derivations": [
+    {
+     "id": "tunes",
+     "formula": "balance.gradient and counter_steer per tune against the lap times on each.",
+     "requires": {
+      "channels": [
+       "steer",
+       "yaw_rate",
+       "a_lat"
+      ],
+      "aspects": [
+       "balance.understeer_oversteer",
+       "balance.counter_steer"
+      ]
+     },
+     "status": "planned"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any",
+    "conditions": ">= 2 tunes"
+   },
+   "outputs": [
+    {
+     "name": "profile.setup_lean",
+     "unit": "loose/neutral/planted"
+    }
+   ],
+   "validation": {
+    "status": "untested"
+   },
+   "implementation": {
+    "status": "planned",
+    "metrics": [],
+    "clickup": "86e3ev2dy"
+   },
+   "acr": {
+    "coverage": "planned"
+   }
+  }
+ ]
+}

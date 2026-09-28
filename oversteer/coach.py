@@ -15,7 +15,7 @@ import math
 import statistics
 import time
 
-from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SHIFT_COVERAGE
+from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SHIFT_COVERAGE, SURFACES, measured_against
 
 # -- metrics of one run (section 9.1) --
 
@@ -104,6 +104,31 @@ def shift_metrics(shifts):
         if downs:
             out.append({'name': 'downshift.over_rev', 'value': 100.0 * sum('over-rev' in f for f in downs)
                         / len(downs), 'count': len(downs), 'method': method})
+    return out
+
+
+def against_best(car, shifts, surface):
+    """The run's changes with each flat-out change up by one measured
+    against the best for the run's surface and that gear, now that the
+    surface is settled (a change is recorded against what was known as it
+    happened: maybe nothing yet, or the best whatever the surface). The
+    game's data leaves no bootstrap range; a grip-limited gear's range is
+    from its lowered best to the engine's, all of it on target
+    (measured_against)."""
+    if car is None:
+        return shifts
+    out = []
+    for s in shifts:
+        if s['direction'] == 'up' and s['gear_to'] == s['gear'] + 1:
+            best = car.best_for(s['gear'], surface)
+            if best is not None and best['coverage'] >= SHIFT_COVERAGE:
+                against, low, high = measured_against(best, s['rpm'])
+                s = dict(s, best=against)
+                if low is not None:
+                    s['best_low'], s['best_high'] = low, high
+                elif best['source'] != 'learnt' or best['grip_limited'] or s['best_low'] is None:
+                    s['best_low'] = s['best_high'] = None
+        out.append(s)
     return out
 
 
@@ -365,12 +390,25 @@ def stage_metrics(store, run, stage, trace, channels, corners, finished):
 
 def power_band_low(car):
     """Where the car's power band starts (rpm): the lowest band giving
-    POWER_BAND of its peak, from the pooled curve; None until known."""
-    curve = car.curve()
+    POWER_BAND of its peak, from the game's torque curve where shipped,
+    else the pooled curve, else the gears' own curves together; None
+    until known."""
+    from .shift_learner import POWER_BIN
+    from . import car_data
+    if car.shipped:
+        limiter = car.known_limiter()
+        curve = {rpm // POWER_BIN: car_data.torque(car.shipped, rpm) * rpm
+                 for rpm in range(POWER_BIN // 2, int(limiter) + 1, POWER_BIN)}
+    else:
+        curve = car.curve()
+        if len(curve) < 5:
+            curve = {}
+            for gear in car.gears():
+                for band, power in car.curve(gear).items():
+                    curve[band] = max(power, curve.get(band, power))
     if len(curve) < 5:
         return None
     peak = max(curve.values())
-    from .shift_learner import POWER_BIN
     lows = [band for band, power in curve.items() if power >= POWER_BAND * peak]
     return (min(lows) + 0.5) * POWER_BIN if lows else None
 
@@ -383,9 +421,8 @@ def car_context(car):
         return {}
     # The known limiter, never the highest rpm seen: an early shifter has
     # only been that far, and would be told he sits on the limiter there
-    gears = car.gears()
     return {'limiter': car.known_limiter() or None, 'power_band_low': power_band_low(car),
-            'top_gear': gears[-1] if gears else None}
+            'top_gear': car.top_gear()}
 
 
 # -- over time (section 9.2) --
@@ -559,6 +596,10 @@ def _with(method):
     return ' with ' + _method(method) if method else ''
 
 
+def _ordinal(n):
+    return '{}{}'.format(n, {1: 'st', 2: 'nd', 3: 'rd'}.get(n if n < 20 else n % 10, 'th'))
+
+
 def _stage_name(stage):
     return 'this stage' if not stage else 'stage ' + stage
 
@@ -603,7 +644,7 @@ class Coach:
     # -- the families of tips --
 
     def _shift_tips(self, slices, model, candidates, praise, notes):
-        gated = False
+        gated = waiting = False
         for (name, gear, method, discipline, surface), rows in sorted(
                 slices.items(), key=lambda kv: tuple('' if x is None else str(x) for x in kv[0])):
             if name != 'shift.error' or gear is None:
@@ -617,8 +658,12 @@ class Coach:
             evidence = ['{} changes up flat out in {} session{}{}.'.format(
                 count, sessions, '' if sessions == 1 else 's', ' ({})'.format(where) if where else '')]
             slip = recent(slices.get(('shift.slip', gear, method, discipline, surface), []), 1)
-            best = model.best_shift(gear) if model is not None else None
-            best_rpm = best[0] if best and best[1] >= SHIFT_COVERAGE else None
+            # The best for this surface and gear: the game's engine data or
+            # learnt, lowered where the gear is measured grip-limited there
+            best = model.best_for(gear, surface if surface in SURFACES else None) if model is not None else None
+            best = best if best is not None and best['coverage'] >= SHIFT_COVERAGE else None
+            best_rpm = best['rpm'] if best else None
+            source = self._source(best)
             key = '{}:{}:{}:{}'.format(gear, method, discipline, surface)
             is_habit = habit(rows, lambda v: abs(v) > SHIFT_OFF and (v > 0) == (error > 0))
             if is_habit:
@@ -627,33 +672,54 @@ class Coach:
                     SHIFT_OFF, 'late' if error > 0 else 'early', bad_ones, all_ones))
             per_10km = _per_10km(rows, sum(r['count'] for r in rows))
             cost = abs(error) / 1000.0 * COST_SHIFT * per_10km
+            limited = best is not None and best['grip_limited']
+            if limited and best['engine_rpm'] > best_rpm:
+                notes.append(Tip('grip:{}:{}'.format(gear, surface), 'note',
+                                 '{} on {}: {} is grip-limited there (measured), so changing up anywhere from {:.0f} '
+                                 'to {:.0f} rpm gives the same drive.'.format(change, surface, _ordinal(gear),
+                                                                            best_rpm, best['engine_rpm'])))
             if error < -SHIFT_OFF:
-                # Early: on a loose surface, or with the wheels spinning,
-                # changing early can be right
-                if loose(surface):
+                # Early: on a loose surface (a mixed one too), only where the
+                # gear's grip there is measured over several pulls (below
+                # the lowered best where it limits: the next gear is short of
+                # the grip limit there); with the surface unknown, only
+                # against the game's data for a gear measured grip-limited
+                # nowhere, or with the wheels seen not to spin
+                engine_says = (best is not None and best['source'] == 'game'
+                               and not model.grip_limited_anywhere(gear))
+                if loose(surface) and not (best is not None and best['grip_limited'] is not None):
+                    waiting = True
                     continue
-                if surface in (None, 'unknown') and not (slip is not None and slip[0] < SPIN_SHIFT):
+                if surface in (None, 'unknown') and not engine_says and not (slip is not None
+                                                                             and slip[0] < SPIN_SHIFT):
                     gated = True
                     continue
-                if slip is not None:
+                if slip is not None and not limited:
                     evidence.append('Driven wheels slipped {:.0f} % at those changes: traction was not the '
                                     'limit.'.format(slip[0] * 100))
                 if best_rpm:
-                    text = '{}{}: you change up at {:.0f} rpm, {:.0f} early.{} Hold it to about {:.0f}.'.format(
+                    text = '{}{}: you change up at {:.0f} rpm, {:.0f} early.{} Hold it to about {:.0f}{}.'.format(
                         change, _with(method), best_rpm + error, -error,
-                        self._drive_lost(model, gear, best_rpm + error), best_rpm)
+                        '' if limited else self._drive_lost(model, gear, best_rpm + error), best_rpm, source)
                 else:
                     text = '{}{}: you change up about {:.0f} rpm early. Hold the gear longer.'.format(
                         change, _with(method), -error)
                 candidates.append(Tip('shift.early:' + key, 'focus' if is_habit else 'tip', text, evidence,
                                       error, cost, count))
             elif error > SHIFT_OFF:
+                # Late: past the engine's best (a grip-limited gear's lowered
+                # best up to there is all on target, measured_against)
+                if best is not None:
+                    best_rpm = best['engine_rpm']
+                    source = self._source(dict(best, grip_limited=False))
                 if best_rpm and model.ceiling() and best_rpm >= model.ceiling() * 0.99:
-                    text = ('{}{}: you change up on the limiter; this car pulls to the limiter in {}, so '
-                            'change as the lights flash.'.format(change, _with(method), gear))
+                    text = ('{}{}: you change up on the limiter; this car pulls to the limiter in {}{}, so '
+                            'change as the lights flash.'.format(change, _with(method), gear,
+                                                                 ' (the game\'s engine data)'
+                                                                 if best['source'] == 'game' else ''))
                 elif best_rpm:
-                    text = '{}{}: you change up at {:.0f} rpm, {:.0f} late; change at about {:.0f}.'.format(
-                        change, _with(method), best_rpm + error, error, best_rpm)
+                    text = '{}{}: you change up at {:.0f} rpm, {:.0f} late; change at about {:.0f}{}.'.format(
+                        change, _with(method), best_rpm + error, error, best_rpm, source)
                 else:
                     text = '{}{}: you change up about {:.0f} rpm late; change a little sooner.'.format(
                         change, _with(method), error)
@@ -672,20 +738,39 @@ class Coach:
         if gated:
             notes.append(Tip('gate.surface', 'note', 'Tips about changing up early wait until the surface is '
                              'known: on a loose surface, short-shifting can be right.'))
+        if waiting:
+            notes.append(Tip('gate.grip', 'note', 'Tips about changing up early on a loose surface wait until '
+                             'the grip of that gear there is measured (a few full-throttle pulls in it): '
+                             'short-shifting can be right when the tyres cannot take the drive.'))
+
+    @staticmethod
+    def _source(best):
+        """Where a best change up comes from, for the end of a sentence."""
+        if best is None:
+            return ''
+        if best['grip_limited']:
+            return ': lowered for grip on {}, where the next gear reaches the grip limit too'.format(best['surface'])
+        return ": the best from the game's engine data" if best['source'] == 'game' else \
+            ': the best learnt from your driving'
 
     def _now(self):
         return self.now if self.now is not None else time.time()
 
     @staticmethod
     def _drive_lost(model, gear, rpm):
-        """' 3rd gives 9 % less drive there.' when the model knows both."""
+        """' Gear 3 gives 9 % less drive there.' when the model knows both:
+        from the game's torque curve and gearing where shipped, else the
+        learnt power."""
         if model is None or rpm is None:
             return ''
-        this, following = model.ratio(gear), model.ratio(gear + 1)
-        if not this or not following:
+        step = model.step(gear)
+        if not step:
             return ''
-        stay = model.power_at(rpm, gear) or model.power_at(rpm)
-        after = model.power_at(rpm * following / this, gear + 1) or model.power_at(rpm * following / this)
+        if model.game_data():
+            stay, after = model.engine_drive(gear, rpm), model.engine_drive(gear + 1, rpm * step)
+        else:
+            stay = model.power_at(rpm, gear) or model.power_at(rpm)
+            after = model.power_at(rpm * step, gear + 1) or model.power_at(rpm * step)
         if not stay or not after or after >= stay:
             return ''
         return ' Gear {} gives {:.0f} % less drive there.'.format(gear + 1, (1 - after / stay) * 100)
@@ -839,7 +924,7 @@ class Coach:
 
     def _model_notes(self, model, now, candidates):
         """What the car's model says it is still learning."""
-        from .shift_learner import POWER_BIN, POWER_MIN
+        from .shift_learner import POWER_BIN
         recent_tunes = sorted(g for g, at in model.retuned.items() if now - at < 7 * DAY)
         if recent_tunes:
             candidates.append(Tip('retuned:' + ','.join(str(g) for g in recent_tunes), 'tip', '{} re-tuned; {} shift '
@@ -849,8 +934,8 @@ class Coach:
                                       'its' if len(recent_tunes) == 1 else 'their'), value=0.0, cost=0.01))
         ceiling = model.ceiling()
         needed = int(ceiling * 0.5 / POWER_BIN) if ceiling else 0
-        bands = sum(1 for v in model.power.values() if len(v) >= POWER_MIN)
-        if needed and bands < needed * 0.8:
+        bands = model.known_bands()
+        if not model.game_data() and needed and bands < needed * 0.8:            # the game's data needs no learning
             candidates.append(Tip('learning', 'tip', 'Still learning the engine ({} of about {} rev bands known): '
                                   'full-throttle pulls from low revs, out of slow corners, fill it in fastest.'.format(
                                       bands, needed), value=0.0, cost=0.0))
