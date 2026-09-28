@@ -153,6 +153,12 @@ def _quantile(values, q):
     return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
 
 
+def _stamp(values):
+    """A cheap fingerprint of {key: [samples]}: a sample added (even to a
+    full list, which drops its oldest) changes the last one."""
+    return tuple((k, len(v), v[-1] if v else None) for k, v in values.items())
+
+
 def _interpolate(curve, rpm):
     """A {band: value} curve at `rpm`, interpolated between the bands
     either side; None where too little is known."""
@@ -206,6 +212,7 @@ class CarModel:
         self.drive = {}                  # (surface, gear) -> [(rpm, m/s, drive m/s^2)] at full throttle
         self.last_surface = None         # the surface last driven on: what the tab shows between drives
         self._shipped = False            # car_data entry, looked up once (False: not yet)
+        self._cache = {}                 # name -> (fingerprint of what it was worked out from, value)
 
     # -- persistence --
 
@@ -323,12 +330,28 @@ class CarModel:
 
     # -- what it knows --
 
+    def _memo(self, name, stamp, compute):
+        """compute(), kept until `stamp` (a fingerprint of what it is worked
+        out from) changes: the listener adds samples to a live model, the
+        readers work on copies, and a snapshot asks the same questions many
+        times over."""
+        hit = self._cache.get(name)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        value = compute()
+        self._cache[name] = (stamp, value)
+        return value
+
+    def _ratios(self):
+        """{gear: rpm per m/s} of the gears learnt well enough."""
+        return self._memo('ratios', _stamp(self.ratios), lambda: {
+            g: _median(v) for g, v in self.ratios.items() if len(v) >= RATIO_MIN})
+
     def ratio(self, gear):
-        samples = self.ratios.get(gear)
-        return _median(samples) if samples and len(samples) >= RATIO_MIN else None
+        return self._ratios().get(gear)
 
     def gears(self):
-        return sorted(g for g in self.ratios if self.ratio(g) is not None)
+        return sorted(self._ratios())
 
     def _estimate(self, samples):
         # With the slope taken out, what is left low is lift and slides: a
@@ -350,6 +373,12 @@ class CarModel:
         """{band: power estimate} for the bands known well enough, pooled
         over all gears or in one gear. `resample(samples)` draws a
         bootstrap sample instead of the samples themselves."""
+        if resample is None:
+            stamp = (_stamp(self.power if gear is None else self.power_g), self.power_source, self.slope_free)
+            return self._memo(('curve', gear), stamp, lambda: self._curve(gear, None))
+        return self._curve(gear, resample)
+
+    def _curve(self, gear, resample):
         if gear is None:
             bands = self.power.items()
         else:
@@ -451,7 +480,8 @@ class CarModel:
         the check."""
         if not self.shipped:
             return None, None
-        return car_data.match_set(self.shipped, {g: self.ratio(g) for g in self.gears()})
+        ratios = self._ratios()
+        return self._memo('gear_set', _stamp(self.ratios), lambda: car_data.match_set(self.shipped, ratios))
 
     def step(self, gear):
         """rpm in gear + 1 per rpm in `gear` at the same road speed: the
@@ -477,16 +507,29 @@ class CarModel:
         from the game's data; else the learnt power over the road speed,
         from the curve pooled over the gears, which only exists with the
         slope taken out. None where unknown."""
+        return self._drive_fn()(gear, rpm)
+
+    def _drive_fn(self):
+        """engine_drive as a function of (gear, rpm), with the gearing and
+        the pooled curve looked up once: loops over many samples or revs
+        call it."""
         if self.shipped:
-            gear_set = self.gear_set()[0]
-            if not 1 <= gear <= len(gear_set['gears']):
+            data, gears = self.shipped, self.gear_set()[0]['gears']
+
+            def drive(gear, rpm):
+                return car_data.torque(data, rpm) * gears[gear - 1] if 1 <= gear <= len(gears) else None
+            return drive
+        if not self.pools():
+            return lambda gear, rpm: None
+        ratios, pooled = self._ratios(), self.curve()
+
+        def drive(gear, rpm):
+            ratio = ratios.get(gear)
+            if not ratio or rpm <= 0:
                 return None
-            return car_data.torque(self.shipped, rpm) * gear_set['gears'][gear - 1]
-        ratio = self.ratio(gear)
-        if not ratio or not self.pools():
-            return None
-        power = self.power_at(rpm)
-        return power * ratio / rpm if power is not None and rpm > 0 else None
+            power = _interpolate(pooled, rpm)
+            return power * ratio / rpm if power is not None else None
+        return drive
 
     def _scan(self, gear, cap=None, tolerance=0.0):
         """The lowest rpm from which, all the way to the limiter, gear + 1
@@ -499,8 +542,9 @@ class CarModel:
             return None
         best = None
         rpm = ceiling
+        engine_drive = self._drive_fn()
         while rpm >= ceiling * 0.4:
-            stay, change = self.engine_drive(gear, rpm), self.engine_drive(gear + 1, rpm * step)
+            stay, change = engine_drive(gear, rpm), engine_drive(gear + 1, rpm * step)
             if stay is None or change is None:
                 return best                      # known down to here only (None: not even at the limiter)
             if cap is not None:
@@ -529,36 +573,44 @@ class CarModel:
         cancels the car's mass, the efficiency and the tyre): a gear
         clearly below it spins or slides its drive away. The top gear has
         nothing to be compared with and is never grip-limited."""
-        samples = self.drive.get((surface, gear))
-        if not samples or len(samples) < DRIVE_MIN:
-            return None
+        return self._grip_table(surface).get(gear)
 
-        def shares(values, g):
-            out = []
-            for rpm, _speed, drive in values:
-                engine = self.engine_drive(g, rpm)
-                if engine:
-                    out.append(drive / engine)
-            return out
+    def _grip_table(self, surface):
+        """{gear: grip()} on `surface`, worked out for every gear at once
+        and kept until the samples, the gearing or the power change."""
+        drive = tuple((k, len(v), v[-1] if v else None) for k, v in self.drive.items() if k[0] == surface)
+        stamp = (drive, _stamp(self.ratios)) if self.shipped else \
+            (drive, _stamp(self.ratios), _stamp(self.power), self.power_source, self.slope_free)
+        return self._memo(('grip', surface), stamp, lambda: self._work_out_grip(surface))
+
+    def _work_out_grip(self, surface):
+        engine_drive = self._drive_fn()
         medians = {}
         for (s, g), values in self.drive.items():
             if s == surface and len(values) >= DRIVE_MIN:
-                found = shares(values, g)
+                found = []
+                for rpm, _speed, drive in values:
+                    engine = engine_drive(g, rpm)
+                    if engine:
+                        found.append(drive / engine)
                 if len(found) >= DRIVE_MIN:
                     medians[g] = _median(found)
-        own = medians.pop(gear, None)
-        higher = [m for g, m in medians.items() if g > gear]
-        if own is None or not higher:
-            return None
-        # Only a higher gear stands for the engine: grip caps the force at
-        # the wheels, which is highest in the low gears, while a resistance
-        # the model underestimates (loose gravel, drag) takes most, as a
-        # share, from the high gears' smaller drive
-        reference = max(higher)
-        if reference <= 0:
-            return None
-        cap = _median([drive for _, _, drive in samples]) / reference
-        return own < GRIP_SHARE * reference, cap, own / reference, len(samples)
+        out = {}
+        for gear, own in medians.items():
+            higher = [m for g, m in medians.items() if g > gear]
+            if not higher:
+                continue
+            # Only a higher gear stands for the engine: grip caps the force at
+            # the wheels, which is highest in the low gears, while a resistance
+            # the model underestimates (loose gravel, drag) takes most, as a
+            # share, from the high gears' smaller drive
+            reference = max(higher)
+            if reference <= 0:
+                continue
+            samples = self.drive[(surface, gear)]
+            cap = _median([drive for _, _, drive in samples]) / reference
+            out[gear] = (own < GRIP_SHARE * reference, cap, own / reference, len(samples))
+        return out
 
     def best_for(self, gear, surface=None):
         """The best change up from `gear` on `surface` (None: whatever the
@@ -909,6 +961,7 @@ class ShiftLearner:
         self._loaded = None                 # load_snapshot(): ((profile, key, updated), snapshot)
         self._shift_cache = {}
         self._shift_cache_at = 0.0
+        self._lights = None                 # publish(): (car key, surface, {gear: best_for()}) for the listener
         self._bands = {}                    # key -> (monotonic time, best_bands())
         self.run_surface = {}               # run number -> its surface, once its stage is known (drive-log thread)
         if database is not None:
@@ -1150,6 +1203,7 @@ class ShiftLearner:
                     self._dirty = False
             profile = self.profile
             self._shift_cache = {}
+            self._lights = None
         if self.log is not None:
             self.log.call(self.log.store.forget_model, profile, key)
 
@@ -1229,12 +1283,18 @@ class ShiftLearner:
 
     def publish(self):
         """Drive-log thread, once a second: work the snapshot out here so
-        readers never do it under the lock."""
+        readers never do it under the lock, and the best changes up for
+        the surface driven on now, which the listener reads for the rev
+        lights and each change up (_best_now) instead of working them out
+        per packet."""
         with self.lock:
             if self.car is None:
-                self.published = None
+                self.published = self._lights = None
                 return
             copy, limiter_time, surface = self.car.copy(), self.session_limiter_time, self._shown_surface()
+            now = self.surface
+        top = copy.top_gear() or 0
+        self._lights = (copy.key, now, {g: copy.best_for(g, now) for g in range(1, top)})
         self.published = self._snapshot_of(copy, limiter_time, self._bands_of(copy), surface)
 
     def _shown_surface(self):
@@ -1268,15 +1328,34 @@ class ShiftLearner:
         with self.lock:
             if self.car is None or gear is None or gear < 1:
                 return None
-            # Worked out at most every couple of seconds: this runs per packet
+            if self.threaded:
+                best = self._best_now(self.car, gear)
+                return best['rpm'] if best and best['coverage'] >= SHIFT_COVERAGE else None
+            # Without a drive-log thread (tests, replays): worked out here, at
+            # most every couple of seconds
             now = time.monotonic()
             if now - self._shift_cache_at > 2.0:
                 self._shift_cache, self._shift_cache_at = {}, now
             key = (gear, self.surface)
             if key not in self._shift_cache:
-                best = self.car.best_for(gear, self.surface) if not shared_car(self.car.key) else None
+                best = self._best_now(self.car, gear)
                 self._shift_cache[key] = best['rpm'] if best and best['coverage'] >= SHIFT_COVERAGE else None
             return self._shift_cache[key]
+
+    def _best_now(self, car, gear):
+        """best_for(gear) on the surface driven on now. With a drive-log
+        thread, what publish() last worked out there (None until it has,
+        for this car and surface: at most a second), so the listener never
+        works a best out under the lock; without one, worked out here."""
+        if shared_car(car.key):
+            return None
+        surface = self.surface
+        if not self.threaded:
+            return car.best_for(gear, surface)
+        lights = self._lights
+        if lights is None or lights[0] != car.key or lights[1] != surface:
+            return None
+        return lights[2].get(gear)
 
     def idle(self):
         """Telemetry stopped for a moment (menus, loading, a pause, the end
@@ -1511,7 +1590,7 @@ class ShiftLearner:
             self._dirty = True
         # Measured against a best the lights would trust, or none: a half
         # learnt curve would coach "600 rpm early" from noise
-        best = car.best_for(start, self.surface) if up and to == start + 1 else None
+        best = self._best_now(car, start) if up and to == start + 1 else None
         best = best if best is not None and best['coverage'] >= SHIFT_COVERAGE else None
         band = (self._bands.get(car.key, (0, {}))[1].get(start)
                 if best and best['source'] == 'learnt' and not best['grip_limited'] else None)

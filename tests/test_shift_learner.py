@@ -750,3 +750,81 @@ def test_a_pooled_curve_learnt_on_hills_is_dropped_on_loading():
            'power': {'60': [100.0] * 5}, 'power_g': {'2:60': [100.0] * 5}}
     car = CarModel.from_dict(old)
     assert car.power == {} and car.power_g == {(2, 60): [100.0] * 5}
+
+
+# -- how long the questions take (the listener and the drive-log thread ask them) --
+
+def _busy_car(key='fh5/busy', seed=1):
+    """A learnt car with everything full: ratios, a pooled and per-gear
+    power curve and 300 drive samples per gear on tarmac."""
+    import random
+    rng = random.Random(seed)
+    car = CarModel(key)
+    car.power_source, car.limiter, car.limiter_source = 'game', 8000.0, 'game'
+
+    def power(band):
+        return band * 1000.0 * (1 - (band - 60) ** 2 / 3600) + rng.gauss(0, 100)
+    for gear, ratio in enumerate([150, 105, 80, 64, 53, 45], 1):
+        car.ratios[gear] = [ratio * (1 + rng.gauss(0, 0.003)) for _ in range(200)]
+        car.drive[('tarmac', gear)] = [(rng.uniform(3000, 7500), 20.0, rng.uniform(2, 8) / gear)
+                                       for _ in range(300)]
+        for band in range(20, 80):
+            car.power_g[(gear, band)] = [power(band) for _ in range(40)]
+    for band in range(20, 80):
+        car.power[band] = [power(band) for _ in range(40)]
+    return car
+
+
+def _timed(fn, repeat=3):
+    import time
+    best = None
+    for _ in range(repeat):
+        start = time.perf_counter()
+        fn()
+        took = time.perf_counter() - start
+        best = took if best is None else min(best, took)
+    return best
+
+
+def test_the_bests_are_quick_to_work_out():
+    """A snapshot asks every gear's best, each best the grip of every gear:
+    worked out from scratch (a fresh copy, as publish() makes) it must stay
+    far below the drive-log thread's second, and a single best far below
+    the rev lights' packet rate. The game's data (the Fabia) as well."""
+    from oversteer import car_data
+    busy = _busy_car().to_dict()
+    assert _timed(lambda: CarModel.from_dict(busy).best_for(1, 'tarmac')) < 0.020
+    assert _timed(lambda: ShiftLearner._snapshot_of(CarModel.from_dict(busy), 0.0, {}, 'tarmac')) < 0.150
+    fabia = CarModel(FABIA)
+    for gear, ratio in enumerate(FABIA_GEARS, 1):
+        fabia.ratios[gear] = [ratio * FABIA_RPM_PER_MS] * 200
+        fabia.drive[('gravel', gear)] = [(3000.0 + 15 * i, 20.0, car_data.torque(car_data.entry(FABIA), 3000.0 + 15 * i)
+                                          * ratio) for i in range(300)]
+    fabia = fabia.to_dict()
+    assert _timed(lambda: CarModel.from_dict(fabia).best_for(1, 'gravel')) < 0.020
+    assert _timed(lambda: ShiftLearner._snapshot_of(CarModel.from_dict(fabia), 0.0, {}, 'gravel')) < 0.150
+
+
+def test_the_listener_never_works_a_best_out(tmp_path, monkeypatch):
+    """With a drive-log thread, the rev lights and each change up read the
+    bests publish() worked out there: the listener, holding the lock, never
+    works one out itself."""
+    learner = ShiftLearner()
+    learner.threaded = True
+    fabia_pulls(learner, runs=1, surface=None)
+    calls = []
+    real = CarModel.best_for
+
+    def counted(self, gear, surface=None):
+        calls.append(gear)
+        return real(self, gear, surface)
+    monkeypatch.setattr(CarModel, 'best_for', counted)
+    assert learner.shift_rpm(2) is None                     # nothing published yet: the percentage rule
+    t = fabia_pulls(learner, runs=1, surface=None, t=100.0)
+    assert calls == []
+    learner.publish()
+    assert calls                                              # worked out by publish(), on its copy
+    del calls[:]
+    assert learner.shift_rpm(2) == 7500.0 and learner.shift_rpm(1) == 7500.0
+    learner._shift_locked(learner.car, (2, 7000.0, 1.0, t, False, None), 3, 5000.0, t + 0.1)
+    assert learner._pending[-1]['best'] == 7500.0 and calls == []
