@@ -727,7 +727,6 @@ class CarModel:
             rows.append({
                 'gear': gear,
                 'ratio': self.ratio(gear),
-                'game_ratio': self.game_ratio(gear, surface),
                 'ratio_samples': len(self.ratios.get(gear, [])),
                 'best': best['rpm'] if best else None,
                 'engine_best': best['engine_rpm'] if best else None,

@@ -2352,7 +2352,7 @@
    "derivations": [
     {
      "id": "game_data",
-     "formula": "Best = the lowest rpm from which gear n+1's torque x ratio at the same road speed beats gear n's to the limiter (game torque curve and gearing); per surface, a gear whose measured full-throttle drive stays under 0.8 of the engine's (against the other gears) is grip-limited and its best drops to where n+1 reaches the same grip limit. Error = shift rpm - best.",
+     "formula": "Best = the lowest rpm from which gear n+1's torque x ratio at the same road speed beats gear n's to the limiter (game torque curve and gearing); per surface, a gear whose measured full-throttle drive (wheelspin included, 20 samples from 3 pulls at least) stays under 0.8 of the engine's (against the higher gears) is grip-limited and its best drops to where n+1 reaches the same grip limit, anything from there to the engine's best on target. The game's data is set aside (learnt instead) where the learnt gearing is more than 4 % off its gear sets and wheelspin does not explain it. Error = shift rpm - the nearest rpm on target.",
      "requires": {
       "channels": [
        "rpm",
@@ -2408,7 +2408,7 @@
    "fallbacks": [],
    "gates": {
     "discipline": "any",
-    "surface": "per surface; early changes silent where the gear is grip-limited there or the surface is unknown without game data",
+    "surface": "per surface; early changes on a loose or mixed surface silent until the gear's grip there is measured (below the lowered best where it limits), and with the surface unknown without game data",
     "conditions": "flat out (throttle >= 0.95 held), up by one gear"
    },
    "outputs": [

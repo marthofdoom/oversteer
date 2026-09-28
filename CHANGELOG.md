@@ -8,21 +8,33 @@
   gear sets, final drive, tyre radius, mass, drivetrain, the game's own
   shift-light rpms). The best upshift per gear is then exact from the
   first drive: for the Skoda Fabia RS Rally2, the limiter in every gear.
-  The learnt gear ratios pick the gear set in use and stay as a check.
+  The learnt gear ratios pick the gear set in use and stay as a check:
+  where they are more than 4 % off every gear set the game gives the car
+  (and wheelspin does not explain it), the game's data is set aside and
+  the best upshifts are learnt, which the Telemetry tab says.
 - Best upshifts per surface: a gear whose measured drive at full throttle
-  stays well below what the engine gives in it (1st on gravel, say) is
-  grip-limited there, and its best upshift is lowered to where the next
-  gear reaches the same grip. The rev lights in Auto use the best for the
+  (wheelspin included, over several pulls) stays well below what the
+  engine gives in it (1st on gravel, say) is grip-limited there, and its
+  best upshift is lowered to where the next gear reaches the same grip;
+  from there up to the engine's best, changing up costs nothing, and all
+  of that range is on target. The rev lights in Auto use the best for the
   surface of the stage being driven (from the stage tables), the
   Telemetry tab's shift table says which surface it shows and marks each
-  best as from the game's data or lowered for grip.
+  best as from the game's data or lowered for grip, with its range.
 
 ### Changed
 - Coaching measures each change up against the best for the run's
   surface and that gear, and says whether that best comes from the game's
-  engine data or was learnt. Early changes on gravel are no longer muted
-  wholesale: only those from a gear measured grip-limited there, which it
-  says once.
+  engine data or was learnt. Early changes on a loose surface (gravel,
+  snow, ice, a mixed stage) are coached only once that gear's grip there
+  is measured over a few full-throttle pulls: against the game's engine
+  data or the learnt best where it does not limit, against the best
+  lowered for grip where it does. Until then the coach says once that it
+  is waiting for that.
+- Some learnt shift points are learnt again after the update: a car's
+  pooled power curve learnt on hills without the slope taken out is
+  dropped (the per-gear curves stay), and the drive samples that measure
+  grip per surface are measured again.
 
 ### Fixed
 - The learnt best upshift of a car driven where the game sends no slope
@@ -31,6 +43,13 @@
   need more samples while hills are left in, and the slope now also comes
   from how the car's position climbs (Assetto Corsa Rally sends it now).
 - Gear ratios are no longer learnt while coasting or braking.
+- The rev lights in Auto no longer freeze for a moment every 2 s: working
+  out a best upshift took up to a second with many samples learnt; it is
+  now kept until what it depends on changes and worked out off the
+  telemetry thread.
+- A car whose slope comes from its position (Assetto Corsa and ACC over
+  the bridge) no longer flickers between two ways of learning its power
+  below about 24 km/h.
 
 ## 0.14.1 — 2026-09-26
 

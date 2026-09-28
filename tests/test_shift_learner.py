@@ -620,7 +620,7 @@ def test_the_game_data_gives_every_best_upshift_exactly():
     snapshot = car.snapshot()
     assert [row['gear'] for row in snapshot['gears']] == [1, 2, 3, 4, 5]
     assert snapshot['gear_set'] == 'SkodaFabiaRSRally2Set0' and snapshot['power_source'] == 'game data'
-    assert abs(snapshot['gears'][2]['game_ratio'] - 1.867 * FABIA_RPM_PER_MS) < 0.5
+    assert abs(car.game_ratio(3, 'gravel') - 1.867 * FABIA_RPM_PER_MS) < 0.5
 
 
 def test_a_curve_that_falls_away_crosses_below_the_limiter(monkeypatch):
