@@ -137,6 +137,34 @@ def set_tables(value):
     _tables = value
 
 
+# Assetto Corsa Rally: where along the road spline a run starts, against
+# the stage's first pace note (marth's captures: 25-50 m before it)
+START_BEFORE_NOTE = (-30.0, 150.0)
+
+
+def acr_stage(track, start=None, length=None):
+    """The Assetto Corsa Rally entry for a track name as the bridge sends
+    it, or None. Two stages of one name (the bridge cuts names and replaces
+    accents) are told apart by where the run started: just before a
+    stage's first pace note. Without that, by the spline length the game
+    sent, against each one's published length and last pace note."""
+    if not track:
+        return None
+    found = [e for e in tables().get('acr', {}).values()
+             if e.get('track') and bridge_track(e['track']) == track]
+    if len(found) > 1 and start is not None:
+        low, high = START_BEFORE_NOTE
+        near = [e for e in found if e.get('pacenote_first_m') is not None
+                and low <= e['pacenote_first_m'] - start <= high]
+        if len(near) == 1:
+            return near[0]
+    if len(found) > 1 and length:
+        found.sort(key=lambda e: min(abs(v - length) for v in (e.get('length_m') or 0.0,
+                                                                 e.get('pacenote_last_m') or 0.0)))
+        return found[0]
+    return found[0] if len(found) == 1 else None
+
+
 def entry(key):
     """The shipped entry of a stage key, or None."""
     if not key:

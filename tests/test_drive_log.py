@@ -415,6 +415,7 @@ def test_a_burst_of_packets_or_a_reset_is_no_teleport(tmp_path):
     tracker = RunTracker.__new__(RunTracker)
     tracker._session, tracker._last_pos, tracker._last_speed = 1, (0.0, 0.0, 0.0), 25.0
     tracker._last_t, tracker._last_stage_time, tracker._last_lap = 10.0, 50.0, None
+    tracker._last_lap_distance = tracker._last_track = None
     from oversteer.telemetry import Sample
     burst = Sample(5000.0, speed=25.0)
     burst.pos, burst.stage_time = (0.5, 0.0, 0.0), 50.0
@@ -466,3 +467,44 @@ def test_the_shipped_wrc_generations_table_names_marths_mexico_stages(tmp_path):
     # every stage its own length: no two within 5 mm
     lengths = sorted(e['length_m'] for e in stage_tables.tables()['wrcg'].values())
     assert all(b - a > 0.005 for a, b in zip(lengths, lengths[1:]))
+
+
+def acr_drive(t0, start, until, track='Wales Afon Bidno', speed=22.0, car='acr/Skoda Fabia RS Rally2'):
+    """An Assetto Corsa Rally drive as the bridge sends it: no position or
+    stage clock, the distance along the stage's spline from the start line."""
+    from oversteer.telemetry import Sample
+    samples, t, d = [], t0, start
+    for _ in range(20):                                        # standing at the line
+        s = Sample(1500.0, 7500.0, gear=1, speed=0.0, car=car, game='acr', throttle=0.0)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        samples.append((t, s, 0.0))
+        t += 0.1
+    while d < until:
+        s = Sample(6000.0, 7500.0, gear=3, speed=speed, car=car, game='acr', throttle=0.8)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        samples.append((t, s, 0.8))
+        t += 0.1
+        d += speed * 0.1
+    return samples
+
+
+def test_acr_finish_restart_and_shared_names(tmp_path):
+    # Afon Bidno - Severn: start 238 m, last pace note 5510 m. An attempt
+    # given up at 1500 m, the stage restarted (the distance jumps back to
+    # the line), then a run past the last note: two runs, the second finished
+    first = acr_drive(0.0, 238.0, 1500.0)
+    second = acr_drive(first[-1][0] + 0.1, 238.0, 5530.0)
+    learner, reader, session = drive_runs(tmp_path, first + second)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert [r['finished'] for r in runs] == [0, 1]
+    assert all(r['stage'] == 'acr:wales:afon-bidno-severn' for r in runs)
+    assert 230 < runs[1]['result_time'] < 250              # (5510 - 238) / 22 m/s from moving off
+
+
+def test_acr_stages_of_one_name_told_apart_by_the_start():
+    from oversteer import stage_tables
+    # "Alsace For_t" is Foret de Munster (first note 3811.6) or de Saverne
+    # (132.3): a run starting at 3773 m is Munster, whatever the spline says
+    assert stage_tables.acr_stage('Alsace For_t', start=3773.0, length=10927.0)['stage'] == 'Forêt de Munster'
+    assert stage_tables.acr_stage('Alsace For_t', start=100.0, length=10927.0)['stage'] == 'Forêt de Saverne'
+    assert stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['stage'] == 'Afon Bidno - Severn'

@@ -179,6 +179,7 @@ SEGMENT_MIN = 50.0               # m: a shorter tail is not kept
 SEGMENT_ROWS = 3600              # rows (a minute at 60 Hz): a segment closes then however short (a parked car)
 TRACE_EVERY = 0.1                # s between trace rows
 RUN_MIN = 100.0                  # m moving: a shorter run (menus, a car parked) is not kept
+DISTANCE_BACK = 100.0            # m the distance along a stage goes back: the stage restarted
 SENT_LENGTH_TOLERANCE = 0.5      # m: a length the game sends against its own in the table
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
@@ -215,11 +216,14 @@ class RunTracker:
 
     def _reset(self):
         self.run = None
+        self._finish_line = None                     # ACR: the last pace note along the spline
         self._last_t = None
         self._last_pos = None
         self._last_stage_time = None
         self._last_lap = None
         self._last_speed = None
+        self._last_lap_distance = None
+        self._last_track = None
 
     def _waiting(self):
         """Not driving yet: how long the car has stood, and whether with the
@@ -272,6 +276,10 @@ class RunTracker:
             self._last_pos = sample.pos
         if sample.stage_time is not None:
             self._last_stage_time = sample.stage_time
+        if sample.lap_distance is not None:
+            self._last_lap_distance = sample.lap_distance
+        if sample.track:
+            self._last_track = sample.track
         self._last_speed = sample.speed
 
     def _boundary(self, now, sample, session):
@@ -296,6 +304,15 @@ class RunTracker:
                 return 'teleport'
         elif pos is None and gap > NO_POSITION_GAP:
             return 'silence'
+        # Another stage, or the stage started again: in Assetto Corsa Rally,
+        # which sends no position or stage clock the checks above could use,
+        # the distance along the stage jumps back to the start line
+        if sample.track and self._last_track and sample.track != self._last_track:
+            return 'restart'
+        distance, last_distance = sample.lap_distance, self._last_lap_distance
+        if distance is not None and last_distance is not None and not (sample.laps and sample.laps > 1) \
+                and distance < last_distance - DISTANCE_BACK:
+            return 'restart'
         stage_time, last_time = sample.stage_time, self._last_stage_time
         if stage_time is not None and last_time is not None and stage_time < last_time - RESTART_DROP:
             laps, lap = sample.laps, sample.lap
@@ -345,8 +362,16 @@ class RunTracker:
             'release': now - self._rolling if self._rolling is not None else 0.0}
         self._stood = self._launch = self._launch_rpm = 0.0
         self._rolling = None
+        # Assetto Corsa Rally sends no stage clock or progress: the run has
+        # finished once it passes the stage's last pace note
+        self._finish_line = None
+        if sample.game == 'acr' and sample.track:
+            stage = stage_tables.acr_stage(sample.track, sample.lap_distance, sample.stage_length)
+            if stage is not None and stage.get('pacenote_last_m'):
+                self._finish_line = stage['pacenote_last_m']
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
-                         sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track)
+                         sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track,
+                         sample.lap_distance)
 
     def _clock(self, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
@@ -417,6 +442,11 @@ class RunTracker:
                 self._finish_d = d
             self._progress = sample.progress
         self._clock(sample, d, dt, speed)
+        if self._finish_line is not None and self._finished is None and sample.lap_distance is not None \
+                and sample.lap_distance >= self._finish_line:
+            # The run's own clock: ACR's stage clock isn't in what the bridge reads
+            self._finished, self._result_time = 1, self._duration
+            self._finish_d = d
         if sample.puddle is not None:
             self._samples += 1
             if any(p > 0 for p in sample.puddle):
@@ -491,7 +521,8 @@ class RunTracker:
 
     # -- the drive-log thread --
 
-    def _write_start(self, number, session, n, started, stage, game, stage_length, start_pos, track=None):
+    def _write_start(self, number, session, n, started, stage, game, stage_length, start_pos, track=None,
+                     start_d=None):
         learner = self.learner
         row = learner._session_rows.get(session)
         if row is None:
@@ -500,7 +531,7 @@ class RunTracker:
         if stage is None and game in ('acr', 'acc', 'acpmf') and track:
             # Assetto Corsa Rally names the stage in its shared memory (the
             # bridge before version 3 does not say which AC game it is)
-            stage = store.match_track(track, stage_length)
+            stage = store.match_track(track, stage_length, start=start_d)
             if stage is not None:
                 game = 'acr'
         if stage is None and game == 'wrcg' and stage_length:
