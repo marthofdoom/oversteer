@@ -108,6 +108,39 @@ def default_set(entry):
     return next((s for s in sets if s.get('default')), sets[0])
 
 
+def unexplained_miss(gear_set, learnt, tolerance):
+    """How far the learnt ratios ({gear: rpm per m/s}) stray from the gear
+    set's where wheelspin does not explain it, or None with no two
+    adjacent gears learnt. The final drive and the tyre scale every gear
+    alike, so they are scaled out by the highest learnt gear, the one that
+    spins least. Steady wheelspin reads as a shorter gear (more rpm per
+    m/s) in the low gears only, the more the lower: the lowest gears
+    shorter than the set's, up to a run of at least two gears from the top
+    that fit within `tolerance`, are taken for spin (a Fabia's 1st and 2nd
+    on gravel read 4-6 % short that way). Any other gear off (above a gear
+    that is not short, which spins more), and a gear longer than the
+    set's, counts."""
+    ratios = gear_set['gears']
+    gears = sorted(g for g, v in learnt.items() if v and 1 <= g <= len(ratios))
+    if not any(g + 1 in gears for g in gears):
+        return None
+    top = gears[-1]
+    scale = learnt[top] / ratios[top - 1]
+    off = {g: learnt[g] / (scale * ratios[g - 1]) - 1.0 for g in gears}
+    run = [top]
+    for g in reversed(gears[:-1]):
+        if g != run[-1] - 1 or abs(off[g]) > tolerance:
+            break
+        run.append(g)
+    spin = set()
+    if len(run) >= 2:
+        for g in gears:
+            if g >= run[-1] or off[g] <= 0:
+                break
+            spin.add(g)
+    return max(abs(v) for g, v in off.items() if g not in spin)          # the top gear is never spin
+
+
 def match_set(entry, learnt):
     """(gear set, worst mismatch) of the car's sets that fits learnt
     ratios best ({gear: rpm per m/s}). Only the steps between gears are

@@ -385,6 +385,7 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
         return {'id': car['id'], 'key': car['key'], 'name': car['name'] or car['key'], 'game': car['game'],
                 'limiter': (snapshot or {}).get('limiter'), 'limiter_source': (snapshot or {}).get('limiter_source'),
                 'shift_surface': (snapshot or {}).get('surface'), 'power_source': (snapshot or {}).get('power_source'),
+                'gearing_aside': (snapshot or {}).get('gearing_aside'),
                 'gears': gears, 'tune': tuning.tune_summary(reader, car['id'], car['game']),
                 'tuning': [n.to_dict() for n in tuning.advice(reader, profile, car['id'], surface)]}
 

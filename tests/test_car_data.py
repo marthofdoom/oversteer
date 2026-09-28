@@ -41,3 +41,20 @@ def test_the_gear_set_in_use_is_told_by_the_steps_between_learnt_ratios():
     assert found['id'] == 'VWPoloGTIR5Set0' and miss < 1e-6
     found, miss = car_data.match_set(polo, {})
     assert found['default'] and miss is None
+
+
+def test_a_gearing_off_the_game_data_is_told_from_wheelspin():
+    """The final drive and tyre scale every gear alike; steady wheelspin
+    shortens the low gears only (the Fabia's 1st and 2nd read 4-6 % short
+    on gravel against a 3rd to 5th that fit): what is left is the miss."""
+    gear_set = {'gears': [3.583, 2.538, 1.867, 1.412, 1.136]}
+    fits = {g + 1: r * 125.0 * 1.02 for g, r in enumerate(gear_set['gears'])}
+    assert car_data.unexplained_miss(gear_set, fits, 0.04) < 1e-9
+    spin = {**fits, 1: fits[1] * 1.036, 2: fits[2] * 1.056}
+    assert car_data.unexplained_miss(gear_set, spin, 0.04) < 1e-9
+    longer = {**fits, 2: fits[2] * 0.94}                 # longer than the set: no spin does that
+    assert abs(car_data.unexplained_miss(gear_set, longer, 0.04) - 0.06) < 1e-9
+    third = {**fits, 3: fits[3] * 1.06}                        # shorter, but above gears that fit: not spin
+    assert abs(car_data.unexplained_miss(gear_set, third, 0.04) - 0.06) < 1e-9
+    assert car_data.unexplained_miss(gear_set, {1: fits[1], 3: fits[3]}, 0.04) is None     # no two adjacent
+    assert abs(car_data.unexplained_miss(gear_set, {4: fits[4] * 1.05, 5: fits[5]}, 0.04) - 0.05) < 1e-9

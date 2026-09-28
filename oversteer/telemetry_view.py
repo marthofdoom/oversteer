@@ -50,6 +50,9 @@ def shift_summary(snapshot):
         _("engine power estimated from acceleration")
     text = _("Limiter {} rpm  ·  {} rev bands of power known ({})  ·  learnt from your recent driving").format(
         int(limiter) if limiter else '?', snapshot['power_bands'], source)
+    if snapshot.get('gearing_aside'):
+        text += '  ·  ' + _("the game's data set aside: the gearing learnt is {:.0f} % off every gear set it gives "
+                            "this car").format(snapshot['gearing_aside'] * 100)
     return text + ('  ·  ' + _("for {}").format(surface) if surface else '')
 
 

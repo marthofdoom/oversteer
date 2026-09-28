@@ -105,6 +105,7 @@ DRIVE_MIN = 20                   # samples before a gear's grip on a surface is 
 DRIVE_PULLS = 3                  # ...from at least this many pulls
 GRIP_SHARE = 0.8                 # measured drive below this share of the engine's: the gear is grip-limited
 GRIP_TOLERANCE = 0.02            # the next gear within this of the grip limit counts as reaching it
+GEARING_ASIDE = 0.04             # learnt ratios off the game's gear set by more (not spin): its data is set aside
 SURFACES = ('tarmac', 'gravel', 'snow', 'ice')     # the surfaces the best changes up are kept for
 LOOSE = ('gravel', 'snow', 'ice')
 
@@ -488,16 +489,38 @@ class CarModel:
         whose steps between gears fit the learnt ratios best, else the
         car's default. The game's ratios are used; the learnt ones are
         the check."""
+        return self._gearing()[:2]
+
+    def _gearing(self):
+        """(gear set, worst mismatch, mismatch spin does not explain), or
+        Nones without shipped data."""
         if not self.shipped:
-            return None, None
+            return None, None, None
         ratios = self._ratios()
-        return self._memo('gear_set', _stamp(self.ratios), lambda: car_data.match_set(self.shipped, ratios))
+
+        def work_out():
+            gear_set, miss = car_data.match_set(self.shipped, ratios)
+            return gear_set, miss, car_data.unexplained_miss(gear_set, ratios, GEARING_ASIDE)
+        return self._memo('gear_set', _stamp(self.ratios), work_out)
+
+    def gearing_aside(self):
+        """How far the learnt gearing is off every gear set the game's
+        files give the car (not wheelspin) when that is more than
+        GEARING_ASIDE: a setup or a car the data does not know, so the
+        best changes up are learnt instead; else None."""
+        miss = self._gearing()[2]
+        return miss if miss is not None and miss > GEARING_ASIDE else None
+
+    def game_data(self):
+        """The shipped entry the best changes up are worked out from: None
+        without one, or with its gearing set aside."""
+        return self.shipped if self.shipped and self.gearing_aside() is None else None
 
     def step(self, gear):
         """rpm in gear + 1 per rpm in `gear` at the same road speed: the
         game's gearing where shipped, else the learnt ratios; None when
         unknown."""
-        gear_set = self.gear_set()[0]
+        gear_set = self.gear_set()[0] if self.game_data() else None
         if gear_set is not None:
             gears = gear_set['gears']
             return gears[gear] / gears[gear - 1] if 1 <= gear < len(gears) else None
@@ -505,7 +528,7 @@ class CarModel:
         return following / this if this and following else None
 
     def top_gear(self):
-        gear_set = self.gear_set()[0]
+        gear_set = self.gear_set()[0] if self.game_data() else None
         if gear_set is not None:
             return len(gear_set['gears'])
         gears = self.gears()
@@ -523,7 +546,7 @@ class CarModel:
         """engine_drive as a function of (gear, rpm), with the gearing and
         the pooled curve looked up once: loops over many samples or revs
         call it."""
-        if self.shipped:
+        if self.game_data():
             data, gears = self.shipped, self.gear_set()[0]['gears']
 
             def drive(gear, rpm):
@@ -569,7 +592,7 @@ class CarModel:
         """The engine's best change up from `gear` from the game's own
         torque curve and gearing: exact, so None only past the top gear."""
         top = self.top_gear()
-        if not self.shipped or top is None or not 1 <= gear < top:
+        if not self.game_data() or top is None or not 1 <= gear < top:
             return None
         return self._scan(gear)
 
@@ -590,7 +613,7 @@ class CarModel:
         """{gear: grip()} on `surface`, worked out for every gear at once
         and kept until the samples, the gearing or the power change."""
         drive = tuple((k, len(v), v[-1] if v else None) for k, v in self.drive.items() if k[0] == surface)
-        stamp = (drive, _stamp(self.ratios)) if self.shipped else \
+        stamp = (drive, _stamp(self.ratios)) if self.game_data() else \
             (drive, _stamp(self.ratios), _stamp(self.power), self.power_source, self.slope_free)
         return self._memo(('grip', surface), stamp, lambda: self._work_out_grip(surface))
 
@@ -644,7 +667,7 @@ class CarModel:
         if rpm is not None:
             found = {'rpm': rpm, 'coverage': 1.0, 'source': 'game'}
         else:
-            if self.shipped:
+            if self.game_data():
                 return None
             best = self.best_shift(gear)
             if best is None:
@@ -694,9 +717,10 @@ class CarModel:
         top = self.top_gear()
         bands = bands or {}
         gear_set, miss = self.gear_set()
+        data = self.game_data()
         rows = []
-        for gear in (gears if gear_set is None else sorted(set(gears) | set(range(1, top + 1)))):
-            last = gear + 1 not in gears if gear_set is None else gear >= top
+        for gear in (gears if data is None else sorted(set(gears) | set(range(1, top + 1)))):
+            last = gear + 1 not in gears if data is None else gear >= top
             best = self.best_for(gear, surface) if not last else None
             average = self.average_upshift(gear)
             band = bands.get(gear) if best and best['source'] == 'learnt' and not best['grip_limited'] else None
@@ -720,7 +744,8 @@ class CarModel:
                 'limiter_source': 'game data' if self.shipped and self.limiter_source != 'launch'
                 else self.limiter_source,
                 'power_bands': self.known_bands(), 'limiter_time': self.limiter_time,
-                'power_source': 'game data' if self.shipped else self.power_source, 'retuned': dict(self.retuned),
+                'power_source': 'game data' if data else self.power_source, 'retuned': dict(self.retuned),
+                'gearing_aside': self.gearing_aside(),
                 'surface': surface, 'gear_set': gear_set['id'] if gear_set else None,
                 'ratio_miss': miss}
 
@@ -771,8 +796,8 @@ class CarModel:
                                  'pulls to the limiter in {}, so change as the lights flash.'.format(
                                      change, shift_rpm, gear)))
                 else:
-                    stay = self.engine_drive(gear, shift_rpm) if self.shipped else self.power_at(shift_rpm)
-                    after = (self.engine_drive(gear + 1, shift_rpm * step) if self.shipped
+                    stay = self.engine_drive(gear, shift_rpm) if self.game_data() else self.power_at(shift_rpm)
+                    after = (self.engine_drive(gear + 1, shift_rpm * step) if self.game_data()
                              else self.power_at(shift_rpm * step))
                     cost = ''
                     if stay and after and stay < after:
@@ -807,7 +832,7 @@ class CarModel:
                 'its' if len(retuned) == 1 else 'their'))
         needed = int(ceiling * 0.5 / POWER_BIN) if ceiling else 0
         bands = self.known_bands()
-        if not self.shipped and needed and bands < needed * 0.8:
+        if not self.game_data() and needed and bands < needed * 0.8:
             lines.append('Still learning the engine ({} of about {} rev bands known): full-throttle pulls from '
                          'low revs, out of slow corners, fill it in fastest.'.format(bands, needed))
         return lines
@@ -818,7 +843,7 @@ class CarModel:
         step = self.step(gear)
         if not step:
             return ''
-        if self.shipped:
+        if self.game_data():
             stay, after = self.engine_drive(gear, rpm), self.engine_drive(gear + 1, rpm * step)
         else:
             stay = self.power_at(rpm, gear) or self.power_at(rpm)

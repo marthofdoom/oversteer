@@ -766,7 +766,7 @@ class Coach:
         step = model.step(gear)
         if not step:
             return ''
-        if model.shipped:
+        if model.game_data():
             stay, after = model.engine_drive(gear, rpm), model.engine_drive(gear + 1, rpm * step)
         else:
             stay = model.power_at(rpm, gear) or model.power_at(rpm)
@@ -935,7 +935,7 @@ class Coach:
         ceiling = model.ceiling()
         needed = int(ceiling * 0.5 / POWER_BIN) if ceiling else 0
         bands = model.known_bands()
-        if not model.shipped and needed and bands < needed * 0.8:            # the game's data needs no learning
+        if not model.game_data() and needed and bands < needed * 0.8:            # the game's data needs no learning
             candidates.append(Tip('learning', 'tip', 'Still learning the engine ({} of about {} rev bands known): '
                                   'full-throttle pulls from low revs, out of slow corners, fill it in fastest.'.format(
                                       bands, needed), value=0.0, cost=0.0))

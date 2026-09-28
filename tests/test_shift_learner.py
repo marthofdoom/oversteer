@@ -911,3 +911,22 @@ def test_a_grip_limited_gear_is_on_target_up_to_the_engine_best(tmp_path):
     assert shift['best'] == 6500.0 and (shift['best_low'], shift['best_high']) == (best['rpm'], 7500.0)
     rows = {row['gear']: row for row in learner.snapshot()['gears']}
     assert rows[1]['best'] == best['rpm'] and rows[1]['engine_best'] == 7500.0
+
+
+def test_the_game_data_is_set_aside_when_the_gearing_does_not_match():
+    """Learnt ratios 6 % longer than the game's in 3rd (a setup or a car
+    the data does not know; no spin does that): the best changes up are learnt instead, and the tab
+    says why; the Fabia's spin-shortened 1st and 2nd are not such a miss."""
+    from oversteer import telemetry_view
+    car = CarModel(FABIA)
+    for gear, ratio in enumerate(FABIA_GEARS, 1):
+        car.ratios[gear] = [ratio * FABIA_RPM_PER_MS * 1.02 * {1: 1.036, 2: 1.056}.get(gear, 1.0)] * 30
+    assert car.gearing_aside() is None and car.game_data() is car.shipped
+    assert car.best_for(3)['source'] == 'game' and car.snapshot()['power_source'] == 'game data'
+    car.ratios[3] = [FABIA_GEARS[2] * FABIA_RPM_PER_MS * 1.02 * 0.94] * 30
+    assert abs(car.gearing_aside() - 0.06) < 0.001 and car.game_data() is None
+    assert car.best_for(3) is None                            # nothing learnt of the engine yet
+    snapshot = car.snapshot()
+    assert snapshot['power_source'] is None and abs(snapshot['gearing_aside'] - 0.06) < 0.001
+    assert snapshot['limiter'] == 7500.0                        # the engine's limit still stands
+    assert "the game's data set aside: the gearing learnt is 6 % off" in telemetry_view.shift_summary(snapshot)

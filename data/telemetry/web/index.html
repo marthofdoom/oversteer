@@ -399,7 +399,8 @@ function shiftTable(car, table, note) {
   markGear();
   const parts = [];
   if (car.limiter) parts.push("Limiter " + rpm(car.limiter) + " rpm" + (car.limiter_source ? " (" + car.limiter_source + ")" : "") + ".");
-  parts.push("Best" + (car.shift_surface ? " on " + car.shift_surface : "") + ": where the next gear pulls harder" + (car.power_source === "game data" ? ", from the game's engine data (grip: lowered where that gear was measured grip-limited)" : ", with the range it is known to") + ". You: your average change up.");
+  parts.push("Best" + (car.shift_surface ? " on " + car.shift_surface : "") + ": where the next gear pulls harder" + (car.power_source === "game data" ? ", from the game's engine data (grip: from where the next gear reaches the grip limit too, up to the engine's best)" : ", with the range it is known to") + ". You: your average change up.");
+  if (car.gearing_aside) parts.push("The game's data is set aside: the gearing learnt is " + Math.round(car.gearing_aside * 100) + " % off every gear set it gives this car.");
   note.textContent = parts.join(" ");
 }
 
