@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.2 — 2026-09-28
 
 ### Added
 - Assetto Corsa Rally: Oversteer ships each of the game's 18 cars' engine
