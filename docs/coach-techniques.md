@@ -1237,3 +1237,25 @@ channels each needs and whether ACR has them.
 [ClickUp 86e3jeaye]: https://app.clickup.com/t/86e3jeaye
 [ClickUp 86e3faftn]: https://app.clickup.com/t/86e3faftn
 [ClickUp 86e3ev2dy]: https://app.clickup.com/t/86e3ev2dy
+
+## Owner's requirements (marth, 2026-10-05)
+
+These apply to every later stage (audit, design, oversight, build):
+
+1. **Say what was good, more often.** Praise is coaching too: name good
+   technique when the data shows it (a clean launch, a well-held gear
+   through a short straight, consistent braking points, a tidy flick,
+   shifts on the best point), not only improvement over time. Keep it
+   specific and earned (a number or a place), never filler, and balance it
+   against tips so a session doesn't read as a list of faults.
+2. **Advice on specific turns and places.** Beyond per-gear and per-session
+   averages, tie observations to where they happened: the corner (by the
+   stage's pace notes where known, e.g. "the hairpin left after the
+   bridge", else by distance along the stage and the corner's direction and
+   tightness), with what was done there and what to try, compared with the
+   driver's own best run through that corner. ACR first (its stage tables
+   carry pace-note distances; full pace-note lists are in the game files,
+   ClickUp 86e3faftn).
+3. **Technique-aware, as the owner's original note says** (ClickUp
+   86e3jeaye): e.g. the limiter between corners on gravel is often right,
+   not a fault.
