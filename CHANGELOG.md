@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Devices tab: a "Steam launch options for wheels under Proton" row with a
+  Copy button: `SDL_JOYSTICK_HIDAPI=0 %command%` stops SDL from opening
+  the hidden physical wheel and pedals behind the combined device. The
+  line under it reminds you to set the game's Steam Input to Disabled and
+  shows the combined form with the shared-memory bridge
+  (`SDL_JOYSTICK_HIDAPI=0 <oversteer-run> %command%`) for the Assetto
+  Corsa family. The tooltip mentions PROTON_LOG=1 for diagnosis.
 - Pedal response: a "Response..." button under each pedal's Invert box in
   the Controls tab sets where the pedal starts (a deadzone at the released
   end, 0 to 45 %), where it reaches full (55 to 100 %) and a curve

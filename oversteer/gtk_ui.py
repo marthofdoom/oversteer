@@ -6,6 +6,7 @@ import math
 import os
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
+from . import steam_options
 from .telemetry import DEFAULT_PORT
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
 from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_items, live_status, shift_summary, shift_table
@@ -58,6 +59,7 @@ class GtkUi:
         self.disable_save_profile()
         self._build_hotkeys_page()
         self._build_telemetry_page()
+        self._build_wheel_launch_options()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -645,6 +647,24 @@ class GtkUi:
 
     def set_launch_options(self, text):
         self.launch_options.set_text(text)
+        self.wheel_launch_guidance.set_text(steam_options.guidance(text))
+
+    def _build_wheel_launch_options(self):
+        """A row at the foot of the Devices tab: the Steam launch options
+        for wheels and the combined device under Proton."""
+        entry = Gtk.Entry(editable=False, text=steam_options.WHEEL_OPTIONS)
+        entry.set_width_chars(28)
+        button = Gtk.Button(label=_("Copy"))
+        button.connect('clicked', lambda w: self._copy_text(entry.get_text()))
+        self.wheel_launch_guidance = self._status_label()
+        self.wheel_launch_guidance.set_text(steam_options.guidance(''))
+        listbox = self._list()
+        listbox.add(self._setting_row(
+            _("Steam launch options for wheels under Proton"), tooltip=steam_options.WHEEL_TOOLTIP,
+            controls=(entry, button), status=self.wheel_launch_guidance))
+        page = self.builder.get_object('devices_page')
+        page.pack_start(listbox, False, False, 0)
+        listbox.show_all()
 
     def copy_launch_options(self):
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
