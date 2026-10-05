@@ -143,3 +143,22 @@ def test_sysfs_read_and_write(tmp_path):
     assert device.get_pedal_response(1) is None
     assert device.set_pedal_response(4, 10, 90, 70)
     assert (tmp_path / 'pedal_response_rz').read_text() == "10 90 70"
+
+
+def test_presets_go_through_the_same_translation():
+    model = make_model()
+    model.data['invert_pedals'] = 0
+    assert model.set_pedal_preset('brakes', 'spring_brake') == (3, 85, 40)
+    assert model.get_brakes_response() == (3, 85, 40)
+    assert model.device.written == [(4, 15, 97, 60)]          # released high: mirrored
+    model.device.written.clear()
+    model.set_invert_pedals(4)
+    assert (4, 3, 85, 40) in model.device.written              # released low: as is
+    model.set_pedal_preset('brakes', 'linear')
+    assert model.get_brakes_response() == (0, 100, 50)
+
+
+def test_spring_brake_preset_is_brakes_only():
+    model = make_model()
+    with pytest.raises(ValueError):
+        model.set_pedal_preset('clutch', 'spring_brake')

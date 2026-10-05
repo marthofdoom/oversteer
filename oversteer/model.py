@@ -78,6 +78,16 @@ class Model:
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
     DEFAULT_RESPONSE = (0, 100, 50)
     PEDAL_RESPONSES = ('clutch', 'accelerator', 'brakes')
+    # Presets the Response popover offers: (id, label, response, note)
+    LINEAR_PRESET = ('linear', 'Linear', (0, 100, 50), None)
+    PEDAL_PRESETS = {
+        'clutch': (LINEAR_PRESET,),
+        'accelerator': (LINEAR_PRESET,),
+        'brakes': (LINEAR_PRESET,
+                   ('spring_brake', 'Spring brake (recommended)', (3, 85, 40),
+                    "Stock spring-and-rubber brakes: full braking where the rubber starts to bite, "
+                    "a softer start for trail braking. Set the game's own brake curve to linear.")),
+    }
 
     def __init__(self, device = None, ui = None):
         self.ui = ui
@@ -332,6 +342,13 @@ class Model:
             return
         if self.set_if_changed(key, (start, end, sensitivity)):
             self.apply_pedal_response(name)
+
+    def set_pedal_preset(self, name, preset_id):
+        for pid, _label, response, _note in self.PEDAL_PRESETS[name]:
+            if pid == preset_id:
+                self.set_pedal_response(name, *response)
+                return response
+        raise ValueError("no preset {} for {}".format(preset_id, name))
 
     def set_clutch_response(self, start, end, sensitivity):
         self.set_pedal_response('clutch', start, end, sensitivity)

@@ -37,6 +37,7 @@ class GtkUi:
         self._set_builder_objects()
 
         self._set_markers()
+        self._build_pedal_response()
 
         cell_renderer = Gtk.CellRendererText()
         self.device_combobox.pack_start(cell_renderer, True)
@@ -356,6 +357,115 @@ class GtkUi:
                 box.set_active(bool(mask) and bit is not None and bool(mask & bit))
         finally:
             self.updating_invert_pedals = False
+
+    # Controls tab grid column of each pedal
+    PEDAL_COLUMNS = {'clutch': 0, 'brakes': 1, 'accelerator': 2}
+
+    def _build_pedal_response(self):
+        """A 'Response...' button under each pedal's Invert box, opening a
+        popover with the pedal's deadzone, full-travel point and curve."""
+        self.updating_pedal_response = False
+        self.pedal_response = {}
+        self.pedal_preset = {}
+        grid = self.invert_clutch.get_parent()
+        for name, column in self.PEDAL_COLUMNS.items():
+            popover_box = Gtk.Grid(row_spacing=6, column_spacing=10, margin=10)
+            start = self._response_scale(0, 45, 5)
+            end = self._response_scale(55, 100, 5)
+            sensitivity = self._response_scale(0, 100, 10)
+            sensitivity.add_mark(0, Gtk.PositionType.BOTTOM, _("Soft"))
+            sensitivity.add_mark(50, Gtk.PositionType.BOTTOM, _("Linear"))
+            sensitivity.add_mark(100, Gtk.PositionType.BOTTOM, _("Sharp"))
+            start.set_tooltip_text(_("How far the pedal travels before it starts to register (deadzone at the released end)."))
+            end.set_tooltip_text(_("How far the pedal travels before it reads full."))
+            sensitivity.set_tooltip_text(_("50 is linear; lower is softer at the start of the travel, higher is sharper."))
+            presets = self.controller.model.PEDAL_PRESETS[name]
+            preset = Gtk.ComboBoxText()
+            preset.append('custom', _("Custom"))
+            for pid, label, _response, _note in presets:
+                preset.append(pid, _(label))
+            preset.set_active_id('custom')
+            note = Gtk.Label(label="", halign=Gtk.Align.START, xalign=0, wrap=True, max_width_chars=34)
+            note.get_style_context().add_class('dim-label')
+            note.set_no_show_all(True)
+            reset = Gtk.Button(label=_("Reset"), halign=Gtk.Align.END)
+            for row, (label, scale) in enumerate(((_("Starts at"), start), (_("Full at"), end), (_("Sensitivity"), sensitivity))):
+                label = Gtk.Label(label=label, halign=Gtk.Align.START, valign=Gtk.Align.START)
+                popover_box.attach(label, 0, row, 1, 1)
+                popover_box.attach(scale, 1, row, 1, 1)
+            popover_box.attach(Gtk.Label(label=_("Preset"), halign=Gtk.Align.START), 0, 3, 1, 1)
+            popover_box.attach(preset, 1, 3, 1, 1)
+            popover_box.attach(note, 1, 4, 1, 1)
+            popover_box.attach(reset, 1, 5, 1, 1)
+            popover_box.show_all()
+            popover = Gtk.Popover()
+            popover.add(popover_box)
+            button = Gtk.MenuButton(label=_("Response…"), halign=Gtk.Align.CENTER, popover=popover, sensitive=False)
+            button.set_tooltip_text(_("Reshape this pedal: a deadzone at the start of the travel, where it reaches full, and a curve. The bars show what games see. Saved in the profile. Needs a driver with pedal_response."))
+            button.show()
+            grid.attach(button, column, 4, 1, 1)
+            self.pedal_response[name] = (button, start, end, sensitivity)
+            self.pedal_preset[name] = (preset, note)
+            preset.connect('changed', self._on_pedal_preset_changed, name)
+            for scale in (start, end, sensitivity):
+                scale.connect('value-changed', self._on_pedal_response_changed, name)
+            reset.connect('clicked', self._on_pedal_response_reset, name)
+
+    @staticmethod
+    def _response_scale(low, high, step):
+        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, low, high, 1)
+        scale.set_digits(0)
+        scale.set_size_request(200, -1)
+        scale.set_hexpand(True)
+        scale.set_value_pos(Gtk.PositionType.RIGHT)
+        scale.get_adjustment().set_page_increment(step)
+        return scale
+
+    def get_pedal_response(self, name):
+        _button, start, end, sensitivity = self.pedal_response[name]
+        return int(start.get_value()), int(end.get_value()), int(sensitivity.get_value())
+
+    def set_pedal_response(self, name, response):
+        """Show a pedal's (start, end, sensitivity); None greys the button
+        out (the driver has no pedal response)."""
+        button, start, end, sensitivity = self.pedal_response[name]
+        button.set_sensitive(response is not None)
+        if response is None:
+            return
+        self.updating_pedal_response = True
+        try:
+            for scale, value in zip((start, end, sensitivity), response):
+                scale.set_value(value)
+            self._show_pedal_preset(name)
+        finally:
+            self.updating_pedal_response = False
+
+    def _show_pedal_preset(self, name):
+        """Preset box and note follow the three controls."""
+        current = self.get_pedal_response(name)
+        combo, note = self.pedal_preset[name]
+        match = [(pid, text) for pid, _label, response, text in self.controller.model.PEDAL_PRESETS[name]
+                 if response == current]
+        combo.set_active_id(match[0][0] if match else 'custom')
+        text = match[0][1] if match else None
+        note.set_text(_(text) if text else "")
+        note.set_visible(bool(text))
+
+    def _on_pedal_preset_changed(self, combo, name):
+        if self.updating_pedal_response or combo.get_active_id() in (None, 'custom'):
+            return
+        response = self.controller.model.set_pedal_preset(name, combo.get_active_id())
+        self.set_pedal_response(name, response)
+
+    def _on_pedal_response_changed(self, widget, name):
+        if self.updating_pedal_response:
+            return
+        self._show_pedal_preset(name)
+        self.controller.model.set_pedal_response(name, *self.get_pedal_response(name))
+
+    def _on_pedal_response_reset(self, widget, name):
+        self.set_pedal_response(name, self.controller.model.DEFAULT_RESPONSE)
+        self.controller.model.set_pedal_response(name, *self.controller.model.DEFAULT_RESPONSE)
 
     def get_invert_pedals(self):
         mask = 0
