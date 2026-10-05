@@ -92,7 +92,10 @@ def test_a_slow_stretch_with_reverse_is_an_off_and_a_long_one_too():
 
 def test_a_slow_hairpin_is_a_stall_not_an_off():
     """The audit's 24 hairpins under 3 m/s: a corner fault, not an off."""
-    tr = rows(300, speed=lambda i, t: 2.0 if 100 <= i < 115 else 20.0, gear=3.0)
+    def v(i, t):                                        # braked and accelerated over 15 rows each: 1.2 m/s a row
+        return 2.0 if 100 <= i < 115 else (20.0 - 1.2 * (i - 85) if 85 <= i < 100 else
+                                           (2.0 + 1.2 * (i - 114) if 115 <= i < 130 else 20.0))
+    tr = rows(300, speed=v, gear=3.0)
     d0, d1 = tr[95][C['distance']], tr[120][C['distance']]
     corner = {'d0': d0, 'd1': d1}
     events = cc.incidents(tr, [corner], course=tr[-1][C['distance']])
@@ -843,3 +846,27 @@ def test_an_unfinished_run_is_not_timed_through_the_section_it_stopped_in():
     ref = reference_from(ref_tr, ref_corners)
     assert cc.section_loss(tr, sections, ref, unfinished=True) is not None          # the first corner is timed
     assert 'loss_exit' not in sections[-1]['lead'] and 'loss_exit' in sections[0]['lead']
+
+
+def test_a_hit_that_fits_in_one_row_is_a_hit_and_a_reset_is_an_off():
+    # the Loutraki crash: 31 to 0 km/h in one row, the distance going back 5 m and the gear 0
+    def speed(i, t):
+        return 0.0 if 120 <= i < 135 else 20.0
+
+    tr = rows(300, speed=speed, distance=lambda i, t: i * 2.0 - (5.4 if i >= 120 else 0.0),
+              gear=lambda i, t: 0.0 if 120 <= i < 135 else 3.0)
+    assert cc.hits(tr) == [(120, 120)]                              # 20 m/s lost in 0.1 s
+    events = cc.incidents(tr, course=tr[-1][C['distance']])
+    assert {e['kind'] for e in events} == {'hit', 'off'}
+    assert [e['class'] for e in events if e['kind'] == 'off'] == ['hit']
+    # a reset with no stretch at 3 m/s: the distance going back with the car stopped is an off by itself
+    tr = rows(300, speed=lambda i, t: 0.5 if i == 150 else 20.0,
+              distance=lambda i, t: i * 2.0 - (5.4 if i >= 150 else 0.0))
+    assert [e['class'] for e in cc.incidents(tr, course=tr[-1][C['distance']]) if e['kind'] == 'off'] == ['reset']
+    # one row of 11 g sideways is a hit; a landing's two rows over 2.5 g still are; one row of 3 g is not
+    tr = rows(300, speed=20.0, a_lat=lambda i, t: 11 * G if i == 50 else 0.0)
+    assert cc.hits(tr) == [(50, 50)]
+    tr = rows(300, speed=20.0, a_long=lambda i, t: 3 * G if i in (50, 51) else 0.0)
+    assert cc.hits(tr) == [(50, 51)]
+    tr = rows(300, speed=20.0, a_long=lambda i, t: 3 * G if i == 50 else 0.0)
+    assert cc.hits(tr) == []

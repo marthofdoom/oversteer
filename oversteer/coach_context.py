@@ -34,6 +34,9 @@ SLOW_END = 50.0                  # m: ...and after this from the end the finish
 OFF_TIME = 3.0                   # s: a slow stretch this long is an off (calibrate)
 HIT_G = 2.5                      # g held for HIT_ROWS rows: a hit (calibrate)
 HIT_ROWS = 2
+HIT_ONE_G = 4.0                  # g in a single row: a hit by itself (a 10 Hz row can hold all of an impact; calibrate)
+HIT_DECEL = 3.0                  # g of speed lost across one row: a hit by itself (calibrate)
+RESET_BACK = 2.0                 # m the distance goes back between two rows, with the car stopped: the game's reset
 HIT_BEFORE = 2.0                 # s: a slow stretch this soon after a hit is an off
 SPIN_HEADING = 200.0             # degrees of heading change in one yaw window: a spin (calibrate)
 SPIN_REVERSAL = 1.0              # rad/s of the other sign past the slowest point (with a turn of REVERSAL_HEADING; 0.5 flags 1 hairpin in 8, the pendulum)
@@ -201,19 +204,33 @@ def stage_rows(trace, course=None, finished=False, result_time=None):
 
 def hits(trace):
     """[(first row, last row)] of the stretches with the car's
-    acceleration, either way, over HIT_G for HIT_ROWS rows or more."""
-    out, start = [], None
+    acceleration, either way, over HIT_G for HIT_ROWS rows or more, and of
+    the single rows that are a hit alone: over HIT_ONE_G, or with the speed
+    dropping by more than HIT_DECEL g across the row (a 10 Hz row holds all
+    of a wall)."""
+    t, speed = CH['t'], CH['speed']
+    big, strong = [], []
     for i, row in enumerate(trace):
         a_long, a_lat = row[CH['a_long']], row[CH['a_lat']]
-        big = (_fin(a_long) and abs(a_long) > HIT_G * G) or (_fin(a_lat) and abs(a_lat) > HIT_G * G)
-        if big and start is None:
-            start = i
-        elif not big and start is not None:
-            if i - start >= HIT_ROWS:
-                out.append((start, i - 1))
-            start = None
-    if start is not None and len(trace) - start >= HIT_ROWS:
-        out.append((start, len(trace) - 1))
+        big.append((_fin(a_long) and abs(a_long) > HIT_G * G) or (_fin(a_lat) and abs(a_lat) > HIT_G * G))
+        hard = (_fin(a_long) and abs(a_long) > HIT_ONE_G * G) or (_fin(a_lat) and abs(a_lat) > HIT_ONE_G * G)
+        if i and _fin(row[speed]) and _fin(trace[i - 1][speed]):
+            dt = max(0.05, row[t] - trace[i - 1][t])
+            hard = hard or (trace[i - 1][speed] - row[speed]) / dt > HIT_DECEL * G
+        strong.append(hard)
+    out, i, n = [], 0, len(trace)
+    while i < n:
+        if big[i]:
+            j = i
+            while j + 1 < n and big[j + 1]:
+                j += 1
+            if j - i + 1 >= HIT_ROWS or any(strong[i:j + 1]):
+                out.append((i, j))
+            i = j + 1
+        else:
+            if strong[i]:
+                out.append((i, i))
+            i += 1
     return out
 
 
@@ -256,8 +273,8 @@ def incidents(trace, corners=(), course=None, unfinished=False):
                               None)
             event = {'d0': d0, 'd1': d1, 't0': trace[i][t], 't1': trace[j][t] + _dt(trace, j), 'value': duration}
             if reverse or duration >= OFF_TIME or hit_before is not None or (unfinished and j == n - 1):
-                event.update(kind='off', **{'class': 'reverse' if reverse else ('long' if duration >= OFF_TIME
-                                                                                  else 'hit')})
+                event.update(kind='off', **{'class': 'reverse' if reverse else (
+                    'hit' if hit_before is not None and duration < OFF_TIME else 'long')})
             elif any(k['d0'] - SECTION_REACH <= d1 and d0 <= k['d1'] + SECTION_REACH for k in corners
                      if k.get('d0') is not None):
                 event.update(kind='stall', **{'class': None})
@@ -265,6 +282,15 @@ def incidents(trace, corners=(), course=None, unfinished=False):
                 event.update(kind='stop', **{'class': None})
             out.append(event)
         i = j + 1
+    # The game's reset after a crash: the distance goes back with the car stopped (and the gear 0)
+    for k in range(1, n):
+        back, here = trace[k - 1][CH['distance']], trace[k][CH['distance']]
+        if (_fin(back) and _fin(here) and here < back - RESET_BACK and _fin(trace[k][speed])
+                and trace[k][speed] < 1.0 and track[k] > SLOW_START and track[k] < end
+                and not any(e['kind'] == 'off' and e['d0'] - INCIDENT_REACH <= track[k] <= e['d1'] + INCIDENT_REACH
+                            for e in out)):
+            out.append({'kind': 'off', 'class': 'reset', 'd0': track[k], 'd1': track[k], 't0': trace[k][t],
+                        't1': trace[k][t], 'value': 0.0})
     for first, last in knocks:
         d0, d1 = track[first], track[last]
         if d0 > SLOW_START and d1 < end:

@@ -283,7 +283,14 @@ def test_a_spin_or_a_near_stop_is_a_corner_fault_and_an_off_is_named(tmp_path):
     assert spin.text == ('On Test Stage, you spun in the 3 right at 0.6 km. Rotate the car less on the way in (a smaller '
                          'flick, a shorter handbrake pull) and get the throttle on sooner.')
     stall, = h.by_id('corner.stall')
-    assert stall.text.startswith('On Test Stage, the car nearly stopped in the 3 left at 1.2 km. Rotate the car less')
+    assert stall.text == ('On Test Stage, the car nearly stopped in the 3 left at 1.2 km. Look at what slowed it there, '
+                          'the braking point, the line or the gear, and get the throttle on sooner.')
+    # with steering against the yaw in that corner it is the rotation
+    h = Stage(tmp_path / 'r.db')
+    h.drive([start(), stored(600.0, complex_=1, direction=-1), stored(1200.0, complex_=2, direction=1, counter_steer=0.4)],
+            events=[event('stall', 1190.0, 1215.0)])
+    assert h.by_id('corner.stall')[0].text.endswith('Rotate the car less on the way in (a smaller flick, a shorter '
+                                                    'handbrake pull) and get the throttle on sooner.')
     assert spin.cost > stall.cost
     off, = h.by_id('corner.off')
     assert off.kind == 'note' and off.text == ('On Test Stage, off at 2.1 km: the corners within 100 m of it are left '

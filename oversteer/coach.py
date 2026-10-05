@@ -1390,9 +1390,16 @@ class Coach:
                 notes.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'note',
                                  'On {}, {}.'.format(name, what)))
                 continue
+            # "Rotate less" only where the corner shows rotation: a spin, steering against the yaw, the handbrake.
+            # A stop with none of them is told neutrally (it may be a wall, a rock or a line that ran wide)
+            rotated = e['kind'] == 'spin' or (corner is not None and (
+                (corner.get('counter_steer') or 0.0) >= coach_context.COUNTER_DELTA or corner.get('handbrake')))
+            action = ('Rotate the car less on the way in (a smaller flick, a shorter handbrake pull) and get the '
+                      'throttle on sooner.' if rotated else
+                      'Look at what slowed it there, the braking point, the line or the gear, and get the '
+                      'throttle on sooner.')
             candidates.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'tip',
-                                  'On {}, {}. Rotate the car less on the way in (a smaller flick, a shorter '
-                                  'handbrake pull) and get the throttle on sooner.'.format(name, what),
+                                  'On {}, {}. {}'.format(name, what, action),
                                   [], 1.0, cost=COST_SPIN if e['kind'] == 'spin' else COST_STALL, count=1))
 
     def _spread(self, stage, name, run, events, sections, report, candidates, praise):
