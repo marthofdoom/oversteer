@@ -108,6 +108,7 @@ class Gui:
         self.hotkey_repeater = hotkeys.Repeater(self._hotkey_repeat_step, GLib.timeout_add, GLib.source_remove)
         self.hat_held = {}                      # hat axis code -> direction held (input thread)
         self.keyboard_hotkeys = None
+        self.keyboard_release_seen = False      # the portal has sent a Deactivated
         self.keyboard_needs_bind = False
         self.keyboard_session_failed = False
         self.global_hotkeys = {}
@@ -1370,6 +1371,8 @@ class Gui:
         start declares them (silently, once the desktop knows them all)."""
         from .global_shortcuts import GlobalShortcuts
         if self.keyboard_hotkeys is not None:
+            if (self.hotkey_repeater.holder or '').startswith('key:'):
+                self.hotkey_repeater.stop()
             self.keyboard_hotkeys.close()
         self.keyboard_session_failed = False
         self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey,
@@ -1452,17 +1455,48 @@ class Gui:
 
     def on_keyboard_hotkey(self, action_id):
         if not self._hotkeys_suppressed():
-            if self.run_hotkey(action_id):
+            if self.run_hotkey(action_id) and self.keyboard_release_seen:
+                # A portal that never sends Deactivated would leave the
+                # repeat running to the limit: only repeat once one has.
                 self.hotkey_repeater.press('key:' + action_id, action_id)
 
     def on_keyboard_hotkey_released(self, action_id):
+        self.keyboard_release_seen = True
         self.hotkey_repeater.release('key:' + action_id)
 
     def _hotkey_repeat_step(self, action_id):
         """One repeat of a held hotkey; False ends the repeating."""
         if self.hotkey_capture is not None or self.device is None or self._hotkeys_suppressed():
             return False
+        holder = self.hotkey_repeater.holder or ''
+        if holder.startswith('wheel:btn:') and not self._wheel_key_down(int(holder[len('wheel:btn:'):])):
+            return False
         return bool(self.run_hotkey(action_id))
+
+    def _wheel_key_down(self, code):
+        """Whether the wheel still holds the key, so a release that was lost
+        (the input device dropped while held) can't leave a repeat running.
+        True when the device can't say."""
+        input_device = getattr(self.device, 'input_device', None)
+        active_keys = getattr(input_device, 'active_keys', None)
+        if active_keys is None:
+            return True
+        try:
+            return code in active_keys()
+        except OSError:
+            return False
+
+    def _post_hotkey(self, callback, *args):
+        """Run a wheel press or release on the main thread at normal priority:
+        GLib's default idle priority would queue a release behind the axis
+        updates posted every few milliseconds."""
+        GLib.idle_add(callback, *args, priority=GLib.PRIORITY_DEFAULT)
+
+    def _wheel_input_lost(self):
+        """Events were dropped or the input device was reopened (input
+        thread): a release may be among them, so nothing counts as held."""
+        self.hat_held.clear()
+        self.ui.safe_call(self.hotkey_repeater.stop)
 
     def _hotkeys_suppressed(self):
         """Presses that belong to something else: the Preferences button
@@ -1608,10 +1642,10 @@ class Gui:
         """A hat axis event as hotkey press and release (input thread)."""
         held = self.hat_held.pop(event.code, 0)
         if held and held != event.value:
-            self.ui.safe_call(self.on_wheel_hotkey_release, hotkeys.hat_input(event.code, held))
+            self._post_hotkey(self.on_wheel_hotkey_release, hotkeys.hat_input(event.code, held))
         if event.value:
             self.hat_held[event.code] = event.value
-            self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
+            self._post_hotkey(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
                               self._hotkeys_suppressed())
 
     def hotkey_feedback(self, fraction=None, state=None):
@@ -1649,6 +1683,8 @@ class Gui:
 
     def process_events(self, events):
         for event in events:
+            if event.type == ecodes.EV_SYN and event.code == ecodes.SYN_DROPPED:
+                self._wheel_input_lost()
             if event.type == ecodes.EV_ABS:
                 if event.code == ecodes.ABS_X:
                     self.last_wheel_axis_value = event.value
@@ -1690,9 +1726,9 @@ class Gui:
                         self.on_button_press(103, 1)
             if event.type == ecodes.EV_KEY:
                 if event.value == 0:
-                    self.ui.safe_call(self.on_wheel_hotkey_release, hotkeys.key_input(event.code))
+                    self._post_hotkey(self.on_wheel_hotkey_release, hotkeys.key_input(event.code))
                 if event.value == 1:
-                    self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
+                    self._post_hotkey(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
                     kind = self.shift_buttons.get(event.code)
                     if kind is not None:
                         self.launch_inputs['shift_press'] = (time.monotonic(), kind)
@@ -1720,9 +1756,13 @@ class Gui:
         while 1:
             if self.device is not None and self.device.is_ready():
                 try:
-                    events = self.device.read_events(0.5)
+                    device = self.device
+                    drops = getattr(device, 'input_drops', 0)
+                    events = device.read_events(0.5)
                     if events is not None:
                         self.process_events(events)
+                    if getattr(device, 'input_drops', 0) != drops:
+                        self._wheel_input_lost()
                 except OSError as e:
                     logging.debug(e)
                     time.sleep(1)

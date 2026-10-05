@@ -23,6 +23,7 @@ class Device:
     def __init__(self, device_manager, data):
         self.device_manager = device_manager
         self.input_device = None
+        self.input_drops = 0        # times the input device was dropped or reopened
         self._device_lock = threading.Lock()
         self.id = None
         self.vendor_id = None
@@ -626,6 +627,7 @@ class Device:
                 except OSError:
                     pass
                 self.input_device = None
+                self.input_drops += 1
             node = self._input_node()
             if node is not None:
                 if node != self.dev_name:
@@ -820,6 +822,7 @@ class Device:
                         except OSError:
                             pass
                         self.input_device = None
+                        self.input_drops += 1
 
     def normalize_event(self, event):
         #

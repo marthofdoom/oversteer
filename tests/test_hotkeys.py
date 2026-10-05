@@ -184,3 +184,81 @@ def test_step_stopping_the_repeater_does_not_reschedule():
     repeater.press('x', 'ff_gain_up')
     timers.fire()
     assert not timers.pending
+
+
+# -- Gui wiring, driven on a stand-in for self --
+
+class FakeGui:
+    """The parts of Gui the hotkey gating touches."""
+    def __init__(self, results=None):
+        from types import SimpleNamespace
+        self.timers = FakeTimers()
+        self.ran = []
+        self.results = results if results is not None else []
+        self.hotkey_repeater = hotkeys.Repeater(lambda a: self.step(a), self.timers.add, self.timers.remove)
+        self.keyboard_release_seen = False
+        self.hotkey_capture = None
+        self.device = SimpleNamespace(input_device=None)
+        self.hat_held = {}
+        self.posted = []
+        self.ui = SimpleNamespace(safe_call=lambda cb, *a: self.posted.append((cb, a)))
+
+    def step(self, action_id):
+        from oversteer.gui import Gui
+        return Gui._hotkey_repeat_step(self, action_id)
+
+    def _hotkeys_suppressed(self):
+        return False
+
+    def run_hotkey(self, action_id):
+        self.ran.append(action_id)
+        return self.results.pop(0) if self.results else True
+
+    def _wheel_key_down(self, code):
+        from oversteer.gui import Gui
+        return Gui._wheel_key_down(self, code)
+
+
+def test_keyboard_hold_repeats_only_after_a_release_was_seen():
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    Gui.on_keyboard_hotkey(gui, 'ff_gain_up')
+    assert gui.hotkey_repeater.holder is None and not gui.timers.pending   # first hold: no repeat
+    Gui.on_keyboard_hotkey_released(gui, 'ff_gain_up')
+    assert gui.keyboard_release_seen
+    Gui.on_keyboard_hotkey(gui, 'ff_gain_up')
+    assert gui.hotkey_repeater.holder == 'key:ff_gain_up'
+    assert gui.timers.fire() == hotkeys.REPEAT_FIRST_MS
+    Gui.on_keyboard_hotkey_released(gui, 'ff_gain_up')
+    assert gui.hotkey_repeater.holder is None
+
+
+def test_wheel_repeat_stops_when_the_key_is_no_longer_down():
+    from types import SimpleNamespace
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    keys = [288]
+    gui.device.input_device = SimpleNamespace(active_keys=lambda: list(keys))
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    gui.timers.fire()
+    assert gui.ran == ['ff_gain_up'] and gui.hotkey_repeater.holder == 'wheel:btn:288'
+    keys.clear()                                   # the release was lost
+    gui.timers.fire()
+    assert gui.ran == ['ff_gain_up'] and gui.hotkey_repeater.holder is None
+    # a device that can't say keeps repeating
+    gui.device.input_device = SimpleNamespace()
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    gui.timers.fire()
+    assert gui.ran == ['ff_gain_up', 'ff_gain_up']
+
+
+def test_syn_dropped_clears_what_is_held():
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    gui.hat_held[ecodes.ABS_HAT0X] = 1
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    Gui._wheel_input_lost(gui)
+    assert gui.hat_held == {}
+    (callback, args), = gui.posted
+    callback(*args)
+    assert gui.hotkey_repeater.holder is None
