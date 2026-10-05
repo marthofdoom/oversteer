@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Devices tab: applying the combined device, the handbrake direction or
+  starting the proxy service while a Wine/Proton game runs now asks first:
+  re-creating the virtual wheel under Assetto Corsa Rally crashes the game.
+  The proxy tests skip themselves while a game runs for the same reason.
 - Hotkeys: hold a wheel button (or the keyboard shortcut) to repeat a
   step: the first repeat after 0.4 s, then every 0.12 s, for the
   strength, spring, damper and similar steps, the shift point and the

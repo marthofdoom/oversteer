@@ -304,10 +304,22 @@ class Gui:
             logging.debug("combine status: %s", e)
         return True
 
+    def _confirm_wine_running(self):
+        """True when it is fine to re-create the combined device: no Wine
+        game runs, or the user accepted the risk."""
+        from .proxy.manager import wine_running
+        if not wine_running():
+            return True
+        return self.ui.confirmation_dialog(_("A game is running under Wine or Proton. " +
+                "Applying this restarts the combined device, which can crash some " +
+                "games (Assetto Corsa Rally). Apply anyway?"))
+
     def start_proxy_service(self):
         """Start oversteer-proxy.service through pkexec, off the GTK thread."""
         from .proxy import install
         if self.combine_busy:
+            return
+        if not self._confirm_wine_running():
             return
         self.combine_busy = True
         self.ui.set_combine_busy(True, _("Starting…"))
@@ -378,6 +390,9 @@ class Gui:
                         specs.append(spec)
                     except SpecError:
                         pass
+        if not self._confirm_wine_running():
+            self.refresh_equipment()
+            return
         # Candidate directory: what the installer sees; copied to the user
         # config only when the install went through. It lives under the
         # config dir, not /tmp: inside Flatpak /tmp is private to the sandbox
@@ -763,6 +778,9 @@ class Gui:
                 mapping.invert = bool(state)
                 changed = True
         if not changed:
+            self.ui.set_handbrake_invert(self.handbrake_invert)
+            return
+        if not self._confirm_wine_running():
             self.ui.set_handbrake_invert(self.handbrake_invert)
             return
         os.makedirs(user_dir(), 0o700, exist_ok=True)
