@@ -327,11 +327,13 @@ def test_a_shift_fault_that_costs_nothing_is_described_not_coached(tmp_path):
     h = fabia_history(tmp_path, 'tarmac')
     h.session(shares(2, cut=0.4, cost=0.05))
     tips = h.tips()
-    assert [t.kind for t in tips] == ['note'] and tips[0].id.startswith('shift.cheap:2:sequential')
-    assert tips[0].text == ('2→3 with the sequential: 0 % of your changes up are early and 40 % on the cut, about 0.1 s '
-                            'a stage: too little to coach.')
+    assert [t.kind for t in tips] == ['technique'] and tips[0].id.startswith('shift.cheap:2:sequential')
+    assert tips[0].text == ('2→3 with the sequential on tarmac: 0 % of your changes up come early and 40 % sit on the '
+                            'cut; that costs about 0.1 s a stage, too little to coach.')
     h.show(tips)
     assert h.tips() == []                                         # said once
+    h.session(shares(2, cut=0.8, cost=0.05))                      # forty points more on the cut: said again
+    assert [t.kind for t in h.tips()] == ['technique']
 
 
 def test_changing_up_early_depends_on_the_surface(tmp_path):

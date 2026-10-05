@@ -2780,11 +2780,11 @@
    "id": "launch.quality",
    "name": "Launch quality",
    "category": "launch",
-   "description": "From a held launch: time to 50 km/h, the mean acceleration over the first half second (g), a bog judged by outcome (under 0.3 g, or 0.5 s over the median of the last launches on the surface), stall. The game's own auto-clutch launch (the clutch never pressed while standing) neither bogs nor is the driver's.",
+   "description": "From a held launch: time to 50 km/h, the mean acceleration over the first half second (g), a bog judged by outcome (under 0.3 g, or 0.5 s over the median of the last launches on the surface), stall, and the seconds the revs sat on the limiter in the launch gear (a change up as the cut comes in is the technique). The game's own auto-clutch launch (the clutch never pressed while standing) neither bogs, nor is held, nor is the driver's; a game whose speed channel is unchecked (WRC Generations) has no launch coaching.",
    "derivations": [
     {
      "id": "trace",
-     "formula": "Launch held >= 0.5 s; t50 = release delay + time to 50 km/h; g = mean a_long over the first 0.5 s in the launch gear; bog = g < 0.3 or t50 over the median + 0.5 s; stall from the revs in the launch gear in the first 2 s; none when the run restarted within 10 s.",
+     "formula": "Launch held >= 0.5 s; t50 = release delay + time to 50 km/h; g = mean a_long over the first 0.5 s in the launch gear; bog = g < 0.3 or t50 over the median + 0.5 s; stall from the revs in the launch gear in the first 2 s; cut = seconds in the launch gear (first 8 s) with the revs at 0.985 x the limiter or more; none when the run restarted within 10 s.",
      "requires": {
       "channels": [
        "rpm",
@@ -2806,7 +2806,8 @@
    "fallbacks": [],
    "gates": {
     "discipline": "rally-stage, rallycross, drag",
-    "surface": "any"
+    "surface": "any",
+    "conditions": "the driver's own launch (the game's auto-clutch writes no bog or cut); not a game whose speed channel is unchecked"
    },
    "outputs": [
     {
@@ -2824,6 +2825,10 @@
     {
      "name": "launch.stall",
      "unit": "0/1"
+    },
+    {
+     "name": "launch.cut",
+     "unit": "s"
     }
    ],
    "validation": {
@@ -2836,7 +2841,8 @@
      "launch.t50",
      "launch.g",
      "launch.bog",
-     "launch.stall"
+     "launch.stall",
+     "launch.cut"
     ],
     "module": "oversteer/coach.py, oversteer/coach_context.py, oversteer/drive_log.py"
    },

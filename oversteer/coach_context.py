@@ -93,6 +93,7 @@ LAUNCH_SLOW = 0.5                # s over the median time to 50 km/h: a bog (cal
 LAUNCH_HISTORY = 10              # launches the median is of
 LAUNCH_ABORT = 10.0              # s: a run restarted this soon dropped its launch
 LAUNCH_WINDOW = 0.5              # s
+LAUNCH_CUT_WINDOW = 8.0          # s after the start in which the launch gear's time on the limiter is counted
 CLUTCH_DOWN = 0.5                # rig clutch the launch never rose above: the game's auto-clutch
 STALL = 300.0                    # rpm
 
@@ -784,6 +785,202 @@ def spread(sections, others):
     return out
 
 
+# -- 7.3 R6: the sections a run lost or gained time in, and why --
+
+BRAKE_DELTA = 10.0               # m: a braking point further than this from the reference's is earlier or later (calibrate)
+SPEED_DELTA = 3.0 / 3.6          # m/s (3 km/h): a speed this far from the reference's is lower or higher (calibrate)
+THROTTLE_DELTA = 0.2             # s: the throttle this much later than the reference's (calibrate)
+COUNTER_DELTA = 0.15             # share of a corner steered against the yaw, more than the reference's: over-rotated
+SECTION_MIN = 0.1                # s a section must lose, or gain, to be named
+END_SLACK = 15.0                 # m a run may stop short of the grid's last section and still be timed through it
+
+
+def key_corner(section):
+    """The corner a section is named and judged by: its slowest."""
+    return next((k for k in section['corners'] if k['d'] == section['apex']), section['corners'][0])
+
+
+def section_name(section):
+    """'the 3 left at 1.8 km' for a corner, 'the left-right at 2.1 km' for a
+    complex (the call of its corners until the pace notes arrive)."""
+    cs = section['corners']
+    if len(cs) == 1:
+        return corner_name(cs[0])
+    sides = ['left' if (k.get('direction') or 0) > 0 else 'right' for k in cs]
+    where = ' at {:.1f} km'.format(section['apex'] / 1000.0)
+    if len(cs) <= 3:
+        return 'the {}{}'.format('-'.join(sides), where)
+    return 'the {}-corner section{}'.format(len(cs), where)
+
+
+def _diff(a, b):
+    return None if a is None or b is None else a - b
+
+
+def compare_section(section, grid_section):
+    """This run's section against the reference's, as differences (this less
+    the reference's; None where either is missing): `brake` (m before the
+    slowest point of the lead corner's strongest braking: positive is
+    earlier), `speed` (the minimum, m/s), `exit` (speed leaving the last
+    corner), `entry` (speed entering the first), `throttle` (s from the
+    slowest point to the throttle past 0.2), `counter` (share steered against
+    the yaw), `coast_entry`, plus this run's `overlap_exit` and the two key
+    corners."""
+    a, b = key_corner(section), key_corner(grid_section)
+    lead, ref_lead = section['corners'][0], grid_section['corners'][0]
+    last, ref_last = section['corners'][-1], grid_section['corners'][-1]
+    return {'brake': _diff(lead.get('brake_d'), ref_lead.get('brake_d')),
+            'speed': _diff(a.get('min_speed'), b.get('min_speed')),
+            'exit': _diff(last.get('exit_speed'), ref_last.get('exit_speed')),
+            'entry': _diff(lead.get('entry_speed'), ref_lead.get('entry_speed')),
+            'throttle': _diff(a.get('throttle_on_t'), b.get('throttle_on_t')),
+            'counter': _diff(a.get('counter_steer'), b.get('counter_steer')),
+            'coast_entry': _diff(a.get('coast_entry'), b.get('coast_entry')),
+            'overlap_exit': a.get('overlap_exit'), 'this': a, 'ref': b}
+
+
+def section_pattern(c, loss):
+    """What a section's numbers say against the reference (`c`: compare_section),
+    given its time `loss` (negative: quicker than the reference). For a loss:
+    - `over-rotated`: a lower minimum with more steering against the yaw;
+    - `over-slowing`: braked earlier, a lower minimum;
+    - `under-committed`: the same braking point, a lower minimum and a slower exit;
+    - `overdriven`: braked later or entered faster, a slower exit;
+    - `late-throttle`: the same minimum, the throttle later;
+    - `slower`: a lower minimum, none of the above;
+    - `unclear`: none of them.
+    For a gain: `right-entry` (braked earlier, the same minimum, a faster
+    exit) or `quicker`. None where the loss is under SECTION_MIN."""
+    if loss is None or abs(loss) < SECTION_MIN:
+        return None
+    brake, speed, exit_ = c['brake'], c['speed'], c['exit']
+    low = speed is not None and speed <= -SPEED_DELTA
+    slow = exit_ is not None and exit_ <= -SPEED_DELTA
+    fast = exit_ is not None and exit_ >= SPEED_DELTA
+    early = brake is not None and brake >= BRAKE_DELTA
+    later = brake is not None and brake <= -BRAKE_DELTA
+    same = brake is not None and abs(brake) < BRAKE_DELTA
+    if loss < 0:
+        return 'right-entry' if early and not low and fast else 'quicker'
+    if low and c['counter'] is not None and c['counter'] >= COUNTER_DELTA:
+        return 'over-rotated'
+    if early and low:
+        return 'over-slowing'
+    if same and low and slow:
+        return 'under-committed'
+    if (later or (c['entry'] is not None and c['entry'] >= SPEED_DELTA)) and slow:
+        return 'overdriven'
+    if not low and c['throttle'] is not None and c['throttle'] >= THROTTLE_DELTA:
+        return 'late-throttle'
+    return 'slower' if low else 'unclear'
+
+
+def section_report(corners, ref_corners):
+    """[dict] per section of a run (its stored corner rows), in order, set
+    against the reference run's (its stored corner rows): `name`, `d` (the
+    apex), `section`, `off`, `loss` (entry and exit loss stored when the run
+    ended, None where it had none), `entry`, `exit`, `ref` (the matched
+    section of the reference), `compare` (compare_section) and `pattern`
+    (section_pattern); `first` marks the section of the stage's start, whose
+    time holds the launch (R3 judges that, not a corner)."""
+    sections = sections_of(corners)
+    grid = sections_of(ref_corners)
+    matches = match_sections(sections, grid) if grid else {}
+    out = []
+    for i, s in enumerate(sections):
+        lead = s['lead']
+        entry, exit_ = lead.get('loss_entry'), lead.get('loss_exit')
+        item = {'name': section_name(s), 'd': s['apex'], 'section': s, 'off': s['off'], 'entry': entry,
+                'exit': exit_, 'loss': entry + exit_ if entry is not None and exit_ is not None else None,
+                'ref': None, 'compare': None, 'pattern': None, 'first': i == 0 or matches.get(i) == 0}
+        if i in matches:
+            g = grid[matches[i]]
+            item['ref'] = g
+            item['compare'] = compare_section(s, g)
+            if item['loss'] is not None and not s['off']:
+                item['pattern'] = section_pattern(item['compare'], item['loss'])
+        out.append(item)
+    return out
+
+
+def grid_of(reference):
+    """(sections, bounds) of the reference run's grid: its sections rebuilt
+    from the stored corners, and each one's distances (section_bounds), not
+    clipped to any other run."""
+    grid = sections_of(reference['corners'])
+    if not grid:
+        return [], []
+    ref_track = along(reference['trace'])
+    return grid, section_bounds(grid, ref_track[0] if ref_track else 0.0,
+                                reference.get('course') or (ref_track[-1] if ref_track else 0.0))
+
+
+def grid_times(trace, corners, grid, bounds):
+    """{grid index: seconds} this run took through each section of the
+    reference's grid that its own sections match, over the grid's distances,
+    so the times of any two runs compare. The first section (it holds the
+    launch), a section an off touched (in the run or the reference), one the
+    run did not cover from end to end (a run may stop END_SLACK m short of
+    the stage's end), or one the trace cannot time is left out."""
+    track = along(trace)
+    if not track:
+        return {}
+    sections = sections_of(corners)
+    out = {}
+    for i, j in match_sections(sections, grid).items():
+        if j == 0 or sections[i]['off'] or grid[j]['off']:
+            continue
+        a, b = bounds[j]
+        if a < track[0] or b > track[-1] + END_SLACK:
+            continue
+        start, end = time_at(trace, track, a), time_at(trace, track, min(b, track[-1]))
+        if start is not None and end is not None:
+            out[j] = end - start
+    return out
+
+
+def stitched(reference, runs):
+    """The best time through each section of the reference's grid over the
+    reference and `runs` ([{'run', 'trace', 'corners'}]): `base` (the
+    reference's), `best`, `who` (the run id that set it), `gain` (base less
+    best, per section) and `total` (what the best sections together beat the
+    reference by: the stage's "possible" time is the reference's less it).
+    None without a grid."""
+    grid, bounds = grid_of(reference)
+    if not grid:
+        return None
+    base = grid_times(reference['trace'], reference['corners'], grid, bounds)
+    best, who = dict(base), {j: reference.get('run') for j in base}
+    for run in runs:
+        for j, t in grid_times(run['trace'], run['corners'], grid, bounds).items():
+            if j in best and t < best[j]:
+                best[j], who[j] = t, run['run']
+    gain = {j: base[j] - best[j] for j in base}
+    return {'grid': grid, 'bounds': bounds, 'base': base, 'best': best, 'who': who, 'gain': gain,
+            'total': sum(gain.values())}
+
+
+def held_vs_reference(trace, reference_trace, d0):
+    """For a limiter episode that began at distance `d0`: how much longer
+    this run took from there to its next braking than the reference did over
+    the same distance (seconds), and the gear the reference was in at `d0`
+    (None where it cannot be told). None when the run did not brake again."""
+    track, ref_track = along(trace), along(reference_trace)
+    i = bisect.bisect_left(track, d0)
+    stop = next((m for m in range(i, len(trace)) if _fin(trace[m][CH['brake']]) and trace[m][CH['brake']] > 0.2), None)
+    if stop is None:
+        return None
+    d1 = track[stop]
+    mine = (time_at(trace, track, d0), time_at(trace, track, d1))
+    theirs = (time_at(reference_trace, ref_track, d0), time_at(reference_trace, ref_track, d1))
+    if None in mine or None in theirs:
+        return None
+    r = min(bisect.bisect_left(ref_track, d0), len(reference_trace) - 1)
+    gear = reference_trace[r][CH['gear']]
+    return {'lost': (mine[1] - mine[0]) - (theirs[1] - theirs[0]), 'd1': d1,
+            'ref_gear': int(gear) if _fin(gear) else None}
+
+
 # -- 7.3 R2: limiter episodes --
 
 def limiter_episodes(trace, limiter, top, corners=(), slip=None):
@@ -871,7 +1068,7 @@ def held_seconds(episodes):
 
 # -- 7.3 R3: the launch --
 
-def launch_outcome(summary, trace, slip=None, history=()):
+def launch_outcome(summary, trace, slip=None, history=(), limiter=None):
     """What the launch did, or None when there was none to judge: a dict
     with `gear` (held at the release), `g` (mean a_long over the first
     LAUNCH_WINDOW s, in g), `t50`, `spin` (the most slip_rpm over those
@@ -881,14 +1078,16 @@ def launch_outcome(summary, trace, slip=None, history=()):
     on this surface: a bog is `g` under LAUNCH_G, or a time to 50 km/h more
     than LAUNCH_SLOW over their median (3 or more). The revs are read only
     in the launch gear, from the release to the first change: a drop of
-    them is not a bog."""
+    them is not a bog. `cut`: the seconds of that stretch the revs sat on
+    the limiter (`limiter`, LIMITER_BAND of it), None where it is not
+    known: a change up as the cut comes in is the technique."""
     if (summary.get('launch') or 0.0) < LAUNCH_HELD or not trace:
         return None
     t, speed, rpm, gear = CH['t'], CH['speed'], CH['rpm'], CH['gear']
     first = trace[0]
     g0 = int(first[gear]) if _fin(first[gear]) and first[gear] >= 1 else None
     out = {'gear': g0, 'dropped': False, 'game': False, 'g': None, 't50': None, 'spin': None, 'stall': None,
-           'bog': None}
+           'bog': None, 'cut': None}
     if summary.get('finished') == 0 and (summary.get('duration') or 0.0) < LAUNCH_ABORT:
         out['dropped'] = True
         return out
@@ -914,6 +1113,14 @@ def launch_outcome(summary, trace, slip=None, history=()):
                 held.append(row[rpm])
         if held and summary.get('launch_rpm'):
             out['stall'] = float(min(held) < STALL)
+        if limiter:
+            on_cut = 0.0
+            for i, row in enumerate(trace):
+                if row[t] - first[t] > LAUNCH_CUT_WINDOW or row[gear] != g0:
+                    break
+                if _fin(row[rpm]) and row[rpm] >= limiter * LIMITER_BAND:
+                    on_cut += _dt(trace, i)
+            out['cut'] = on_cut
     clutch = summary.get('launch_clutch')
     out['game'] = clutch is not None and clutch <= CLUTCH_DOWN
     slow = None
@@ -1084,7 +1291,7 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
                       started, last_started)
     top = summary.get('gears') or context.get('shipped_top') or context.get('top_gear')
     episodes = limiter_episodes(rows, context.get('limiter'), top, corners, slip)
-    launch = launch_outcome(summary, rows, slip, history)
+    launch = launch_outcome(summary, rows, slip, history, context.get('limiter'))
     loss = section_loss(rows, sections, reference) if reference is not None else None
     # The changes of gear
     limiter = context.get('limiter')
@@ -1109,8 +1316,9 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
         s['band'] = shift_band(context, s['gear'], s.get('method')) if s.get('direction') == 'up' else None
         s['class'] = classify_shift(s, s['band'], limiter, cut=episode is not None)
         s['touch'] = episode['value'] if episode is not None else None
-        loss = context.get('drive_loss')
-        s['drive_loss'] = loss(s['gear'], s['rpm']) if loss is not None and s.get('direction') == 'up' else None
+        drive_loss = context.get('drive_loss')
+        s['drive_loss'] = (drive_loss(s['gear'], s['rpm']) if drive_loss is not None and s.get('direction') == 'up'
+                           else None)
         if s['class'] == 'cut' and 'cut' not in flags:
             flags.append('cut')
             s['flags'] = ','.join(flags)
@@ -1123,7 +1331,7 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     if launch is not None and not launch['dropped']:
         all_events.append({'kind': 'launch', 'class': 'game' if launch['game'] else 'driver', 'd0': None, 'd1': None,
                            't0': rows[0][t_col] if rows else None, 't1': None, 'gear': launch['gear'],
-                           'value': launch['t50'], 'detail': {k: launch[k] for k in ('g', 'spin', 'stall', 'bog')}})
+                           'value': launch['t50'], 'detail': {k: launch[k] for k in ('g', 'spin', 'stall', 'bog', 'cut')}})
     return {'corners': corners, 'sections': sections, 'events': all_events, 'run_class': klass,
             'episodes': episodes, 'launch': launch, 'slip': slip, 'shifts': out_shifts, 'loss': loss,
             'spreads': spreads}

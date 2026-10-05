@@ -16,7 +16,7 @@ SURFACES = {'tarmac': _("tarmac"), 'gravel': _("gravel"), 'snow': _("snow"), 'ic
             'loose-low': _("snow or wet gravel")}
 METHODS = {'h-pattern': _("H-pattern"), 'sequential': _("sequential"), 'paddles': _("paddles"),
            'auto': _("automatic"), 'mixed': _("mixed shifting")}
-KINDS = {'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': ''}
+KINDS = {'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': '', 'technique': ''}
 CHANGES = {'first': _("first seen"), 'final-drive': _("final drive changed"), 'user': _("set by you")}
 
 

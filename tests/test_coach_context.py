@@ -625,3 +625,125 @@ def test_analyse_flags_the_cut_the_launch_and_the_block_change_down():
     assert [e['class'] for e in out['events'] if e['kind'] == 'limiter'] == ['shift']
     assert any(e['kind'] == 'launch' for e in out['events'])
     assert first['d'] is not None and first['d'] < second['d']
+
+
+# -- step 2: the launch held on the cut, sections by place and cause, the best of the runs --
+
+def test_the_launch_gear_held_on_the_limiter_is_counted():
+    summary = {'launch': 1.0, 'release': 0.4, 'launch_rpm': 6500.0, 'finished': 1, 'duration': 200.0,
+               'launch_clutch': 0.9}
+    held = rows(60, speed=lambda i, t: 3.0 + t * 4.0, gear=1.0, rpm=lambda i, t: 7460.0 if 3 <= i < 9 else 6000.0,
+                a_long=0.6 * G, throttle=1.0, brake=0.0, clutch=0.0)
+    out = cc.launch_outcome(summary, held, limiter=7500.0)
+    assert abs(out['cut'] - 0.6) < 0.11                                        # six rows on the cut in 1st
+    assert cc.launch_outcome(summary, launch_trace(), limiter=7500.0)['cut'] == 0.0
+    assert cc.launch_outcome(summary, held)['cut'] is None                     # no limiter known: nothing said
+    changed = rows(60, speed=lambda i, t: 3.0 + t * 4.0, gear=lambda i, t: 1.0 if i < 4 else 2.0,
+                   rpm=lambda i, t: 7460.0 if 3 <= i < 20 else 6000.0, a_long=0.6 * G, throttle=1.0, brake=0.0)
+    assert cc.launch_outcome(summary, changed, limiter=7500.0)['cut'] < 0.2    # only the launch gear counts
+
+
+def test_a_run_with_changes_of_gear_keeps_its_loss_against_the_reference():
+    """The drive loss of a change up is not the section loss (they shared a name once)."""
+    ref_tr, ref_corners = road()
+    cc.describe_corners(ref_tr, ref_corners, cc.build_sections(ref_tr, ref_corners))
+    tr, corners = road(vmin=6.0, brake_from=380.0)
+    context = {'limiter': LIMITER, 'drive_loss': lambda gear, rpm: 0.04, 'top_gear': 5}
+    shifts = [{'at': 1005.0, 'gear': 3, 'gear_to': 4, 'direction': 'up', 'rpm': 7000.0, 'flat_out': 1,
+               'method': 'sequential', 'flags': None, 'id': 1, 'throttle': 1.0, 'slip': None}]
+    summary = {'finished': 1, 'duration': 80.0, 'course': tr[-1][C['distance']]}
+    out = cc.analyse(summary, tr, corners, shifts, context, started=1000.0, reference=reference_from(ref_tr, ref_corners))
+    assert isinstance(out['loss'], float) and out['loss'] > 0.5
+    out = cc.analyse(summary, tr, find_corners(tr), shifts, context, started=1000.0)
+    assert out['loss'] is None                                                 # no reference, no loss
+
+
+def stored(d, min_speed=10.0, direction=1, brake_d=50.0, exit_speed=20.0, entry_speed=25.0, throttle_on_t=0.5,
+           counter_steer=0.0, loss=None, off=0, complex_=0, d0=None, d1=None, coast_entry=0.0, overlap_exit=0.0,
+           tightness='3'):
+    """A corner as the store holds it (CORNER_FIELDS), with the loss on it where the run had one."""
+    return {'d': d, 'd0': d - 20.0 if d0 is None else d0, 'd1': d + 20.0 if d1 is None else d1, 'complex': complex_,
+            'min_speed': min_speed, 'direction': direction, 'brake_d': brake_d, 'exit_speed': exit_speed,
+            'entry_speed': entry_speed, 'throttle_on_t': throttle_on_t, 'counter_steer': counter_steer,
+            'loss_entry': None if loss is None else loss[0], 'loss_exit': None if loss is None else loss[1],
+            'off': off, 'coast_entry': coast_entry, 'overlap_exit': overlap_exit, 'tightness': tightness}
+
+
+def compare(**kw):
+    c = {'brake': 0.0, 'speed': 0.0, 'exit': 0.0, 'entry': 0.0, 'throttle': 0.0, 'counter': 0.0, 'coast_entry': 0.0,
+         'overlap_exit': 0.0}
+    c.update(kw)
+    return c
+
+
+def test_a_sections_numbers_name_what_it_lost_or_gained():
+    kmh = 1 / 3.6
+    pattern = cc.section_pattern
+    assert pattern(compare(brake=25.0, speed=-7 * kmh, exit=-5 * kmh), 0.6) == 'over-slowing'
+    assert pattern(compare(brake=3.0, speed=-6 * kmh, exit=-5 * kmh), 0.6) == 'under-committed'
+    assert pattern(compare(brake=-20.0, speed=1 * kmh, exit=-6 * kmh), 0.6) == 'overdriven'
+    assert pattern(compare(brake=2.0, speed=0.0, exit=-6 * kmh, entry=8 * kmh), 0.6) == 'overdriven'     # entered faster
+    assert pattern(compare(speed=0.5 * kmh, exit=-4 * kmh, throttle=0.5), 0.4) == 'late-throttle'
+    assert pattern(compare(brake=-5.0, speed=-6 * kmh, exit=-1 * kmh, counter=0.3), 0.5) == 'over-rotated'
+    assert pattern(compare(brake=None, speed=-9 * kmh, exit=-8 * kmh), 0.5) == 'slower'
+    assert pattern(compare(), 0.5) == 'unclear'
+    # a gain: braking earlier for the same minimum and a faster exit is the loose-surface entry
+    assert pattern(compare(brake=15.0, speed=0.5 * kmh, exit=6 * kmh), -0.4) == 'right-entry'
+    assert pattern(compare(brake=-15.0, speed=5 * kmh, exit=6 * kmh), -0.4) == 'quicker'
+    assert pattern(compare(brake=25.0, speed=-7 * kmh, exit=-5 * kmh), 0.05) is None        # under a tenth: not named
+    assert pattern(compare(), None) is None
+
+
+def test_sections_are_named_by_their_corners_and_set_against_the_reference():
+    ref = [stored(300.0), stored(900.0, direction=-1, complex_=1, min_speed=12.0),
+           stored(1000.0, direction=1, complex_=1, min_speed=14.0, d0=980.0, d1=1020.0)]
+    # this run: the first corner is the start's, the second a complex whose slowest corner is the first of its two
+    mine = [stored(305.0, loss=(0.0, 0.1)),
+            stored(905.0, direction=-1, complex_=1, min_speed=8.0, brake_d=80.0, exit_speed=17.0, loss=(0.5, 0.3)),
+            stored(1005.0, direction=1, complex_=1, min_speed=14.0, d0=985.0, d1=1025.0)]
+    report = cc.section_report(mine, ref)
+    assert [r['name'] for r in report] == ['the 3 left at 0.3 km', 'the right-left at 0.9 km']
+    assert [r['first'] for r in report] == [True, False]                       # the start's section holds the launch
+    second = report[1]
+    assert abs(second['loss'] - 0.8) < 1e-9 and second['entry'] == 0.5 and second['exit'] == 0.3
+    c = second['compare']
+    assert c['brake'] == 30.0 and abs(c['speed'] - (-4.0)) < 1e-9              # braked 30 m earlier; 4 m/s slower
+    assert second['pattern'] == 'over-slowing'
+    assert cc.section_report(mine, [])[1]['ref'] is None                       # no reference: no comparison
+    assert cc.section_name({'corners': [stored(1800.0, tightness='hairpin', direction=-1)], 'apex': 1800.0}) == \
+        'the hairpin right at 1.8 km'
+    many = {'corners': [stored(float(d)) for d in (100, 150, 200, 250)], 'apex': 100.0}
+    assert cc.section_name(many) == 'the 4-corner section at 0.1 km'
+
+
+def test_the_best_of_the_runs_is_found_section_by_section():
+    ref_tr, ref_corners = road(vmin2=10.0, second_brake=1000.0)
+    cc.describe_corners(ref_tr, ref_corners, cc.build_sections(ref_tr, ref_corners))
+    quick_tr, quick_corners = road(vmin2=13.0, second_brake=1030.0)            # quicker through the second corner
+    cc.describe_corners(quick_tr, quick_corners, cc.build_sections(quick_tr, quick_corners))
+    slow_tr, slow_corners = road(vmin=6.0, brake_from=380.0, vmin2=10.0)       # slower through the first
+    cc.describe_corners(slow_tr, slow_corners, cc.build_sections(slow_tr, slow_corners))
+    reference = dict(reference_from(ref_tr, ref_corners), run=1)
+    best = cc.stitched(reference, [{'run': 2, 'trace': quick_tr, 'corners': quick_corners},
+                                   {'run': 3, 'trace': slow_tr, 'corners': slow_corners}])
+    assert set(best['base']) == {1}                                            # the first section is the launch's: left out
+    assert best['who'][1] == 2 and best['gain'][1] > 0.1
+    assert abs(best['total'] - best['gain'][1]) < 1e-9
+    assert cc.stitched(dict(reference, corners=[]), []) is None
+    # a run that did not cover the section from end to end, or went off in it, has no time for it
+    short = [row for row in quick_tr if row[C['distance']] < 1050.0]
+    assert cc.grid_times(short, quick_corners, *cc.grid_of(reference)) == {}
+    off = [dict(k, off=1) for k in quick_corners]
+    assert cc.grid_times(quick_tr, off, *cc.grid_of(reference)) == {}
+
+
+def test_a_held_straight_is_measured_against_the_reference_to_the_next_braking():
+    # the reference takes the straight in 4th and is quicker; this run held 3rd on the cut
+    mine = rows(300, speed=lambda i, t: 20.0, gear=3.0, brake=lambda i, t: 0.6 if i > 200 else 0.0)
+    theirs = rows(300, speed=lambda i, t: 24.0, gear=4.0, brake=lambda i, t: 0.6 if i > 200 else 0.0)
+    found = cc.held_vs_reference(mine, theirs, 100.0)
+    assert found['ref_gear'] == 4 and found['lost'] > 0.5 and found['d1'] > 400.0
+    even = cc.held_vs_reference(mine, mine, 100.0)
+    assert abs(even['lost']) < 1e-9
+    nobrake = rows(300, speed=20.0, gear=3.0, brake=0.0)
+    assert cc.held_vs_reference(nobrake, theirs, 100.0) is None                # never braked again
