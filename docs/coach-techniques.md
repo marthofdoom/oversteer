@@ -1291,7 +1291,30 @@ What can be built now on Assetto Corsa Rally, and what cannot:
   and result time; the game's car data (limiter, `shift_lights_rpm`,
   `auto_upshift_rpm`, gear sets, drivetrain, turbo).
 - **Do not have:**
-  - Wheel slip: `slip_drive` is NaN on nearly every ACR row.
+  - Wheel slip from the game: `slip_drive` is NaN on nearly every ACR
+    row. **Oversight:** but the driven-axle slip is in the trace anyway,
+    for every car with shipped gearing: `slip_rpm = rpm / (speed ×
+    game_ratio(gear)) − 1`, valid while the gear has been the same for
+    0.3 s and the rig clutch is under 0.1. Checked on the audit replay:
+    on the i20N at full throttle on gravel the median is +0.03 in 3rd to
+    5th (the loaded tyre is a little smaller than the shipped radius)
+    with p90 at +0.16 in 3rd and +0.07 in 4th, +0.88 in 1st (the launch
+    spinning); on tarmac p90 is under +0.05 in every gear; at partial
+    throttle the median is 0 ± 0.03 in every gear, which gives the zero
+    per car and gear. Of the 122 limiter rows below top gear in the
+    captures, 81 have `slip_rpm` over 0.15: two thirds of marth's
+    "limiter time" is wheelspin on the cut, not gearing. The Fabia reads
+    +0.08 to +0.12 in 4th and 3rd (its gravel tyre or gear set differs
+    from the shipped default: use the learnt `tunes.ratios` where it
+    disagrees with the shipped set) and the 208 reads +0.09 median in
+    4th on tarmac, which is not credible wheelspin, so the proxy needs
+    the per-gear zero and a plausibility cap (a median over 0.05 at
+    partial throttle means the ratio is wrong, and the proxy is off for
+    that gear). With that, launch spin (R3), spin on the cut (R2), exit
+    spin and "n−1 would have spun" (R8) and the FWD exit-wheelspin
+    coaching of §3.5 are all available on ACR now, at 10 Hz. It is
+    derived at read time from channels the trace already has and the
+    car data; it is not a new column.
   - The game's handbrake, and the rig's handbrake in captures.
   - The shifter method in replays. Live data has it; marth's live
     database is all "sequential".
@@ -1303,9 +1326,11 @@ What can be built now on Assetto Corsa Rally, and what cannot:
   - The suspension sign and zero, which are unverified.
 - **So:**
   - Everything below runs on the channels in "Have".
-  - Rules that need slip, the handbrake, the method or a per-segment
+  - Rules that need the handbrake, the method or a per-segment
     surface are written with their gate closed. They stay silent and say
-    once why.
+    once why. **Oversight:** rules that need slip use `slip_rpm` where
+    the car has shipped gearing and its per-gear zero is plausible, and
+    close their gate otherwise.
   - Corners are named by distance, direction and tightness until the note
     lists exist.
   - WRC Generations is excluded from launch and attitude rules until its
@@ -1338,6 +1363,34 @@ which takes the store as an argument, the way `stage_metrics` does.
   15 runs, most of them with reverse or from more than 20 m/s, including
   run 7 at 2.1 km. Each incident goes in `events`, kind `off` or `stop`.
   The corners within ±100 m of an incident are marked `corners.off = 1`.
+
+  **Oversight:** the second and third tests do not separate an off from
+  a hairpin. In the audit replay 24 of the 139 hairpins (heading change
+  135° or more) have a minimum speed under 3 m/s, 17 of the 34 slow
+  stretches lie within 60 m of a hairpin, and 26 of the 34 came from
+  above 15 m/s within the 3 s before: a hairpin approached at 60 km/h
+  and taken at walking pace passes the "fell from above 15 m/s" test
+  every time. The 40 % drop with the brake under 0.3 fires on 502 rows
+  of the 60 runs: a sideways car on gravel sheds 40 % of its speed in a
+  second without the brake. Both tests go. An **off** is a slow stretch
+  with reverse engaged, or lasting 3 s or more (**calibrate**), or
+  preceded within 2 s by a **hit**: an `a_lat`/`a_long` magnitude over
+  2.5 g held for 2 rows (**calibrate**: 211 single rows over 2 g in the
+  replay, which may be kerbs and landings; look at them before setting
+  this). A slow stretch at a corner that is none of these is a
+  **stall** (kind `stall`): the car nearly stopped in the corner, which
+  is a corner fault (over-rotated, the handbrake held, the clutch
+  dipped), not an off. A **spin** (kind `spin`) is a yaw window whose
+  heading change exceeds 200°, or whose yaw sign reverses with
+  `|yaw_rate|` above 0.5 rad/s past the slowest point (**calibrate**);
+  no stage corner turns the car more than a hairpin does. `stall`,
+  `spin` and `hit` mark their section (`corners.off = 1`, the section
+  is left out of the reference comparison and the section bests) but
+  do not reclass the run: a run with one messy hairpin is still a run,
+  and still a reference for every other section. Only `off` reclasses
+  the run. The coach names them: "you spun at 2.9 km", "the car nearly
+  stopped in the hairpin at 1.2 km", and coaches the corner before a
+  spin like any other corner.
 - **Run class** (`runs.run_class`):
   - `restart`: not finished and under 50 % of the stage.
   - `partial`: not finished, 50 % or more.
@@ -1362,6 +1415,26 @@ which takes the store as an argument, the way `stage_metrics` does.
   "best" of 0 s/km coasting that came from a 220 m restart. Tips name the
   reference: "your best run here in the Fabia (227.6 s on 3 Oct)".
 
+  **Oversight:** three things a coach checks before trusting a reference
+  run, and what happens when there is none to beat:
+  - **Same conditions.** The reference must have the same `runs.wet`
+    state; a dry best against a wet run is every corner "over-slowed".
+    Where the game sends weather or time of day, the same; where the
+    `tunes` row differs (another gear set or final drive), the shift
+    and exit-gear rules compare within the tune, the corner rules across
+    tunes with the tune named ("your best here was on the long final
+    drive").
+  - **The run that is the new best** has no reference quicker than
+    itself, so every loss is zero or negative. The comparison then runs
+    against the previous best and the sentence flips: "Afon Bidno, your
+    best yet in the Fabia: 1.9 s quicker than 3 Oct, 1.1 s of it in the
+    square left at 1.8 km, where you braked 20 m later for the same
+    minimum." Praise of this kind is the most valuable the coach gives,
+    because it names what worked.
+  - **"Most of it in two places" must be true.** The sentence is used
+    only when the two costliest sections hold at least half the loss;
+    otherwise "spread over the stage; the biggest two are".
+
 #### 7.2.2 Corner sections, complexes and names
 
 - **Sections.** `find_corners` already finds each corner's yaw window
@@ -1373,10 +1446,44 @@ which takes the store as an argument, the way `stage_metrics` does.
   replaces the ±50 m windows that counted run 7's off three times. On
   gravel the median gap between corners is 41 m, so the old windows
   overlapped nearly everywhere, offs or not.
+
+  **Oversight:** the midpoint is the wrong place to cut. The straight
+  after a corner is where its exit speed pays, so a slow exit from
+  corner A shows up, under the midpoint rule, as entry loss at corner B,
+  and the coach would tell the driver to brake later into B when the
+  fault was the throttle out of A. A section ends where the braking for
+  the next corner begins: the boundary is the **reference run's**
+  strongest brake onset for the next corner (`brake_d`, below), with
+  the midpoint as the floor where the reference braked before the
+  midpoint and as the boundary where it did not brake at all. The whole
+  straight then belongs to the exit of the corner before it, which is
+  how every coach attributes it.
+
+  **Oversight:** the design never says how a section in this run is
+  matched with the same section in the reference run or in the other
+  runs that the section bests pool. Corner apexes move 5-20 m between
+  runs and the yaw window's start moves with the line, so equality of
+  `d` does not work. Sections live on a **stage grid**: the reference
+  run's sections (its `d0`, `d1`, boundaries). This run's corners are
+  matched to grid sections by overlap of their yaw windows (at least
+  half of the shorter window, else the apex within 25 m), a complex as
+  a whole. Loss and section bests are worked out on the grid, so they
+  are comparable across runs; when the reference changes, the grid
+  changes and the bests are recomputed from stored `section_t`, which
+  is why `best_t` is not stored (below). In the audit database a 25 m
+  apex match found 21 of the i20N's corners in 5 of its 6 Afon Bidno
+  runs.
 - **Complexes.** Corners less than 30 m apart (**calibrate**) are joined
   into one complex and one section. On the replay this turns 1170 corners
   into 732 sections. With 20 m it gives 801; with 50 m, 585. The complex
   keeps the corners' directions for its name ("the left-right").
+
+  **Oversight:** linked is a matter of time, not metres. Two corners are
+  one complex when the driver cannot brake in a straight line between
+  them: 30 m is 2 s at a 15 m/s exit (two corners) and under a second at
+  35 m/s (one). The join rule is a gap of under 1.5 s at the reference
+  run's speed through the gap (**calibrate**), with 30 m as the fallback
+  where no reference exists yet.
 - **Names.** Tightness comes from the heading change:
   - **hairpin**: 135° or more;
   - **square**: 75° to 135°;
@@ -1387,6 +1494,20 @@ which takes the store as an argument, the way `stage_metrics` does.
   1.8 km". A complex is named "the left-right at 2.1 km". When the
   pace-note lists arrive, the call replaces tightness: "the 3 left after
   the jump".
+
+  **Oversight:** heading change is not what a co-driver calls. A 60°
+  bend taken at 110 km/h is a "5 left long"; a 60° junction at 40 km/h
+  is a "2 left". The grade is the radius, and the radius is in the
+  trace: `radius = speed / |yaw_rate|` at the slowest point (and its
+  minimum over the window), stored as `corners.radius`. Tightness comes
+  from the radius first, in bands that follow the game's own note scale
+  (**calibrate** against the note lists when they arrive; ACR's scale is
+  ascending, 1 the tightest), and the heading change adds "long" when
+  it exceeds what the radius alone implies (over 90° on a radius that
+  reads 3 or 4) and "hairpin" at 135° and up. The name then matches what
+  the driver heard: "the 3 left at 1.8 km", and the slow kink after a
+  hairpin (under 40°, minimum speed under 20 m/s), which the four bands
+  above leave unnamed, becomes "the 2 right at 1.9 km".
 - **Phases per section**, from this run's trace:
   - **approach**: from the section start to the brake onset, or to `d0`;
   - **entry**: from the brake onset or `d0` to the slowest point;
@@ -1407,6 +1528,33 @@ which takes the store as an argument, the way `stage_metrics` does.
 
   `min_speed` and `exit_speed` are already stored. The trace allows all
   of this at 10 Hz.
+
+  **Oversight:** two of these columns are defined wrongly for rally
+  driving.
+  - **`brake_d` is not the last onset.** Rally entries have several
+    brake applications: a stab on the approach, the main braking, a
+    left-foot touch at turn-in. In the audit replay 961 of 1139 corners
+    have more than one application in the 200 m before the slowest
+    point; in 569 the last onset and the strongest are more than 15 m
+    apart, and in 99 the last onset is a touch under 0.3 within 15 m of
+    the slowest point, which would give a braking point of nearly zero.
+    `brake_d` is the onset of the **strongest** application (the one
+    with the highest peak) in the approach and entry; the strongest
+    application starts 78 m before the slowest point on gravel and 95 m
+    on tarmac at the median (p10/p90 32/168 m and 34/174 m). Store the
+    peak too (`brake_peak`): a lower peak with an earlier onset is
+    gentle braking, the same onset with a lower peak is a driver who
+    did not commit to the pedal.
+  - **`throttle_t` at 0.95 is the wrong moment for half the field.** A
+    FWD car on gravel, an RWD car anywhere loose, and any car on snow
+    leaves a corner on partial throttle by technique; the time to full
+    throttle then measures the surface, not the driver. Store two:
+    `throttle_on_t`, seconds from the slowest point to the throttle
+    first above 0.2 after it (the decision to go), and `throttle_t` to
+    0.95 (the commitment). R5 and R6 read `throttle_on_t` against the
+    reference on every surface and `throttle_t` only on tarmac in AWD;
+    the difference between the two is the "feeding it in" time, which
+    is described, not corrected, on loose surfaces.
 - **Loss per section** is this run's `section_t` minus the reference's
   time over the same distances. It is split at this run's slowest point
   into `loss_entry` and `loss_exit`. The **section best** is the quickest
@@ -1416,6 +1564,18 @@ which takes the store as an argument, the way `stage_metrics` does.
   and stored as `corners.loss_entry`, `corners.loss_exit` and
   `corners.best_t` (the section best at that time). The cost is one
   reference trace and a lookup of the section bests.
+
+  **Oversight:** `best_t` is not stored. It is a cross-run figure written
+  into a per-run row, so it goes stale with every new run that sets a
+  best, and it depends on the grid, which moves with the reference.
+  Store `section_t` per corner (this run's own time, which never
+  changes) and work the section bests out at coach time from the
+  `corners` rows of the same car and stage on the grid: one query, no
+  backfill. `loss_entry` and `loss_exit` against the reference at the
+  time of the run may be stored, as the design says, because "what you
+  lost against your best at the time" is a fact about that run; they
+  are recomputed only when the coach shows the run against a newer
+  reference.
 
 #### 7.2.3 Events
 
@@ -1492,6 +1652,39 @@ What the audit's cases become:
 on" needs the praise row of the table. The live line "N s on the limiter
 this session" uses R2's `held-straight` seconds only.
 
+**Oversight: the cost of a shift fault, and why it decides the tip.**
+Shift tips are second-order in rally, and a coach who leads with them
+loses the driver. The audit's own numbers: the Fabia climbs 848 rpm/s in
+3rd and 433 rpm/s in 4th at full throttle on gravel, so a change 400 rpm
+early is 0.5 s early in 3rd and 0.9 s in 4th, in a gear that then pulls
+4-6 % less for that long: a speed deficit of about 0.1-0.2 m/s, which
+over the run to the next braking point costs a few hundredths. A touch
+on the cut costs the touch's length of zero drive (at 10 Hz the touch is
+one or two rows, so its length is known to ±0.1 s), of the same order.
+Fifteen such changes in a stage are 0.3-0.7 s; a single corner in the
+audit costs 0.4-0.6 s against the reference. So:
+
+- Every `cut` and `early` change gets a cost in seconds from the trace,
+  like every corner: the speed deficit `Δv` (the acceleration at the
+  change times the time lost: the rpm gap over the climb rate for an
+  early change, the rows on the cut for a `cut`) divided by the speed,
+  times the time to the next brake onset (`shifts.d` against the next
+  section). The sum per gear and surface is the stage cost that ranks
+  the tip; the share thresholds in the table only gate it.
+- A shift tip whose stage cost is under 0.2 s (**calibrate**) is a
+  `technique` description once ("you take the cut on 1 in 3 changes in
+  2nd on gravel; it costs about a tenth a stage"), never a tip and never
+  a focus habit. The present `COST_SHIFT` constant goes.
+- The pro's view of the cut on a sequential: flat-shifting on the
+  limiter is a deliberate habit of many rally drivers, because the box
+  shifts under full throttle, the cut is soft and the eyes are on the
+  road. It is corrected when it costs, and the cost is what the sentence
+  quotes; "never on the cut" is not something a coach says to a Rally2
+  driver.
+- Praise for being on the lights is pooled: one line per surface ("your
+  changes up are on the lights in every gear on gravel"), not one per
+  gear, method and surface, which the table as written would give.
+
 #### R2. Limiter episodes classified by what follows
 
 **Episode.** Rows with rpm at or above 0.985 × limiter, throttle at or
@@ -1512,6 +1705,18 @@ the final-drive notes run on ACR.
 | `up-down` | change up, then down within 4 s | 8 | describe only (it is the alternative to holding) |
 | `held-corner` | ended by brake above 0.2 or a change down, or inside a corner, or the next section's `d0` within 100 m or 3 s | 11, the longest 1.8 s / 30 m on gravel with the next corner 29 m on | silent on loose surfaces and in hairpin complexes on tarmac; when it recurs at the same place in at least 3 of 5 runs and exceeds 1 s, a gearing description: "3rd is short for the run from 2.0 to 2.1 km; holding it there is right" |
 | `held-straight` | 1.5 s or more, or 80 m or more on the cut, with no change up within 1 s and the next corner more than 100 m away | 0 | tip, only when the reference run was at least 0.1 s quicker from the episode's start to the next brake onset, or was in a higher gear there |
+
+**Oversight: a sixth class, `spin`.** Before any of the above, an
+episode whose `slip_rpm` (§7.1) exceeds 0.15 (**calibrate**) is
+wheelspin on the cut: the engine is at the limiter because the wheels
+are, not because the car is going fast. In the audit replay 81 of the
+122 limiter rows below top gear are this (the stuck car, the launches,
+and 2nd-gear exits on gravel). A `spin` episode is a traction event,
+not a gearing one, and belongs to R3 when it is the launch, to R8 when
+it is a corner exit ("2nd spins out of the hairpins at 3.2 km: the
+exits are 0.2 s down on your best; feed the throttle, or take 3rd") and
+to the incident test when the car is under 8 m/s. It is never "change
+up when the lights flash", which is what the coach says about it today.
 
 **Stored as:** `events` (kind `limiter`). The metric
 `limiter.per_km` is renamed `limiter.held`: seconds of `held-straight`
@@ -1553,6 +1758,29 @@ channel is checked.
 took 1.83 to 1.94 s. A cut held in 1st after the release for more than
 0.3 s (**calibrate**) is a tip: "change to 2nd as the cut comes in".
 
+**Oversight:**
+- **The game-controlled test collides with the praise test.** A launch
+  SD under 0.05 s is "the game did it" and an SD under 0.1 s is praise,
+  so the most consistent human launches are the ones that earn nothing.
+  Consistency cannot tell the two apart. The rig can: the trace carries
+  the rig's `clutch`. A launch in which the rig clutch never rose above
+  0.5 while the car was standing and then released is the game's
+  auto-clutch, and so is one in which the car moved off before the rig
+  clutch came down; everything else is the driver's. Where a game
+  reports its assists, those win. The SD gate goes.
+- **Not only 1st.** The launch gear is the gear held at release,
+  whatever it is; a 2nd-gear start on tarmac or snow is a technique, and
+  reading revs "only in 1st" would give it no launch metrics at all.
+  The 1→2 `launch` flag becomes "the first change up within 3 s".
+- **Spin is measurable now.** `slip_rpm` over the first 0.5 s gives the
+  launch spin without the game's wheel speeds: the i20N's 1st-gear
+  launches on gravel run at +0.88 median (the gravel being dug, which is
+  right), so the gravel threshold is high. A tarmac launch with
+  `slip_rpm` over 0.5 and `launch.g` under the car's median is "too many
+  revs for tarmac"; a gravel launch with no spin and a slow t50 is "too
+  gentle". The catalogue's launch entry (§3.1) had this; the design
+  dropped it for want of slip.
+
 #### R4. Pedal overlap by phase
 
 **Classifier.** The `overlap_entry` and `overlap_exit` corner columns
@@ -1570,6 +1798,16 @@ phase's time) and `pedal.drag` (seconds per km on straights).
   on tarmac in a turbo or FWD car. It earns a description or praise once
   per car and surface: "You left-foot brake into 7 in 10 corners on
   gravel: that is how a Rally2 is turned."
+
+  **Oversight:** a description, never praise. How many corners the
+  driver left-foot brakes into says nothing about whether it was done
+  well, and "that is how a Rally2 is turned" lectures a driver on the
+  technique he is already using. Praise is for an outcome against the
+  reference (R6's "right gravel entry"), and the owner's rule is that it
+  must be earned. The description reads "you left-foot brake into 7 in
+  10 corners on gravel" and stops. Entry overlap on tarmac is also left
+  alone in hairpins (135° and up) in every car, where the tarmac corner
+  is driven like gravel.
 - A tip needs one of two things, on tarmac or circuit only:
   - **Exit overlap:** at least 3 corners in the run with overlap_exit
     above 0.3 s whose `loss_exit` against the reference exceeds 0.1 s.
@@ -1590,11 +1828,19 @@ straight more than 100 m from any corner counts as `coast_straight`.
   - on loose surfaces it is the rotation, and is never a fault;
   - on tarmac it is dead time between brake and throttle, coached per
     corner against the reference when that corner's `loss_entry`
-    exceeds 0.1 s.
+    exceeds 0.1 s. **Oversight:** not in tarmac hairpins, which are
+    rotated like gravel corners (a flick, the handbrake, a throttle-off
+    rotation), and only when the reference run coasted at least 0.3 s
+    less there: the comparison is with the driver's own entry, not with
+    an ideal of zero.
 - **Exit coasting and throttle-on time (`throttle_t`):** coached on every
   surface when `throttle_t` is at least 0.3 s later than the reference's
   in the same corner and `loss_exit` exceeds 0.1 s. Two or more such
-  corners are needed in the run.
+  corners are needed in the run. **Oversight:** the quantity is
+  `throttle_on_t` (the throttle first past 0.2 after the slowest point),
+  on every surface and drivetrain; `throttle_t` to full is read only on
+  tarmac in AWD, because partial throttle on exit is the technique of a
+  FWD or RWD car and of every car on loose surfaces (§7.2.2).
 - **Straight coasting:** described only, until crests and jumps can be
   told apart.
 
@@ -1620,6 +1866,25 @@ reference, plus causes:
 - **late throttle:** same minimum, `throttle_t` later, slower exit;
 - **the right gravel entry:** braked earlier, same minimum, faster exit.
   This one is praise on loose surfaces.
+
+**Oversight:** two patterns a coach sees often are missing, and the
+first is the commonest fault of a careful sim driver:
+
+- **under-committed:** same braking point (within 10 m), lower minimum,
+  slower exit: the driver braked where the best run did and then did
+  not let go of the pedal, or lifted mid-corner. The action is "same
+  braking, carry it in: your best run was 7 km/h quicker through the
+  middle from the same point";
+- **over-rotated:** lower minimum with more counter-steer than the
+  reference, or a `stall`/`spin` incident in the section: the car was
+  turned too much and had to be gathered. The action is about the
+  entry (less flick, a shorter handbrake pull, the throttle sooner),
+  never "brake later".
+
+And the action for over-slowing is not "trust the note". The coach does
+not know what the note said; it may have been a caution. The action is
+what the driver's own run did: "you can brake 25 m deeper here: your
+best run did, for the same exit."
 
 **Metric:** `corner.loss` is kept: the sum of the three worst sections,
 now non-overlapping, offs left out, same-car reference.
@@ -1658,6 +1923,33 @@ The split SD is worked out:
 
 The praise sentence names the runs it compares.
 
+**Oversight: consistency per corner, now.** The split SD says the driver
+is inconsistent somewhere in a 500 m tenth; a coach wants to know in
+which corner, because the spread of the minimum speed through the same
+corner across runs is how commitment is read, and it is the measure the
+pace-note aspect (§7.6, "later") is waiting on the note lists for. It
+needs no notes: the `corners` table already has `min_speed` per run,
+and matching corners on the grid (§7.2.2) gives the spread. In the audit
+database the i20N's six finished Afon Bidno runs give 21 corners seen in
+most runs; the median corner's minimum speed has an SD of 7 km/h, and
+two corners (at 946 m and 1844 m, medium lefts taken around 63 km/h)
+vary by 13 km/h, one in five of their speed. The Fabia's three runs
+show 15 km/h at 954 m. A coach starts the session there.
+
+- **Metric** `corner.spread`: per grid section, the SD of `min_speed`
+  over the same car's last 6 finished runs (clean, learning and off
+  runs away from the off), needing 4 or more runs (**calibrate**).
+- **Tip** when a section's spread exceeds 8 km/h (**calibrate**) and
+  10 % of its median: "Your minimum through the 4 left at 0.9 km has
+  varied by 13 km/h over 6 runs (54 to 76); your quickest run through it
+  took 68 and was quickest out of it too. Settle on that."
+- **Praise** when the five costliest sections of the stage are all
+  within 4 km/h over the runs: "Your speed through the big corners on
+  Afon Bidno is within 4 km/h run after run."
+- The same spread per note grade, once the note lists exist, is the
+  "you are not sure what a 4 is" table of §3.4 without the mind-reading
+  (§7.5).
+
 #### R8. Exit gear (tuning `_long_gears`)
 
 **Classifier.**
@@ -1678,6 +1970,19 @@ meaning narrows.
 - Otherwise it needs 50 % over 10.
 - "Use n−1 there" is never said for 1st (wheelspin; ACR gives no slip to
   check).
+
+**Oversight:**
+- An exit still sliding is not read: rows with `|yaw_rate|` over 0.3
+  rad/s in the second after throttle-on are a power slide, whose
+  `a_long` says nothing about the gear. Exits on a measured grade over
+  5 % (the learner's slope estimate) are compared with exits on the
+  same grade band or not at all.
+- With `slip_rpm` (§7.1), "n−1 would have spun" is measurable: where
+  the same car's exits in n−1 at the same speed on the same surface ran
+  `slip_rpm` over 0.15, the long gear was the right choice and the note
+  is silent; where they did not, and the exits in n bog, the note stands.
+  The 1st-gear exclusion then applies only where `slip_rpm` is
+  unavailable (no shipped gearing).
 
 #### R9. Balance and counter-steer (tuning)
 
@@ -1733,6 +2038,8 @@ the reference run was quicker there.
 | R5 entry coast | T vs ref | — | — | T vs ref | — | as surface |
 | R5 exit coast, throttle-on | T vs ref | T vs ref | D | T vs ref | — | T vs ref |
 | R6 corner loss and causes | T/P | T/P (early braking may be P) | T/P | T/P | — | T/P |
+| R2 spin on the cut (**Oversight**) | T vs ref (exit), R3 (launch) | T vs ref (exit), R3 (launch) | D | T vs ref | — | as surface |
+| R7 corner spread (**Oversight**) | T/P | T/P | T/P | T/P | P (consistency is the drift coach's subject) | T/P |
 | Over-rev, stall, double tap (mechanical) | T | T | T | T | T | T |
 
 Car gates in every column:
@@ -1743,6 +2050,19 @@ Car gates in every column:
 - **Shipped car data:** the band comes from the lights.
 - **A drift profile** silences every family except the mechanical ones
   (§3.3).
+
+**Oversight: the budget rule.** The table says which rules may speak; it
+does not say which get heard. A professional opens with where the time
+is. In the audit, corners cost 0.4-0.6 s each and shifts a few
+hundredths each, so a view that leads with "3→4: you change at 6500"
+while 4.4 s sit in two corners is wrong even when every sentence in it
+is true. Every tip carries a stage cost in seconds against the reference
+(R1's from §7.3, R6's from the sections, R3's from t50 against the
+median, the mechanical rules' from `COST_EVENT`), and `select()` shows
+only tips whose cost is at least a tenth of the costliest tip's
+(**calibrate**); the rest go to the quiet "still:" list. Rules with no
+reference (the first run of a stage) fall back to the rough constants
+and are shown only when nothing with a reference fires.
 
 ### 7.5 Phrasing
 
@@ -1766,7 +2086,29 @@ earned: a number or a place, never filler.
   requirement).
 - A new kind, `technique`, holds descriptions of correct technique.
   These are shown once, like notes, and come back only when the share
-  changes by 20 % or more.
+  changes by 20 % or more. **Oversight:** 20 percentage points of the
+  share (7 in 10 corners to 5 in 10), not a fifth of it.
+
+**Oversight: what a coach does not say.** Three habits in the catalogue's
+sample sentences would cost the coach the driver's trust, and the
+templates must exclude them:
+
+- **No mind-reading.** "You are not sure what a 4 is", "trust the
+  note", "hesitation", "you are over-driving the front": the coach has
+  a trace, not the driver's head. It says what the data shows and what
+  the driver's own best run did there, and leaves the diagnosis of
+  intent to the driver. "Your speed through the 4-grade corners varies
+  by 12 km/h between runs" is the whole observation.
+- **No lecturing on a technique the driver already uses.** "That is how
+  a Rally2 is turned", "that is what pulls the i20N straight": a driver
+  who left-foot brakes into every corner knows why. A `technique` line
+  describes the habit once and says it is fine; it does not explain it.
+- **No absolutes.** "Never on the cut", "always", "every time": the
+  coach's authority is the number. "On 1 in 3 changes" is stronger than
+  "never".
+- **Praise is a fact with a place.** "Good" and "right" on their own
+  are filler; "your best yet through the hairpin at 0.9 km, 0.3 s up
+  on 3 Oct" is praise.
 
 **Words that go:**
 
@@ -1799,6 +2141,8 @@ matching; nothing needs migrating.
 | `engine.limiter` (reworked) | episodes and classes, `limiter.held` |
 | `launch.quality` (reworked) | `launch.g`, outcome-based bog, game-controlled gate |
 | `shift.upshift` (reworked) | the lights band, early and cut shares |
+| `corner.consistency` (new; **Oversight**) | `corner.spread`: the minimum speed through the same section across runs (R7) |
+| `traction.slip` (new; **Oversight**) | `slip_rpm` from rpm, speed and the shipped gearing (§7.1): launch spin, spin on the cut, exit spin, the FWD exit |
 
 **Later, because the data does not support them yet:**
 
@@ -1845,6 +2189,16 @@ below, which Opus writes. An Opus review comes before each commit.
    with a stored trace and `run_class IS NULL`, oldest first, in batches,
    and recomputes corners, events and metrics. Older metric rows of
    renamed metrics are deleted for those runs.
+
+   **Oversight:** `best_t` is dropped from the column list and
+   `radius`, `brake_peak` and `throttle_on_t` are added (§7.2.2). The
+   backfill shares the drive-log thread with the live writes, so it runs
+   only while no session is live (or between runs), a few runs per
+   batch, and yields to the queue between batches; a backfill that
+   recomputes sixty traces while the game feeds 60 Hz samples is how
+   the first live run after the upgrade gets dropped. `slip_rpm` is a
+   function in `coach_context.py`, not a column: the trace has rpm,
+   speed, gear and clutch, the car data has the gearing.
 2. **`coach_context.py`:**
    - `stage_rows`;
    - `incidents`;
@@ -1909,6 +2263,19 @@ below, which Opus writes. An Opus review comes before each commit.
    - No coasting tip uses a restart as its reference.
    - `limiter.held` is 0 on every ACR run.
    - At least one praise line per car.
+   - **Oversight:** no run is classed `off` for a slow hairpin: the 24
+     hairpins under 3 m/s give `stall` or `spin` sections, and only the
+     runs with reverse, a 3 s stop or a hit are `off`.
+   - **Oversight:** `slip_rpm`'s partial-throttle median is within
+     ±0.03 in 3rd to 5th on the i20N, and the proxy is marked off for
+     any gear of the 208 or the Fabia where it is not.
+   - **Oversight:** the i20N's Afon Bidno runs produce a `corner.spread`
+     tip naming the corners at about 0.95 and 1.84 km.
+   - **Oversight:** no shift tip outranks a corner tip on a run whose
+     corner loss exceeds 1 s, and no `cut` tip fires with a stage cost
+     under 0.2 s.
+   - **Oversight:** no sentence contains "trust", "never", "always",
+     "that is how" or "you are not sure".
 
    The result is recorded as a short appendix here. The captures are
    private, so this is a script and not a test.
@@ -1935,3 +2302,14 @@ otherwise.
 | Exit bog: a_long share / exits (loose or FWD) | 80 % / 70 % of 15 | the audit: "low" 5th-gear exits pulled 0.27 g against 0.20 g in band |
 | Tightness bands | 135 / 75 / 40° | the catalogue's counter-steer bins |
 | Pattern deltas | 10 m, 3 km/h, 0.2 s | to set from the first reference comparisons |
+| **Oversight:** off = stop of / hit at | 3 s / 2.5 g for 2 rows | 24 of 139 hairpins under 3 m/s and 26 of 34 slow stretches from above 15 m/s: speed alone cannot separate them; 211 single rows over 2 g to look at first |
+| **Oversight:** spin: heading change / yaw reversal | 200° / 0.5 rad/s past the slowest point | no stage corner turns the car further than a hairpin |
+| **Oversight:** `slip_rpm` zero / spin | median of partial-throttle rows per gear / 0.15 | i20N full throttle gravel p50 +0.03, p90 +0.07 to +0.16 in 3rd-5th; 81 of 122 limiter rows over 0.15 |
+| **Oversight:** `slip_rpm` plausibility cap | partial-throttle median over 0.05: proxy off for that gear | the 208 reads +0.09 in 4th on tarmac, the Fabia +0.08 to +0.12: a gearing or tyre mismatch, not spin |
+| **Oversight:** `brake_d` | onset of the strongest application in the 200 m before | 569 of 1139 corners: last and strongest onsets more than 15 m apart; strongest starts p50 78 m (gravel) / 95 m (tarmac) before the slowest point |
+| **Oversight:** complex gap | 1.5 s at the reference's speed (30 m fallback) | 30 m is 2 s at 15 m/s and 0.9 s at 35 m/s |
+| **Oversight:** section match | yaw windows overlap by half, else apex within 25 m | 21 of the i20N's corners matched in 5 of 6 Afon Bidno runs at 25 m |
+| **Oversight:** shift-tip cost floor | 0.2 s a stage | climb rates 848 rpm/s (3rd), 433 (4th): a 400 rpm early change is 0.5-0.9 s in a gear pulling 4-6 % less, a few hundredths each |
+| **Oversight:** budget rule | a tenth of the costliest tip | corners 0.4-0.6 s each against shifts' hundredths in the audit |
+| **Oversight:** `corner.spread` tip | SD over 8 km/h and 10 % of the median, 4+ runs | i20N Afon Bidno: median corner 7 km/h, worst 13 km/h over 6 runs; Fabia 15 km/h over 3 |
+| **Oversight:** `throttle_on_t` | throttle past 0.2 after the slowest point | partial-throttle exits are technique in FWD, RWD and on loose surfaces |
