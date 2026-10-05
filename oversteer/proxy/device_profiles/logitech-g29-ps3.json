@@ -9,7 +9,7 @@
   "kind": "wheel",
   "verified": false,
   "anti_cheat_class": "unknown",
-  "notes": "PS3 mode (046d:c24f). Capture is the real device on marth's rig via sysfs; abs ranges not captured, so verified stays false until a full capture. Auto-detected by ACR/EA WRC and Forza Horizon as a Logitech G29.",
+  "notes": "PS3 mode (046d:c24f). Capture is the real device on marth's rig via sysfs; abs ranges not captured, so verified stays false until a full capture. Auto-detected by Assetto Corsa Rally on marth's rig; other titles not checked here.",
   "capture": {
     "date": "2026-10-05",
     "source": "marth's rig",
