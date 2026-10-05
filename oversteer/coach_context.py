@@ -722,6 +722,22 @@ def match_sections(sections, grid):
     return out
 
 
+def exit_end(trace, track, grid_section):
+    """Where a section's exit ends on the reference run's own trace: where the reference has full
+    throttle and is straight, past the section's yaw windows, at most EXIT_REACH m past them. The
+    straight after it is not the corner's: a loss there is speed, not the exit."""
+    reach = grid_section['d1'] + EXIT_REACH
+    start = max(bisect.bisect_left(track, grid_section['d1']), 0)
+    throttle, yaw = CH['throttle'], CH['yaw_rate']
+    for i in range(start, len(trace)):
+        if track[i] >= reach:
+            break
+        v, y = trace[i][throttle], trace[i][yaw]
+        if _fin(v) and v >= THROTTLE_FULL and (not _fin(y) or abs(y) < EXIT_YAW):
+            return max(track[i], grid_section['d1'])
+    return reach
+
+
 def section_loss(trace, sections, reference):
     """Time lost against the reference run on its grid: sets
     `loss_entry` and `loss_exit` on the lead corner of each section of this
@@ -749,6 +765,8 @@ def section_loss(trace, sections, reference):
             continue
         a, b = bounds[j]
         apex = min(max(s['apex'], a), b)
+        b = min(b, exit_end(ref_trace, ref_track, g))
+        apex = min(apex, b)
         mine = [time_at(trace, track, x) for x in (a, apex, b)]
         theirs = [time_at(ref_trace, ref_track, x) for x in (a, apex, b)]
         if None in mine or None in theirs:
@@ -799,6 +817,7 @@ THROTTLE_DELTA = 0.2             # s: the throttle this much later than the refe
 COUNTER_DELTA = 0.15             # share of a corner steered against the yaw, more than the reference's: over-rotated
 SECTION_MIN = 0.1                # s a section must lose, or gain, to be named
 END_SLACK = 15.0                 # m a run may stop short of the grid's last section and still be timed through it
+EXIT_REACH = 150.0               # m past a section's yaw window that its exit is timed to at most (the rest is a straight)
 
 
 def key_corner(section):

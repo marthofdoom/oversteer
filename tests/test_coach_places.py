@@ -632,3 +632,17 @@ def test_a_learning_run_has_its_spin_described_and_a_run_that_beat_the_reference
             result_time=197.0)
     [tip] = [t for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert 's behind your previous best clean run here (Test car, 200.0 s on ' in tip.text
+
+
+def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):
+    """Fast through one corner and too careful for the next is one trade, not a 1.1 s fault."""
+    h = Stage(tmp_path / 't.db')
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second={'loss': (-0.5, -0.4)}, third={'loss': (0.6, 0.5)}), result_time=200.2)
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    assert ' 0.2 s behind ' in tip.text and abs(tip.cost - 0.2) < 1e-9
+    assert 'Net of the 0.9 s the section before it gained.' in tip.evidence
+    h = Stage(tmp_path / 'u.db')
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second={'loss': (-0.8, -0.4)}, third={'loss': (0.6, 0.5)}), result_time=199.9)
+    assert not [t for t in h.tips() if t.id.startswith('corner.section')]

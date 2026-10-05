@@ -1224,8 +1224,19 @@ class Coach:
         # A run that is quicker than the reference is measured against the run it beat
         beat = run['finished'] == 1 and run['result_time'] and run['result_time'] < ref['result_time']
         ref_name = 'your previous best clean run' if beat else 'your best clean run'
-        named = [it for it in report if it['loss'] is not None and not it['off'] and it['compare'] is not None
-                 and not it['first']]
+        named = []
+        for n, it in enumerate(report):
+            if it['loss'] is None or it['off'] or it['compare'] is None or it['first']:
+                continue
+            # Time lost beside time gained is one trade (braked later into the one, too early for the next):
+            # a section is named for what it lost net of the gain right before it
+            prev = report[n - 1] if n else None
+            if (it['loss'] > 0 and prev is not None and prev['loss'] is not None and not prev['off']
+                    and not prev['first'] and prev['loss'] <= -coach_context.SECTION_MIN):
+                net = it['loss'] + prev['loss']
+                it = dict(it, loss=net, gained_before=-prev['loss'], pattern=(
+                    coach_context.section_pattern(it['compare'], net) if net >= coach_context.SECTION_MIN else None))
+            named.append(it)
         lost = sorted((it for it in named if it['loss'] >= coach_context.SECTION_MIN), key=lambda it: -it['loss'])
         claimed = self._patterns(stage, name, run, named, ref_name, ref_text, candidates, model)
         total = sum(it['loss'] for it in lost)
@@ -1248,6 +1259,8 @@ class Coach:
             text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}. {}'.format(
                 name, it['name'], it['loss'], ref_name, ref_text, _say(how), _section_action(pattern, c, it))
             evidence = ['{:.1f} s of it before the slowest point and {:.1f} s after.'.format(it['entry'], it['exit'])]
+            if it.get('gained_before'):
+                evidence.append('Net of the {:.1f} s the section before it gained.'.format(it['gained_before']))
             if spread:
                 evidence.append('{:.1f} s behind {} over {} sections. {}'.format(total, ref_name, len(lost), spread))
             candidates.append(Tip('corner.section:{}:{:.0f}'.format(stage, it['d']), 'tip', text, evidence,

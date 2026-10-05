@@ -408,12 +408,14 @@ def test_what_a_shift_costs_a_stage():
 
 # -- corners, sections, phases, loss --
 
-def road(vmin=10.0, brake_from=430.0, second_brake=1000.0, vmin2=12.0, speed=28.0, throttle_late=0.0):
+def road(vmin=10.0, brake_from=430.0, second_brake=1000.0, vmin2=12.0, speed=28.0, throttle_late=0.0, slow_tail=None):
     """A run through two corners (at 500 m and 1100 m) 28 m/s between them:
     braking from `brake_from` into the first, away again; the second braked
     from `second_brake`. Returns the trace and its corners (find_corners)."""
     points = [(0.0, speed), (brake_from, speed), (500.0, vmin), (600.0, speed), (second_brake, speed),
               (1100.0, vmin2), (1200.0, speed), (1700.0, speed)]
+    if slow_tail:                       # slow on the long straight after the second corner, from 1400 m
+        points[-1:] = [(1400.0, speed), (1420.0, slow_tail), (1700.0, slow_tail)]
     corners = [(470.0, 530.0, 1, 0.5), (1070.0, 1130.0, -1, 0.5)]
 
     def brake(i, t, d, a):
@@ -765,3 +767,18 @@ def test_both_pedals_in_a_braking_zone_are_not_drag_on_a_straight():
                    brake=lambda i, t: 0.5 if 20 <= i < 40 else 0.0)
     assert cc.pedal_time(slowing, [])[1] == 0.0
     assert tr and cc.pedal_time(tr, [])[1] == 0.0
+
+
+def test_the_exit_is_timed_to_full_throttle_not_to_the_next_braking():
+    ref_tr, ref_corners = road()
+    cc.describe_corners(ref_tr, ref_corners, cc.build_sections(ref_tr, ref_corners))
+    tr, corners = road(slow_tail=15.0)                    # the same corners, a slow straight 270 m after the last
+    sections = cc.build_sections(tr, corners)
+    cc.describe_corners(tr, corners, sections)
+    total = cc.section_loss(tr, sections, reference_from(ref_tr, ref_corners))
+    run_time = tr[-1][C['t']] - tr[0][C['t']]
+    ref_time = ref_tr[-1][C['t']] - ref_tr[0][C['t']]
+    assert run_time - ref_time > 5.0                       # the straight cost seconds...
+    last = sections[1]['lead']
+    assert last['loss_entry'] + last['loss_exit'] < 0.3     # ...and no section is blamed for them
+    assert abs(total) < 0.5
