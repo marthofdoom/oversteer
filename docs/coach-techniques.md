@@ -1128,6 +1128,22 @@ discipline there.
 Each is phrased as the rule it changes in `coach.py` and the gates it
 needs; thresholds to **calibrate**.
 
+**Status (2026-10-05, after build steps 1 and 2, §8):**
+
+| Item | Status |
+|---|---|
+| 1 Change-up target = the game's band | done (step 1: the band and shares; step 2: sentences, praise pooled per surface) |
+| 2 Limiter episodes with context | done (step 1: episodes and classes; step 2: a held straight is a tip only against a quicker reference, the place named; a gear held into the same corner again and again is described once) |
+| 3 Launch bog by outcome | done (step 1: outcome-based bog; step 2: praise for launches that repeat, the late change from 1st as `launch.cut`) |
+| 4 Pedal overlap by phase and car | done (step 1: phases; step 2: exit overlap tip on tarmac and circuit, left-foot braking described once) |
+| 5 Coasting by phase | done (step 1: phases; step 2: entry coasting on tarmac, the throttle later than the reference leaving corners) |
+| 6 Counter-steer per corner class | partly: bends only, tarmac only (step 1) and "over-rotated" as a corner cause (step 2); the tip against the best run's counter-steer and the catch signature are not built |
+| 7 Corner loss by phase and cause | done (step 2: sections named by call and distance, the cause and the action) |
+| 8 Exit gear with slip | done (step 1) |
+| 9 Per-surface thresholds and the discipline switch | partly: the gates are per surface and discipline; no per-segment surface on mixed stages (they are coached as loose) |
+| 10 Session context gates | done (step 1) |
+| 11 ACR discipline from the stage table | done (step 1) |
+
 1. **Change-up target = the game's band, not the cut.** `best_for` keeps
    the crossover as the floor; the target band for `shift.error` and
    `shift.in_band` becomes `[max(crossover, shift_lights.shift),
@@ -2361,3 +2377,157 @@ wiring and rules). What differs from, or settles, the design:
   pedal as the game has it, not the rig's own channel). Under 0.5 it is the game's
   auto-clutch launch.
 
+
+### Step 2 (2026-10-05): phrasing, new aspects, docs, replay check
+
+Built as §7.7 describes, in two commits (`Coach: tips by place and cause...` with
+`tests/test_coach_places.py`, and the naming, learning-run and doc follow-up). What
+differs from, or settles, the design:
+
+- **Where the tips read from.** The place tips (`Coach._place_tips`) read the newest run
+  of each of the three newest stages (not a restart) from its stored corners and events,
+  not from the metrics, against the reference worked out again at coach time with the
+  same rule `_work_over` used (the fastest finished clean or learning run of the car
+  before it, in the same conditions). Sections are matched by `section_report` (window
+  overlap or apex within 25 m, `corners` rows only). Section bests and the "possible"
+  time read the traces of up to 8 of the car's runs (`stitched`): the times through each
+  section of the reference's grid, by the grid's own distances so that two runs compare.
+  A view costs a few hundredths of a second on the replay database.
+- **The reference is "your best clean run".** The reference is the fastest finished run
+  without an off, so the sentence says so (the Fabia's run 7 was 24 s quicker than its
+  reference and had gone off at 2.1 km); a run that beat the reference is set against
+  "your previous best clean run".
+- **The first section is left out.** The section of the stage's start holds the launch:
+  a car that crept off the line (the Fabia's run 4 took 43 s to its first 100 m) gave a
+  38 s "gain" in its first corner. The first section is never named as a corner, in the
+  tips, the praise, the section bests or the spread. The `corner.loss` metric still
+  includes it (step 1 code, and its tests): the metric is only the fallback total for a
+  stage whose corners are not stored.
+- **One tip per section, patterns once.** `corner.section:<stage>:<d>` per section (the
+  costliest three that lost 0.1 s, each with the stage's total and "most of it in two
+  places" only when two hold half of it); a pattern across the run (`throttle.late` in 2
+  or more corners, `pedal.exit` in 3 or more on tarmac or circuit, `coast.entry` on
+  tarmac and circuit outside hairpins) is one tip naming its corners, and a section
+  already told by the late-throttle tip is not told again. The throttle pattern reads
+  `throttle_on_t` on every surface and drivetrain (silent on snow and ice);
+  `throttle_t` to full and `relifts` are stored and not coached.
+- **Spins, stops and offs.** A spin or a near stop is a corner tip (the corner that the
+  event overlaps is named, not the whole complex; a stop in a spin's own corner is the
+  spin; rough cost 2 s and 1 s since no reference gives seconds); an off is a note and
+  its surroundings are left out. A learning run's spin or stop is a note, not a tip
+  (design §7.2.1: learning runs are described, not coached). WRC Generations has no
+  spin or stall coaching (steer and yaw not checked) and no launch coaching.
+- **Spread.** One tip per stage names up to three sections over 8 km/h of SD and a tenth
+  of their median (ranked by SD), with the best run's speed through them where it is
+  known; the five costliest sections within 4 km/h are praised.
+- **Launch.** `launch.cut` (new metric, in `derivations.json`) is the time the revs sat
+  on the limiter in the launch gear in the first 8 s; a tip needs 0.3 s in 3 of the last
+  5 launches on a surface. Praise: the last 5 launches on a surface within 0.1 s of each
+  other and of the car's best, only for launches that have a `launch.bog` row (the
+  game's auto-clutch writes none).
+- **Held straight.** Per stage with a reference, a held-straight episode is a tip only
+  when the reference was at least 0.1 s quicker over the same road to the next braking,
+  or in a higher gear at the start of it (`limiter.held:<stage>:<d>`); the per-km figure
+  is then not used for that stage. A gear held into the same corner in 3 of the last 5
+  runs for over a second is a `technique` line.
+- **Selection.** `technique` is a new kind (`telemetry_view.KINDS` has it; the GTK tab
+  shows it as a plain tip). `select()` demotes a focus habit that is not the costliest
+  tip, shows two praise lines and forces one in when two tips show, shows a technique
+  line once and again when its share moved 20 points, and drops duplicates by id (the
+  same line from two stages).
+- **A bug found and fixed on the way.** `coach_context.analyse` reused the name `loss` for
+  the drive-loss function of a change up, so for a run with any change of gear the
+  analysis returned that function as the section loss: every run with a stage wrote a
+  `corner.loss` of 0.0 (run 1's and the first runs of each car in the audit database).
+
+#### Replay check (script, not a test)
+
+All 15 captures were replayed into a scratch database as in the audit
+(`replay_audit.py`'s pattern, one database, profile `ACR`) with the code of step 2, the
+code before step 1 (`f30c4e4`) and the code after step 1 (`946a771`); the coach was
+then run on each of the four cars with "show all". A copy of the live database
+(`~/.var/app/*/data/oversteer/telemetry.db`, 42 runs) was worked over by the backfill
+(1.1 s) and read the same way: its three ACR cars say what the replay says (its launches
+have no praise, since the backfill cannot redo the launch and drops `launch.bog`).
+
+**Before** (the commit before step 1, "show all", the three ACR cars): the "hold it to
+about 7500: the best from the game's engine data" tip for every gear of the two Rally2
+cars (nine tips, one of them the focus); "launches bogged down" for both Rally2 cars (4 of
+5, 3 of 5); "your last run lost 31.0 s / 9.6 s in its three worst corners" (a 300 m
+restart, another car's run, a clock that ran on after the finish); "you coasted 1.3 and
+1.4 s per km more than your best run: stay on one pedal or the other"; "Steadier: your
+splits vary by 5.3 s, from 68.6" (the standing time after the finish); and the
+fair ones: "still learning the engine" and the grip notes.
+
+**After** (step 2), judged against the catalogue:
+
+| Car | What it says | Judgement |
+|---|---|---|
+| Fabia | 3→4: 67 % early, lights band 6900 to 7100, 0.4 s a stage (§3.1, the lights band) | right: the target is the lights, not the cut |
+| Fabia | cheap habits (1→2, 4→5) as `technique` lines (§3.1, short-shifting on loose surfaces) | right |
+| Fabia | the 2 right at 1.0 km, 1.1 s: braked 43 m earlier, 33 km/h slower at the slowest point, 13 km/h slower out (over-slowing, §3.3) | fair: the numbers are the traces'; the reference took the corner at 72 km/h against 40 |
+| Fabia | the 5-corner section at 1.2 km, 0.5 s: braked 63 m later, 18 km/h slower | fair |
+| Fabia | the right-left at 3.5 km, 0.8 s: "rotate the car less" (over-rotated, §3.3) | doubtful: the 96 m braking difference is likely two different brake applications picked as the strongest |
+| Fabia | the car nearly stopped in three hairpins at Loutraki (1.2, 3.0 and 10.2 km) (§3.4) | right in what it observed; the advice (less rotation) is the design's and generic: a hairpin taken at walking pace may be deliberate |
+| Fabia | praise: best yet through the 3 right at 1.7 km (0.4 s); notes: off at 2.1 km, the possible time (248.3 s, 3.6 s under the best clean run) | right |
+| Fabia | left-foot braking into 4 in 10 corners on gravel, once, as a technique line (§3.2) | right (and no praise) |
+| 208 | three sections on Afon Bidno at 3.0, 4.1 and 3.0 km (2.4, 2.2 and 1.5 s): slower through the middle; braked 15 m later with the same minimum and the time lost after it; braked 12 m later, 26 km/h slower | fair (§3.3 over-driving); the second says where the time went because the numbers agree |
+| 208 | praise: the best clean run yet (1.9 s, 2.9 s of it in the left-left at 2.1 km, braked 22 m earlier, 18 km/h faster), the gravel entry that gained, the best section at 1.3 km | right |
+| 208 | praise: 5 launches on tarmac at 3.37 to 3.38 s | doubtful: the 208's launches are probably the game's own (the audit's SD of 0.02 s) and the clutch test does not catch them |
+| 208 | both pedals on the straights at Forêt de Munster (tarmac, drag); 2→3 on tarmac as a technique line (12 % early, 38 % cut, 0.1 s a stage); left-foot braking into 7 in 10 corners on gravel and 5 in 10 on tarmac | right (§3.2, §3.1) |
+| i20N | the 5 right at 4.8 km, 2.0 s: same braking point, 4 km/h slower at the slowest point and 6 km/h slower out (under-committed, §3.3) | fair |
+| i20N | speed through the left-left at 3.3 km, the 4-corner section at 2.7 km and the left-right at 0.9 km varies by 22, 16 and 13 km/h over 6 runs (§3.4, consistency) | right; the corner at 1.84 km (9 km/h) is the fourth |
+| i20N | two small sections (the 3 right at 1.3 km and the 1 left at 0.7 km, 0.4 s each: carry more speed; brake 71 m later) | fair |
+| i20N | a spin in the hairpin at 5.2 km on Steigenbach (a note: its first run there) and both pedals on the straights there | right |
+| i20N | praise: launches 1.83 to 1.84 s, 3→4 on the lights on tarmac, the best section at 0.3 km (1.2 s) | right |
+| i20N | cheap habits (1→2, 2→3, 3→4 on gravel: 25 to 46 % cut at 0.0 to 0.1 s a stage) and left-foot braking (3 in 10 on gravel, 7 in 10 on tarmac) as `technique` lines | right: the limiter on the cut is the shift, and it costs a tenth |
+| WRCG | both pedals on the straights (Autódromo de León), three offs (notes), left-foot braking into 6 in 10 corners, the lights praised | right (no launch, spin or stall coaching) |
+
+Pass criteria of §7.7 step 2.4:
+
+- None of the nine wrong tips of the audit appears: **met**. No "hold it to the cut", no
+  bogged launch (all nine Fabia launches and the rest score no bog), no restart or
+  other car as the reference, no "stay on one pedal", no standing-time consistency.
+- The Fabia's gravel 3→4 targets 6900 to 7100: **met**.
+- The 208's tarmac 1→2 and 2→3 get cut tips: **not met as written, by design**: the
+  2→3 costs 0.1 s a stage, under the 0.2 s floor of the Oversight, so it is a `technique`
+  line, and the 1→2 cuts are the launch's change (R3). No `cut` tip fires with a stage
+  cost under 0.2 s: **met**.
+- The i20N launches get praise and no Fabia launch is bogged: **met**.
+- Run 7 is class `off`, "off at 2.1 km" is a note, and it is not a reference: **met**
+  (the Fabia's reference is run 4).
+- No coasting tip uses a restart: **met** (no coasting tip fires on the captures).
+- `limiter.held` is 0 on every ACR run: **met**.
+- At least one praise per car: **met**.
+- No run is `off` for a slow hairpin: **met**: the seven `off` runs have fourteen off
+  events, ten with reverse and four of 3 s or more; none is a hit or a hairpin.
+- `slip_rpm`'s partial-throttle median within ±0.03 in 3rd to 5th on the i20N: **not
+  reproduced**. Read the way `slip_rpm` reads it (settled 0.3 s in the gear, rig clutch
+  under 0.1, throttle 0.2 to 0.8, no brake, over 5 m/s), the i20N's pooled medians are
+  +0.076 (3rd), +0.056 (4th) and +0.035 (5th) on gravel, +0.104, +0.063 and +0.037 on
+  tarmac. The per-run zero absorbs a constant offset where it is within 0.05, so the
+  5th is on in every run, the 4th about half the runs and the 3rd off; the Fabia's and
+  the 208's gears are off where they were (their 2nd and 3rd, 1st). A per-car zero
+  kept in the model (not built) would hold across runs.
+- The i20N's `corner.spread` tip names the corners at about 0.95 and 1.84 km: **partly**:
+  it names 0.9 km (13 km/h) and two others by SD (3.3 and 2.7 km); 1.84 km (9 km/h) is
+  the fourth and is left out.
+- No shift tip outranks a corner tip on a run whose corner loss exceeds 1 s: **met**
+  (the order per car is corner tips first; the Fabia's shift tip, 0.4 s, comes after
+  corners of 1.1 and 0.8 s).
+- No sentence contains "trust", "never", "always", "that is how" or "you are not sure":
+  **met** (all tips of the four cars, "show all", and the strings of `coach.py`,
+  `tuning.py` and `shift_learner.py` by `test_nothing_the_coach_says_claims_to_know_the_drivers_mind`).
+
+**Did not fire on the captures** (so only the unit tests exercise them): `throttle.late`,
+`pedal.exit`, `coast.entry`, `limiter.held:<stage>:<d>` (no held straight), `launch.cut`
+(at most 0.49 s once, 3 of 5 never) and the "five costliest corners steady" praise.
+
+**Deferred.** Pace-note names for corners (ClickUp 86e3faftn); `throttle_t` to full and
+`relifts` as tips (and the all-wheel-drive-on-tarmac reading of `throttle_t`); the
+counter-steer tip against the best run and the catch signature; a per-car `slip_rpm`
+zero; a weather and tune check for the reference (`runs.wet` only); the section
+matching can pair two different lines through one corner (the Fabia's 1.0 km), which a
+look at the traces would settle; the `corner.loss` metric still includes the start's
+section; a launch that the game ran (the 208's) is not told from the driver's by the
+clutch channel alone.
