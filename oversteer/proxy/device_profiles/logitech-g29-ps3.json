@@ -7,15 +7,14 @@
   "bustype": "usb",
   "phys": "^usb-.*/input0$",
   "kind": "wheel",
-  "verified": false,
+  "verified": true,
   "anti_cheat_class": "unknown",
-  "notes": "PS3 mode (046d:c24f). Capture is the real device on marth's rig via sysfs; abs ranges not captured, so verified stays false until a full capture. Auto-detected by Assetto Corsa Rally on marth's rig; other titles not checked here.",
+  "notes": "PS3 mode (046d:c24f). Capture is the real device on marth's rig via sysfs; Auto-detected by Assetto Corsa Rally on marth's rig; other titles not checked here.",
   "capture": {
     "date": "2026-10-05",
     "source": "marth's rig",
-    "method": "sysfs capability bitmaps (device node is root-only/hidden by the proxy udev rule)",
-    "complete": false,
-    "missing": "abs min/max/fuzz/flat/resolution"
+    "method": "keys from sysfs; axis ranges and FF effects read (read-only, no grab) from the combined device, which mirrors the wheel's own axes under new-lg4ff",
+    "complete": true
   },
   "capabilities": {
     "keys": [
@@ -46,12 +45,42 @@
       "BTN_TRIGGER_HAPPY9"
     ],
     "abs": {
-      "ABS_X": {},
-      "ABS_Y": {},
-      "ABS_Z": {},
-      "ABS_RZ": {},
-      "ABS_HAT0X": {},
-      "ABS_HAT0Y": {}
+      "ABS_X": {
+        "min": 0,
+        "max": 65535,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_Y": {
+        "min": 0,
+        "max": 255,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_Z": {
+        "min": 0,
+        "max": 255,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_RZ": {
+        "min": 0,
+        "max": 255,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_HAT0X": {
+        "min": -1,
+        "max": 1,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_HAT0Y": {
+        "min": -1,
+        "max": 1,
+        "fuzz": 0,
+        "flat": 0
+      }
     },
     "ff": [
       "FF_RUMBLE",

@@ -48,7 +48,7 @@ class DeviceProfileTest(unittest.TestCase):
         bad(kind='toaster')
         bad(vendor='zzzz')
         bad(verified='yes')
-        bad(verified=True)                       # incomplete capture
+        bad(verified=True, capture=dict(self._base()['capture'], complete=False))   # incomplete capture
         bad(surprise=1)
         bad(capabilities={'keys': ['BTN_NOPE']})
         bad(capabilities={'abs': {'ABS_X': {'min': 5}}})
