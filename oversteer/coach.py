@@ -555,6 +555,7 @@ HELD_NEAR = 100.0                # m: episodes this close are one place
 HELD_GAIN = 0.1                  # s the reference must have been quicker to the next braking for a held straight
 LAUNCH_CUT = 0.3                 # s on the limiter in the launch gear: a late change
 LAUNCH_CUTS = 3                  # of the last five launches
+LAUNCH_GAME = 0.02               # s: five launches within this of each other are the game's launch, not a driver's (they never repeat to a hundredth)
 LAUNCH_STEADY = 0.1              # s: the last five launches within this of each other and of the best: praise
 LAUNCH_OUT = ('wrcg',)           # games whose speed channel is not checked: no launch rules
 ATTITUDE_OUT = ('wrcg',)         # games whose steer and yaw signals are not checked: no spin or stall coaching
@@ -580,12 +581,13 @@ class Tip:
     with, kept quiet), 'note' (what the coach is waiting for). `value` is the
     metric behind it, kept in coach_state to tell when it got worse."""
 
-    __slots__ = ('id', 'kind', 'text', 'evidence', 'value', 'cost', 'count', 'ref')
+    __slots__ = ('id', 'kind', 'text', 'evidence', 'value', 'cost', 'count', 'ref', 'rough')
 
-    def __init__(self, id, kind, text, evidence=None, value=None, cost=0.0, count=0, ref=False):
+    def __init__(self, id, kind, text, evidence=None, value=None, cost=0.0, count=0, ref=False, rough=False):
         self.id, self.kind, self.text = id, kind, text
         self.evidence, self.value, self.cost, self.count = list(evidence or []), value, cost, count
         self.ref = ref                   # `cost` is seconds a stage worked out from a run (not a rough constant)
+        self.rough = rough               # `cost` is a rough constant: shown only where no tip has a reference
 
     def to_dict(self):
         return {'id': self.id, 'kind': self.kind, 'text': self.text, 'evidence': list(self.evidence),
@@ -1080,13 +1082,15 @@ class Coach:
                                       'under {:.1f} g over its first half second, or took over half a second longer '
                                       'than usual to 50 km/h. Let the clutch out more gradually, or hold more '
                                       'revs.'.format(bogged, len(last), coach_context.LAUNCH_G),
-                                      value=bogged / len(last), cost=bogged / len(last) * 0.5, count=len(last)))
+                                      value=bogged / len(last), cost=bogged / len(last) * 0.5, count=len(last),
+                                      rough=True))
         last = sorted(launch_rows('launch.stall'), key=lambda r: -r['started'])[:5]
         stalled = sum(1 for r in last if r['value'] >= 1.0)
         if stalled >= 2:
             candidates.append(Tip('launch.stall', 'tip', 'You stalled {} of your last {} launches: more revs, and '
                                   'the clutch out more gently.'.format(stalled, len(last)),
-                                  value=stalled / len(last), cost=stalled * 1.0, count=len(last)))
+                                  value=stalled / len(last), cost=stalled * 1.0, count=len(last),
+                                      rough=True))
         went = growth(launch_rows('launch.t50'), 5)
         if went is not None and went[1] <= went[0] * 0.9:
             before, after, n, when = went
@@ -1107,6 +1111,8 @@ class Coach:
             group.sort(key=lambda r: -r['started'])
             values = [r['value'] for r in group[:5]]
             best = min(r['value'] for r in group)
+            if len(values) == 5 and max(values) - min(values) < LAUNCH_GAME:
+                continue                    # human launches do not repeat within 20 ms: the game's own launch
             if len(values) == 5 and max(values) - min(values) <= LAUNCH_STEADY and min(values) - best <= LAUNCH_STEADY:
                 praise.append(Tip('launch.steady:' + surface, 'praise',
                                   'Your last 5 launches on {} took {:.2f} to {:.2f} s to 50 km/h, within a tenth of '
@@ -1124,7 +1130,7 @@ class Coach:
                                       '{:.1f} s: change up as the cut comes in.'.format(
                                           len(late), len(last), surface, mean),
                                       ['{} launches on {}.'.format(len(group), surface)], len(late) / len(last),
-                                      cost=mean * len(late) / len(last) * COST_LAUNCH_CUT, count=len(last)))
+                                      cost=mean * len(late) / len(last) * COST_LAUNCH_CUT, count=len(last), rough=True))
 
     def _stage_tips(self, rows, candidates, praise, placed=(), model=None):
         """What only the same stage can say that the sections do not (_place_tips, which has the
@@ -1156,7 +1162,7 @@ class Coach:
                 candidates.append(Tip('pedal.drag:' + stage, 'tip', 'On {} you were on both pedals on the straights: '
                                       'come off the brake before the throttle goes down.'.format(name),
                                       ['{:.1f} s per km over {} runs.'.format(found[0], found[2])],
-                                      value=found[0], cost=found[0] * 2, count=found[1]))
+                                      value=found[0], cost=found[0] * 2, count=found[1], rough=True))
             steady = sorted((r for r in stage_rows if r['name'] == 'consistency.split_sd'),
                             key=lambda r: -r['started'])
             if len(steady) >= 4 and steady[0]['value'] <= 0.7 * max(r['value'] for r in steady[1:]):
@@ -1400,7 +1406,7 @@ class Coach:
                       'throttle on sooner.')
             candidates.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'tip',
                                   'On {}, {}. {}'.format(name, what, action),
-                                  [], 1.0, cost=COST_SPIN if e['kind'] == 'spin' else COST_STALL, count=1))
+                                  [], 1.0, cost=COST_SPIN if e['kind'] == 'spin' else COST_STALL, count=1, rough=True))
 
     def _spread(self, stage, name, run, events, sections, report, candidates, praise):
         """R7: the speed through the same section from run to run (corner.spread events). A section that
@@ -1442,7 +1448,8 @@ class Coach:
                                   ['{:.0f} to {:.0f} km/h through {}.'.format(
                                       e['detail']['min'] * 3.6, e['detail']['max'] * 3.6, coach_context.section_name(sec))
                                    for _, e, sec in top],
-                                  top[0][0], cost=sum(sd for sd, _, _ in top) * COST_SPREAD, count=len(top)))
+                                  top[0][0], cost=sum(sd for sd, _, _ in top) * COST_SPREAD, count=len(top),
+                                  rough=True))
         # The five costliest sections: by what the run lost or gained in them where it is known
         scored = []
         for e in spreads:
@@ -1612,7 +1619,11 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
     floor = BUDGET * costliest
 
     def worth(tip):
-        return show_all or not costliest or tip.cost >= floor
+        if show_all:
+            return True
+        if tip.rough and costliest:
+            return False                 # a rough constant is not weighed against seconds from a reference run
+        return not costliest or tip.cost >= floor
 
     focus = ranked[0] if ranked and ranked[0].kind == 'focus' and worth(ranked[0]) else None
     if focus is not None:

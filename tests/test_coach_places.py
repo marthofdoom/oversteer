@@ -469,6 +469,9 @@ def test_launches_that_repeat_are_praised_and_the_games_own_are_not(tmp_path):
     assert praise.kind == 'praise' and praise.id == 'launch.steady:gravel'
     assert praise.text == ('Your last 5 launches on gravel took 1.83 to 1.90 s to 50 km/h, within a tenth of your best '
                            '(1.83 s).')
+    h = Stage(tmp_path / 'g.db')                                         # to a hundredth: the game's launch, not praised
+    launches(h, [3.37, 3.38, 3.37, 3.38, 3.37])
+    assert not [t for t in h.tips() if t.id.startswith('launch.steady')]
     h = Stage(tmp_path / 'u.db')                                         # a tenth apart is not the same launch
     launches(h, [1.90, 1.83, 1.85, 1.84, 2.1])
     assert not [t for t in h.tips() if t.id.startswith('launch.steady')]
@@ -662,3 +665,16 @@ def test_the_last_section_of_a_run_that_did_not_finish_is_never_named(tmp_path):
             course=1500.0)
     named = [t.id for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert named == ['corner.section:{}:600'.format(STAGE_KEY)]
+
+
+def test_a_rough_cost_is_not_weighed_against_seconds_from_a_reference_run():
+    rough = Tip('corner.spin:x:1', 'tip', 'spun', value=1.0, cost=2.0, count=1, rough=True)
+    placed = candidate('corner.section:x:1', cost=0.5)
+    out = select([rough, placed], [], [], {}, 100.0)
+    assert [t.id for t in out if t.kind == 'tip'] == ['corner.section:x:1']
+    assert [(t.id, t.kind) for t in out if t.kind == 'still'] == [('corner.spin:x:1', 'still')]    # the quiet lines
+    out = select([rough, placed], [], [], {}, 100.0, show_all=True)
+    assert [t.id for t in out] == ['corner.spin:x:1', 'corner.section:x:1']
+    # with nothing that has a reference, the rough one leads
+    out = select([rough], [], [], {}, 100.0)
+    assert [t.id for t in out] == ['corner.spin:x:1']
