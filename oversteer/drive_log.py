@@ -717,6 +717,25 @@ BACKFILL_KEEP = ('launch.t50', 'launch.stall', 'launch.slip')
 BACKFILL_FAILED = 'unclassified'
 
 
+def repair_shipped(store):
+    """What the game's shipped data says beats what an older run or version
+    wrote: the discipline of every run on a stage the table knows (a profile
+    word or a shape said 'rally stage' of the Livigno circuit), once at
+    start. Returns the number of runs changed."""
+    changed = 0
+    for stage in store.stage_keys():
+        found = drive_detect.table_discipline(stage)
+        if found:
+            try:
+                changed += store.set_stage_discipline(stage, found, [
+                    'The stage table says {}: {}.'.format(found.replace('-', ' '), stage)])
+            except Exception:
+                logging.exception("drive log: stage table discipline of %s", stage)
+    if changed:
+        store.commit()
+    return changed
+
+
 def backfill_step(learner, limit=3):
     """Work the oldest runs from before the context layer over again (their
     corners, events, class and metrics), at most `limit` of them: runs with a
@@ -728,6 +747,9 @@ def backfill_step(learner, limit=3):
     the app next starts."""
     store = learner.log.store
     failed = learner.__dict__.setdefault('_backfill_failed', set())
+    if not learner.__dict__.get('_repaired'):
+        learner._repaired = True
+        repair_shipped(store)
     done = 0
     for run in store.runs_to_backfill(limit + len(failed)):
         if run in failed:

@@ -76,6 +76,27 @@ def test_an_acr_stage_in_the_table_is_a_rally_stage_and_livigno_a_circuit():
     assert drive_detect.classify_discipline({'game': 'acr', 'stage': None}, [], TRACE_CHANNELS).confidence != 'game'
 
 
+def test_the_start_repairs_runs_whose_discipline_the_stage_table_knows(tmp_path):
+    from oversteer.drive_log import backfill_step
+    learner, reader = drive_stages(tmp_path, (30.0, 30.0))
+    store = learner.log.store
+    store.upsert_stage('acr:livigno-circuit:main-circuit', 'acr')
+    store.upsert_stage('acr:wales:afon-bidno-severn', 'acr')
+    runs = [r[0] for r in reader.db.execute('SELECT id FROM runs ORDER BY id')]
+    for run, stage, found, conf in ((runs[0], 'acr:livigno-circuit:main-circuit', 'rally-stage', 'low'),
+                                    (runs[1], 'acr:wales:afon-bidno-severn', 'unknown', None)):
+        store.update_run(run, stage=stage, discipline=found, discipline_conf=conf)
+    store.set_stage_prior('acr:livigno-circuit:main-circuit', 'discipline', 'rally-stage', 'learnt')
+    store.commit()
+    backfill_step(learner, 1)
+    rows = reader.db.execute('SELECT discipline, discipline_conf FROM runs ORDER BY id').fetchall()
+    assert rows == [('circuit', 'game'), ('rally-stage', 'game')]
+    assert store.stage('acr:livigno-circuit:main-circuit')['discipline_prior'] == 'circuit'
+    session = reader.db.execute('SELECT discipline FROM sessions').fetchall()
+    assert session and session[0][0] in ('circuit', 'rally-stage')
+    learner.close()
+
+
 # -- what a run writes --
 
 def drive_stages(tmp_path, tops, clutch=None):

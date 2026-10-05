@@ -1336,6 +1336,29 @@ class Store(Reader):
         self._do('DELETE FROM metrics WHERE run = ?{}'.format(' AND name NOT IN ({})'.format(marks) if keep_metrics else ''),
                  (run,) + tuple(keep_metrics))
 
+    def stage_keys(self):
+        """The stage keys any run was on."""
+        return [r[0] for r in self._rows('SELECT DISTINCT stage FROM runs WHERE stage IS NOT NULL')]
+
+    def set_stage_discipline(self, stage, value, evidence):
+        """The stage table's word on the discipline of every run on `stage`
+        that does not already say it from the game: the runs' verdict, their
+        metrics' tag, the learnt stage prior and the sessions' summaries.
+        Returns the number of runs changed."""
+        runs = [r[0] for r in self._rows(
+            'SELECT id FROM runs WHERE stage = ? AND (discipline IS NOT ? OR discipline_conf IS NOT ?)',
+            (stage, value, 'game'))]
+        for run in runs:
+            self._do('UPDATE runs SET discipline = ?, discipline_conf = ?, discipline_evidence = ? WHERE id = ?',
+                     (value, 'game', json.dumps(evidence), run))
+            self._do('UPDATE metrics SET discipline = ? WHERE run = ?', (value, run))
+        if runs:
+            self._do('UPDATE stages SET discipline_prior = ? WHERE key = ? AND discipline_prior_source = ? '
+                     'AND discipline_prior IS NOT ?', (value, stage, 'learnt', value))
+            for (session,) in self._rows('SELECT DISTINCT session FROM runs WHERE stage = ?', (stage,)):
+                self.summarise_session(session)
+        return len(runs)
+
     def update_run(self, run, **fields):
         """Set columns of a run (unlike end_run, counts nothing)."""
         names = sorted(fields)
