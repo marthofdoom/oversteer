@@ -1259,3 +1259,679 @@ These apply to every later stage (audit, design, oversight, build):
 3. **Technique-aware, as the owner's original note says** (ClickUp
    86e3jeaye): e.g. the limiter between corners on gravel is often right,
    not a fault.
+
+## 7. Design: a technique-aware coach (2026-10-05)
+
+This section turns the catalogue (§2-§5) and the audit of 2026-10-05 into
+a design. The audit replayed the fifteen captures through the current code
+and also ran the coach on a copy of marth's live database. Of the 22
+distinct things the coach says about the three ACR cars, 1 was fair, 5
+were right in direction but had the wrong target, 9 were wrong and 7 could
+not be judged. About half of the wrong ones misread technique (the
+limiter, launches, coasting, left-foot braking). The other half come from
+errors in the numbers before any rule reads them: corner windows that
+overlap, a "best run" that is a 300 m restart or a different car, a stage
+timed to the moment the car was parked after the finish. The design
+therefore puts a **context layer** between the trace and the rules. The
+layer classifies every event before a rule judges it, and stores the
+class with the event. Each rule then reads the class and the gates
+(surface, discipline, car) and does one of four things: correct, praise,
+describe, or stay silent.
+
+Every number marked **calibrate** is a starting value. Where it comes
+from marth's captures, the evidence is given.
+
+### 7.1 What the data supports (ACR first)
+
+What can be built now on Assetto Corsa Rally, and what cannot:
+
+- **Have:** the 10 Hz trace with speed, rpm, gear, throttle, brake, steer,
+  a_long, a_lat, yaw rate and distance; corners from yaw; shift rows; the
+  stage from the table, with its surface and `surface_parts`; finished
+  and result time; the game's car data (limiter, `shift_lights_rpm`,
+  `auto_upshift_rpm`, gear sets, drivetrain, turbo).
+- **Do not have:**
+  - Wheel slip: `slip_drive` is NaN on nearly every ACR row.
+  - The game's handbrake, and the rig's handbrake in captures.
+  - The shifter method in replays. Live data has it; marth's live
+    database is all "sequential".
+  - Position in older captures.
+  - Pace-note lists. The table has only the first and last note, and
+    those are in the track spline's coordinates ([ClickUp 86e3faftn]).
+  - Per-segment surface: `segments.surface` is filled only where a
+    calibration is deployed.
+  - The suspension sign and zero, which are unverified.
+- **So:**
+  - Everything below runs on the channels in "Have".
+  - Rules that need slip, the handbrake, the method or a per-segment
+    surface are written with their gate closed. They stay silent and say
+    once why.
+  - Corners are named by distance, direction and tightness until the note
+    lists exist.
+  - WRC Generations is excluded from launch and attitude rules until its
+    speed and steer signals are checked (§6).
+
+### 7.2 The context layer: a new module `oversteer/coach_context.py`
+
+The new module holds pure functions over (summary, trace, corners,
+shifts, car data). Its results are written at run end on the drive-log
+thread, next to the run's metrics. `coach.py` keeps only the rules.
+Nothing in the module reads the database except the reference lookup,
+which takes the store as an argument, the way `stage_metrics` does.
+
+#### 7.2.1 Run class and reference
+
+- **Finish cut.** Store the finish distance on the run, `runs.course`
+  (the tracker's `_finish_d` from the summary's `course`). Every
+  per-stage comparison uses `stage_rows(trace, course)`: the rows up to
+  the first row at or past `course`, and for a finished run no row past
+  `result_time` + 1 s. This fixes the 68.6 s split of run 45, which
+  carried 1377 s of standing after the finish.
+- **Incidents.** An incident is a stretch where the speed is under 3 m/s
+  for at least 1 s. It must start past the first 100 m and end before
+  the last 50 m (**calibrate**). It is an **off** when one of these holds:
+  - reverse gear is engaged in it;
+  - the speed fell from above 15 m/s within the 3 s before it;
+  - the speed drops more than 40 % in 1 s with the brake under 0.3.
+
+  Otherwise it is a **stop**. In the replay, 34 such stretches turn up in
+  15 runs, most of them with reverse or from more than 20 m/s, including
+  run 7 at 2.1 km. Each incident goes in `events`, kind `off` or `stop`.
+  The corners within ±100 m of an incident are marked `corners.off = 1`.
+- **Run class** (`runs.run_class`):
+  - `restart`: not finished and under 50 % of the stage.
+  - `partial`: not finished, 50 % or more.
+  - `off`: finished with at least one off.
+  - `learning`: the first run of this car on this stage, or the first
+    after 7 days away (**calibrate**).
+  - `clean`: everything else.
+
+  The class decides what a run counts towards:
+
+  | Run class | Reference run | Section best | Coaching tips | Launch | Coasting/overlap per km | Stuck time in limiter |
+  |---|---|---|---|---|---|---|
+  | clean | yes | yes | yes | yes | yes | n/a |
+  | learning | yes, once it is the best | yes | describe only | yes | yes | n/a |
+  | off | no | sections away from the off | sections before the off, plus "off at 2.1 km" | yes | excluding ±100 m of the off | dropped |
+  | partial / restart | no | sections it covers cleanly | the sections it covers | yes, unless restarted within 10 s of the start | no | dropped |
+
+- **Reference run.** The reference is the fastest finished run of the
+  same car (the same `cars.id`) on the same stage, with run class `clean`
+  or `learning`. `Store.stage_runs` gains `car` and `run_class` filters.
+  This removes the Peugeot being compared with the Fabia's run 7, and the
+  "best" of 0 s/km coasting that came from a 220 m restart. Tips name the
+  reference: "your best run here in the Fabia (227.6 s on 3 Oct)".
+
+#### 7.2.2 Corner sections, complexes and names
+
+- **Sections.** `find_corners` already finds each corner's yaw window
+  (rows i..j). It also stores the window's ends, `corners.d0` and
+  `corners.d1`. The stage is cut into non-overlapping **sections**: a
+  section runs from the midpoint between the previous corner's `d1` and
+  this corner's `d0`, to the midpoint before the next corner. Section
+  times add up to the run's time, so nothing is counted twice. This
+  replaces the ±50 m windows that counted run 7's off three times. On
+  gravel the median gap between corners is 41 m, so the old windows
+  overlapped nearly everywhere, offs or not.
+- **Complexes.** Corners less than 30 m apart (**calibrate**) are joined
+  into one complex and one section. On the replay this turns 1170 corners
+  into 732 sections. With 20 m it gives 801; with 50 m, 585. The complex
+  keeps the corners' directions for its name ("the left-right").
+- **Names.** Tightness comes from the heading change:
+  - **hairpin**: 135° or more;
+  - **square**: 75° to 135°;
+  - **medium**: 40° to 75°;
+  - **fast**: under 40° with a minimum speed above 20 m/s.
+
+  Thresholds are **calibrate**. A corner is named "the square left at
+  1.8 km". A complex is named "the left-right at 2.1 km". When the
+  pace-note lists arrive, the call replaces tightness: "the 3 left after
+  the jump".
+- **Phases per section**, from this run's trace:
+  - **approach**: from the section start to the brake onset, or to `d0`;
+  - **entry**: from the brake onset or `d0` to the slowest point;
+  - **exit**: from the slowest point until the throttle is above 0.95
+    with |yaw| under 0.1, or the section end.
+
+  Stored per corner as new `corners` columns:
+  - `brake_d`: metres before the slowest point where the last brake
+    onset above 0.1 began;
+  - `throttle_t`: seconds from the slowest point to throttle at or above
+    0.95 (negative means before it);
+  - `relifts`: throttle drops of more than 0.3 in the exit;
+  - `coast_entry` and `coast_exit`: seconds with both pedals under 0.05
+    above 10 m/s;
+  - `overlap_entry` and `overlap_exit`: seconds with both pedals above
+    0.2;
+  - `section_t`: seconds through the section.
+
+  `min_speed` and `exit_speed` are already stored. The trace allows all
+  of this at 10 Hz.
+- **Loss per section** is this run's `section_t` minus the reference's
+  time over the same distances. It is split at this run's slowest point
+  into `loss_entry` and `loss_exit`. The **section best** is the quickest
+  time through the section by any run of the car that covers it with no
+  off within ±100 m, partial runs included. The sum of the section bests
+  is the "possible" time for the stage. These are worked out at run end
+  and stored as `corners.loss_entry`, `corners.loss_exit` and
+  `corners.best_t` (the section best at that time). The cost is one
+  reference trace and a lookup of the section bests.
+
+#### 7.2.3 Events
+
+There is a new `events` table: (`run`, `kind`, `class`, `d0`, `d1`, `t0`,
+`t1`, `gear`, `value`, `detail` JSON). Kinds are `limiter`, `off`, `stop`
+and `launch`. Shift rows gain `d`, the distance at the change, and
+`flags` gains `cut` and `launch` (below). One table holds every located
+event, so the coach and the web page can say where something happened
+without reading a trace.
+
+### 7.3 Rules: classifier, gates, what is said
+
+#### R1. Change-up target: the game's lights band, judged as a distribution
+
+**Classifier.** Each flat-out change up by one is one of these:
+
+- `early`: below the band's low end minus 100 rpm.
+- `on`: inside the band, ±100 rpm.
+- `late`: above the band but under the cut.
+- `cut`: the peak in the last 0.3 s is at or above 0.985 × limiter, or a
+  limiter episode ended in this change. Flag `cut`.
+- `launch`: the 1→2 within 3 s of a launch. This change belongs to R3,
+  not here. Flag `launch`.
+
+**The band.**
+
+- **Low end:** the game's `shift_lights_rpm.shift`. If the gear is
+  grip-limited on the surface, the low end is the grip-lowered best,
+  under two conditions (**calibrate**):
+  - the grip comes from 6 or more pulls;
+  - the measured share is plausible: 1.0 or less, and the lowering is
+    never applied to 3rd or higher on tarmac.
+- **High end:** the smaller of `shift_lights_rpm.late` and the limiter
+  minus a margin. The margin is 150 rpm on a sequential and 300 on an
+  H-pattern (**calibrate**).
+- **Without lights:** where the game ships no lights, the band runs from
+  the crossover (`best_for`) to the limiter minus the margin.
+
+The torque crossover stays as the explanation ("4th pulls 6 % less at
+6470") and is never the target. The lights do not depend on the gearing,
+so the 208, whose gearing is set aside, gets a band of 6000 to 6150.
+The Fabia's band is 6900 to 7100 and the i20N's is 7000 to 7250.
+
+**Stored as:**
+
+- `shifts.best_low` and `shifts.best_high` hold the band. They already
+  mean "the target range"; this is documented.
+- `shifts.best` keeps the crossover for the drive lost.
+- New metrics per gear and method: `shift.early_share` and
+  `shift.cut_share`. `shift.in_band` keeps its name and moves to the
+  band. `shift.error`, the mean, goes.
+
+**Gates and decisions** (per car, surface, gear and method; 5 or more
+changes):
+
+| Pattern (**calibrate**) | Tarmac | Gravel, snow, ice, mixed |
+|---|---|---|
+| cut share at least 25 % | tip | tip |
+| early share at least 60 % | tip, with the drive lost | 1st and 2nd: silent (short-shifting is technique). 3rd and up: tip only when the gear is measured *not* grip-limited by the plausible-grip rule above; otherwise a note, once |
+| early at least 30 % and cut at least 25 % ("two places") | tip | tip |
+| on share at least 60 % and cut share at most 10 % | praise | praise |
+
+What the audit's cases become:
+
+- **Fabia gravel 3→4** (80 % early): tip, target 6900-7100, provided
+  the gear is measured not grip-limited. Otherwise a once-only note.
+- **Fabia 2→3** (50 % early, 28 % cut): the two-places tip.
+- **Fabia 1→2** (68 % cut): mostly launch changes, so R3 takes them.
+  The non-launch rest is judged on its own.
+- **208 tarmac 1→2** (100 % cut) and **2→3** (36 %): cut tips. Today
+  they are missed.
+
+`advice()` in `shift_learner.py` takes the same band and shares. "Spot
+on" needs the praise row of the table. The live line "N s on the limiter
+this session" uses R2's `held-straight` seconds only.
+
+#### R2. Limiter episodes classified by what follows
+
+**Episode.** Rows with rpm at or above 0.985 × limiter, throttle at or
+above 0.95, the same gear, and the gear below top. When the game sends no
+gear count, the top gear comes from the shipped gear set; this also lets
+the final-drive notes run on ACR.
+
+**Limiter figure.** Keep the game's figure when a launch measured within
+2 % of it, because a launch overshoots the cut. This removes the WRCG
+"7460 threshold" and the "hold it to 7577" in the live database.
+
+**Classes:**
+
+| Class | Rule (**calibrate**) | Replay count (episodes at or above 8 m/s: 50) | Coach |
+|---|---|---|---|
+| `crawl` | mean speed under 8 m/s | 28 episodes, 8.5 s | never; it feeds the off/stuck test |
+| `shift` | ended by a change up within 1.0 s | 31; touch length p90 0.2 s | R1 (`cut` flag) |
+| `up-down` | change up, then down within 4 s | 8 | describe only (it is the alternative to holding) |
+| `held-corner` | ended by brake above 0.2 or a change down, or inside a corner, or the next section's `d0` within 100 m or 3 s | 11, the longest 1.8 s / 30 m on gravel with the next corner 29 m on | silent on loose surfaces and in hairpin complexes on tarmac; when it recurs at the same place in at least 3 of 5 runs and exceeds 1 s, a gearing description: "3rd is short for the run from 2.0 to 2.1 km; holding it there is right" |
+| `held-straight` | 1.5 s or more, or 80 m or more on the cut, with no change up within 1 s and the next corner more than 100 m away | 0 | tip, only when the reference run was at least 0.1 s quicker from the episode's start to the next brake onset, or was in a higher gear there |
+
+**Stored as:** `events` (kind `limiter`). The metric
+`limiter.per_km` is renamed `limiter.held`: seconds of `held-straight`
+per km, a different quantity under a new name. The current
+`LIMITER_PER_KM` threshold applies to it.
+
+On marth's captures this rule says nothing, which is the right answer.
+The owner's complaint about the limiter between corners becomes, by
+construction, the silent `held-corner` class.
+
+#### R3. Launch judged by outcome
+
+**Classifier.**
+
+- **Revs** are read only while in 1st, from the release to the first
+  change.
+- **`launch.g`** (new metric) is the mean a_long over the first 0.5 s of
+  the trace in 1st. ACR's trace starts at 3 m/s, so this is the first
+  half second it holds.
+- **Bog:** `launch.g` under 0.3 g, or `launch.t50` more than 0.5 s over
+  the median of this car's last 10 launches on this surface. The rev drop
+  alone is never a bog (**calibrate**).
+- **Stall:** as today.
+- **Game-controlled:** when the SD of `launch.t50` over 5 or more
+  launches of a car on a surface is under 0.05 s, the game is taken to
+  run the launch (the 208's 3.36-3.39 s). Neither tips nor praise.
+- **Restart within 10 s of the start:** the launch is dropped; the
+  driver aborted it.
+
+**Stored as:** `events` (kind `launch`), with `detail` holding release
+rpm, the 1st-gear minimum and t50. The launch 1→2 is flagged `launch`
+in `shifts`.
+
+**Gates.** Every surface and drivetrain. WRCG is excluded until its speed
+channel is checked.
+
+**Praise:** the last 5 launches within 0.1 s of each other and within
+0.1 s of the car's best on the surface. For example, all 25 i20N launches
+took 1.83 to 1.94 s. A cut held in 1st after the release for more than
+0.3 s (**calibrate**) is a tip: "change to 2nd as the cut comes in".
+
+#### R4. Pedal overlap by phase
+
+**Classifier.** The `overlap_entry` and `overlap_exit` corner columns
+from §7.2.2. A **straight overlap** is overlap more than 100 m from any
+section's corner. The 0.4 s around every H-pattern change down is left
+out (the blip).
+
+**Metrics:** `pedal.overlap_entry` and `pedal.overlap_exit` (share of the
+phase's time) and `pedal.drag` (seconds per km on straights).
+`pedal.overlap` goes.
+
+**Gates:**
+
+- On loose surfaces, entry overlap is technique, and so is entry overlap
+  on tarmac in a turbo or FWD car. It earns a description or praise once
+  per car and surface: "You left-foot brake into 7 in 10 corners on
+  gravel: that is how a Rally2 is turned."
+- A tip needs one of two things, on tarmac or circuit only:
+  - **Exit overlap:** at least 3 corners in the run with overlap_exit
+    above 0.3 s whose `loss_exit` against the reference exceeds 0.1 s.
+    The tip names those corners.
+  - **Drag:** more than 0.5 s per km (**calibrate**).
+- The "last run lost 0.5 s" gate goes.
+- On the replay, exit overlap is 2-7 % of all overlap, so the tip will be
+  rare, and correct when it fires.
+
+#### R5. Coasting by phase
+
+**Classifier.** `coast_entry` and `coast_exit` per corner. Coasting on a
+straight more than 100 m from any corner counts as `coast_straight`.
+
+**Gates and coaching:**
+
+- **Entry coasting:**
+  - on loose surfaces it is the rotation, and is never a fault;
+  - on tarmac it is dead time between brake and throttle, coached per
+    corner against the reference when that corner's `loss_entry`
+    exceeds 0.1 s.
+- **Exit coasting and throttle-on time (`throttle_t`):** coached on every
+  surface when `throttle_t` is at least 0.3 s later than the reference's
+  in the same corner and `loss_exit` exceeds 0.1 s. Two or more such
+  corners are needed in the run.
+- **Straight coasting:** described only, until crests and jumps can be
+  told apart.
+
+**Metrics:** `pedal.coast_entry`, `pedal.coast_exit` and
+`pedal.coast_straight` (s/km). `pedal.coast` goes, and so do the
+"minimum over earlier runs" reference and the sentence "stay on one
+pedal or the other".
+
+#### R6. Corner loss named by place, phase and cause
+
+**Classifier.** Per section: `loss_entry` and `loss_exit` against the
+reference, plus causes:
+
+- `brake_d` against the reference: braked earlier or later;
+- `min_speed` against the reference;
+- `throttle_t` against the reference;
+- `exit_speed` against the reference.
+
+**Pattern names** (**calibrate**: 10 m, 3 km/h, 0.2 s):
+
+- **over-slowing:** braked earlier, lower minimum, slower exit;
+- **overdriven entry:** braked later or entered faster, slower exit;
+- **late throttle:** same minimum, `throttle_t` later, slower exit;
+- **the right gravel entry:** braked earlier, same minimum, faster exit.
+  This one is praise on loose surfaces.
+
+**Metric:** `corner.loss` is kept: the sum of the three worst sections,
+now non-overlapping, offs left out, same-car reference.
+
+**Gates:**
+
+- stage known;
+- a reference exists;
+- the run is not `learning`;
+- sections within ±100 m of an off are skipped and replaced by one line:
+  "off at 2.1 km".
+
+**Tip** (the costliest three sections):
+
+> "Afon Bidno, 4.4 s behind your best here in the Fabia (227.6 s). Most
+> of it in two places. The square left at 1.8 km, 0.6 s: you braked 25 m
+> earlier and were 7 km/h slower at the slowest point for the same exit.
+> Brake later and trust the note. The hairpin right at 3.2 km, 0.4 s: the
+> throttle came 0.4 s later than in your best run. Throttle as soon as the
+> nose points out."
+
+**Praise:**
+
+- a section where the run set the section best: "Your best yet through
+  the hairpin at 0.9 km";
+- the "possible" time against the best run, as motivation, once per
+  stage and car.
+
+#### R7. Consistency
+
+The split SD is worked out:
+
+- on `stage_rows` (cut at `course`);
+- over the same car's `clean` finished runs only;
+- with tenths of `course`, not of the trace's last distance.
+
+The praise sentence names the runs it compares.
+
+#### R8. Exit gear (tuning `_long_gears`)
+
+**Classifier.**
+
+- The gear and revs are read at throttle-on. The revs 1 s later are kept
+  only if the gear is unchanged.
+- A "low" exit is a **bog** only when a_long over that second is under
+  80 % of the median of this car's in-band exits on the same surface,
+  ±5 m/s of the same speed (**calibrate**).
+
+**Metric:** `exit.low` now counts bog exits only; the name stays and the
+meaning narrows.
+
+**Gates.**
+
+- On loose surfaces, and on FWD cars on any surface, the note needs 70 %
+  bog exits over 15 exits (**calibrate**).
+- Otherwise it needs 50 % over 10.
+- "Use n−1 there" is never said for 1st (wheelspin; ACR gives no slip to
+  check).
+
+#### R9. Balance and counter-steer (tuning)
+
+**Balance:**
+
+- The balance gradient is pooled per surface; this fixes the pooling
+  across surfaces at `tuning.py` line 153.
+- The absolute "the car understeers" note goes. Only `balance.change`
+  between tunes on the same surface remains, as the docstring of
+  `balance_gradient` always said.
+
+**Counter-steer:** the tuning rule reads only corners under 90° of
+heading change on tarmac, so hairpin technique (0.38) no longer counts
+as a balance problem.
+
+#### R10. Gearbox events and the method comparison
+
+- **H-pattern skip:** a change down is flagged `skip` only with the brake
+  under 0.1. With the brake on, it is a left-foot-braked block change
+  down, which is correct.
+- **Method comparison tip:** compares the same car, surface and gear,
+  with 10 or more changes each, against the R1 band rather than the mean
+  error.
+- **Clutch use on a sequential and rev-match quality:** later (§7.5);
+  the captures do not hold the rig.
+
+#### R11. Discipline, drivetrain and surface inputs
+
+- **Discipline:** a known ACR stage key becomes `rally-stage` with `game`
+  confidence. The two Livigno keys become `circuit`, through a new
+  `discipline` field in their `acr.json` entries. Surface comes before
+  discipline: Livigno is snow, so the loose rules apply.
+- **Drivetrain:** where the car data is shipped, the shipped drivetrain
+  wins over the learnt vote. This fixes the Fabia's stored `fwd`.
+- **Mixed stages:** coached as loose (today's `loose()`, the safe side)
+  until per-segment surface exists.
+
+### 7.4 Gates at a glance
+
+T: tip. P: praise. D: describe once. —: silent. "vs ref" means only where
+the reference run was quicker there.
+
+| Rule | Tarmac rally | Gravel, mixed rally | Snow, ice | Circuit (not snow) | Drift | Unknown discipline |
+|---|---|---|---|---|---|---|
+| R1 band: cut, two places | T | T | T | T | — | T |
+| R1 early | T | 3rd and up, with measured grip; else D | D | T | — | as surface |
+| R1 on the lights | P | P | P | P | — | P |
+| R2 held-corner | — (D when recurring) | — (D when recurring) | — | D | — | as surface |
+| R2 held-straight | T vs ref | T vs ref | T vs ref | T | — | T vs ref |
+| R3 launch (bog, cut in 1st, steady) | T/P | T/P | T/P | — | — | T/P |
+| R4 entry overlap | D/P (turbo or FWD), else — | D/P | D/P | T only on exit, non-turbo | — | as surface |
+| R4 exit overlap, drag | T vs ref | — | — | T vs ref | — | as surface |
+| R5 entry coast | T vs ref | — | — | T vs ref | — | as surface |
+| R5 exit coast, throttle-on | T vs ref | T vs ref | D | T vs ref | — | T vs ref |
+| R6 corner loss and causes | T/P | T/P (early braking may be P) | T/P | T/P | — | T/P |
+| Over-rev, stall, double tap (mechanical) | T | T | T | T | T | T |
+
+Car gates in every column:
+
+- **FWD:** entry overlap is technique; the exit-gear note uses the 70 %
+  threshold.
+- **Turbo:** entry overlap is technique on tarmac.
+- **Shipped car data:** the band comes from the lights.
+- **A drift profile** silences every family except the mechanical ones
+  (§3.3).
+
+### 7.5 Phrasing
+
+Every tip has four parts, in this order:
+
+1. **The observation, with its place:** "The square left at 1.8 km".
+2. **The number against the reference:** "you braked 25 m earlier than
+   in your best run here, 7 km/h slower at the slowest point".
+3. **Why it matters,** in time or drive: "0.6 s, for the same exit".
+4. **One action:** "brake at the same board and trust the note".
+
+Praise follows the same pattern: what was done, where, the number, and
+why it is right ("That is how a Rally2 is rotated on gravel"). It is
+earned: a number or a place, never filler.
+
+**Selection** (`select()`):
+
+- Up to 2 praise lines per view, where today there is 1.
+- When 2 or more tips show, at least one praise shows if any exists, so
+  that a view does not read as a list of faults (the owner's first
+  requirement).
+- A new kind, `technique`, holds descriptions of correct technique.
+  These are shown once, like notes, and come back only when the share
+  changes by 20 % or more.
+
+**Words that go:**
+
+- "Hold it to about <the limiter>";
+- "the best from the game's engine data" used as a target;
+- "stay on one pedal or the other";
+- an absolute "the car understeers";
+- "your best run" without naming which one;
+- per-km figures in the sentence. Per-km stays in the evidence line and
+  is used for ranking only.
+
+**Costs for ranking:** seconds lost against the reference, where a
+section or episode is known. The rough constants (`COST_*`) stay only
+for rules that have no reference.
+
+Tip ids change with the rules: `shift.band:*`, `limiter.held:*`,
+`corner.section:<stage>:<d>`. The old `coach_state` rows simply stop
+matching; nothing needs migrating.
+
+### 7.6 Missing aspects: now and later
+
+**Now (step 2), because ACR data supports them:**
+
+| Aspect (derivations id) | What |
+|---|---|
+| `corner.phases` (new; absorbs `brake.point` and `corner.speeds`) | brake point, minimum and exit speed, throttle-on time against the reference, per section |
+| `pedal.throttle_application` (planned → implemented, partial) | `throttle_t` and `relifts` per corner |
+| `context.incidents` (new) | offs, stops, restarts, run class |
+| `corner.loss` (reworked) | sections, complexes, names, section best, the "possible" time |
+| `engine.limiter` (reworked) | episodes and classes, `limiter.held` |
+| `launch.quality` (reworked) | `launch.g`, outcome-based bog, game-controlled gate |
+| `shift.upshift` (reworked) | the lights band, early and cut shares |
+
+**Later, because the data does not support them yet:**
+
+- **Pace-note context:** speed per grade, braking against the call. Needs
+  the note lists ([ClickUp 86e3faftn]).
+- **Jumps and crests:** needs the ACR suspension sign and a_vert checked.
+- **Lock-ups:** needs believable ACR wheel speeds.
+- **Handbrake per corner:** the rig handbrake is in live data only; it
+  can be built, but replays cannot test it.
+- **Clutch on a sequential and rev-match quality:** rig channels, live
+  only.
+- **Rotation timing and body slip:** needs the car-frame velocity
+  checked on ACR.
+- **Steering smoothness:** 10 Hz is coarse.
+- **Scandinavian flick and lift-off detection.**
+- **Turbo lag:** needs a per-car boost model.
+- **Per-segment surface on Elatia and Zeli:** needs a deployed ACR
+  surface calibration, or the table's split points.
+- **WRCG attitude rules:** need the steer sign verified.
+
+### 7.7 Build plan
+
+Each step follows the global model roles. The diff is written by the
+`sonnet-coder` agent from this section, except the tier-A part named
+below, which Opus writes. An Opus review comes before each commit.
+`python3 -m pytest -q tests` stays green throughout.
+
+**Step 1: classification, gates and rule fixes.**
+
+1. **Schema v3** (`telemetry_store.py`), additive. This part is tier A,
+   since it changes a persisted format, so Opus writes it. It adds:
+   - `runs.course` and `runs.run_class`;
+   - `corners.d0`, `d1`, `complex`, `tightness`, `brake_d`,
+     `throttle_t`, `relifts`, `coast_entry`, `coast_exit`,
+     `overlap_entry`, `overlap_exit`, `section_t`, `loss_entry`,
+     `loss_exit`, `best_t` and `off`;
+   - `shifts.d`;
+   - the `events` table and its index;
+   - `stage_runs(car=, run_class=)`.
+
+   The v2 → v3 migration is `ALTER TABLE ADD COLUMN` plus `CREATE
+   TABLE`, in one transaction, after the file is copied aside as v1 → v2
+   does. A backfill runs once on the drive-log thread. It goes over runs
+   with a stored trace and `run_class IS NULL`, oldest first, in batches,
+   and recomputes corners, events and metrics. Older metric rows of
+   renamed metrics are deleted for those runs.
+2. **`coach_context.py`:**
+   - `stage_rows`;
+   - `incidents`;
+   - `run_class`;
+   - `reference_run`;
+   - `sections`, which also builds complexes, names and phases;
+   - `section_loss`;
+   - `limiter_episodes`;
+   - `launch_outcome`;
+   - `shift_band` and `classify_shift`.
+
+   Unit tests use synthetic traces, one per class boundary.
+3. **Wiring.** `drive_log._write_end` and `_write_metrics` call the
+   context layer. `run_metrics` and `stage_metrics` get the new and
+   renamed metrics; the old definitions go. The data fixes are:
+   - the finish cut;
+   - the same-car reference;
+   - the fastest finished clean run as the reference;
+   - non-overlapping sections;
+   - incidents excluded from launches, coasting and loss;
+   - launch revs in 1st only;
+   - the game's limiter within 2 % of a launch figure;
+   - the top gear from the shipped gear set;
+   - the shipped drivetrain winning over the vote;
+   - ACR discipline from the stage table;
+   - balance per surface;
+   - the H-pattern skip needing the brake off.
+4. **Rule gates** in `coach.py`, `shift_learner.advice()` and
+   `tuning.py`, as in §7.3 and §7.4. Wrong sentences are removed and
+   their replacements are minimal in this step: the band numbers, no
+   limiter target. The new metrics go into `derivations.json` in the same
+   commit, because `test_every_metric_the_coach_writes_maps_to_an_aspect`
+   fails otherwise.
+5. **Quick replay** of the 15 captures into a scratch database, as a
+   sanity check: no crash, run classes plausible, sections counted.
+
+**Step 2: phrasing, new aspects, docs, replay check.**
+
+1. **Sentences.** The four-part templates of §7.5, place names, named
+   references, the `technique` kind, and the praise rules in `select()`.
+2. **New tips:** corner loss by place and cause (R6), late throttle (R5),
+   exit overlap and drag on tarmac (R4), `held-straight` (R2), launch
+   praise and the cut in 1st (R3), band praise and the two-places tip
+   (R1), section bests and the "possible" time.
+3. **Data and docs:**
+   - `derivations.json`: the aspects of §7.6 marked implemented or
+     partial, new metrics, `acr.coverage`;
+   - `docs/coaching-derivations.md` tables;
+   - `docs/telemetry-coaching.md` §9.1 (the metric table), §9.2
+     (phrasing, praise, selection) and §10 (the exit-gear and balance
+     rows);
+   - this document's §4 items marked done.
+4. **Replay check.** Replay all 15 captures with the scratch-database
+   pattern of the audit (`replay_audit.py`), then run the coach on the
+   copy of the live database. Pass criteria:
+   - None of the audit's nine wrong tips appears.
+   - The Fabia's gravel 3→4 tip targets 6900-7100, or is a once-only
+     grip note.
+   - The 208's tarmac 1→2 and 2→3 get cut tips.
+   - The i20N launches get praise; no Fabia launch is "bogged".
+   - Run 7 is class `off`, with "off at 2.1 km", and is not a reference.
+   - No coasting tip uses a restart as its reference.
+   - `limiter.held` is 0 on every ACR run.
+   - At least one praise line per car.
+
+   The result is recorded as a short appendix here. The captures are
+   private, so this is a script and not a test.
+
+### 7.8 Thresholds to calibrate
+
+Every value below was set from marth's ACR captures unless it says
+otherwise.
+
+| Constant | Start | Evidence |
+|---|---|---|
+| Limiter episode speed floor | 8 m/s | 28 crawl episodes (8.5 s) under it, all stuck or at the start |
+| `shift` class: change up within | 1.0 s | p90 of the touch before a change is 0.2 s, the maximum 0.39 s |
+| `held-corner`: next corner within | 100 m / 3 s | gravel corner gaps: median 41 m, 74 % under 100 m; tarmac median 92 m |
+| `held-straight`: on the cut for | 1.5 s / 80 m | none in the captures; the catalogue's rule of thumb |
+| Complex: corners closer than | 30 m | 1170 corners give 732 sections (801 at 20 m, 585 at 50 m) |
+| Incident: speed under / for | 3 m/s / 1 s | 34 mid-run stops in 15 runs, the offs with reverse or from more than 20 m/s |
+| Restart / partial split | 50 % of the stage | marth's Afon Bidno restarts end at 220-470 m or 0.9-3.0 km of 5.3 km; one at 4.7 km is a partial |
+| R1 cut share / early share / two places | 25 % / 60 % / 30 % + 25 % | Fabia 2→3: 50 % early, 28 % cut; 1→2: 68 % cut |
+| R1 sequential / H-pattern margin | 150 / 300 rpm | the catalogue; the lights give the band where shipped |
+| Grip lowering: pulls / plausible share | 6 / at most 1.0 | the audit's gravel shares over 1.0, and 4th on tarmac from one stage |
+| Launch bog g / t50 over median | 0.3 g / 0.5 s | AWD launches 0.6-0.84 g, 1.6-2.1 s |
+| Game-controlled launch SD | 0.05 s | 208: 3.36-3.39 s |
+| Exit bog: a_long share / exits (loose or FWD) | 80 % / 70 % of 15 | the audit: "low" 5th-gear exits pulled 0.27 g against 0.20 g in band |
+| Tightness bands | 135 / 75 / 40° | the catalogue's counter-steer bins |
+| Pattern deltas | 10 m, 3 km/h, 0.2 s | to set from the first reference comparisons |
