@@ -1,0 +1,12 @@
+{
+  "id": "thrustmaster-th8a",
+  "name": "Thrustmaster TH8A",
+  "vendor": "044f",
+  "product": "b65c",
+  "bustype": "usb",
+  "phys": ".*",
+  "kind": "shifter",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "VID/PID from equipment.KNOWN_SHIFTERS; name nominal, other fields not captured. 7 + R; sequential positions not verified."
+}

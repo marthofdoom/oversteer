@@ -1,0 +1,39 @@
+{
+  "id": "thrustmaster-t500rs-shifter",
+  "name": "Thustmaster T500 RS Gear Shift",
+  "vendor": "044f",
+  "product": "b660",
+  "version": "0111",
+  "bustype": "usb",
+  "phys": "^usb-.*/input0$",
+  "kind": "shifter",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "Name is spelled \"Thustmaster\" by the device firmware. 7 gears + R, then sequential down/up (see equipment.KNOWN_SHIFTERS). Capture via sysfs; abs ranges not captured.",
+  "capture": {
+    "date": "2026-10-05",
+    "source": "marth's rig",
+    "method": "sysfs capability bitmaps (device node is root-only/hidden by the proxy udev rule)",
+    "complete": false,
+    "missing": "abs min/max/fuzz/flat/resolution"
+  },
+  "capabilities": {
+    "keys": [
+      "BTN_TRIGGER",
+      "BTN_THUMB",
+      "BTN_THUMB2",
+      "BTN_TOP",
+      "BTN_TOP2",
+      "BTN_PINKIE",
+      "BTN_BASE",
+      "BTN_BASE2",
+      "BTN_BASE3",
+      "BTN_BASE4"
+    ],
+    "abs": {
+      "ABS_X": {},
+      "ABS_Y": {}
+    },
+    "ff": []
+  }
+}

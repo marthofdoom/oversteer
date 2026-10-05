@@ -1,0 +1,11 @@
+{
+  "id": "thrustmaster-tss-handbrake-sparco",
+  "name": "Thrustmaster TSS Handbrake Sparco Mod",
+  "vendor": "044f",
+  "bustype": "usb",
+  "phys": ".*",
+  "kind": "handbrake",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "Product ID not reliably documented here, left out. Nothing else captured."
+}

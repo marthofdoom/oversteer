@@ -1,0 +1,11 @@
+{
+  "id": "fanatec-clubsport-shifter",
+  "name": "Fanatec ClubSport Shifter",
+  "vendor": "0eb7",
+  "bustype": "usb",
+  "phys": ".*",
+  "kind": "shifter",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "Product ID not reliably documented here, left out. Nothing else captured."
+}
