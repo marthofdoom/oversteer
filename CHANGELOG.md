@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Hotkeys: hold a wheel button (or the keyboard shortcut) to repeat a
+  step: the first repeat after 0.4 s, then every 0.12 s, for the
+  strength, spring, damper and similar steps, the shift point and the
+  rotation range. It stops when you let go, at the control's limit (the
+  rev lights still show the level), when you start setting a button, or
+  when you switch device. Toggles and profile switches fire once.
 - Devices tab: a "Steam launch options for wheels under Proton" row with a
   Copy button: `SDL_JOYSTICK_HIDAPI=0 %command%` stops SDL from opening
   the hidden physical wheel and pedals behind the combined device. The

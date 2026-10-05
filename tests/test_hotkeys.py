@@ -95,3 +95,92 @@ def test_switch_state_display(tmp_path):
 def test_profile_switching_is_app_wide():
     assert set(hotkeys.GLOBAL_ACTIONS) <= set(hotkeys.BY_ID)
     assert all(hotkeys.BY_ID[a].kind == 'profile' for a in hotkeys.GLOBAL_ACTIONS)
+
+
+class FakeTimers:
+    """add_timeout/remove_timeout that run on demand instead of on a main loop."""
+
+    def __init__(self):
+        self.pending = {}
+        self.next = 1
+
+    def add(self, ms, callback):
+        handle = self.next
+        self.next += 1
+        self.pending[handle] = (ms, callback)
+        return handle
+
+    def remove(self, handle):
+        del self.pending[handle]
+
+    def fire(self):
+        """Fire the one pending timer; returns the delay it was set for."""
+        (handle, (ms, callback)), = self.pending.items()
+        del self.pending[handle]
+        callback()
+        return ms
+
+
+def _repeater(results):
+    timers = FakeTimers()
+    steps = []
+
+    def step(action_id):
+        steps.append(action_id)
+        return results.pop(0) if results else True
+    return hotkeys.Repeater(step, timers.add, timers.remove), timers, steps
+
+
+def test_hold_repeats_after_400_then_every_120():
+    repeater, timers, steps = _repeater([])
+    repeater.press('wheel:btn:300', 'ff_gain_up')
+    assert [ms for ms, _cb in timers.pending.values()] == [400]
+    assert timers.fire() == 400
+    assert timers.fire() == 120
+    assert timers.fire() == 120
+    assert steps == ['ff_gain_up'] * 3
+
+
+def test_release_stops_repeating_and_other_buttons_do_not():
+    repeater, timers, steps = _repeater([])
+    repeater.press('wheel:btn:300', 'ff_gain_up')
+    repeater.release('wheel:btn:301')
+    assert len(timers.pending) == 1
+    repeater.release('wheel:btn:300')
+    assert not timers.pending and not steps
+
+
+def test_limit_stops_repeating():
+    repeater, timers, steps = _repeater([True, False])
+    repeater.press('key:range_up', 'range_up')
+    timers.fire()
+    timers.fire()
+    assert not timers.pending and len(steps) == 2
+
+
+def test_toggles_and_profile_switches_never_repeat():
+    repeater, timers, steps = _repeater([])
+    for action_id in ('ffb_toggle', 'profile_next', 'nonsense'):
+        repeater.press('wheel:btn:300', action_id)
+        assert not timers.pending
+
+
+def test_a_new_press_and_stop_replace_the_old_hold():
+    repeater, timers, steps = _repeater([])
+    repeater.press('wheel:btn:300', 'ff_gain_up')
+    repeater.press('wheel:btn:301', 'ff_gain_down')
+    assert len(timers.pending) == 1
+    timers.fire()
+    assert steps == ['ff_gain_down']
+    repeater.stop()
+    assert not timers.pending
+
+
+def test_step_stopping_the_repeater_does_not_reschedule():
+    timers = FakeTimers()
+    holder = []
+    repeater = hotkeys.Repeater(lambda a: holder[0].stop() or True, timers.add, timers.remove)
+    holder.append(repeater)
+    repeater.press('x', 'ff_gain_up')
+    timers.fire()
+    assert not timers.pending

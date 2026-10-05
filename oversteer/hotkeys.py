@@ -72,6 +72,59 @@ GLOBAL_ACTIONS = ('profile_next', 'profile_prev')
 
 SHIFT_STEP = {'percent': 1, 'rpm': 100}      # one press of the shift point hotkey
 
+REPEAT_KINDS = ('step', 'range', 'shift')      # holding the button repeats these
+REPEAT_FIRST_MS = 400                          # before the first repeat
+REPEAT_EVERY_MS = 120
+
+
+class Repeater:
+    """Hold to repeat: after REPEAT_FIRST_MS and then every REPEAT_EVERY_MS
+    `step(action_id)` runs again until the button is let go, stop() is
+    called, or step returns False (the control is at its limit, or the
+    hotkey no longer applies). The timers are injected (GLib's on the
+    main thread) so the timing logic needs no main loop."""
+
+    def __init__(self, step, add_timeout, remove_timeout):
+        self.step = step
+        self.add_timeout = add_timeout          # (milliseconds, callback) -> handle
+        self.remove_timeout = remove_timeout
+        self.holder = None                      # what is held: wheel input or shortcut id
+        self.action_id = None
+        self.handle = None
+        self.first = False
+
+    def press(self, holder, action_id):
+        self.stop()
+        action = BY_ID.get(action_id)
+        if action is None or action.kind not in REPEAT_KINDS:
+            return
+        self.holder, self.action_id, self.first = holder, action_id, True
+        self.handle = self.add_timeout(REPEAT_FIRST_MS, self.tick)
+
+    def release(self, holder):
+        if holder == self.holder:
+            self.stop()
+
+    def stop(self):
+        if self.handle is not None:
+            self.remove_timeout(self.handle)
+        self.holder = self.action_id = self.handle = None
+
+    def tick(self):
+        """A timer fired. Returns False: the timer that fired is done (the
+        next one, if any, was already added)."""
+        self.handle = None
+        action_id = self.action_id
+        if action_id is None:
+            return False
+        if not self.step(action_id):
+            self.stop()
+            return False
+        if self.action_id == action_id:         # step() may have stopped us
+            self.handle = self.add_timeout(REPEAT_EVERY_MS, self.tick)
+        return False
+
+
 HAT_NAMES = {
     (ecodes.ABS_HAT0X, -1): _("D-pad left"),
     (ecodes.ABS_HAT0X, 1): _("D-pad right"),

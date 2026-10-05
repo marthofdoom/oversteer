@@ -105,6 +105,8 @@ class Gui:
         self.button_config[0] = [-1]
         self.pressed_button_count = 0
         self.hotkey_capture = None
+        self.hotkey_repeater = hotkeys.Repeater(self._hotkey_repeat_step, GLib.timeout_add, GLib.source_remove)
+        self.hat_held = {}                      # hat axis code -> direction held (input thread)
         self.keyboard_hotkeys = None
         self.keyboard_needs_bind = False
         self.keyboard_session_failed = False
@@ -446,6 +448,7 @@ class Gui:
 
     def change_device(self, device_id):
         self.cancel_hotkey_capture()
+        self.hotkey_repeater.stop()
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
@@ -1366,7 +1369,8 @@ class Gui:
             self.keyboard_hotkeys.close()
         self.keyboard_session_failed = False
         self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey,
-                                                self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed)
+                                                self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed,
+                                                self.on_keyboard_hotkey_released)
         if not self.keyboard_hotkeys.start():
             self.keyboard_hotkeys = None
             self.ui.set_keyboard_triggers(None)
@@ -1444,7 +1448,17 @@ class Gui:
 
     def on_keyboard_hotkey(self, action_id):
         if not self._hotkeys_suppressed():
-            self.run_hotkey(action_id)
+            if self.run_hotkey(action_id):
+                self.hotkey_repeater.press('key:' + action_id, action_id)
+
+    def on_keyboard_hotkey_released(self, action_id):
+        self.hotkey_repeater.release('key:' + action_id)
+
+    def _hotkey_repeat_step(self, action_id):
+        """One repeat of a held hotkey; False ends the repeating."""
+        if self.hotkey_capture is not None or self.device is None or self._hotkeys_suppressed():
+            return False
+        return bool(self.run_hotkey(action_id))
 
     def _hotkeys_suppressed(self):
         """Presses that belong to something else: the Preferences button
@@ -1472,6 +1486,7 @@ class Gui:
         self.ui.set_hotkeys(self.model.get_hotkeys())
 
     def start_hotkey_capture(self, action_id):
+        self.hotkey_repeater.stop()
         self.hotkey_capture = None if self.hotkey_capture == action_id else action_id
         self.ui.set_hotkey_capture(self.hotkey_capture)
 
@@ -1484,6 +1499,10 @@ class Gui:
         bindings = self.hotkey_bindings()
         if bindings.pop(action_id, None) is not None:
             self._store_hotkeys(bindings)
+
+    def on_wheel_hotkey_release(self, wheel_input):
+        """A wheel button came up (main thread)."""
+        self.hotkey_repeater.release('wheel:' + wheel_input)
 
     def on_wheel_hotkey(self, wheel_input, suppressed=False):
         """A wheel button went down (main thread)."""
@@ -1510,7 +1529,8 @@ class Gui:
             return
         for action_id, bound in self.hotkey_bindings().items():
             if bound == wheel_input:
-                self.run_hotkey(action_id)
+                if self.run_hotkey(action_id):
+                    self.hotkey_repeater.press('wheel:' + wheel_input, action_id)
                 return
 
     def _use_buttons_input(self, wheel_input):
@@ -1529,7 +1549,9 @@ class Gui:
 
     def run_hotkey(self, action_id):
         """Move the action's control as if by hand (main thread); the
-        control's own handler writes the model and the driver."""
+        control's own handler writes the model and the driver. Returns True
+        when a step moved the control (so holding the button may repeat it),
+        False at its limit, None for anything that does not repeat."""
         action = hotkeys.BY_ID.get(action_id)
         if action is None or self.device is None:
             return
@@ -1548,17 +1570,19 @@ class Gui:
             self.ui.set_hotkeys_status('{}: {}'.format(action.label, name or _("no saved profiles")))
             return
         if action.kind == 'range':
+            before = self.model.get_range()
             self.add_range(action.delta)
             value = self.model.get_range()
             self.hotkey_feedback(fraction=(value - 40) / max(1, self.device.get_max_range() - 40))
             self.ui.set_hotkeys_status('{}: {}°'.format(action.label, value))
-            return
+            return value != before
         adjustment = widget.get_adjustment()
         delta = action.delta
         if action.kind == 'shift':
             unit = self.model.get_rev_leds_shift_unit()
             delta *= hotkeys.SHIFT_STEP[unit]
-        widget.set_value(widget.get_value() + delta)       # the adjustment clamps it
+        before = widget.get_value()
+        widget.set_value(before + delta)       # the adjustment clamps it
         value = widget.get_value()
         low, high = adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
         fraction = (value - low) / (high - low) if high > low else 1.0
@@ -1574,6 +1598,17 @@ class Gui:
             shown = str(int(value))
         self.hotkey_feedback(fraction=fraction)
         self.ui.set_hotkeys_status('{}: {}'.format(action.label, shown))
+        return value != before
+
+    def _hat_hotkey(self, event):
+        """A hat axis event as hotkey press and release (input thread)."""
+        held = self.hat_held.pop(event.code, 0)
+        if held and held != event.value:
+            self.ui.safe_call(self.on_wheel_hotkey_release, hotkeys.hat_input(event.code, held))
+        if event.value:
+            self.hat_held[event.code] = event.value
+            self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
+                              self._hotkeys_suppressed())
 
     def hotkey_feedback(self, fraction=None, state=None):
         """Show the new level on the rev LEDs for a moment, over the rev
@@ -1637,23 +1672,21 @@ class Gui:
                         self.ui.safe_call(self.ui.set_handbrake_input, pulled)
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
-                    if event.value:
-                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
-                                          self._hotkeys_suppressed())
+                    self._hat_hotkey(event)
                     if event.value == -1:
                         self.on_button_press(100, 1)
                     elif event.value == 1:
                         self.on_button_press(101, 1)
                 elif event.code == ecodes.ABS_HAT0Y:
                     self.ui.safe_call(self.ui.set_haty_input, event.value)
-                    if event.value:
-                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
-                                          self._hotkeys_suppressed())
+                    self._hat_hotkey(event)
                     if event.value == -1:
                         self.on_button_press(102, 1)
                     elif event.value == 1:
                         self.on_button_press(103, 1)
             if event.type == ecodes.EV_KEY:
+                if event.value == 0:
+                    self.ui.safe_call(self.on_wheel_hotkey_release, hotkeys.key_input(event.code))
                 if event.value == 1:
                     self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
                     kind = self.shift_buttons.get(event.code)
