@@ -290,17 +290,17 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `context.wet` Wet | wet (dry/wet/unknown) | puddles [implemented]: puddle | - | untested | implemented: oversteer/drive_detect.py |
 | `context.corners` Corner detection | corners (list) | yaw [implemented]: yaw_rate, speed, run_distance; heading [implemented]: pos, speed; pace_notes [planned]: lap_distance, static:pace_notes | - | validated | implemented: oversteer/drive_log.py (86e3faftn) |
 | `context.stage_result` Stage finish and time | finished (bool), result_time (s) | game_clock [implemented]: progress, stage_time; last_note [implemented]: lap_distance, run_time, static:stage_table | discipline: rally-stage, hillclimb | validated | implemented: oversteer/drive_log.py |
-| `shift.upshift` Upshift timing (per gear, per surface) | shift.error (rpm), shift.in_band (fraction), shift.slip (ratio) | game_data [implemented]: rpm, gear, speed, throttle, a_long, static:car_data, aspect:context.surface; learnt [implemented]: rpm, gear, speed, throttle, a_long, aspect:context.surface | surface: per surface; early changes on a loose or mixed surface silent until the gear's grip there is measured (below the lowered best where it limits), and with the surface unknown without game data, conditions: flat out (throttle >= 0.95 held), up by one gear | validated | implemented: shift.error, shift.in_band, shift.slip (86e3fae1g) |
+| `shift.upshift` Upshift timing against the lights band (per gear, per surface) | shift.in_band (fraction), shift.early_share (fraction), shift.cut_share (fraction), shift.cost (s), shift.slip (ratio) | game_data [implemented]: rpm, gear, speed, throttle, a_long, static:car_data, aspect:context.surface; learnt [implemented]: rpm, gear, speed, throttle, a_long, aspect:context.surface | surface: per surface; early changes on a loose or mixed surface only in 3rd and up where the gear is measured not grip-limited, never in 1st and 2nd, a note otherwise, conditions: flat out (throttle >= 0.95 held), up by one gear, not the launch's change; a tip needs 5 changes and 0.2 s a stage | validated | implemented: shift.in_band, shift.early_share, shift.cut_share, shift.cost, shift.slip (86e3fae1g) |
 | `shift.downshift` Downshift over-rev | downshift.over_rev (per 100 downshifts) | engage [implemented]: rpm, gear | - | validated | implemented: downshift.over_rev |
 | `shift.hpattern` H-pattern technique | hpattern.neutral (s), hpattern.missed (per 100 upshifts), hpattern.skip (per 100 changes) | press [implemented]: gear, clock, shift_press; neutral_seen [implemented]: gear, clock | conditions: H-pattern changes only | sim-tested | implemented: hpattern.neutral, hpattern.missed, hpattern.skip |
 | `shift.sequential` Sequential and paddle double taps | seq.double_tap (per 100 changes) | press [implemented]: gear, clock, shift_press; gear_only [planned]: gear, clock | conditions: sequential or paddles | sim-tested | implemented: seq.double_tap |
-| `engine.limiter` Limiter time below top gear | limiter.per_km (s/km) | trace [implemented]: rpm, throttle, gear, run_distance | - | validated | implemented: limiter.per_km |
+| `engine.limiter` Limiter held on a straight | limiter.held (s/km) | trace [implemented]: rpm, throttle, gear, brake, speed, run_distance | - | validated | implemented: limiter.held |
 | `engine.top_gear` Top gear use (gearing) | limiter.top (s per run), top.share (fraction), top.peak (fraction of limiter) | trace [implemented]: rpm, throttle, gear, gears, speed | conditions: >= 3 runs of the same stage on the tune (tuning.py) | sim-tested | implemented: limiter.top, top.share, top.peak |
-| `launch.quality` Launch quality | launch.t50 (s), launch.bog (0/1), launch.stall (0/1) | trace [implemented]: rpm, speed, clock | discipline: rally-stage, rallycross, drag | validated | implemented: launch.t50, launch.bog, launch.stall |
+| `launch.quality` Launch quality | launch.t50 (s), launch.g (g), launch.bog (0/1), launch.stall (0/1) | trace [implemented]: rpm, speed, clock | discipline: rally-stage, rallycross, drag | validated | implemented: launch.t50, launch.g, launch.bog, launch.stall |
 | `launch.wheelspin` Launch wheelspin | launch.slip (ratio) | slip [implemented]: slip_drive | surface: per surface | sim-tested | implemented: launch.slip |
-| `pedal.coast` Coasting | pedal.coast (s/km) | trace [implemented]: throttle, brake, speed, run_distance | conditions: compared with the driver's own runs of the stage | validated | implemented: pedal.coast |
-| `pedal.overlap` Pedal overlap / left-foot braking | pedal.overlap (fraction) | trace [implemented]: throttle, brake, speed | surface: technique on loose; a tip on tarmac or circuit only with a slower exit than the best | validated | implemented: pedal.overlap |
-| `pedal.throttle_application` Throttle application | throttle.to_full (s), throttle.relifts (per corner) | corners [planned]: throttle, clock, aspect:context.corners | - | untested | planned (86e3ev2dy) |
+| `pedal.coast` Coasting by phase | pedal.coast_entry (s/km), pedal.coast_exit (s/km), pedal.coast_straight (s/km) | trace [implemented]: throttle, brake, speed, run_distance | conditions: not in partial or restart runs; an off's surroundings left out | validated | implemented: pedal.coast_entry, pedal.coast_exit, pedal.coast_straight |
+| `pedal.overlap` Both pedals by phase | pedal.overlap_entry (fraction), pedal.overlap_exit (fraction), pedal.drag (s/km) | trace [implemented]: throttle, brake, speed | surface: technique on loose; a tip on tarmac or circuit only with a slower exit than the best, conditions: not in partial or restart runs; an off's surroundings left out | validated | implemented: pedal.overlap_entry, pedal.overlap_exit, pedal.drag |
+| `pedal.throttle_application` Throttle application | throttle.to_full (s), throttle.relifts (per corner) | corners [implemented]: throttle, clock, aspect:context.corners | - | untested | partial: oversteer/coach_context.py (86e3ev2dy) |
 | `pedal.handbrake` Handbrake use | handbrake.per_km (pulls/km) | game [implemented]: handbrake, run_distance; rig [planned]: rig_handbrake, run_distance | discipline: rally, drift | sim-tested | implemented: handbrake.per_km |
 | `brake.point` Braking point | brake.point (m) | corners [planned]: brake, run_distance, aspect:context.corners; pace_notes [planned]: brake, lap_distance, static:pace_notes | conditions: same stage, >= 2 runs | untested | planned (86e3faftn) |
 | `brake.consistency` Braking consistency | brake.point_sd (m), brake.peak_sd (0..1) | corners [planned]: brake, run_distance, aspect:context.corners | conditions: >= 3 runs of the stage | untested | planned (86e3faftn) |
@@ -309,7 +309,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `corner.speeds` Entry, minimum and exit speed | entry_speed (m/s), min_speed (m/s), exit_speed (m/s) | corners [implemented]: speed, aspect:context.corners | - | validated | partial: oversteer/drive_log.py |
 | `corner.exit_revs` Exit revs (gear too long) | exit.low (fraction) | corners [implemented]: rpm, gear, throttle, clock, aspect:context.corners | - | validated | implemented: exit.low |
 | `corner.exit_wheelspin` Wheelspin on exit | exit_spin (ratio) | corners [implemented]: slip_drive, aspect:context.corners | surface: per surface | untested | partial: oversteer/drive_log.py |
-| `corner.loss` Corner time loss | corner.loss (s) | traces [implemented]: run_distance, clock, aspect:context.corners, aspect:context.stage_result | conditions: >= 1 other finished run of the stage | validated | implemented: corner.loss |
+| `corner.loss` Section time loss | corner.loss (s) | traces [implemented]: run_distance, clock, aspect:context.corners, aspect:context.stage_result | conditions: a finished clean or learning run of the same car and stage, in the same conditions | validated | implemented: corner.loss |
 | `corner.pace_note` Corners by pace note | corners_by_note (list) | notes [planned]: lap_distance, speed, static:pace_notes | discipline: rally-stage | untested | planned (86e3faftn) |
 | `balance.understeer_oversteer` Understeer / oversteer balance | balance.gradient (lock per g) | fit [implemented]: steer, yaw_rate, a_lat, speed | surface: per surface; between tunes | validated | implemented: balance.gradient |
 | `balance.counter_steer` Counter-steer | counter_steer (fraction) | corners [implemented]: steer, yaw_rate, aspect:context.corners | surface: technique on loose, habit or setup on tarmac | validated | implemented: counter_steer |
@@ -324,6 +324,10 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `profile.mechanical_sympathy` Driver style: mechanical sympathy | style.sympathy (percentile) | combine [planned]: rpm, gear, aspect:shift.downshift, aspect:engine.limiter | - | untested | planned (86e3ev2dy) |
 | `profile.strengths` Strong and weak areas by time cost | profile.areas (ranked list) | loss_by_kind [planned]: run_distance, clock, speed, aspect:corner.loss | conditions: >= 3 runs | untested | planned (86e3ev2dy) |
 | `profile.setup_lean` Setup lean | profile.setup_lean (loose/neutral/planted) | tunes [planned]: steer, yaw_rate, a_lat, aspect:balance.understeer_oversteer, aspect:balance.counter_steer | conditions: >= 2 tunes | untested | planned (86e3ev2dy) |
+| `context.incidents` Incidents and run class | events (rows), run_class (class) | trace [implemented]: speed, gear, a_long, a_lat, yaw_rate, run_distance, aspect:context.corners, aspect:context.stage_result | - | validated | implemented: oversteer/coach_context.py incidents, run_class |
+| `corner.phases` Corner phases | corners (columns) | trace [implemented]: throttle, brake, speed, yaw_rate, run_distance, aspect:context.corners | - | validated | implemented: oversteer/coach_context.py describe_corners, build_sections, section_loss |
+| `corner.consistency` Minimum speed through the same section across runs | corner.spread (m/s) | trace [implemented]: speed, yaw_rate, run_distance, aspect:context.corners | - | sim-tested | implemented: corner.spread |
+| `traction.slip` Driven-wheel slip from the revs | exit.spin (fraction) | trace [implemented]: rpm, speed, gear, throttle, clutch, static:car_data | - | validated | implemented: exit.spin |
 
 ### Assetto Corsa Rally coverage
 
@@ -340,12 +344,12 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `shift.hpattern` | implemented | press [implemented] |  | needs an H-pattern car and the rig input; the captures had neither (sequential Fabia and 208, no presses in a replay) |
 | `shift.sequential` | implemented | press [implemented] |  | live with the rig; a replay has no presses, so no method |
 | `engine.limiter` | validated | trace [implemented] |  |  |
-| `engine.top_gear` | planned | trace [implemented] |  | needs the gear count in the run summary; car data has it but trace_metrics reads summary gears (the replay wrote none for ACR) |
+| `engine.top_gear` | implemented | trace [implemented] |  | the top gear is the shipped gear set's where the game sends no gear count |
 | `launch.quality` | validated | trace [implemented] |  |  |
 | `launch.wheelspin` | planned | slip [implemented] |  | slip_drive is derivable (wheel_rot x tyre radius) but drive_log only uses a sent wheel speed |
 | `pedal.coast` | validated | trace [implemented] |  |  |
 | `pedal.overlap` | validated | trace [implemented] |  |  |
-| `pedal.throttle_application` | planned | corners [planned] |  |  |
+| `pedal.throttle_application` | implemented | corners [implemented] |  |  |
 | `pedal.handbrake` | planned | rig [planned] |  | no handbrake in the telemetry; the rig axis would do it |
 | `brake.point` | planned | corners [planned] |  |  |
 | `brake.consistency` | planned | corners [planned] |  |  |
@@ -369,6 +373,10 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `profile.mechanical_sympathy` | planned | combine [planned] |  |  |
 | `profile.strengths` | planned | loss_by_kind [planned] | static:pace_notes |  |
 | `profile.setup_lean` | planned | tunes [planned] |  |  |
+| `context.incidents` | implemented | trace [implemented] |  |  |
+| `corner.phases` | implemented | trace [implemented] |  |  |
+| `corner.consistency` | implemented | trace [implemented] |  |  |
+| `traction.slip` | implemented | trace [implemented] |  |  |
 
 ### Assetto Corsa Rally gaps
 

@@ -18,8 +18,8 @@ import queue
 import threading
 import time
 
-from . import coach, drive_detect, stage_tables
-from .shift_learner import SURFACES, drive_slip
+from . import coach, coach_context, drive_detect, stage_tables
+from .shift_learner import SURFACES, CarModel, drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
 QUEUE_SIZE = 8192
@@ -232,6 +232,7 @@ class RunTracker:
         self._stood = 0.0
         self._launch = 0.0
         self._launch_rpm = 0.0
+        self._clutch = None              # the most the clutch was pressed while standing (the pedal, as the game has it)
         self._rolling = None             # when the car began to move, before the run started
         self._after_end = False
 
@@ -258,8 +259,11 @@ class RunTracker:
                     if throttle is not None and throttle >= LAUNCH_THROTTLE:
                         self._launch += dt
                         self._launch_rpm = max(self._launch_rpm, sample.rpm or 0.0)
+                        if sample.clutch is not None:
+                            self._clutch = max(self._clutch or 0.0, sample.clutch)
                     else:
                         self._launch = self._launch_rpm = 0.0
+                        self._clutch = None
                 elif self._rolling is None:
                     self._rolling = now
                 self._remember(now, sample)
@@ -361,11 +365,13 @@ class RunTracker:
         self._summary = {
             'game': sample.game, 'profile': profile, 'stage': sample.stage, 'stage_length': sample.stage_length,
             'laps': sample.laps, 'has_pos': sample.pos is not None, 'standing': self._stood,
-            'launch': self._launch, 'launch_rpm': self._launch_rpm or None, 'track': sample.track,
+            'launch': self._launch, 'launch_rpm': self._launch_rpm or None, 'launch_clutch': self._clutch,
+            'track': sample.track,
             'car': sample.car, 'gears': sample.gears,
             # s from moving off to the run's start (at START_MOVING), for the launch time
             'release': now - self._rolling if self._rolling is not None else 0.0}
         self._stood = self._launch = self._launch_rpm = 0.0
+        self._clutch = None
         self._rolling = None
         # Assetto Corsa Rally sends no stage clock or progress: the run has
         # finished once it crosses the stage's last pace note (looked up in
@@ -614,26 +620,73 @@ class RunTracker:
         summary['stage'] = stage
         verdicts = drive_detect.detect_run(store, run, summary, trace, TRACE_CHANNELS)
         fields.update(verdicts)
+        fields['course'] = summary['course']
         store.end_run(run, **fields)
         store.add_trace(run, trace)
-        corners = find_corners(trace)
-        store.add_corners(run, corners)
-        self._write_metrics(run, summary, fields, trace, corners)
+        self._work_over(run, summary, trace, fields)
         return True
 
-    def _write_metrics(self, run, summary, verdicts, trace, corners):
-        """What the run measured about the driver (coach.py), tagged with
-        the run's discipline and surface."""
+    def _work_over(self, run, summary, trace, verdicts, started=None, backfill=False):
+        """What the run says about the driver (coach_context, coach.py): its
+        corners with their phases, sections and losses, its events and
+        class, the changes of gear classified and the metrics, tagged with
+        the run's discipline and surface. Written for a run just ended, and
+        again by the backfill for one from before."""
         learner, store = self.learner, self.learner.log.store
-        with learner.lock:
-            car = learner._models.get(summary.get('car'))
-            car = car.copy() if car is not None else None
-        context = coach.car_context(car)
+        row = store.run(run)
+        if row is None:
+            return
+        started = row['started'] if row['started'] is not None else started
+        stage = row['stage']
+        course = summary.get('course')
+        rows = coach_context.stage_rows(trace, course, row['finished'] == 1, row['result_time'])
+        corners = find_corners(rows)
+        car = _car_model(learner, store, row['car'], summary.get('car'))
         surface = verdicts.get('surface')
-        shifts = coach.against_best(car, store.run_shifts(run), surface if surface in SURFACES else None)
-        metrics = coach.run_metrics(summary, trace, TRACE_CHANNELS, shifts, corners, context)
-        metrics += coach.stage_metrics(store, run, summary.get('stage'), trace, TRACE_CHANNELS, corners,
-                                       verdicts.get('finished'))
+        context = coach.car_context(car, surface)
+        shifts = store.run_shifts(run)
+        profile = learner.profile
+        reference = history = None
+        others, last_started = [], None
+        if stage:
+            before = [r for r in store.stage_runs(stage, exclude=run, limit=60, car=row['car'])
+                      if started is None or r['started'] <= started]
+            last_started = before[0]['started'] if before else None
+            ref = coach_context.reference_run(
+                [r for r in before if r['run_class'] in ('clean', 'learning')], wet=verdicts.get('wet'))
+            if ref is not None:
+                ref_trace = store.trace(ref['id'])
+                ref_corners = store.corners(ref['id'])
+                if ref_trace and ref_corners:
+                    reference = {'trace': coach_context.stage_rows(ref_trace, ref['course'], True, ref['result_time']),
+                                 'corners': ref_corners, 'course': ref['course'], 'run': ref['id']}
+            for r in before:
+                if len(others) >= coach_context.SPREAD_RUNS - 1:
+                    break
+                if r['finished'] == 1 and r['run_class'] in ('clean', 'learning', 'off'):
+                    found = store.corners(r['id'])
+                    if found:
+                        others.append((r, found))
+        if surface is not None:
+            history = [m['value'] for m in store.metric_series(profile, 'launch.t50', car=row['car'], surface=surface,
+                                                               limit=coach_context.LAUNCH_HISTORY + 1)
+                       if m['run'] != run][:coach_context.LAUNCH_HISTORY]
+        stage_row = store.stage(stage) if stage else None
+        analysis = coach_context.analyse(summary, rows, corners, shifts, context, started=started,
+                                         reference=reference, history=history or (), others=others,
+                                         last_started=last_started,
+                                         stage_length=(stage_row or {}).get('length'))
+        if not backfill:
+            with learner.lock:
+                learner.session_held_time += coach_context.held_seconds(analysis['episodes'])
+        store.add_corners(run, corners)
+        store.add_events(run, analysis['events'])
+        store.update_run(run, course=course, run_class=analysis['run_class'])
+        for s in analysis['shifts']:
+            store.update_shift(s['id'], s['flags'], s['d'], s.get('band'))
+        metrics = coach.run_metrics(summary, rows, TRACE_CHANNELS, analysis['shifts'], corners, context, analysis)
+        metrics += coach.stage_metrics(store, run, stage, rows, TRACE_CHANNELS, corners, row['finished'], analysis,
+                                       car=row['car'])
         # A value the trace could not give (NaN) is no measurement
         metrics = [m for m in metrics if m['value'] is not None and math.isfinite(m['value'])]
         for m in metrics:
@@ -641,6 +694,70 @@ class RunTracker:
         session = store.run_session(run)
         if session is not None and metrics:
             store.add_metrics(session, run, metrics)
+
+
+def _car_model(learner, store, car_id, key):
+    """The car's model as a copy: the learner's, else the stored one."""
+    with learner.lock:
+        car = learner._models.get(key) if key else None
+        car = car.copy() if car is not None else None
+    if car is None and car_id is not None:
+        found = store.car_row(car_id)
+        data = store.car(*found) if found else None
+        if data is not None and data['model'].get('key'):
+            try:
+                car = CarModel.from_dict(data['model'])
+            except (ValueError, KeyError, TypeError, AttributeError):
+                car = None
+    return car
+
+
+# The metrics the backfill cannot work out again (the launch is not in the trace)
+BACKFILL_KEEP = ('launch.t50', 'launch.stall', 'launch.slip')
+BACKFILL_FAILED = 'unclassified'
+
+
+def backfill_step(learner, limit=3):
+    """Work the oldest runs from before the context layer over again (their
+    corners, events, class and metrics), at most `limit` of them: runs with a
+    trace and no class. The trace does not hold what the run tracker's
+    summary did (the launch, the game's gear count): the launch metrics that
+    were written stay, the rest is recomputed from what is stored. Returns
+    the number of runs worked over, 0 when nothing is left."""
+    store = learner.log.store
+    done = 0
+    for run in store.runs_to_backfill(limit):
+        try:
+            _backfill_run(learner, store, run)
+        except Exception:
+            logging.exception("drive log: backfill of run %s", run)
+            store.clear_derived(run, BACKFILL_KEEP)
+            store.update_run(run, run_class=BACKFILL_FAILED)
+        done += 1
+    return done
+
+
+def _backfill_run(learner, store, run):
+    row = store.run(run)
+    trace = store.trace(run)
+    if row is None or not trace:
+        store.update_run(run, run_class=BACKFILL_FAILED)
+        return
+    car_row = store.car_row(row['car'])
+    car_key = car_row[1] if car_row else None
+    last = trace[-1][T['distance']] if trace else 0.0
+    course = row['course'] if row['course'] is not None else last
+    summary = {'game': (car_key or '').split('/')[0] or None, 'stage': row['stage'], 'distance': row['distance'] or 0.0,
+               'duration': row['duration'], 'moving_time': row['moving_time'], 'finished': row['finished'],
+               'result_time': row['result_time'], 'course': course, 'car': car_key, 'launch': 0.0}
+    store.clear_derived(run, BACKFILL_KEEP)
+    verdicts = {'surface': row['surface'], 'discipline': row['discipline'], 'wet': row['wet']}
+    if row['stage'] and row['discipline'] in (None, 'unknown'):
+        found = drive_detect.table_discipline(row['stage'])
+        if found:
+            store.update_run(run, discipline=found, discipline_conf='game')
+            verdicts['discipline'] = found
+    learner.runs._work_over(run, summary, trace, verdicts, row['started'], backfill=True)
 
 
 def stage_surface(store, game, stage):
@@ -798,6 +915,7 @@ CORNER_SMOOTH = 0.5              # s
 CORNER_TIME = 1.0                # s above CORNER_YAW...
 CORNER_HEADING = 30.0            # ...or this many degrees of heading: a corner (calibrate)
 CORNER_SIDE = 2.0                # s either side of the apex for entry and exit speeds
+RADIUS_YAW = 0.1                 # rad/s: slower turning than this has no radius worth the name
 
 
 def _yaw_rates(trace):
@@ -869,8 +987,14 @@ def _corner(trace, yaw, i, j, sign):
     handbrake = [row[T['handbrake']] for row in trace[i:j + 1] if not math.isnan(row[T['handbrake']])]
     spin = [row[T['slip_drive']] for row in trace if t[apex] <= row[T['t']] <= t[apex] + CORNER_SIDE
             and not math.isnan(row[T['slip_drive']])]
+    speeds_in = [(speed[k] / abs(yaw[k]), k) for k in range(i, j + 1) if abs(yaw[k]) >= RADIUS_YAW and speed[k] > 0]
+    radius = min(speeds_in)[0] if speeds_in else None
+    heading_deg = math.degrees(heading)
     return {
         'd': trace[apex][T['distance']], 'direction': sign,
+        'd0': trace[i][T['distance']], 'd1': trace[j][T['distance']], 'radius': radius,
+        'tightness': coach_context.tightness(radius, heading_deg, speed[apex]),
+        '_i0': i, '_i1': j, '_apex': apex,
         'entry_speed': at(-CORNER_SIDE), 'min_speed': speed[apex], 'exit_speed': at(CORNER_SIDE),
         'gear_min': int(min(gears)) if gears else None,
         'heading_change': math.degrees(heading), 'duration': duration,

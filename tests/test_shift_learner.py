@@ -168,15 +168,19 @@ def test_braking_teaches_no_ratio(tmp_path):
 
 
 def test_coaching_says_early_or_late(tmp_path):
+    """The changes up are judged as shares against the band (the learnt crossover to the limiter less a
+    margin where the game ships no lights): early, from 60 % of them, on tarmac; on the cut, from a quarter."""
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     exits(learner)
-    drive(learner, shift_at=5200, runs=3)            # well short of ~6700
-    tips = learner.snapshot()['advice']
-    assert any(t.startswith('2→3') and 'early' in t and '% less drive' in t for t in tips), tips
+    drive(learner, shift_at=5200, runs=5)            # well short of ~6700
+    tips = learner.car.advice(surface='tarmac')
+    assert any(t.startswith('2→3') and 'come before' in t and '% less drive' in t for t in tips), tips
+    assert learner.car.advice() == []                # the surface is not known: short-shifting can be right
     learner.car.upshifts = {}
-    drive(learner, shift_at=LIMITER, runs=3)         # on the limiter every time
-    tips = learner.snapshot()['advice']
-    assert any(t.startswith('2→3') and 'late' in t for t in tips), tips
+    drive(learner, shift_at=LIMITER, runs=5)         # on the limiter every time
+    tips = learner.car.advice(surface='tarmac')
+    assert any(t.startswith('2→3') and 'sit on the limiter cut' in t for t in tips), tips
+    assert not any('come before' in t for t in tips)
 
 
 def test_sessions_keep_every_shift_and_how_it_was_made(tmp_path):
@@ -302,13 +306,19 @@ def test_coaching_is_short():
     car.ratios = {g: [r] * 30 for g, r in {1: 480.0, 2: 330.0, 3: 250.0, 4: 200.0, 5: 165.0, 6: 140.0}.items()}
     for band in range(20, 80):
         car.power[band] = [power(band * 100 + 50)] * 5
-    early = {g: analytic_shift(g) - 300 - 200 * g for g in (1, 2, 3, 4)}   # 4→5 the most early
-    car.upshifts = {g: [rpm] * 3 for g, rpm in early.items()}
-    car.upshifts[5] = [car.best_shift(5)[0]] * 4                             # and one spot on
-    tips = car.advice(session_limiter_time=1.0)
-    assert [t[:3] for t in tips[:3]] == ['4→5', '3→4', '2→3'], tips
-    assert tips[3] == 'Spot on: 5→6 within 200 rpm of the best (4 changes).'
+    best = {g: analytic_shift(g) for g in (1, 2, 3, 4)}
+    # 1→2 always early, 2→3 four times in five, 3→4 three in five (the least), 4→5 two in five: still on the band
+    # three times in five
+    car.upshifts = {g: [best[g] - 600] * early + [best[g]] * (5 - early) for g, early in {1: 5, 2: 4, 3: 3, 4: 2}.items()}
+    car.upshifts[5] = [car.best_shift(5)[0]] * 5                             # and one spot on
+    tips = car.advice(held_limiter_time=1.0, surface='tarmac')
+    assert [t[:3] for t in tips[:3]] == ['1→2', '2→3', '3→4'], tips
+    assert tips[3] == 'Spot on: 4→5 and 5→6 on the shift band (10 changes).', tips
     assert len(tips) == 4
+    # the limiter held on straights counts only once it is more than a few seconds
+    assert not any('held on the limiter' in t for t in tips)
+    held = car.advice(held_limiter_time=12.0, surface='tarmac')
+    assert any(t.startswith('12 s held on the limiter on straights this session') for t in held)
 
 
 def test_saved_snapshot_is_cached_until_the_car_changes(tmp_path):
@@ -883,19 +893,23 @@ def test_advice_waits_for_the_grip_on_a_loose_surface():
     gravel only once the gear's grip there is measured."""
     car = CarModel(FABIA)
     car.upshifts[3] = [6500.0] * 5
-    assert any(line.startswith('3→4: you change up around 6500 rpm, 1000 early') for line in car.advice(surface='tarmac'))
+    lines = car.advice(surface='tarmac')
+    assert lines[0].startswith('3→4: 100 % of your changes up come before 6800 rpm, the start of the lights band '
+                               '(6900 to 7100); stay in the gear to the lights.')
     lines = car.advice(surface='gravel')
-    assert not any('1000 early' in line for line in lines)
+    assert not any('come before' in line for line in lines)
     assert any(line.startswith('3→4 on gravel: early, but not coached until the grip') for line in lines)
+    car.upshifts[1] = [6500.0] * 5                           # 1st and 2nd are short-shifted on gravel: technique
+    assert not any(line.startswith('1→2') for line in car.advice(surface='gravel'))
 
 
 def test_a_grip_limited_gear_is_on_target_up_to_the_engine_best(tmp_path):
     """From where 2nd reaches the grip limit on gravel up to the engine's
     best both gears are held to it: 1st changed up at 6500 is spot on, not
-    "3000 late", and recorded as on target, with the range; below the
-    lowered best it is early against it."""
+    "3000 late", and recorded as on target, with the range; the lights band's low end moves down to
+    the lowered best, which needs the grip measured over six pulls."""
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
-    t = fabia_pulls(learner)
+    t = fabia_pulls(learner, runs=8)
     car = learner.car
     best = car.best_for(1, 'gravel')
     assert best['grip_limited'] and best['rpm'] < 4500 and best['engine_rpm'] == 7500.0
@@ -904,9 +918,8 @@ def test_a_grip_limited_gear_is_on_target_up_to_the_engine_best(tmp_path):
     lines = car.advice(surface='gravel')
     assert lines[0].startswith('Spot on: 1→2') and not any('late' in line for line in lines)
     assert any('1→2 from {:.0f} to 7500 rpm'.format(best['rpm']) in line for line in lines)
-    car.upshifts[1] = [best['rpm'] - 800] * 5
-    assert car.advice(surface='gravel')[0].endswith('hold it to about {:.0f} (lowered for grip on gravel).'.format(
-        best['rpm']))
+    car.upshifts[1] = [best['rpm'] - 800] * 5                # below the lowered best: early, but 1st is technique on gravel
+    assert not any(line.startswith('1→2:') for line in car.advice(surface='gravel'))
     learner._shift_locked(car, (1, 6500.0, 1.0, t, False, None), 2, 4000.0, t + 0.1)
     shift = learner._pending[-1]
     assert shift['best'] == 6500.0 and (shift['best_low'], shift['best_high']) == (best['rpm'], 7500.0)

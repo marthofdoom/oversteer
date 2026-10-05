@@ -86,12 +86,12 @@ def test_web_status():
 
 
 def test_gather_from_the_database(tmp_path):
-    from tests.test_coach import History, error
+    from tests.test_coach import History
     h = History(tmp_path / 't.db')
     for _ in range(3):
-        h.session([error(2, 450.0)])
+        h.session([{'name': 'limiter.held', 'value': 2.0, 'count': 10}])
     found = view.gather(h.store, 'rally', 'eawrc/17')
-    assert found['car_id'] == h.car and found['tips'][0].id.startswith('shift.late:2')
+    assert found['car_id'] == h.car and found['tips'][0].id == 'limiter.held'
     assert found['context'][0].startswith('discipline unknown') and len(found['sessions']) == 3
     assert found['tuning'][0].startswith('No setup recorded yet')
     assert view.gather(h.store, 'rally', 'nothing/1')['car_id'] is None
