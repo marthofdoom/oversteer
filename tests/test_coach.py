@@ -224,7 +224,13 @@ def test_runs_write_their_metrics(tmp_path):
     rows = reader.metrics('_no_profile')
     assert all(m['discipline'] == 'rally-stage' and m['surface'] == 'unknown' for m in rows)
     [loss] = [m for m in rows if m['name'] == 'corner.loss' and m['run'] == ids[2]]
-    assert loss['value'] > 0.5                                  # the slower run lost time in its sections
+    assert loss['value'] > 0.1                                  # the slower run lost time in its sections
+    # ...and not the first one's, which holds the launch
+    stored = reader.corners(ids[2])
+    first = min(k['complex'] for k in stored)
+    rest = sorted((k['loss_entry'] + k['loss_exit'] for k in stored if k['loss_entry'] is not None
+                   and not k['off'] and k['complex'] != first), reverse=True)
+    assert abs(loss['value'] - sum(x for x in rest[:coach.WORST_CORNERS] if x > 0)) < 1e-9
     [sd] = [m for m in rows if m['name'] == 'consistency.split_sd']
     assert sd['value'] > 0.1
     series = reader.metric_series('_no_profile', 'corner.loss', discipline='rally-stage')

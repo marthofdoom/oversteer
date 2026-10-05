@@ -419,8 +419,12 @@ def stage_metrics(store, run, stage, trace, channels, corners, finished, analysi
         if sd is not None:
             out.append({'name': 'consistency.split_sd', 'value': sd, 'count': len(traces)})
     if analysis.get('loss') is not None and klass != 'learning':
+        # Not the first section: it holds the launch (R3 judges that, not a corner)
+        launch = {id(k) for i, sec in enumerate(analysis.get('sections') or ())
+                  if i == 0 or sec.get('grid') == 0 for k in sec['corners']}
         losses = sorted((k['loss_entry'] + k['loss_exit'] for k in corners
-                         if k.get('loss_entry') is not None and not k.get('off')), reverse=True)
+                         if k.get('loss_entry') is not None and not k.get('off') and id(k) not in launch),
+                        reverse=True)
         out.append({'name': 'corner.loss', 'value': sum(x for x in losses[:WORST_CORNERS] if x > 0), 'count': 1})
     spreads = analysis.get('spreads')
     if spreads:
