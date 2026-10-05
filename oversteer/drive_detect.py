@@ -136,6 +136,16 @@ PROFILE_WORDS = (('rallycross', 'rallycross'), ('hillclimb', 'hillclimb'), ('hil
                  ('rally', 'rally-stage'), ('circuit', 'circuit'), ('track', 'circuit'), ('drift', 'drift'))
 
 
+def table_discipline(stage):
+    """The discipline an Assetto Corsa Rally stage key says it is: its table
+    entry's `discipline` (the Livigno circuit's), else a rally stage; None
+    for a key that is not an ACR table entry."""
+    entry = stage_tables.entry(stage)
+    if entry is None or not (stage or '').startswith('acr:'):
+        return None
+    return entry.get('discipline') or 'rally-stage'
+
+
 def classify_discipline(summary, trace, channels):
     """A Verdict on the run's discipline. `summary` is the run tracker's
     (game, laps, stage_length, packets, standing, launch, stops,
@@ -159,6 +169,10 @@ def classify_discipline(summary, trace, channels):
     elif game in ('dirt', 'wrcg') and length and length >= 1000.0:
         verdict = Verdict('rally-stage', 'game', ['{} sends one stage of {:.1f} km.'.format(
             _game(summary), length / 1000.0)])
+    elif game == 'acr' and table_discipline(summary.get('stage')):
+        found = table_discipline(summary['stage'])
+        verdict = Verdict(found, 'game', ['The stage table says {}: {}.'.format(found.replace('-', ' '),
+                                                                                summary['stage'])])
     elif game == 'forza-fm' and summary.get('stage'):
         verdict = Verdict('circuit', 'game', ['Forza Motorsport names the track ({}).'.format(summary['stage'])])
     if verdict is not None:

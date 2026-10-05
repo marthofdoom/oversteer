@@ -802,10 +802,10 @@ class Reader:
             tuple(args) + (limit,))]
 
     def run(self, run_id):
-        """One run's row: id, session, car (cars.id), stage, started, ended, distance, duration, finished,
-        result_time, course, run_class, discipline, surface, wet; None when there is none."""
-        names = ('id', 'session', 'stage', 'started', 'ended', 'distance', 'duration', 'finished', 'result_time',
-                 'course', 'run_class', 'discipline', 'surface', 'wet')
+        """One run's row: id, session, car (cars.id), stage, started, ended, distance, duration, moving_time,
+        finished, result_time, course, run_class, discipline, surface, wet; None when there is none."""
+        names = ('id', 'session', 'stage', 'started', 'ended', 'distance', 'duration', 'moving_time', 'finished',
+                 'result_time', 'course', 'run_class', 'discipline', 'surface', 'wet')
         rows = self._rows('SELECT {}, s.car FROM runs r JOIN sessions s ON r.session = s.id WHERE r.id = ?'.format(
             ', '.join('r.' + n for n in names)), (run_id,))
         return dict(zip(names + ('car',), rows[0])) if rows else None
@@ -1309,8 +1309,16 @@ class Store(Reader):
             self._do('UPDATE runs SET {} WHERE id = ?'.format(', '.join(n + ' = ?' for n in names)),
                      tuple(fields[n] for n in names) + (run,))
 
-    def update_shift(self, shift_id, flags=None, d=None):
-        self._do('UPDATE shifts SET flags = ?, d = ? WHERE id = ?', (flags, d, shift_id))
+    def update_shift(self, shift_id, flags=None, d=None, band=None):
+        """What the context layer made of a change of gear: its flags, the
+        distance, and the band it was judged against (`band`: (low, high,
+        crossover): best_low and best_high are the band, best the crossover,
+        for the drive lost; left as they are without one)."""
+        if band is not None:
+            self._do('UPDATE shifts SET flags = ?, d = ?, best_low = ?, best_high = ?, best = ? WHERE id = ?',
+                     (flags, d, band[0], band[1], band[2], shift_id))
+        else:
+            self._do('UPDATE shifts SET flags = ?, d = ? WHERE id = ?', (flags, d, shift_id))
 
     def add_shift(self, session, run, shift):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle', 'method',

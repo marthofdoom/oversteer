@@ -551,6 +551,7 @@
   },
   {
    "location": "Livigno Circuit",
+   "discipline": "circuit",
    "stage": "Main Circuit",
    "track": "Livigno Circuit Main Circuit",
    "config": null,
@@ -581,6 +582,7 @@
   },
   {
    "location": "Livigno Circuit",
+   "discipline": "circuit",
    "stage": "Main Circuit Reverse",
    "track": "Livigno Circuit Main Reverse",
    "config": null,
