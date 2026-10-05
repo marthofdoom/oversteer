@@ -420,3 +420,20 @@ def test_corner_columns_events_and_stage_runs_filters(tmp_path):
     store.clear_derived(ids['a1'])
     assert store.corners(ids['a1']) == [] and store.events(ids['a1']) == []
     store.close()
+
+
+def test_the_reference_runs_trace_survives_the_cap(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'acr/a', 'acr')
+    session = store.start_session('p', car, 'acr', 1.0)
+    rows = [tuple(float(i + c) for c in range(len(TRACE_CHANNELS))) for i in range(100)]
+    runs = []
+    for n, result in enumerate((200.0, 210.0, 220.0), 1):          # the oldest is the best
+        run = store.start_run(session, n, float(n), 'acr:x:y', 'acr', 5000.0)
+        store.end_run(run, ended=300.0, distance=5000.0, finished=1, result_time=result, course=4900.0,
+                      run_class='clean', wet='dry')
+        store.add_trace(run, rows)
+        runs.append(run)
+    size = store.db.execute('SELECT LENGTH(data) FROM traces WHERE run = ?', (runs[0],)).fetchone()[0]
+    assert store.prune_traces(cap=size * 2) == 1
+    assert store.trace(runs[0]) is not None and store.trace(runs[1]) is None and store.trace(runs[2]) is not None

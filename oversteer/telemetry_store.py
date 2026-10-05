@@ -141,7 +141,9 @@ CREATE TABLE shifts (
     gear_to INTEGER,
     direction TEXT DEFAULT 'up',
     rpm REAL NOT NULL,              -- peak over the last 0.3 s in the old gear
-    best REAL, best_low REAL, best_high REAL,
+    best REAL, best_low REAL, best_high REAL,   -- the learner best and band when the change was made, then once the run
+                                    -- ended update_shift() overwrites them with the coach band (the crossover and
+                                    -- the lights band): nothing reads the learner values after that
     throttle REAL,                  -- max over the same window
     method TEXT,                    -- 'h-pattern', 'sequential', 'paddles', 'auto', NULL
     neutral_time REAL,              -- s between leaving and engaging
@@ -1259,14 +1261,30 @@ class Store(Reader):
 
     def prune_traces(self, cap=TRACES_CAP):
         """Drop the oldest traces beyond `cap` bytes in total; their runs,
-        metrics and verdicts stay."""
+        metrics and verdicts stay. The trace of each car's best finished run
+        on a stage (the reference the coach reads the sections against, in
+        each wetness) is kept: without it the stage gets no tips by place.
+        A run whose trace is gone is not backfilled when the metrics change
+        meaning: its old ones stay."""
         total = self._do('SELECT COALESCE(SUM(LENGTH(data)), 0) FROM traces').fetchone()[0]
         if total <= cap:
             return 0
+        best = {}
+        for run, stage, car, wet, result, first in self._do(
+                'SELECT r.id, r.stage, s.car, r.wet, r.result_time, (SELECT c.section_t FROM corners c WHERE '
+                'c.run = r.id AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1) FROM runs r JOIN sessions s ON '
+                'r.session = s.id WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                "AND r.run_class IN ('clean', 'learning') AND r.id IN (SELECT run FROM traces)").fetchall():
+            key = (stage, car, wet)
+            if key not in best or result - (first or 0.0) < best[key][0]:
+                best[key] = (result - (first or 0.0), run)
+        kept = {run for _, run in best.values()}
         dropped = 0
         for run, size in self._do('SELECT run, LENGTH(data) FROM traces ORDER BY run').fetchall():
             if total <= cap:
                 break
+            if run in kept:
+                continue
             self._do('DELETE FROM traces WHERE run = ?', (run,))
             total -= size
             dropped += 1
