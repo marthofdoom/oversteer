@@ -544,7 +544,7 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
 Each capture, once labelled, becomes a fixture in `tests/data/` if under
 ~1 MB (cut to the useful seconds by `telemetry-replay.py --cut A:B`).
 
-## 7. Data model (SQLite, schema v2)
+## 7. Data model (SQLite, schema v3)
 
 ### 7.1 Conventions
 
@@ -552,8 +552,11 @@ Each capture, once labelled, becomes a fixture in `tests/data/` if under
   journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
 - Version in `PRAGMA user_version`: 0 with a `cars` table = v1 (today), 1 =
   v1 with the Codemasters rescale done (Step A, §7.3 step 2), 2 = this
-  design. Migrations run in one transaction at open; the old file is
-  first copied to `telemetry.db.v1.bak` (once).
+  design, 3 = the same with the coach's context layer
+  (docs/coach-techniques.md §7.2: `runs.course` and `run_class`, the phase,
+  section and loss columns of `corners`, `shifts.d`, the `events` table).
+  Migrations run in one transaction at open; the old file is
+  first copied to `telemetry.db.v1.bak` (v2 → v3: `.v2.bak`, once).
 - Times are Unix epoch seconds (REAL). JSON columns hold things whose shape
   will change with calibration (feature vectors, evidence), never things
   that are queried.
@@ -1155,23 +1158,29 @@ Labels come from the tab (Step C) and the web page never writes them.
 
 | Name | Unit | Counted when | Weight / gate |
 |---|---|---|---|
-| `shift.error` (per gear, per method) | rpm, signed vs best | flat-out upshifts with a known best | full on tarmac/circuit; low on gravel/snow (traction-limited, short-shifting can be right); silent when surface unknown and the car is traction-limited (slip at the shift > κ₀); with the game tier (§8.6) that is rare in the user's rally games |
-| `shift.in_band` | fraction within the confidence band ±100 rpm | same | same |
-| `limiter.per_km` | s/km, gears below top | always | all disciplines |
+| `shift.in_band`, `shift.early_share`, `shift.cut_share` (per gear, per method) | share of the run's flat-out changes up by one on the game's lights band (±100 rpm), below it by 100 rpm or more, on the limiter cut | judged changes (not the launch's), 5 or more over the sessions read | tip from a cut share of 25 %, an early share of 60 % on tarmac and circuits (on a loose surface only in 3rd and up where the gear is measured not grip-limited), both together; praise from 60 % on the band; silent on a drift profile (docs/coach-techniques.md §7.3 R1) |
+| `shift.cost` (per gear, per method) | s a stage the early and cut changes cost | same | a tip needs 0.2 s a stage, else a note once |
+| `shift.slip` | driven-wheel slip at the change | wheel speeds sent | lets an early change be coached where the surface is unknown |
+| `limiter.held` | s/km held on the limiter on a straight, below top gear | the limiter and the top gear known (the game's count, else the shipped gear set's) | all disciplines but drift; the limiter between corners, at a shift, in a crawl or in wheelspin is not counted |
 | `limiter.top` | s per run in top gear | always | goes to tuning (§10), not driving |
 | `launch.t50` | s from release to 50 km/h | launch detected | rally, rallycross, drag |
-| `launch.slip` | peak drive slip in the first 2 s | wheel speeds sent | per surface |
-| `launch.bog` / `launch.stall` | count | rpm < 60 % of launch rpm / 0 | all |
-| `pedal.overlap` | fraction with throttle and brake > 20 % | always | reported only on circuit or tarmac and only with a slower exit than the driver's best there (left-foot braking is technique on loose surfaces) |
-| `pedal.coast` | s/km with both < 5 % above 10 m/s | always | compared with the driver's own runs of the same stage, never absolute |
+| `launch.g` | g, mean a_long over the first half second in the launch gear | launch detected | per surface |
+| `launch.slip` | peak drive slip in the first 2 s, else the slip from the revs | wheel speeds sent, or the shipped gearing | per surface |
+| `launch.bog` / `launch.stall` | 0/1 | bog: under 0.3 g or 0.5 s over the median t50 of the last launches / stall: the revs under 300 in the launch gear | not the game's own launch (the clutch never pressed while standing), not a launch the driver restarted within 10 s |
+| `pedal.overlap_entry`, `pedal.overlap_exit` | share of the phase with throttle and brake > 20 % | pedals sent; not partial or restart runs; an off's surroundings left out | description only (left-foot braking is technique on loose surfaces) |
+| `pedal.drag` | s/km on both pedals on a straight | same | a tip on tarmac and circuits |
+| `pedal.coast_entry`, `pedal.coast_exit`, `pedal.coast_straight` | s/km with both < 5 % above 10 m/s, by phase | same | by phase, against the reference, never absolute |
 | `hpattern.neutral` | median s per shift | H-pattern shifts | per method |
 | `hpattern.missed`, `hpattern.skip` | per 100 shifts | H-pattern | |
 | `downshift.over_rev` | per 100 downshifts | engage rpm known | |
 | `seq.double_tap` | per 100 shifts | sequential/paddles | |
 | `handbrake.per_km` | pulls/km | handbrake known | rally, drift |
-| `counter_steer` | fraction of cornering time | steer + yaw rate | technique on loose, habit or setup on tarmac |
-| `consistency.split_sd` | s, SD of splits at every 10 % of the stage | ≥ 3 runs of the stage | per stage |
-| `corner.loss` | s lost in the 3 worst corners vs own best run | ≥ 2 runs of the stage | per stage |
+| `counter_steer` | fraction of cornering time, bends under 90° of heading change | steer + yaw rate | technique on loose, habit or setup on tarmac |
+| `exit.low` (per gear) | share of exits with the revs under the power band that pulled under 80 % of the in-band exits | exits not in a slide | tuning (§10): 50 % of 10 exits, 70 % of 15 on loose surfaces and in FWD cars, never for 1st |
+| `exit.spin` (per gear) | share of exits whose second after throttle-on ran over 0.15 slip from the revs | the shipped gearing known | tuning: the long gear is right where the gear below spun |
+| `consistency.split_sd` | s, SD of splits at every 10 % of the stage (cut at the finish) | ≥ 3 finished clean runs of the car | per stage |
+| `corner.loss` | s lost in the 3 worst sections vs the car's best finished clean run | a reference in the same conditions; not a learning run | per stage |
+| `corner.spread` | m/s, the largest SD of the minimum speed through the same section over the last runs | ≥ 4 runs | per stage; each section's own is an event |
 
 ### 9.2 Over time
 

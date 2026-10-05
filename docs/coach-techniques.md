@@ -2313,3 +2313,51 @@ otherwise.
 | **Oversight:** budget rule | a tenth of the costliest tip | corners 0.4-0.6 s each against shifts' hundredths in the audit |
 | **Oversight:** `corner.spread` tip | SD over 8 km/h and 10 % of the median, 4+ runs | i20N Afon Bidno: median corner 7 km/h, worst 13 km/h over 6 runs; Fabia 15 km/h over 3 |
 | **Oversight:** `throttle_on_t` | throttle past 0.2 after the slowest point | partial-throttle exits are technique in FWD, RWD and on loose surfaces |
+
+## 8. Build log
+
+### Step 1 (2026-10-05): classification, gates and rule fixes
+
+Built as §7.7 describes, in three commits (store v3, `oversteer/coach_context.py`,
+wiring and rules). What differs from, or settles, the design:
+
+- **Backfill** (`drive_log.backfill_step`, `ShiftLearner.backfill`): runs from
+  before the upgrade are worked over from their stored trace, three a batch, from a
+  once-a-second tick on the drive-log thread, only with no run on and no packet for
+  two seconds. The tracker's summary is not stored, so the launch cannot be redone:
+  `launch.t50`, `launch.stall` and `launch.slip` stay as written, the other launch
+  metrics (the old `launch.bog` among them) go. A run it cannot read is classed
+  `unclassified` and not tried again. On marth's live database (42 runs) it takes 1.2 s.
+- **Sections.** Complexes join by time at the run's own pace through the gap (the
+  reference's is not at hand while the run's corners are being found); the section
+  grid is the reference's (its stored corners and `brake_d`); the last section is
+  measured to where the shorter of the two runs stops, the first from where the later
+  starts. `corners.section_t` is the section's time on its first corner, and
+  `loss_entry`/`loss_exit` sit on that corner too. Section bests are not computed yet:
+  they need other runs' traces on the grid (step 2).
+- **Spin.** The yaw reversal threshold is 1.0 rad/s, not 0.5: at 0.5 one hairpin in
+  eight of marth's runs is a spin (the pendulum), at 1.0 only the runs with a
+  hard reversal (one at 4.7 rad/s). Heading change over 200° is unchanged.
+- **Shift cost.** An early change costs `a x drive_lost x (time to climb to the band's
+  low end) / v x (time to the next braking, at most 15 s)`; a cut costs the touch on
+  the limiter beyond 0.1 s (a change made well also leaves the drive for about that
+  long). With that, a cut touch of one or two rows at 10 Hz costs nothing and a held
+  one (0.3 s and more) a few hundredths to a tenth; on marth's captures every
+  change-up pattern is below 0.2 s a stage and comes out as a once-only note, as the
+  audit's arithmetic says. `CUT_NORMAL` is the knob.
+- **Slip from the revs** is per run: a gear's zero is the median of its partial-throttle
+  rows in that run (15 or more), off where it is further than 0.05 from nothing. On the
+  captures the i20N reads 0.00 to 0.03 in 3rd to 5th; the Fabia's 2nd and 3rd and
+  the 208's 2nd are off (their gearing is not the shipped set's). A per-car zero kept
+  in the model would hold across runs; not done.
+- **Not done in step 1:** the grade band for exit gears (the trace has no grade),
+  the tune comparison of §7.2.1 (reference runs are compared across tunes), weather
+  and time of day (only `runs.wet`), the four-part sentences, the `technique` kind,
+  two praise lines a view, and every tip that names a section (R4 exit overlap, R5, R6,
+  R7 spread, held-straight with the reference): their metrics and events are
+  stored; step 2 writes the sentences.
+- **Launch clutch.** The run tracker keeps the most the clutch was pressed while the
+  car stood with the throttle held (`summary['launch_clutch']`, from `sample.clutch`: the
+  pedal as the game has it, not the rig's own channel). Under 0.5 it is the game's
+  auto-clutch launch.
+
