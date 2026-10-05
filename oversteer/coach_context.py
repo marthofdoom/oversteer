@@ -975,7 +975,8 @@ def section_report(corners, ref_corners):
     ended, None where it had none), `entry`, `exit`, `ref` (the matched
     section of the reference), `compare` (compare_section) and `pattern`
     (section_pattern); `first` marks the section of the stage's start, whose
-    time holds the launch (R3 judges that, not a corner)."""
+    time holds the launch (R3 judges that, not a corner), `last` the section the stage ends in (its time holds
+    the finish, not a corner) and `ref_off` that the matched reference section had an off in it."""
     sections = sections_of(corners)
     grid = sections_of(ref_corners)
     matches = match_sections(sections, grid) if grid else {}
@@ -985,10 +986,12 @@ def section_report(corners, ref_corners):
         entry, exit_ = lead.get('loss_entry'), lead.get('loss_exit')
         item = {'name': section_name(s), 'd': s['apex'], 'section': s, 'off': s['off'], 'entry': entry,
                 'exit': exit_, 'loss': entry + exit_ if entry is not None and exit_ is not None else None,
-                'ref': None, 'compare': None, 'pattern': None, 'first': i == 0 or matches.get(i) == 0}
+                'ref': None, 'compare': None, 'pattern': None, 'first': i == 0 or matches.get(i) == 0,
+                'last': i == len(sections) - 1, 'ref_off': False}
         if i in matches:
             g = grid[matches[i]]
             item['ref'] = g
+            item['ref_off'] = bool(g['off'])
             item['compare'] = compare_section(s, g)
             if item['loss'] is not None and not s['off']:
                 item['pattern'] = section_pattern(item['compare'], item['loss'])

@@ -55,7 +55,8 @@ def start():
 
 
 def reference_corners(**kw):
-    return [start(), stored(600.0, complex_=1, direction=-1, **kw), stored(1200.0, complex_=2, direction=1)]
+    return [start(), stored(600.0, complex_=1, direction=-1, **kw), stored(1200.0, complex_=2, direction=1),
+            stored(2000.0, complex_=3, direction=-1)]          # the last section holds the finish and is not judged
 
 
 def corners_with(second=None, third=None, first_loss=None):
@@ -63,7 +64,7 @@ def corners_with(second=None, third=None, first_loss=None):
     given (stored() fields, `loss` for what it lost)."""
     return [stored(150.0, complex_=0, direction=1, loss=first_loss),
             stored(600.0, complex_=1, direction=-1, **(second or {})),
-            stored(1200.0, complex_=2, direction=1, **(third or {}))]
+            stored(1200.0, complex_=2, direction=1, **(third or {})), stored(2000.0, complex_=3, direction=-1)]
 
 
 def two_runs(h, **mine):
@@ -131,11 +132,11 @@ def test_the_start_is_not_a_corner(tmp_path):
 
 def test_only_the_three_costliest_sections_and_those_that_lost_a_tenth_are_named(tmp_path):
     h = Stage(tmp_path / 't.db')
-    ref = [start()] + [stored(300.0 * n, complex_=n) for n in range(1, 7)]
+    ref = [start()] + [stored(300.0 * n, complex_=n) for n in range(1, 8)]
     h.drive(ref, result_time=200.0)
     losses = [0.5, 0.05, 0.4, 0.4, 0.4, 0.4]
     mine = [stored(150.0, complex_=0)] + [stored(300.0 * n, complex_=n, loss=(x, 0.0), min_speed=10.0 - 4 * KMH)
-                                          for n, x in enumerate(losses, 1)]
+                                          for n, x in enumerate(losses, 1)] + [stored(2100.0, complex_=7)]
     h.drive(mine, result_time=203.0)
     tips = [t for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert [t.id.split(':')[-1] for t in tips] == ['300', '1200', '900']     # by cost, then by name
@@ -145,10 +146,10 @@ def test_only_the_three_costliest_sections_and_those_that_lost_a_tenth_are_named
 
 def test_most_of_it_in_two_places_only_when_two_sections_hold_half(tmp_path):
     h = Stage(tmp_path / 't.db')
-    ref = [start()] + [stored(300.0 * n, complex_=n) for n in range(1, 5)]
+    ref = [start()] + [stored(300.0 * n, complex_=n) for n in range(1, 6)]
     h.drive(ref, result_time=200.0)
     mine = [stored(150.0, complex_=0)] + [stored(300.0 * n, complex_=n, loss=(x, 0.0)) for n, x in
-                                          enumerate([1.5, 1.0, 0.1, 0.1], 1)]
+                                          enumerate([1.5, 1.0, 0.1, 0.1], 1)] + [stored(1500.0, complex_=5)]
     h.drive(mine, result_time=203.0)
     [first, *_] = [t for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert first.evidence[1].endswith('Most of it in two places.')
@@ -241,6 +242,33 @@ def test_the_best_run_yet_is_praised_with_where_it_was_won(tmp_path):
     h.drive(reference_corners(), result_time=200.0)
     h.drive(corners_with(), result_time=197.0, run_class='off')
     assert not h.by_id('corner.best')
+
+
+def test_a_gain_beside_an_off_or_at_the_finish_is_not_praised_and_slower_numbers_are_not_credited(tmp_path):
+    # both the slowest point and the exit slower than the reference: no "where you" clause for the gain
+    h = Stage(tmp_path / 't.db')
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second={'min_speed': 10.0 - 4 * KMH, 'exit_speed': 20.0 - 5 * KMH, 'loss': (-0.5, -1.4)}),
+            result_time=197.0)
+    [praise] = h.by_id('corner.best:')
+    assert '1.9 s of it in the 3 right at 0.6 km.' in praise.text and 'where you' not in praise.text
+    # a reference section with an off in it is no comparison, and the last section holds the finish
+    h = Stage(tmp_path / 'u.db')
+    ref = reference_corners()
+    ref[1]['off'] = 1
+    h.drive(ref, result_time=200.0)
+    mine = corners_with(second={'loss': (-0.5, -1.4), 'brake_d': 30.0, 'exit_speed': 20.0 + 5 * KMH})
+    mine[3].update(loss_entry=-1.0, loss_exit=-1.0, brake_d=30.0)
+    h.drive(mine, result_time=197.0)
+    [praise] = h.by_id('corner.best:')
+    assert 'of it in' not in praise.text
+    # the last of the four sections is not named even for a loss
+    h = Stage(tmp_path / 'v.db')
+    h.drive(reference_corners(), result_time=200.0)
+    mine = corners_with(second={'loss': (0.4, 0.4)})
+    mine[3]['loss_entry'], mine[3]['loss_exit'] = 3.0, 3.0
+    h.drive(mine, result_time=203.0)
+    assert [t.id.split(':')[-1] for t in h.by_id('corner.section')] == ['600']
 
 
 def test_best_run_yet_needs_to_beat_every_earlier_clean_run_not_just_the_reference(tmp_path):
@@ -681,7 +709,7 @@ def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):
 def test_the_last_section_of_a_run_that_did_not_finish_is_never_named(tmp_path):
     h = Stage(tmp_path / 't.db')
     h.drive(reference_corners(), result_time=200.0)
-    h.drive(corners_with(second={'loss': (0.4, 0.4)}, third={'loss': (7.0, 7.0)}), finished=0, run_class='partial',
+    h.drive(corners_with(second={'loss': (0.4, 0.4)}, third={'loss': (7.0, 7.0)})[:3], finished=0, run_class='partial',
             course=1500.0)
     named = [t.id for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert named == ['corner.section:{}:600'.format(STAGE_KEY)]

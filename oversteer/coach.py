@@ -1243,8 +1243,8 @@ class Coach:
             ref_name = 'your best clean run' if quickest else 'your quickest run after the start'
         named = []
         for n, it in enumerate(report):
-            if it['loss'] is None or it['off'] or it['compare'] is None or it['first']:
-                continue
+            if it['loss'] is None or it['off'] or it['compare'] is None or it['first'] or it['ref_off'] or it['last']:
+                continue                    # the last holds the finish; one beside an off is no fair comparison
             # Time lost beside time gained is one trade (braked later into the one, too early for the next):
             # a section is named for what it lost net of the gain right before it
             prev = report[n - 1] if n else None
@@ -1254,9 +1254,6 @@ class Coach:
                 it = dict(it, loss=net, gained_before=-prev['loss'], pattern=(
                     coach_context.section_pattern(it['compare'], net) if net >= coach_context.SECTION_MIN else None))
             named.append(it)
-        if run['finished'] != 1 and report:
-            # The section an unfinished run stopped in holds the crash or the stop, not a corner
-            named = [it for it in named if it['section'] is not report[-1]['section']]
         lost = sorted((it for it in named if it['loss'] >= coach_context.SECTION_MIN), key=lambda it: -it['loss'])
         claimed = self._patterns(stage, name, run, named, ref_name, ref_text, candidates, model)
         total = sum(it['loss'] for it in lost)
@@ -1546,7 +1543,10 @@ class Coach:
                 name, car, gain, _date(prior['started']), prior['result_time'])
             if gained and prior['id'] == ref['id']:                 # the gains are against the reference
                 it = gained[0]
-                how = _how(it['compare'])
+                c = it['compare']
+                lower = coach_context.SPEED_DELTA
+                # a gain with both the slowest point and the exit slower was not made there
+                how = [] if (c['speed'] or 0.0) <= -lower and (c['exit'] or 0.0) <= -lower else _how(c)
                 sentence += ' {:.1f} s of it in {}{}.'.format(-it['loss'], it['name'],
                                                               ', where you ' + _say(how) if how else '')
             praise.append(Tip('corner.best:' + stage, 'praise', sentence, [], gain, cost=gain + 1.0, count=1))
