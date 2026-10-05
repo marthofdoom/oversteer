@@ -1,6 +1,6 @@
 import pytest
 from evdev import ecodes
-from oversteer.device import Device, pedal_response_to_raw
+from oversteer.device import Device
 from oversteer.model import Model
 
 
@@ -8,9 +8,12 @@ class FakeDevice:
     """Just enough of Device for the model: records what reaches the driver."""
     PEDAL_NAMES = Device.PEDAL_NAMES
 
-    def __init__(self, supported=True, mask=0):
+    def __init__(self, supported=True, mask=0, held=None, combine=0, fail=False):
         self.supported = supported
         self.mask = mask
+        self.held = held or {}      # bit -> response the driver holds
+        self.combine = combine
+        self.fail = fail
         self.written = []           # (bit, start, end, sensitivity)
         self.invert_writes = []
 
@@ -21,7 +24,19 @@ class FakeDevice:
         # clutch / accelerator / brakes on raw Y / Z / RZ
         return {ecodes.ABS_Y: (65535, 0, 1), ecodes.ABS_Z: (65535, 0, 2), ecodes.ABS_RZ: (65535, 0, 4)}
 
+    def get_pedal_response(self, bit):
+        return self.held.get(bit, (0, 100, 50)) if self.supported else None
+
+    def get_combine_pedals(self):
+        return self.combine
+
+    def set_combine_pedals(self, value):
+        self.combine = value
+
     def set_pedal_response(self, bit, start, end, sensitivity):
+        if self.fail:
+            raise PermissionError("denied")
+        self.held[bit] = (start, end, sensitivity)
         self.written.append((bit, start, end, sensitivity))
 
     def set_invert_pedals(self, mask):
@@ -40,17 +55,9 @@ class FakeDevice:
         raise AttributeError(name)
 
 
-def make_model(supported=True, mask=0):
-    model = Model(FakeDevice(supported, mask))
+def make_model(supported=True, mask=0, **kwargs):
+    model = Model(FakeDevice(supported, mask, **kwargs))
     return model
-
-
-def test_translation_both_directions():
-    assert pedal_response_to_raw((10, 90, 30), False) == (10, 90, 30)
-    assert pedal_response_to_raw((10, 90, 30), True) == (10, 90, 70)
-    assert pedal_response_to_raw((0, 100, 50), True) == (0, 100, 50)
-    assert pedal_response_to_raw((20, 80, 100), True) == (20, 80, 0)
-    assert pedal_response_to_raw((5, 60, 40), True) == (40, 95, 60)
 
 
 def test_defaults_follow_the_driver():
@@ -71,32 +78,73 @@ def test_validation(args):
     assert model.device.written == []
 
 
-def test_released_at_axis_minimum_is_written_as_is():
-    model = make_model(mask=7)
-    model.data['invert_pedals'] = 7
+@pytest.mark.parametrize('mask', [0, 7])
+def test_written_unchanged_whichever_way_the_axis_runs(mask):
+    model = make_model(mask=mask)
+    model.data['invert_pedals'] = mask
     model.set_accelerator_response(10, 90, 30)
-    assert model.device.written == [(2, 10, 90, 30)]
-
-
-def test_released_at_axis_maximum_is_mirrored():
-    model = make_model()
-    model.data['invert_pedals'] = 0
-    model.set_accelerator_response(10, 90, 30)
-    assert model.device.written == [(2, 10, 90, 70)]
-    model.device.written.clear()
     model.set_brakes_response(5, 60, 40)
-    assert model.device.written == [(4, 40, 95, 60)]
+    assert model.device.written == [(2, 10, 90, 30), (4, 5, 60, 40)]
 
 
-def test_invert_change_reapplies_every_pedal():
+def test_invert_change_writes_nothing():
     model = make_model()
-    model.data['invert_pedals'] = 0
     model.set_clutch_response(10, 90, 30)
-    model.set_accelerator_response(0, 100, 20)
     model.device.written.clear()
-    model.set_invert_pedals(2)                   # only the accelerator flips
+    model.set_invert_pedals(2)
     assert model.device.invert_writes == [2]
-    assert sorted(model.device.written) == [(1, 10, 90, 70), (2, 0, 100, 20), (4, 0, 100, 50)]
+    assert model.device.written == []
+
+
+def test_reading_the_device_keeps_the_drivers_curves():
+    model = make_model(held={4: (3, 85, 40)})
+    assert model.get_brakes_response() == (3, 85, 40)
+    assert model.get_clutch_response() == (0, 100, 50)
+    model.flush_device()
+    assert model.device.held[4] == (3, 85, 40)
+
+
+def test_driver_values_outside_the_ui_ranges_are_clamped():
+    model = make_model(held={4: (60, 70, 50), 2: (0, 50, 20), 1: (9, 3, 50)})
+    assert model.get_brakes_response() == (45, 70, 50)
+    assert model.get_accelerator_response() == (0, 55, 20)
+    assert model.get_clutch_response() is None          # not a valid response
+
+
+def test_set_is_kept_to_the_ui_ranges():
+    model = make_model()
+    with pytest.raises(ValueError):
+        model.set_brakes_response(50, 90, 50)
+    with pytest.raises(ValueError):
+        model.set_brakes_response(0, 50, 50)
+    model.set_brakes_response(45, 55, 50)
+
+
+def test_combined_pedals_skip_the_writes_until_uncombined():
+    model = make_model(combine=1)
+    model.set_brakes_response(5, 60, 40)
+    assert model.get_brakes_response() == (5, 60, 40)
+    assert model.device.written == []
+    model.flush_device()
+    assert model.device.written == []
+    model.set_combine_pedals(0)
+    assert (4, 5, 60, 40) in model.device.written
+
+
+def test_write_failure_does_not_abort_the_flush():
+    model = make_model(fail=True)
+    model.data['clutch_response'] = (5, 95, 20)
+    model.data['brakes_response'] = (0, 80, 60)
+    model.flush_device()                    # no exception
+    model.set_accelerator_response(10, 90, 30)
+    assert model.get_accelerator_response() == (10, 90, 30)
+
+
+def test_refresh_reads_what_was_unreadable():
+    model = make_model(held={4: (3, 85, 40)})
+    model.data['brakes_response'] = None
+    model.refresh_pedal_responses()
+    assert model.get_brakes_response() == (3, 85, 40)
 
 
 def test_flush_device_applies_the_responses():
@@ -125,6 +173,17 @@ def test_profile_round_trip_and_old_profile(tmp_path):
     assert other.get_clutch_response() == (5, 95, 20)
 
 
+def test_invalid_profile_values_keep_the_current_ones(tmp_path):
+    model = make_model(held={4: (3, 85, 40)})
+    for bad in ("60,40,50", "0,100", "a,b,c", "0,100,101", "-1,100,50", "5,5,50", "0,100,50,1"):
+        path = tmp_path / 'bad.ini'
+        path.write_text("[DEFAULT]\nbrakes_response = {}\nclutch_response = 5,95,20\n".format(bad))
+        model.profile = None
+        model.load(str(path))
+        assert model.get_brakes_response() == (3, 85, 40), bad
+        assert model.get_clutch_response() == (5, 95, 20)
+
+
 def test_old_driver_has_no_attributes(tmp_path):
     device = Device.__new__(Device)
     device.device_file = lambda name: str(tmp_path / name)
@@ -145,15 +204,12 @@ def test_sysfs_read_and_write(tmp_path):
     assert (tmp_path / 'pedal_response_rz').read_text() == "10 90 70"
 
 
-def test_presets_go_through_the_same_translation():
+def test_presets_are_written_as_they_are():
     model = make_model()
     model.data['invert_pedals'] = 0
     assert model.set_pedal_preset('brakes', 'spring_brake') == (3, 85, 40)
     assert model.get_brakes_response() == (3, 85, 40)
-    assert model.device.written == [(4, 15, 97, 60)]          # released high: mirrored
-    model.device.written.clear()
-    model.set_invert_pedals(4)
-    assert (4, 3, 85, 40) in model.device.written              # released low: as is
+    assert model.device.written == [(4, 3, 85, 40)]
     model.set_pedal_preset('brakes', 'linear')
     assert model.get_brakes_response() == (0, 100, 50)
 

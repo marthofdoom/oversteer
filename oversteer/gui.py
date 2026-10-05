@@ -460,6 +460,9 @@ class Gui:
         if not self.device.check_permissions() and self.check_permissions:
             if self.app.udev_path:
                 self.install_udev_files()
+                # The pedal response attributes may only now be readable
+                if self.device.get_id() in self.models:
+                    self.models[self.device.get_id()].refresh_pedal_responses()
             else:
                 self.ui.info_dialog(_("You don't have the required permissions to change your wheel settings."))
 

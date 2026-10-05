@@ -247,8 +247,9 @@ class Device:
         return any(self._pedal_response_file(bit) for bit in self.PEDAL_RESPONSE_SUFFIX)
 
     def get_pedal_response(self, bit):
-        """(start, end, sensitivity) of the raw axis whose invert_pedals bit
-        is `bit`, as the driver holds it; None when it has no such control."""
+        """(start, end, sensitivity) of the pedal whose invert_pedals bit is
+        `bit`, in pedal-travel terms as the driver holds it; None when it has
+        no such control or the value isn't three integers."""
         path = self._pedal_response_file(bit)
         if not path:
             return None
@@ -256,10 +257,15 @@ class Device:
             values = file.read().split()
         if len(values) != 3:
             return None
-        return tuple(int(v) for v in values)
+        try:
+            return tuple(int(v) for v in values)
+        except ValueError:
+            return None
 
     def set_pedal_response(self, bit, start, end, sensitivity):
-        """Write the raw-axis response (see the driver's pedal_response_*)."""
+        """Write a pedal's response in pedal-travel terms, from the released
+        end whichever way invert_pedals has the axis (the driver mirrors it
+        itself and ignores it while the pedals are combined)."""
         path = self._pedal_response_file(bit)
         if not path:
             return False
@@ -892,14 +898,3 @@ class Device:
                 event.code = ecodes.ABS_RZ
 
         return event
-
-
-def pedal_response_to_raw(response, released_high):
-    """A pedal's response in pedal-travel terms (deadzone at the released
-    end, where it reaches full, sensitivity 50 linear) as the driver's
-    pedal_response_* wants it, in terms of the raw axis: unchanged when the
-    pedal is released at the axis minimum, mirrored when at the maximum."""
-    start, end, sensitivity = response
-    if released_high:
-        return 100 - end, 100 - start, 100 - sensitivity
-    return start, end, sensitivity
