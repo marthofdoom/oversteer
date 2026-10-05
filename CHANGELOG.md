@@ -10,8 +10,10 @@
   rev lights still show the level), when you start setting a button, or
   when you switch device. Toggles and profile switches fire once.
 - Devices tab: a "Steam launch options for wheels under Proton" row with a
-  Copy button: `SDL_JOYSTICK_HIDAPI=0 %command%` stops SDL from opening
-  the hidden physical wheel and pedals behind the combined device. The
+  Copy button: `SDL_JOYSTICK_HIDAPI=0 %command%` keeps SDL (in Proton)
+  from driving a Logitech wheel itself through its HIDAPI driver (SDL 3.4
+  has one for the G29 PS3 mode, G27, G25 and DFGT, on by default on Linux),
+  which bypasses the kernel driver and Oversteer's settings. The
   line under it reminds you to set the game's Steam Input to Disabled and
   shows the combined form with the shared-memory bridge
   (`SDL_JOYSTICK_HIDAPI=0 <oversteer-run> %command%`) for the Assetto

@@ -4,8 +4,8 @@ as strings (text only: nothing here knows a game)."""
 from locale import gettext as _
 
 WHEEL_OPTIONS = 'SDL_JOYSTICK_HIDAPI=0 %command%'
-WHEEL_TOOLTIP = _("Stops SDL's HIDAPI from opening the hidden physical wheel and pedals on their own, which "
-                  "would bypass the combined device. Also set this game's Steam Input to Disabled "
+WHEEL_TOOLTIP = _("Keeps SDL (in Proton) from driving a Logitech wheel itself through HIDAPI, which bypasses "
+                  "the kernel driver and Oversteer's settings. Also set this game's Steam Input to Disabled "
                   "(Properties > Controller). To see what the game does with the devices, add PROTON_LOG=1 "
                   "(not in the copied text): Proton then writes steam-<appid>.log in your home folder.")
 

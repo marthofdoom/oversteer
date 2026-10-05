@@ -19,3 +19,9 @@ def test_no_combination_without_a_path():
     missing = 'oversteer-run was not found: install Oversteer'
     assert steam_options.shared_memory_combined(missing) is None
     assert 'shared-memory' not in steam_options.guidance(missing)
+
+
+def test_tooltip_gives_the_hidapi_reason():
+    assert 'HIDAPI' in steam_options.WHEEL_TOOLTIP
+    assert 'Steam Input' in steam_options.WHEEL_TOOLTIP
+    assert 'hidden' not in steam_options.WHEEL_TOOLTIP

@@ -659,7 +659,7 @@ class GtkUi:
         """A row at the foot of the Devices tab: the Steam launch options
         for wheels and the combined device under Proton."""
         entry = Gtk.Entry(editable=False, text=steam_options.WHEEL_OPTIONS)
-        entry.set_width_chars(28)
+        entry.set_width_chars(len(steam_options.WHEEL_OPTIONS) + 1)
         button = Gtk.Button(label=_("Copy"))
         button.connect('clicked', lambda w: self._copy_text(entry.get_text()))
         self.wheel_launch_guidance = self._status_label()
