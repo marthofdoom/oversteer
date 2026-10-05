@@ -1399,7 +1399,8 @@ class GtkUi:
         self.telemetry_sessions.show_all()
         self._show_coaching()
 
-    KIND_TAGS = {'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip'}
+    KIND_TAGS = {'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip',
+                'technique': 'telemetry-technique'}
 
     def _show_coaching(self):
         """The coach's tips, one row each with its kind as a tag, the

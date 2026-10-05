@@ -1,5 +1,7 @@
 """The Telemetry tab's strings, built without a display
 (docs/telemetry-coaching.md, section 12)."""
+from pathlib import Path
+
 from oversteer import telemetry_view as view
 from oversteer.coach import Tip
 
@@ -169,3 +171,14 @@ def test_preferences_through_configparser(tmp_path):
     again = configparser.ConfigParser()
     again.read(str(path))
     assert view.read_preferences(again['DEFAULT'])['telemetry_web_port'] == 6000
+
+
+def test_a_technique_line_is_labelled_neutrally_in_both_windows():
+    tips = [Tip('t', 'technique', 'You left-foot brake.')]
+    assert view.coaching_items(tips) == [('Technique', 'You left-foot brake.', 'technique')]
+    assert view.coaching_lines(tips) == [('Technique: You left-foot brake.', 'technique')]
+    root = Path(__file__).resolve().parent.parent
+    page = (root / 'data/telemetry/web/index.html').read_text()
+    assert 'technique: "Technique"' in page and '.k-technique' in page          # not the raw kind, not the tip's blue
+    assert '.telemetry-technique' in (root / 'oversteer/main.css').read_text()
+    assert "'technique': 'telemetry-technique'" in (root / 'oversteer/gtk_ui.py').read_text()

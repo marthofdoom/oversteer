@@ -99,7 +99,7 @@ ul.tips li:first-child { border-top: 0; padding-top: 2px; }
 .badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   padding: 2px 7px; border-radius: 5px; margin-right: 8px; vertical-align: 2px; border: 1px solid currentColor; }
 .k-focus { color: var(--bad); } .k-tip { color: var(--accent); } .k-praise { color: var(--good); }
-.k-still, .k-note, .k-driving { color: var(--dim); } .k-setup { color: var(--warn); }
+.k-still, .k-note, .k-driving, .k-technique { color: var(--dim); } .k-setup { color: var(--warn); }
 li.still { color: var(--dim); font-size: 15px; }
 details { margin-top: 6px; }
 summary { cursor: pointer; color: var(--dim); font-size: 14px; }
@@ -361,7 +361,7 @@ async function loadCar() {
   if (car) { shiftTable(car, table, note); tune(car); }
   else note.textContent = "Could not read this car.";
   if (c) {
-    const names = {focus: "Focus", tip: "Tip", praise: "Better", still: "", note: ""};
+    const names = {focus: "Focus", tip: "Tip", praise: "Better", technique: "Technique", still: "", note: ""};
     const order = {focus: 0, praise: 2, still: 3};
     const tips = c.tips.slice().sort((a, b) => (order[a.kind] ?? 1) - (order[b.kind] ?? 1));
     for (const t of tips) coach.appendChild(tipItem(t, names[t.kind] ?? t.kind));

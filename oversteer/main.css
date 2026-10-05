@@ -86,6 +86,7 @@ window#overlay-window .overlay-leds levelbar:nth-child(5) block.filled {
 .telemetry-focus { color: #e66100; }
 .telemetry-praise { color: #2ec27e; }
 .telemetry-tip { color: #3584e4; }
+.telemetry-technique { color: alpha(currentColor, 0.65); }
 .telemetry-dot { color: alpha(currentColor, 0.4); }
 .telemetry-dot.telemetry-waiting { color: #e5a50a; }
 .telemetry-dot.telemetry-live { color: #2ec27e; }
