@@ -1237,6 +1237,9 @@ class Coach:
                 it = dict(it, loss=net, gained_before=-prev['loss'], pattern=(
                     coach_context.section_pattern(it['compare'], net) if net >= coach_context.SECTION_MIN else None))
             named.append(it)
+        if run['finished'] != 1 and report:
+            # The section an unfinished run stopped in holds the crash or the stop, not a corner
+            named = [it for it in named if it['section'] is not report[-1]['section']]
         lost = sorted((it for it in named if it['loss'] >= coach_context.SECTION_MIN), key=lambda it: -it['loss'])
         claimed = self._patterns(stage, name, run, named, ref_name, ref_text, candidates, model)
         total = sum(it['loss'] for it in lost)

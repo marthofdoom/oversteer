@@ -646,3 +646,12 @@ def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):
     h.drive(reference_corners(), result_time=200.0)
     h.drive(corners_with(second={'loss': (-0.8, -0.4)}, third={'loss': (0.6, 0.5)}), result_time=199.9)
     assert not [t for t in h.tips() if t.id.startswith('corner.section')]
+
+
+def test_the_last_section_of_a_run_that_did_not_finish_is_never_named(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second={'loss': (0.4, 0.4)}, third={'loss': (7.0, 7.0)}), finished=0, run_class='partial',
+            course=1500.0)
+    named = [t.id for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
+    assert named == ['corner.section:{}:600'.format(STAGE_KEY)]

@@ -44,6 +44,7 @@ SECTION_REACH = 20.0             # m a yaw window may be from a stall, a spin or
 # -- run class --
 RESTART_SHARE = 0.5              # of the stage: a run that stopped before is a restart
 AWAY = 7 * 86400.0               # s: the first run after this long on a stage is a learning run (calibrate)
+FINISH_SHARE = 0.95              # of the stage: a run that ended with no finish known, short of this, did not finish
 NO_LENGTH_RESTART = 1000.0       # m: with no stage length, an unfinished run shorter than this is a restart
 
 # -- corners and sections --
@@ -216,7 +217,7 @@ def hits(trace):
     return out
 
 
-def incidents(trace, corners=(), course=None):
+def incidents(trace, corners=(), course=None, unfinished=False):
     """The located trouble in a run: dicts (kind, class, d0, d1, t0, t1,
     value) of kinds
     - `off`: a slow stretch (under SLOW m/s for SLOW_TIME s, past the first
@@ -228,13 +229,16 @@ def incidents(trace, corners=(), course=None):
     - `stop`: any other slow stretch;
     - `hit`: a stretch over HIT_G (a wall, a rock, a landing);
     - `spin`: a corner whose yaw window turns the car through more than
-      SPIN_HEADING, or reverses its yaw hard after the slowest point."""
+      SPIN_HEADING, or reverses its yaw hard after the slowest point.
+    A run that did not finish has no finish to be slow at: SLOW_END is not
+    applied to it, and a slow stretch that runs to the end of its trace is an
+    off (the crash, the stop before the restart)."""
     out = []
     if not trace:
         return out
     t, speed, gear = CH['t'], CH['speed'], CH['gear']
     track = along(trace)
-    end = (course if course is not None and _fin(course) else track[-1]) - SLOW_END
+    end = float('inf') if unfinished else (course if course is not None and _fin(course) else track[-1]) - SLOW_END
     knocks = hits(trace)
     i, n = 0, len(trace)
     while i < n:
@@ -251,7 +255,7 @@ def incidents(trace, corners=(), course=None):
             hit_before = next((k for k, last in knocks if trace[i][t] - HIT_BEFORE <= trace[last][t] <= trace[j][t]),
                               None)
             event = {'d0': d0, 'd1': d1, 't0': trace[i][t], 't1': trace[j][t] + _dt(trace, j), 'value': duration}
-            if reverse or duration >= OFF_TIME or hit_before is not None:
+            if reverse or duration >= OFF_TIME or hit_before is not None or (unfinished and j == n - 1):
                 event.update(kind='off', **{'class': 'reverse' if reverse else ('long' if duration >= OFF_TIME
                                                                                   else 'hit')})
             elif any(k['d0'] - SECTION_REACH <= d1 and d0 <= k['d1'] + SECTION_REACH for k in corners
@@ -316,7 +320,8 @@ def mark_off(corners, events):
 
 def run_class(finished, course, stage_length, events, started=None, last_started=None):
     """The class of a run (runs.run_class):
-    - `restart`: not finished, and under half the stage;
+    - `restart`: not finished (or ended with no finish known, short of
+      FINISH_SHARE of a known stage), and under half the stage;
     - `partial`: not finished, half the stage or more;
     - `off`: finished with at least one off;
     - `learning`: the first run of this car on this stage (`last_started`
@@ -324,6 +329,8 @@ def run_class(finished, course, stage_length, events, started=None, last_started
     - `clean`: everything else.
     Without a stage length an unfinished run shorter than NO_LENGTH_RESTART
     m is a restart."""
+    if finished is None and stage_length and (course or 0.0) < FINISH_SHARE * stage_length:
+        finished = 0                    # ended in silence well short of the line
     if finished == 0:
         length = stage_length or None
         if length is None:
@@ -739,14 +746,17 @@ def exit_end(trace, track, grid_section):
     return reach
 
 
-def section_loss(trace, sections, reference):
+def section_loss(trace, sections, reference, unfinished=False):
     """Time lost against the reference run on its grid: sets
     `loss_entry` and `loss_exit` on the lead corner of each section of this
     run that matches a section of the reference's (and neither was off).
     `reference` is {'trace', 'corners' (stored rows), 'course'}. The loss
     is this run's time through the reference's section less the
     reference's own, split at this run's slowest point. Returns the sum of
-    the matched sections' losses (negative: quicker than the reference)."""
+    the matched sections' losses (negative: quicker than the reference).
+    A run that did not finish (`unfinished`) is not timed through a section
+    it did not cover to the end (END_SLACK m short at most): the one it
+    stopped in, which holds the crash and not a corner."""
     ref_trace = reference['trace']
     grid = sections_of(reference['corners'])
     if not grid or not sections:
@@ -756,6 +766,7 @@ def section_loss(trace, sections, reference):
     # first section is measured from where the later of them starts, the last to where the shorter stops
     limit, first = min(ref_track[-1], track[-1]), max(ref_track[0], track[0])
     bounds = section_bounds(grid, ref_track[0] if ref_track else 0.0, reference.get('course') or ref_track[-1])
+    reach = [b for _, b in bounds]
     bounds = [(min(max(a, first), limit), min(max(b, first), limit)) for a, b in bounds]
     matches = match_sections(sections, grid)
     total = 0.0
@@ -765,6 +776,8 @@ def section_loss(trace, sections, reference):
         if g.get('off') or any(k.get('off') for k in s['corners']):
             continue
         a, b = bounds[j]
+        if unfinished and reach[j] > track[-1] + END_SLACK:
+            continue
         apex = min(max(s['apex'], a), b)
         b = min(b, exit_end(ref_trace, ref_track, g))
         apex = min(apex, b)
@@ -1332,14 +1345,16 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     downs = [s['t'] for s in out_shifts if s.get('method') == 'h-pattern' and s.get('direction') == 'down'
              and s['t'] is not None]
     describe_corners(rows, corners, sections, downs)
-    events = incidents(rows, corners, course)
+    length = stage_length or summary.get('stage_length')
+    unfinished = summary.get('finished') == 0 or (
+        summary.get('finished') is None and bool(length) and (course or 0.0) < FINISH_SHARE * length)
+    events = incidents(rows, corners, course, unfinished)
     mark_off(corners, events)
-    klass = run_class(summary.get('finished'), course, stage_length or summary.get('stage_length'), events,
-                      started, last_started)
+    klass = run_class(summary.get('finished'), course, length, events, started, last_started)
     top = summary.get('gears') or context.get('shipped_top') or context.get('top_gear')
     episodes = limiter_episodes(rows, context.get('limiter'), top, corners, slip)
     launch = launch_outcome(summary, rows, slip, history, context.get('limiter'))
-    loss = section_loss(rows, sections, reference) if reference is not None else None
+    loss = section_loss(rows, sections, reference, unfinished) if reference is not None else None
     # The changes of gear
     limiter = context.get('limiter')
     brake, t_col = CH['brake'], CH['t']
@@ -1372,8 +1387,7 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     costs = shift_costs(rows, out_shifts)
     for s in out_shifts:
         s['cost'] = costs.get(s['key'])
-    spreads = spread(sections, others) if klass in ('clean', 'learning', 'off') and summary.get('finished') != 0 \
-        else []
+    spreads = spread(sections, others) if klass in ('clean', 'learning', 'off') and not unfinished else []
     all_events = events + episodes + spreads
     if launch is not None and not launch['dropped']:
         all_events.append({'kind': 'launch', 'class': 'game' if launch['game'] else 'driver', 'd0': None, 'd1': None,

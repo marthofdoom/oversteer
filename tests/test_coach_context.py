@@ -803,3 +803,43 @@ def test_the_spread_matches_corners_not_neighbours_and_skips_a_run_whose_corner_
     # one odd run does not make the corner a spread
     odd = [({'id': i}, run(20.0 if i == 0 else 12.0)) for i in range(5)]
     assert [e for e in cc.spread(mine, odd) if e['d0'] == 1080.0][0]['value'] == 0.0
+
+
+def crash_run(finished=0):
+    """The road's first corner, then the second one's braking and a crawl of 20 s that ends the trace."""
+    points = [(0.0, 28.0), (430.0, 28.0), (500.0, 10.0), (600.0, 28.0), (1000.0, 28.0), (1100.0, 12.0),
+              (1110.0, 1.0), (1130.0, 1.0)]
+    tr = stage(points, [(470.0, 530.0, 1, 0.5), (1070.0, 1130.0, -1, 0.5)],
+               brake=lambda i, t, d, a: 0.6 if a < -1.0 else 0.0, throttle=lambda i, t, d, a: 0.0 if a < -1.0 else 0.3)
+    return tr, find_corners(tr)
+
+
+def test_a_run_that_ended_in_a_crash_has_an_off_and_no_loss_in_the_section_it_stopped_in():
+    ref_tr, ref_corners = road()
+    cc.describe_corners(ref_tr, ref_corners, cc.build_sections(ref_tr, ref_corners))
+    tr, corners = crash_run()
+    end = tr[-1][C['distance']]
+    # the crawl reaches the end of the trace: past the finish's margin on a finished run, an off on an unfinished one
+    summary = {'finished': 0, 'course': end, 'duration': 80.0}
+    out = cc.analyse(summary, tr, corners, [], {}, reference=reference_from(ref_tr, ref_corners), stage_length=1500.0)
+    assert [e['class'] for e in out['events'] if e['kind'] == 'off'] == ['long']
+    assert out['run_class'] == 'partial'
+    assert all(k.get('loss_exit') is None for k in corners[1:]) and all(k['off'] for k in corners[1:])
+    # a run that ended in silence short of the line is not a finished run either
+    tr, corners = crash_run()
+    out = cc.analyse({'finished': None, 'course': end}, tr, corners, [], {}, stage_length=1500.0)
+    assert out['run_class'] == 'partial' and any(e['kind'] == 'off' for e in out['events'])
+    assert cc.run_class(None, 5000.0, None, []) == 'clean'                       # no stage length: unknown
+    assert cc.run_class(None, 5000.0, 5000.0, []) == 'clean'
+    assert cc.run_class(None, 1200.0, 5000.0, []) == 'restart'
+
+
+def test_an_unfinished_run_is_not_timed_through_the_section_it_stopped_in():
+    ref_tr, ref_corners = road()
+    cc.describe_corners(ref_tr, ref_corners, cc.build_sections(ref_tr, ref_corners))
+    tr, corners = crash_run()
+    sections = cc.build_sections(tr, corners)
+    cc.describe_corners(tr, corners, sections)
+    ref = reference_from(ref_tr, ref_corners)
+    assert cc.section_loss(tr, sections, ref, unfinished=True) is not None          # the first corner is timed
+    assert 'loss_exit' not in sections[-1]['lead'] and 'loss_exit' in sections[0]['lead']
