@@ -401,7 +401,7 @@ class GtkUi:
             for row, (label, scale) in enumerate(((_("Starts at"), start), (_("Full at"), end), (_("Sensitivity"), sensitivity))):
                 label = Gtk.Label(label=label, halign=Gtk.Align.START, valign=Gtk.Align.START)
                 popover_box.attach(label, 0, row, 1, 1)
-                popover_box.attach(self._response_row(scale), 1, row, 1, 1)
+                popover_box.attach(self._response_row(scale, scale is not sensitivity), 1, row, 1, 1)
             popover_box.attach(Gtk.Label(label=_("Preset"), halign=Gtk.Align.START), 0, 3, 1, 1)
             popover_box.attach(preset, 1, 3, 1, 1)
             popover_box.attach(note, 1, 4, 1, 1)
@@ -432,12 +432,18 @@ class GtkUi:
         return scale
 
     @staticmethod
-    def _response_row(scale):
-        """The scale with its value and a '%', in a label of a fixed width so
-        the three tracks come out the same length."""
+    def _response_row(scale, percent=True):
+        """The scale with its value, in a label of a fixed width so the three
+        tracks come out the same length. `percent` adds a '%' (the sensitivity
+        is not a percentage); the label is kept the same width either way. Without
+        it the label sits at the top, level with the track, as the sensitivity
+        track has marks under it."""
         value = Gtk.Label(label="", width_chars=5, xalign=1)
+        if not percent:
+            value.set_valign(Gtk.Align.START)
+            value.set_margin_top(4)
         def show(scale):
-            value.set_text("{:.0f} %".format(scale.get_value()))
+            value.set_text("{:.0f} %".format(scale.get_value()) if percent else "{:.0f}".format(scale.get_value()))
         scale.connect('value-changed', show)
         show(scale)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)

@@ -193,7 +193,7 @@ class Gui:
                     '/bin/sh',
                     '-c',
                     copy_cmd +
-                    'udevadm control --reload-rules && udevadm trigger',
+                    'udevadm control --reload-rules && udevadm trigger && udevadm settle',
                 ])
                 if return_code == 0:
                     self.ui.info_dialog(_("Permissions rules installed."),
@@ -463,9 +463,6 @@ class Gui:
         if not self.device.check_permissions() and self.check_permissions:
             if self.app.udev_path:
                 self.install_udev_files()
-                # The pedal response attributes may only now be readable
-                if self.device.get_id() in self.models:
-                    self.models[self.device.get_id()].refresh_pedal_responses()
             else:
                 self.ui.info_dialog(_("You don't have the required permissions to change your wheel settings."))
 
@@ -477,6 +474,8 @@ class Gui:
         else:
             self.model = Model(self.device, self.ui)
             self.models[self.device.get_id()] = self.model
+        # The pedal response attributes may only now be readable
+        self.model.refresh_pedal_responses()
 
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
@@ -624,6 +623,11 @@ class Gui:
         the invert_pedals value about to be written, so events arriving
         while the driver catches up are read the new way."""
         self.pedal_axes = self.device.pedal_axes(mask) if self.device is not None else {}
+        if self.pedal_axes and self.model is not None and self.model.get_device() is self.device:
+            # The input device may have opened only now (proxy restarting,
+            # ACL not yet applied): pick up responses the model couldn't
+            # resolve and write the ones a profile set that never got out.
+            self.model.refresh_pedal_responses()
         # Which bit each box flips depends on the wheel: the pedal shown as
         # the clutch is not always the axis the driver calls the clutch.
         self.ui.set_pedal_bits({name: (self.pedal_axes[code][2] if code in self.pedal_axes else None)
