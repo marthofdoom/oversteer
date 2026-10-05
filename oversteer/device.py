@@ -232,6 +232,43 @@ class Device:
             file.write(str(int(mask)))
         return True
 
+    # sysfs suffix of pedal_response_<suffix>, by invert_pedals bit
+    PEDAL_RESPONSE_SUFFIX = {1: 'y', 2: 'z', 4: 'rz'}
+
+    def _pedal_response_file(self, bit):
+        suffix = self.PEDAL_RESPONSE_SUFFIX.get(bit)
+        if suffix is None:
+            return False
+        return self.checked_device_file("pedal_response_" + suffix)
+
+    def has_pedal_response(self):
+        """True when the driver can reshape the pedals (new-lg4ff with
+        pedal_response); older drivers have no such attributes."""
+        return any(self._pedal_response_file(bit) for bit in self.PEDAL_RESPONSE_SUFFIX)
+
+    def get_pedal_response(self, bit):
+        """(start, end, sensitivity) of the raw axis whose invert_pedals bit
+        is `bit`, as the driver holds it; None when it has no such control."""
+        path = self._pedal_response_file(bit)
+        if not path:
+            return None
+        with open(path, "r") as file:
+            values = file.read().split()
+        if len(values) != 3:
+            return None
+        return tuple(int(v) for v in values)
+
+    def set_pedal_response(self, bit, start, end, sensitivity):
+        """Write the raw-axis response (see the driver's pedal_response_*)."""
+        path = self._pedal_response_file(bit)
+        if not path:
+            return False
+        value = "{} {} {}".format(int(start), int(end), int(sensitivity))
+        logging.debug("Setting pedal_response (bit %s): %s", bit, value)
+        with open(path, "w") as file:
+            file.write(value)
+        return True
+
     def get_combine_pedals(self):
         path = self.checked_device_file("combine_pedals")
         if not path:
@@ -449,7 +486,7 @@ class Device:
             return False
         if not self.check_file_permissions('peak_ffb_level'):
             return False
-        for name in ('sensitivity', 'invert_pedals', 'app_gain', 'autocenter_persistent', 'inertia_mode'):
+        for name in ('sensitivity', 'invert_pedals', 'pedal_response_y', 'pedal_response_z', 'pedal_response_rz', 'app_gain', 'autocenter_persistent', 'inertia_mode'):
             if not self.check_file_permissions(name):
                 return False
         return True
@@ -593,6 +630,7 @@ class Device:
     # invert_pedals bits, by the *raw* axis the driver sees
     PEDAL_BITS = {ecodes.ABS_Y: 1, ecodes.ABS_Z: 2, ecodes.ABS_RZ: 4}
     PEDALS = (ecodes.ABS_Y, ecodes.ABS_Z, ecodes.ABS_RZ)   # as Oversteer sees them: clutch, accelerator, brakes
+    PEDAL_NAMES = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'accelerator', ecodes.ABS_RZ: 'brakes'}
 
     def _axis_now(self, device, code, fallback):
         """An axis's current value. capabilities(absinfo=True) answers from
@@ -854,3 +892,14 @@ class Device:
                 event.code = ecodes.ABS_RZ
 
         return event
+
+
+def pedal_response_to_raw(response, released_high):
+    """A pedal's response in pedal-travel terms (deadzone at the released
+    end, where it reaches full, sensitivity 50 linear) as the driver's
+    pedal_response_* wants it, in terms of the raw axis: unchanged when the
+    pedal is released at the axis minimum, mirrored when at the maximum."""
+    start, end, sensitivity = response
+    if released_high:
+        return 100 - end, 100 - start, 100 - sensitivity
+    return start, end, sensitivity
