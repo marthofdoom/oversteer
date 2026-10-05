@@ -1359,6 +1359,30 @@ class Store(Reader):
                 self.summarise_session(session)
         return len(runs)
 
+    def car_drivetrains(self):
+        """[(id, key, drivetrain column, model's drivetrain)] of every car."""
+        out = []
+        for car, key, column, model in self._rows('SELECT id, key, drivetrain, model FROM cars'):
+            try:
+                found = json.loads(model).get('drivetrain')
+            except (ValueError, AttributeError):
+                found = None
+            out.append((car, key, column, found))
+        return out
+
+    def set_car_drivetrain(self, car, value):
+        """Write a car's drivetrain, in its column and in its stored model."""
+        row = self._do('SELECT model FROM cars WHERE id = ?', (car,)).fetchone()
+        try:
+            model = json.loads(row[0]) if row else None
+        except ValueError:
+            model = None
+        if isinstance(model, dict):
+            model['drivetrain'] = value
+            self._do('UPDATE cars SET drivetrain = ?, model = ? WHERE id = ?', (value, json.dumps(model), car))
+        else:
+            self._do('UPDATE cars SET drivetrain = ? WHERE id = ?', (value, car))
+
     def update_run(self, run, **fields):
         """Set columns of a run (unlike end_run, counts nothing)."""
         names = sorted(fields)

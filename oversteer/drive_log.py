@@ -18,8 +18,8 @@ import queue
 import threading
 import time
 
-from . import coach, coach_context, drive_detect, stage_tables
-from .shift_learner import SURFACES, CarModel, drive_slip
+from . import car_data, coach, coach_context, drive_detect, stage_tables
+from .shift_learner import DRIVEN, SURFACES, CarModel, drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
 QUEUE_SIZE = 8192
@@ -720,8 +720,9 @@ BACKFILL_FAILED = 'unclassified'
 def repair_shipped(store):
     """What the game's shipped data says beats what an older run or version
     wrote: the discipline of every run on a stage the table knows (a profile
-    word or a shape said 'rally stage' of the Livigno circuit), once at
-    start. Returns the number of runs changed."""
+    word or a shape said 'rally stage' of the Livigno circuit) and the
+    drivetrain of every car the shipped car data knows (a learnt vote said
+    'fwd' of a Fabia), once at start. Returns the number of rows changed."""
     changed = 0
     for stage in store.stage_keys():
         found = drive_detect.table_discipline(stage)
@@ -731,6 +732,11 @@ def repair_shipped(store):
                     'The stage table says {}: {}.'.format(found.replace('-', ' '), stage)])
             except Exception:
                 logging.exception("drive log: stage table discipline of %s", stage)
+    for car, key, column, model in store.car_drivetrains():
+        shipped = (car_data.entry(key) or {}).get('drivetrain')
+        if shipped in DRIVEN and (column != shipped or model != shipped):
+            store.set_car_drivetrain(car, shipped)         # the game's files beat a learnt vote
+            changed += 1
     if changed:
         store.commit()
     return changed

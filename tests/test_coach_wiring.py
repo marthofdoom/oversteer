@@ -97,6 +97,23 @@ def test_the_start_repairs_runs_whose_discipline_the_stage_table_knows(tmp_path)
     learner.close()
 
 
+def test_the_start_gives_a_car_the_shipped_drivetrain_over_a_learnt_one(tmp_path):
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    fabia = CarModel(FABIA)
+    fabia.drivetrain = 'fwd'
+    store.save_model('p', FABIA, 'acr', 'Fabia', fabia.to_dict(), None, 'fwd')
+    other = CarModel('forza/9')
+    other.drivetrain = 'rwd'
+    store.save_model('p', 'forza/9', 'forza-fh', 'Other', other.to_dict(), None, 'rwd')
+    assert repair_shipped(store) == 1
+    assert store.car('p', FABIA)['drivetrain'] == 'awd' and store.car('p', FABIA)['model']['drivetrain'] == 'awd'
+    assert store.car('p', 'forza/9')['drivetrain'] == 'rwd'            # no shipped value: the learnt one stays
+    assert repair_shipped(store) == 0
+    learner.close()
+
+
 # -- what a run writes --
 
 def drive_stages(tmp_path, tops, clutch=None):
