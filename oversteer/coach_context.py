@@ -1052,14 +1052,19 @@ def stitched(reference, runs):
     if not grid:
         return None
     base = grid_times(reference['trace'], reference['corners'], grid, bounds)
-    best, who = dict(base), {j: reference.get('run') for j in base}
+    times = {j: [(t, reference.get('run'))] for j, t in base.items()}
     for run in runs:
         for j, t in grid_times(run['trace'], run['corners'], grid, bounds).items():
-            if j in best and t < best[j]:
-                best[j], who[j] = t, run['run']
+            if j in times:
+                times[j].append((t, run['run']))
+    best, who, runner_up = {}, {}, {}
+    for j, ts in times.items():
+        ts.sort(key=lambda x: x[0])
+        best[j], who[j] = ts[0]
+        runner_up[j] = ts[1][0] if len(ts) > 1 else None
     gain = {j: base[j] - best[j] for j in base}
     return {'grid': grid, 'bounds': bounds, 'base': base, 'best': best, 'who': who, 'gain': gain,
-            'total': sum(gain.values())}
+            'runner_up': runner_up, 'total': sum(gain.values())}
 
 
 def held_vs_reference(trace, reference_trace, d0):

@@ -630,11 +630,11 @@ def test_the_best_sections_put_together_and_the_section_where_this_run_was_best(
     h = Stage(tmp_path / 't.db')
     a = drive_traced(h, v2=14.0, v3=10.0)                          # the best run: quick through the second corner
     drive_traced(h, v2=10.0, v3=13.0, reference=a)                 # quick through the third, slower overall
-    drive_traced(h, v2=12.0, v3=16.0, reference=a)                 # the latest run: its third corner is the best yet
+    drive_traced(h, v2=16.0, v3=11.0, reference=a)                 # the latest run: its second corner is the best yet
     [best] = h.by_id('corner.bestsection')
     assert best.kind == 'praise'
-    assert best.text.startswith('On Test Stage, your best yet through the ') and ' left at 1.7 km: ' in best.text \
-        and best.text.endswith(' s up on your best before this run.')
+    assert best.text.startswith('On Test Stage, your quickest through the ') and ' at 1.1 km of your last 3 runs here: ' \
+        in best.text and best.text.endswith(' s up on the next best.')
     [possible] = h.by_id('corner.possible')
     assert possible.kind == 'note'
     assert possible.text.startswith('On Test Stage, your best sections put together make ')
@@ -735,3 +735,11 @@ def test_a_quicker_run_that_was_not_clean_is_not_set_against_a_previous_best(tmp
             result_time=197.0, run_class='off')
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert 'behind your best clean run here' in tip.text
+
+
+def test_the_section_with_the_finish_is_not_praised(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=13.0, reference=a)
+    drive_traced(h, v2=12.0, v3=16.0, reference=a)                 # best only through the last corner
+    assert h.by_id('corner.bestsection') == []

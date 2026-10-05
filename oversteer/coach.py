@@ -1568,13 +1568,19 @@ class Coach:
                                        'corners': ref_corners, 'course': ref['course'], 'run': ref['id']}, loaded)
         if best is None:
             return
-        mine = [(g, j) for j, g in best['gain'].items() if best['who'].get(j) == run['id']
-                and g >= coach_context.SECTION_MIN]
+        # measured against the quickest of the other runs there (not the
+        # reference's own time, which may be its slow section), and never
+        # the last section, which holds the finish
+        last = len(best['grid']) - 1
+        mine = [(best['runner_up'][j] - best['best'][j], j) for j in best['best']
+                if best['who'].get(j) == run['id'] and best['runner_up'].get(j) is not None and j != last]
+        mine = [(g, j) for g, j in mine if g >= coach_context.SECTION_MIN]
         if mine:
             g, j = max(mine)
             praise.append(Tip('corner.bestsection:{}:{:.0f}'.format(stage, best['grid'][j]['apex']), 'praise',
-                              'On {}, your best yet through {}: {:.1f} s up on your best before this run.'.format(
-                                  name, coach_context.section_name(best['grid'][j]), g),
+                              'On {}, your quickest through {} of your last {} runs here: {:.1f} s up on the '
+                              'next best.'.format(name, coach_context.section_name(best['grid'][j]),
+                                                  len(loaded) + 1, g),
                               [], g, cost=g, count=1))
         if best['total'] >= 3 * coach_context.SECTION_MIN:
             j = max(best['gain'], key=lambda k: best['gain'][k])
