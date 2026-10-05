@@ -491,7 +491,8 @@ def test_stage_tips_compare_with_the_same_stage(tmp_path):
         h.session([{'name': 'consistency.split_sd', 'value': value, 'count': 4}])
     h.session([{'name': 'consistency.split_sd', 'value': 0.4, 'count': 4}])
     [praise] = [t for t in h.tips() if t.kind == 'praise']
-    assert praise.text == 'Steadier on stage eawrc:4:12: your splits vary by 0.4 s, from 1.2.'
+    assert praise.text == ('Steadier on stage eawrc:4:12: your splits over your last 4 clean runs vary by 0.4 s, '
+                           'from 1.2 s over the 4 runs before.')
 
 
 def test_a_tip_must_cost_a_tenth_of_the_costliest(tmp_path):

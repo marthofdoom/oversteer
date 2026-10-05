@@ -1166,10 +1166,11 @@ Labels come from the tab (Step C) and the web page never writes them.
 | `launch.t50` | s from release to 50 km/h | launch detected | rally, rallycross, drag |
 | `launch.g` | g, mean a_long over the first half second in the launch gear | launch detected | per surface |
 | `launch.slip` | peak drive slip in the first 2 s, else the slip from the revs | wheel speeds sent, or the shipped gearing | per surface |
+| `launch.cut` | s the revs sat on the limiter in the launch gear, in the first 8 s | the driver's own launch, the limiter known | a tip from 0.3 s in 3 of the last 5 launches on a surface ("change up as the cut comes in"); no launch coaching for WRC Generations (speed channel unchecked) |
 | `launch.bog` / `launch.stall` | 0/1 | bog: under 0.3 g or 0.5 s over the median t50 of the last launches / stall: the revs under 300 in the launch gear | not the game's own launch (the clutch never pressed while standing), not a launch the driver restarted within 10 s |
-| `pedal.overlap_entry`, `pedal.overlap_exit` | share of the phase with throttle and brake > 20 % | pedals sent; not partial or restart runs; an off's surroundings left out | description only (left-foot braking is technique on loose surfaces) |
+| `pedal.overlap_entry`, `pedal.overlap_exit` | share of the phase with throttle and brake > 20 % | pedals sent; not partial or restart runs; an off's surroundings left out | entry: a `technique` line once ("you left-foot brake into 7 in 10 corners on gravel", read from the corners' own `overlap_entry`), never praise; exit: a tip on tarmac and circuit for 3 or more corners with 0.3 s on both pedals leaving them that lost 0.1 s of exit time |
 | `pedal.drag` | s/km on both pedals on a straight | same | a tip on tarmac and circuits |
-| `pedal.coast_entry`, `pedal.coast_exit`, `pedal.coast_straight` | s/km with both < 5 % above 10 m/s, by phase | same | by phase, against the reference, never absolute |
+| `pedal.coast_entry`, `pedal.coast_exit`, `pedal.coast_straight` | s/km with both < 5 % above 10 m/s, by phase | same | by phase, against the reference, never absolute: entry on tarmac and circuit outside hairpins when the reference coasted 0.3 s less and the entry lost 0.1 s; the exit and the throttle through `throttle_on_t` (the throttle 0.3 s later than the reference's in 2 or more corners that lost exit time; silent on snow and ice) |
 | `hpattern.neutral` | median s per shift | H-pattern shifts | per method |
 | `hpattern.missed`, `hpattern.skip` | per 100 shifts | H-pattern | |
 | `downshift.over_rev` | per 100 downshifts | engage rpm known | |
@@ -1179,8 +1180,8 @@ Labels come from the tab (Step C) and the web page never writes them.
 | `exit.low` (per gear) | share of exits with the revs under the power band that pulled under 80 % of the in-band exits | exits not in a slide | tuning (§10): 50 % of 10 exits, 70 % of 15 on loose surfaces and in FWD cars, never for 1st |
 | `exit.spin` (per gear) | share of exits whose second after throttle-on ran over 0.15 slip from the revs | the shipped gearing known | tuning: the long gear is right where the gear below spun |
 | `consistency.split_sd` | s, SD of splits at every 10 % of the stage (cut at the finish) | ≥ 3 finished clean runs of the car | per stage |
-| `corner.loss` | s lost in the 3 worst sections vs the car's best finished clean run | a reference in the same conditions; not a learning run | per stage |
-| `corner.spread` | m/s, the largest SD of the minimum speed through the same section over the last runs | ≥ 4 runs | per stage; each section's own is an event |
+| `corner.loss` | s lost in the 3 worst sections vs the car's best finished clean run | a reference in the same conditions; not a learning run | per stage; the tips read the stored sections instead (§9.2, "By place") and use this total only for a stage whose corners are not stored |
+| `corner.spread` | m/s, the largest SD of the minimum speed through the same section over the last runs | ≥ 4 runs | per stage; each section's own is an event, and a tip names up to three sections over 8 km/h and a tenth of their speed |
 
 ### 9.2 Over time
 
@@ -1195,22 +1196,52 @@ Labels come from the tab (Step C) and the web page never writes them.
 - **Habit**: a metric beyond its threshold in ≥ 70 % of ≥ 5 sessions in a
   slice. One **focus** habit at a time: the one with the largest estimated
   time cost (shift error × drive lost, limiter time), ties broken by count.
-- **Rate limiting** (`coach_state`): at most 3 tips and 1 praise per view;
+- **Rate limiting** (`coach_state`): at most 3 tips and 2 praise lines per view (and one praise line is added when two tips show, so a view does not read as a list of faults);
   a tip is re-shown when its value got worse by ≥ 20 %, after 14 days, or
   when the user asks ("Show all"); after two showings without change it
   becomes a quiet "still:" line (*run 5:* a showing is a sitting: views
   within 6 h of the last counted one are the same showing) at the bottom, at most 3 of those, oldest
   dropped. The same limits apply to praise and to "Still learning the
   engine"; today's per-gear "spot on" on every refresh goes.
-- **Phrasing**: observation + number + consequence + one action, in the
-  sentence style of today's `CarModel.advice`. Praise carries a number too.
-  Examples:
+- **Phrasing**: observation with its place + the number against the named
+  reference + what it cost + one action (docs/coach-techniques.md §7.5).
+  Praise carries a number and a place too. The coach does not say what the
+  driver was thinking, does not explain technique the driver uses, and uses
+  no absolutes. Selection (`select()`): the focus is the costliest tip, when
+  it is a habit (a habit that is not the costliest is a plain tip); a tip
+  costing under a tenth of the costliest one that has seconds from a run
+  goes to the quiet lines; a `technique` line (correct technique, described)
+  is shown once and comes back when its share moved 20 points; two praise
+  lines. Examples from the first designs:
   - "2→3 with the H-pattern: you change up at 6400 rpm, 500 early; 3rd gives
     9 % less drive there. Hold it to about 6900."
   - "With the H-pattern you change up 400 rpm earlier than with the
     paddles." (shifter comparison, needs ≥ 10 shifts each)
   - "Better: 4 of your last 5 stages had your 2→3 within 100 rpm of the
     best; two weeks ago you were 500 early."
+- **By place** (build step 2, `Coach._place_tips`): the newest run of each
+  of the three newest stages is read from its stored corners and events
+  (not from the metrics) against the car's best finished clean or learning
+  run of the stage in the same conditions, named in the sentence ("Skoda
+  Fabia RS Rally2, 251.9 s on 25 Sep"). The costliest three sections that
+  lost 0.1 s or more are tips (`corner.section:<stage>:<d>`) with the call
+  and distance of the corner, what was done differently (braking point,
+  minimum, exit speed, throttle) and the action for the pattern (over-slowing,
+  under-committed, overdriven, late throttle, over-rotated, slower, or where
+  the time went when the numbers agree). Patterns across the run are one tip
+  naming their corners and are not said again per corner (`throttle.late`,
+  `pedal.exit`, `coast.entry`). A spin or near stop is a corner tip
+  (`corner.spin`, `corner.stall`; not for WRC Generations); an off is a note
+  (`corner.off`) and its surroundings are left out. A run that beat the
+  reference is praised with where (`corner.best`), a section where the run
+  was the best of the car's runs is praised (`corner.bestsection`), a gravel
+  entry that braked earlier for the same minimum and left faster is praised
+  (`corner.entry`), and the best sections of all runs put together give a
+  once-only note (`corner.possible`). The first section holds the launch and
+  is never a corner. A held-straight limiter episode is a tip only against a
+  quicker reference over the same road to the next braking
+  (`limiter.held:<stage>:<d>`); a gear held into the same corner in 3 of the
+  last 5 runs is described once (`technique:held:...`).
 - **Gating**: coaching that depends on discipline or surface is silent when
   either is unknown, and says so once ("tips about short-shifting wait until
   the surface is known").
@@ -1228,8 +1259,8 @@ Labels come from the tab (Step C) and the web page never writes them.
   limiting (`coach_state`) is unchanged.
 
 `Coach(reader).tips(profile, car_id=None, limit=3) -> list[Tip]` with
-`Tip(id, kind ('focus', 'tip', 'praise', 'still'), text, evidence,
-value)`; `Coach.seen(tips)` updates `coach_state` (drive-log thread).
+`Tip(id, kind ('focus', 'tip', 'praise', 'technique', 'note', 'still'), text,
+evidence, value)`; `Coach.seen(tips)` updates `coach_state` (drive-log thread).
 *As built:* `coach.seen(store, profile, car_id, tips)`, a function, since
 it writes through the drive log's store while `Coach` only reads; kind
 `note` for the surface gate (said once).
@@ -1244,10 +1275,10 @@ family (never click counts) and whether it is a setup or a driving matter.
 |---|---|---|
 | Final drive too short | `limiter.top` > 1 s per run on ≥ 3 runs of the same stage (a Rally2 on one long tarmac straight is normal) | lengthen final drive / top gear, if the setup allows |
 | Final drive too long | top gear used > 5 % of the time but never above 85 % of the limiter, on ≥ 3 runs of the same stage | shorten final drive, if the setup allows |
-| A gear too long for the stage | rpm 1 s after throttle reapplication after corners in gear n below the power band on > 50 % of exits | shorten gear n, or use n−1 there |
+| A gear too long for the stage | exits in gear n with the revs 1 s after throttle-on below the power band that **bogged** (pulled under 80 % of the in-band exits' acceleration at the same speed, not in a slide): on > 50 % of 10 exits, on > 70 % of 15 on loose surfaces and in FWD cars; silent where the gear below spun (`exit.spin`, 30 % of 5 exits, from the revs and the shipped gearing), never for 1st, and for 2nd only where 1st's exits are measured | shorten gear n, or use n−1 there |
 | Bottoming | travel saturating (Forza normalised 1.0, AC `suspensionMaxTravel`, DiRT/EA saturation) per km, split into landings (vertical accel spike) and compressions; for DiRT and WRCG only once their suspension units are verified by capture | ride height up / springs or bump stiffer |
 | Spring/damper balance | travel histogram piled at one end; > 1.5 oscillations after a hit | softer/stiffer; more damping |
-| Understeer/oversteer | sign and change between tunes of the steer-vs-a_lat gradient (arbitrary units: steering lock unknown); counter-steer fraction per surface | rear/front anti-roll bar, springs, differential |
+| Understeer/oversteer | the change between tunes of the steer-vs-a_lat gradient **pooled per surface** (arbitrary units: steering lock unknown; no absolute "the car understeers"); counter-steer fraction on tarmac in bends under 90° of heading change (a hairpin is rotated) | rear/front anti-roll bar, springs, differential |
 | Open differential | inside-wheel spin on > 30 % of hairpin exits | lock the differential more |
 | Brake balance | front vs rear locking under braking (wheel speeds) | brake bias |
 

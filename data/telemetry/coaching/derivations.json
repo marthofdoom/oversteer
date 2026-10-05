@@ -2656,7 +2656,7 @@
    "id": "engine.limiter",
    "name": "Limiter held on a straight",
    "category": "engine",
-   "description": "Seconds per km held on the limiter (>= LIMITER_BAND of it, flat out, one gear below top) with nothing to ask for the revs: no change up within 1 s, no brake, gear change down or corner within 100 m or 3 s, no wheelspin, not a crawl. On loose surfaces the limiter between corners is often right; only the held-straight class counts.",
+   "description": "Seconds per km held on the limiter (>= LIMITER_BAND of it, flat out, one gear below top) with nothing to ask for the revs: no change up within 1 s, no brake, gear change down or corner within 100 m or 3 s, no wheelspin, not a crawl. On loose surfaces the limiter between corners is often right; only the held-straight class counts. Per stage, a held-straight episode is a tip only when the reference run was at least 0.1 s quicker over the same road to the next braking, or in a higher gear there; a gear held on the limiter into the same corner in 3 of the last 5 runs for over a second is described once as gearing.",
    "derivations": [
     {
      "id": "trace",
@@ -2705,7 +2705,7 @@
     "metrics": [
      "limiter.held"
     ],
-    "module": "oversteer/coach.py, oversteer/coach_context.py"
+    "module": "oversteer/coach.py, oversteer/coach_context.py limiter_episodes, held_vs_reference"
    },
    "acr": {
     "coverage": "validated"
@@ -2920,7 +2920,7 @@
    "gates": {
     "discipline": "any",
     "surface": "any",
-    "conditions": "not in partial or restart runs; an off's surroundings left out"
+    "conditions": "not in partial or restart runs; an off's surroundings left out; entry coasting is coached only on tarmac and circuit, outside hairpins, against a reference that coasted 0.3 s less"
    },
    "outputs": [
     {
@@ -2976,7 +2976,7 @@
    "fallbacks": [],
    "gates": {
     "discipline": "any",
-    "surface": "technique on loose; a tip on tarmac or circuit only with a slower exit than the best",
+    "surface": "technique on loose (described once, never praised); a tip on tarmac or circuit only for 3 or more corners whose exit lost time with both pedals down leaving them, or drag over 0.5 s/km",
     "conditions": "not in partial or restart runs; an off's surroundings left out"
    },
    "outputs": [
@@ -3059,9 +3059,9 @@
    "implementation": {
     "status": "partial",
     "metrics": [],
-    "module": "oversteer/coach_context.py",
+    "module": "oversteer/coach_context.py describe_corners; oversteer/coach.py Coach._patterns",
     "clickup": "86e3ev2dy",
-    "note": "stored per corner (throttle_on_t, throttle_t, relifts); no metric or tip yet"
+    "note": "throttle_on_t against the reference is coached (late throttle, R5); throttle_t to full and relifts are stored, not coached"
    },
    "acr": {
     "coverage": "implemented"
@@ -3515,11 +3515,11 @@
    "id": "corner.loss",
    "name": "Section time loss",
    "category": "corners",
-   "description": "Seconds lost in the three worst sections (corners less than 1.5 s apart joined, each section from where the reference's braking for it begins to where the next one's does) against the car's best finished clean run of the stage, offs and a learning run left out.",
+   "description": "Seconds lost in the sections of the last run against the car's best finished clean run of the stage (corners less than 1.5 s apart joined, each section from where the reference's braking for it begins to where the next one's does; the first section, which holds the launch, is left out of the tips), named by call and distance, with what was done differently (braking point, minimum speed, exit speed, throttle) and the one thing to do; offs and a learning run left out. The metric is the three worst sections' sum. The best sections of all the car's runs put together are the stage's \"possible\" time.",
    "derivations": [
     {
      "id": "traces",
-     "formula": "Time through the reference's section in this run minus the reference's own, split at this run's slowest point into entry and exit loss; worst three summed.",
+     "formula": "Time through the reference's section in this run minus the reference's own, split at this run's slowest point into entry and exit loss; worst three summed (the metric). At coach time: the section's pattern (over-slowing, under-committed, overdriven, late throttle, over-rotated, slower, the gravel entry that gained) from the braking point, minimum, exit speed and throttle-on time against the reference's matched section; the best time through each grid section over the car's runs gives the possible time.",
      "requires": {
       "channels": [
        "run_distance",
@@ -3531,7 +3531,7 @@
       ]
      },
      "status": "implemented",
-     "module": "oversteer/coach_context.py section_loss"
+     "module": "oversteer/coach_context.py section_loss, section_report, stitched; oversteer/coach.py Coach._place_tips"
     }
    ],
    "fallbacks": [],
@@ -3548,7 +3548,7 @@
    ],
    "validation": {
     "status": "validated",
-    "evidence": "replay of the 7 ACR captures (21 runs, 405 corners, 500 shifts), 2026-09-28: 4 runs"
+    "evidence": "replay of the 15 ACR and WRCG captures (60 runs, 1159 corners), 2026-10-05, step 2: the i20N's, Fabia's and 208's last Afon Bidno runs each name their costliest corners with cause (e.g. the 208's 2 right at 3.0 km, 2.4 s, 18 km/h slower); the start's section no longer reads a 38 s slow launch as a corner"
    },
    "implementation": {
     "status": "implemented",
@@ -4321,10 +4321,10 @@
     "status": "implemented",
     "metrics": [],
     "module": "oversteer/coach_context.py incidents, run_class",
-    "note": "events and the class are stored, not metrics"
+    "note": "events and the class are stored, not metrics; a spin or near stop in a corner is coached as a corner (not for WRC Generations), an off is named and its surroundings left out"
    },
    "acr": {
-    "coverage": "implemented"
+    "coverage": "validated"
    }
   },
   {
@@ -4371,11 +4371,11 @@
    "implementation": {
     "status": "implemented",
     "metrics": [],
-    "module": "oversteer/coach_context.py describe_corners, build_sections, section_loss",
-    "note": "stored per corner; the tips that name the sections come with the phrasing step"
+    "module": "oversteer/coach_context.py describe_corners, build_sections, section_loss; oversteer/coach.py Coach._place_tips",
+    "note": "stored per corner; the tips that name the sections read them (R6, and R4/R5 for the pedals and the throttle leaving corners)"
    },
    "acr": {
-    "coverage": "implemented"
+    "coverage": "validated"
    }
   },
   {
@@ -4414,17 +4414,18 @@
     }
    ],
    "validation": {
-    "status": "sim-tested"
+    "status": "validated",
+    "evidence": "replay of the 15 ACR and WRCG captures (60 runs, 1159 corners), 2026-10-05, step 2: the i20N's Afon Bidno runs give a corner.spread tip naming the left-left at 3.3 km, the 4-corner section at 2.7 km and the left-right at 0.9 km (22, 16 and 13 km/h SD over 6 runs)"
    },
    "implementation": {
     "status": "implemented",
     "metrics": [
      "corner.spread"
     ],
-    "module": "oversteer/coach_context.py spread"
+    "module": "oversteer/coach_context.py spread; oversteer/coach.py Coach._spread"
    },
    "acr": {
-    "coverage": "implemented"
+    "coverage": "validated"
    }
   },
   {
