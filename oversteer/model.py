@@ -1,5 +1,6 @@
 import configparser
 import logging
+from .device import pedal_response_to_raw
 
 class Model:
 
@@ -17,6 +18,9 @@ class Model:
         'inertia_mode': None,
         'combine_pedals': None,
         'invert_pedals': None,
+        'clutch_response': None,
+        'accelerator_response': None,
+        'brakes_response': None,
         'ffb_enabled': None,
         'spring_level': None,
         'damper_level': None,
@@ -48,6 +52,9 @@ class Model:
         'inertia_mode': 'boolean',
         'combine_pedals': 'integer',
         'invert_pedals': 'integer',
+        'clutch_response': 'tuple',
+        'accelerator_response': 'tuple',
+        'brakes_response': 'tuple',
         'ffb_enabled': 'boolean',
         'spring_level': 'integer',
         'damper_level': 'integer',
@@ -67,6 +74,10 @@ class Model:
         'center_wheel': 'boolean',
         'start_app_manually': 'boolean',
     }
+
+    # pedal response: (start %, end %, sensitivity), in pedal-travel terms
+    DEFAULT_RESPONSE = (0, 100, 50)
+    PEDAL_RESPONSES = ('clutch', 'accelerator', 'brakes')
 
     def __init__(self, device = None, ui = None):
         self.ui = ui
@@ -109,6 +120,9 @@ class Model:
             'inertia_mode': self.device.get_inertia_mode(),
             'combine_pedals': self.device.get_combine_pedals(),
             'invert_pedals': self.device.get_invert_pedals(),
+            'clutch_response': self.DEFAULT_RESPONSE if self.device.has_pedal_response() else None,
+            'accelerator_response': self.DEFAULT_RESPONSE if self.device.has_pedal_response() else None,
+            'brakes_response': self.DEFAULT_RESPONSE if self.device.has_pedal_response() else None,
             'ffb_enabled': True if self.device.get_ff_gain() is not None else None,
             'spring_level': self.device.get_spring_level(),
             'damper_level': self.device.get_damper_level(),
@@ -167,6 +181,10 @@ class Model:
         # greying the boxes out.
         if data['invert_pedals'] is None:
             data['invert_pedals'] = self.device.get_invert_pedals()
+        # Likewise for the pedal response: an older profile leaves it as is
+        for name in self.PEDAL_RESPONSES:
+            if data[name + '_response'] is None:
+                data[name + '_response'] = self.data.get(name + '_response')
         if data['rev_leds'] is not None:
             if data['rev_leds_shift_unit'] == 'launch':
                 # a development build had the launch limiter as a unit
@@ -283,9 +301,55 @@ class Model:
             if self.ui is not None:
                 self.ui.controller.update_pedals(mask)
             self.device.set_invert_pedals(mask)
+            # Which end of the axis is 'released' just changed
+            self.apply_pedal_responses()
 
     def get_invert_pedals(self):
         return self.data['invert_pedals']
+
+    def apply_pedal_response(self, name):
+        """Write a pedal's response to the driver, in the raw axis's terms:
+        the driver shapes the axis games see, whose low end is the pedal's
+        released end only when invert_pedals flips it."""
+        response = self.data[name + '_response']
+        if response is None or not self.device:
+            return
+        mask = self.data['invert_pedals'] or 0
+        for code, (_released, _pressed, bit) in self.device.pedal_axes(mask).items():
+            if bit and self.device.PEDAL_NAMES.get(code) == name:
+                self.device.set_pedal_response(bit, *pedal_response_to_raw(response, not mask & bit))
+
+    def apply_pedal_responses(self):
+        for name in self.PEDAL_RESPONSES:
+            self.apply_pedal_response(name)
+
+    def set_pedal_response(self, name, start, end, sensitivity):
+        start, end, sensitivity = int(start), int(end), int(sensitivity)
+        if not 0 <= start < end <= 100 or not 0 <= sensitivity <= 100:
+            raise ValueError("pedal response out of range: {} {} {}".format(start, end, sensitivity))
+        key = name + '_response'
+        if self.data[key] is None:
+            return
+        if self.set_if_changed(key, (start, end, sensitivity)):
+            self.apply_pedal_response(name)
+
+    def set_clutch_response(self, start, end, sensitivity):
+        self.set_pedal_response('clutch', start, end, sensitivity)
+
+    def set_accelerator_response(self, start, end, sensitivity):
+        self.set_pedal_response('accelerator', start, end, sensitivity)
+
+    def set_brakes_response(self, start, end, sensitivity):
+        self.set_pedal_response('brakes', start, end, sensitivity)
+
+    def get_clutch_response(self):
+        return self.data['clutch_response']
+
+    def get_accelerator_response(self):
+        return self.data['accelerator_response']
+
+    def get_brakes_response(self):
+        return self.data['brakes_response']
 
     def get_ff_gain(self):
         return self.data['ff_gain']
@@ -515,6 +579,7 @@ class Model:
             self.device.set_ff_gain(self.data['ff_gain'])
         if self.data['invert_pedals'] is not None:
             self.device.set_invert_pedals(self.data['invert_pedals'])
+        self.apply_pedal_responses()
         if self.data['spring_level'] is not None:
             self.device.set_spring_level(self.data['spring_level'])
         if self.data['damper_level'] is not None:
@@ -540,6 +605,8 @@ class Model:
         self.ui.set_inertia_mode(data['inertia_mode'])
         self.ui.set_combine_pedals(data['combine_pedals'])
         self.ui.set_invert_pedals(data['invert_pedals'])
+        for name in self.PEDAL_RESPONSES:
+            self.ui.set_pedal_response(name, data[name + '_response'])
         self.ui.set_spring_level(data['spring_level'])
         self.ui.set_damper_level(data['damper_level'])
         self.ui.set_friction_level(data['friction_level'])
