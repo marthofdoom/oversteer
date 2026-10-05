@@ -478,7 +478,8 @@ class RunTracker:
         else:
             a_long = (speed - self._last_speed) / dt if dt > 0 and self._last_speed is not None else None
             a_lat = speed * sample.yaw_rate if sample.yaw_rate is not None else None
-        slip = drive_slip(sample, self.learner.car.drivetrain if self.learner.car else None)
+        car = self.learner.car
+        slip = drive_slip(sample, car.drivetrain if car else None, car.radii if car else None)
         slip = slip[0] if slip is not None and slip[1] == 'raw' else None
         susp, susp_vel = sample.susp, sample.susp_vel
         slip_angle = sample.slip_angle

@@ -121,16 +121,21 @@ G = 9.80665
 DRIVEN = {'fwd': (0, 1), 'rwd': (2, 3), 'awd': (0, 1, 2, 3)}     # wheel indices (FL, FR, RL, RR)
 
 
-def drive_slip(sample, drivetrain=None):
+def drive_slip(sample, drivetrain=None, radii=None):
     """(slip, kind) of the driven wheels, or None where the game sends no
     wheel speeds or slip. From wheel speeds: how much faster the driven
     wheels turn than the car moves (0.1 = 10 %), 'raw'; from Forza's slip
     ratio, its own figure where 1 is the grip limit, 'normalised'. The
     driven wheels are the drivetrain's, or the fastest wheel when it is
-    unknown (the driven ones are the ones that spin)."""
+    unknown (the driven ones are the ones that spin). Where the game sends
+    wheel rotation but no tyre radius (ACR's is 0), `radii` is the car's
+    learnt one."""
     wheels = DRIVEN.get(drivetrain)
-    if sample.wheel_speed is not None and sample.speed and sample.speed > MIN_SPEED:
-        speeds = [abs(v) for v in sample.wheel_speed]
+    wheel_speed = sample.wheel_speed
+    if wheel_speed is None and radii is not None and sample.wheel_rot is not None:
+        wheel_speed = [w * r for w, r in zip(sample.wheel_rot, radii)]
+    if wheel_speed is not None and sample.speed and sample.speed > MIN_SPEED:
+        speeds = [abs(v) for v in wheel_speed]
         driven = sum(speeds[i] for i in wheels) / len(wheels) if wheels else max(speeds)
         return driven / sample.speed - 1.0, 'raw'
     if sample.slip_ratio is not None:
@@ -1599,7 +1604,7 @@ class ShiftLearner:
             recent.append((now, rpm, throttle))
             while now - recent[0][0] > SHIFT_WINDOW:
                 recent.popleft()
-            slip = drive_slip(sample, car.drivetrain)
+            slip = drive_slip(sample, car.drivetrain, car.radii)
             self._slip = slip[0] if slip is not None and slip[1] == 'raw' else None
         pending = self._pending
         if pending:
@@ -1689,7 +1694,7 @@ class ShiftLearner:
         if not on_ratio:
             # Wheelspin or a jump, or a gear not learnt yet: no power from it
             return
-        slip = drive_slip(sample, car.drivetrain)
+        slip = drive_slip(sample, car.drivetrain, car.radii)
         if slip is not None and slip[0] > SLIP_POWER[slip[1]]:
             return                                   # spinning: the drive is not reaching the road
         if sample.power is not None:

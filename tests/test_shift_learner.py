@@ -960,3 +960,15 @@ def test_the_grip_limited_line_applies_the_gate_the_band_does_and_spot_on_leaves
     for gear in range(1, 6):
         few.car.upshifts[gear] = [6500.0] * 5
     assert not any('grip-limited' in line for line in few.car.advice(surface='tarmac'))
+
+
+def test_drive_slip_uses_the_learnt_radius_where_the_game_sends_none():
+    """ACR sends wheel rotation and a tyre radius of 0: the slip comes from
+    the car's learnt radii, and is none until they are known."""
+    from oversteer.shift_learner import drive_slip
+    from oversteer.telemetry_formats import Sample
+    sample = Sample(5000.0, 7000.0, speed=20.0, game='acr')
+    sample.wheel_rot = (60.0, 60.0, 66.0, 66.0)
+    assert drive_slip(sample, 'rwd') is None
+    slip, kind = drive_slip(sample, 'rwd', (0.33,) * 4)
+    assert kind == 'raw' and abs(slip - (66.0 * 0.33 / 20.0 - 1.0)) < 1e-9
