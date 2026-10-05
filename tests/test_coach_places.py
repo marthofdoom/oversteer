@@ -243,6 +243,26 @@ def test_the_best_run_yet_is_praised_with_where_it_was_won(tmp_path):
     assert not h.by_id('corner.best')
 
 
+def test_best_run_yet_needs_to_beat_every_earlier_clean_run_not_just_the_reference(tmp_path):
+    h = Stage(tmp_path / 't.db')
+
+    def timed(first, loss=None):
+        corners = corners_with(second={'loss': loss} if loss else None)
+        corners[0]['section_t'] = first
+        return corners
+    # the reference is ranked by the time after the start: run 1 (212 - 10) is ahead of run 2 (208.3 - 4)
+    h.drive(timed(10.0), result_time=212.0)
+    h.drive(timed(4.0), result_time=208.3)
+    h.drive(timed(4.0, loss=(0.4, 0.5)), result_time=210.5)
+    assert not h.by_id('corner.best:')
+    texts = ' '.join(t.text for t in h.tips(show_all=True))
+    assert 'your quickest run after the start' in texts and 'your best clean run yet' not in texts
+    # quicker than all of them is still praised, against the quickest run
+    h.drive(timed(4.0), result_time=207.0)
+    [praise] = h.by_id('corner.best:')
+    assert '1.3 s quicker than' in praise.text and '(208.3 s)' in praise.text
+
+
 def test_a_learning_run_a_first_run_and_other_conditions_get_no_corner_tips(tmp_path):
     loss = {'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}
     h = Stage(tmp_path / 't.db')

@@ -1231,10 +1231,16 @@ class Coach:
         if report is None or run['run_class'] in ('learning', 'unclassified'):
             return False
         ref_text = '{}, {:.1f} s on {}'.format(car, ref['result_time'], _date(ref['started']))
-        # A run that is quicker than the reference is measured against the run it beat
-        beat = (run['finished'] == 1 and run['run_class'] == 'clean' and run['result_time']
-                and run['result_time'] < ref['result_time'])
-        ref_name = 'your previous best clean run' if beat else 'your best clean run'
+        # A run is "best yet" only when quicker than every earlier clean run; it is then measured against
+        # the run it beat. The reference is chosen by the time after the start, so it may not be the quickest
+        prior = _prior_best(run, before)
+        beat = prior is not None and run['finished'] == 1 and run['run_class'] == 'clean' \
+            and bool(run['result_time']) and run['result_time'] < prior['result_time']
+        quickest = _ref_is_quickest(ref, before)
+        if beat:
+            ref_name = 'your previous best clean run' if quickest else 'your previous quickest run after the start'
+        else:
+            ref_name = 'your best clean run' if quickest else 'your quickest run after the start'
         named = []
         for n, it in enumerate(report):
             if it['loss'] is None or it['off'] or it['compare'] is None or it['first']:
@@ -1532,12 +1538,13 @@ class Coach:
         the best of the car's runs, and what the car's best sections put together make (the "possible"
         time, once per stage)."""
         reader = self.reader
-        if (run['finished'] == 1 and run['result_time'] and run['run_class'] in ('clean',)
-                and run['result_time'] < ref['result_time']):
-            gain = ref['result_time'] - run['result_time']
+        prior = _prior_best(run, before)
+        if (prior is not None and run['finished'] == 1 and run['result_time'] and run['run_class'] in ('clean',)
+                and run['result_time'] < prior['result_time']):
+            gain = prior['result_time'] - run['result_time']
             sentence = 'On {}, your best clean run yet in the {}: {:.1f} s quicker than {} ({:.1f} s).'.format(
-                name, car, gain, _date(ref['started']), ref['result_time'])
-            if gained:
+                name, car, gain, _date(prior['started']), prior['result_time'])
+            if gained and prior['id'] == ref['id']:                 # the gains are against the reference
                 it = gained[0]
                 how = _how(it['compare'])
                 sentence += ' {:.1f} s of it in {}{}.'.format(-it['loss'], it['name'],
@@ -1572,9 +1579,11 @@ class Coach:
         if best['total'] >= 3 * coach_context.SECTION_MIN:
             j = max(best['gain'], key=lambda k: best['gain'][k])
             notes.append(Tip('corner.possible:' + stage, 'note',
-                             'On {}, your best sections put together make {:.1f} s, {:.1f} s under your best clean run in '
+                             'On {}, your best sections put together make {:.1f} s, {:.1f} s under {} in '
                              'the {} ({:.1f} s). The biggest gain is {}, {:.1f} s.'.format(
-                                 name, ref['result_time'] - best['total'], best['total'], car, ref['result_time'],
+                                 name, ref['result_time'] - best['total'], best['total'],
+                                 'your best clean run' if _ref_is_quickest(ref, before)
+                                 else 'your quickest run after the start', car, ref['result_time'],
                                  coach_context.section_name(best['grid'][j]), best['gain'][j]),
                              [], best['total'], cost=0.0, count=len(loaded) + 1))
 
@@ -1595,6 +1604,20 @@ class Coach:
             candidates.append(Tip('learning', 'tip', 'Still learning the engine ({} of about {} rev bands known): '
                                   'full-throttle pulls from low revs, out of slow corners, fill it in fastest.'.format(
                                       bands, needed), value=0.0, cost=0.0))
+
+
+def _prior_best(run, before):
+    """The quickest finished clean run of the car on the stage before `run`, or None."""
+    found = [r for r in before if r['id'] != run['id'] and r['run_class'] == 'clean' and r.get('finished') == 1
+             and r.get('result_time')]
+    return min(found, key=lambda r: r['result_time']) if found else None
+
+
+def _ref_is_quickest(ref, before):
+    """True when no earlier finished clean or learning run was quicker over the whole stage than the reference
+    (which is ranked by the time after the first section)."""
+    return not any(r['id'] != ref['id'] and r['run_class'] in ('clean', 'learning') and r.get('finished')
+                   and r.get('result_time') and r['result_time'] < ref['result_time'] for r in before)
 
 
 def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, techniques=()):
