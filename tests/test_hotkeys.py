@@ -198,7 +198,7 @@ class FakeGui:
         self.hotkey_repeater = hotkeys.Repeater(lambda a: self.step(a), self.timers.add, self.timers.remove)
         self.keyboard_release_seen = False
         self.hotkey_capture = None
-        self.device = SimpleNamespace(input_device=None)
+        self.device = SimpleNamespace(input_device=None, normalize_event=lambda e: e)
         self.hat_held = {}
         self.posted = []
         self.ui = SimpleNamespace(safe_call=lambda cb, *a: self.posted.append((cb, a)))
@@ -217,6 +217,10 @@ class FakeGui:
     def _wheel_key_down(self, code):
         from oversteer.gui import Gui
         return Gui._wheel_key_down(self, code)
+
+    def _stop_wheel_repeat(self):
+        from oversteer.gui import Gui
+        return Gui._stop_wheel_repeat(self)
 
 
 def test_keyboard_hold_repeats_only_after_a_release_was_seen():
@@ -252,13 +256,42 @@ def test_wheel_repeat_stops_when_the_key_is_no_longer_down():
     assert gui.ran == ['ff_gain_up', 'ff_gain_up']
 
 
-def test_syn_dropped_clears_what_is_held():
+def test_syn_dropped_clears_what_is_held(monkeypatch):
+    from oversteer import gui as gui_module
     from oversteer.gui import Gui
+    monkeypatch.setattr(gui_module.GLib, 'idle_add', lambda cb, *a, **kw: None)
     gui = FakeGui()
     gui.hat_held[ecodes.ABS_HAT0X] = 1
     gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
     Gui._wheel_input_lost(gui)
     assert gui.hat_held == {}
-    (callback, args), = gui.posted
-    callback(*args)
+    Gui._stop_wheel_repeat(gui)
+    assert gui.hotkey_repeater.holder is None
+
+
+def test_wheel_repeat_compares_normalized_codes():
+    from types import SimpleNamespace
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    gui.device.normalize_event = lambda e: SimpleNamespace(code=e.code + 1000)   # a remapped button
+    gui.device.input_device = SimpleNamespace(active_keys=lambda: [288])
+    assert Gui._wheel_key_down(gui, 1288)
+    assert not Gui._wheel_key_down(gui, 288)
+
+
+def test_input_lost_leaves_a_keyboard_repeat_alone(monkeypatch):
+    from oversteer import gui as gui_module
+    from oversteer.gui import Gui
+    posted = []
+    monkeypatch.setattr(gui_module.GLib, 'idle_add', lambda cb, *a, **kw: posted.append((cb, kw)))
+    gui = FakeGui()
+    gui.hotkey_repeater.press('key:ff_gain_up', 'ff_gain_up')
+    Gui._wheel_input_lost(gui)
+    (callback, kw), = posted
+    assert kw == {'priority': gui_module.GLib.PRIORITY_DEFAULT}
+    Gui._stop_wheel_repeat(gui)
+    assert gui.hotkey_repeater.holder == 'key:ff_gain_up'
+    gui.hotkey_repeater.release('key:ff_gain_up')
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    Gui._stop_wheel_repeat(gui)
     assert gui.hotkey_repeater.holder is None

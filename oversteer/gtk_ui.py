@@ -489,7 +489,8 @@ class GtkUi:
 
     def _show_pedal_preset(self, name):
         """Preset box and note follow the three controls."""
-        current = self.get_pedal_response(name)
+        model = self.controller.model
+        current = model.data.get(name + '_response') or self.get_pedal_response(name)
         combo, note = self.pedal_preset[name]
         match = [(pid, text) for pid, _label, response, text in self.controller.model.PEDAL_PRESETS[name]
                  if response == current]
@@ -511,8 +512,19 @@ class GtkUi:
     def _on_pedal_response_changed(self, widget, name):
         if self.updating_pedal_response:
             return
-        self._show_pedal_preset(name)
-        self.controller.model.set_pedal_response(name, *self.get_pedal_response(name))
+        model = self.controller.model
+        _button, *scales = self.pedal_response[name]
+        shown = self.get_pedal_response(name)
+        # Only the moved scale comes from the UI: the others may show a value
+        # clamped for display that the driver holds beyond the scale's range.
+        response = shown
+        stored = model.data.get(name + '_response')
+        if stored is not None:
+            mixed = tuple(s if scale is widget else st for scale, s, st in zip(scales, shown, stored))
+            if model.valid_response(mixed) is not None:
+                response = mixed
+        model.set_pedal_response(name, *response)
+        self._show_pedal_preset(name)   # after the model took it
 
     def _on_pedal_response_reset(self, widget, name):
         self.set_pedal_response(name, self.controller.model.DEFAULT_RESPONSE)

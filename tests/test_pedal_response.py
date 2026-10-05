@@ -38,6 +38,7 @@ class FakeDevice:
             raise PermissionError("denied")
         self.held[bit] = (start, end, sensitivity)
         self.written.append((bit, start, end, sensitivity))
+        return True
 
     def set_invert_pedals(self, mask):
         self.invert_writes.append(mask)
@@ -252,3 +253,51 @@ def test_spring_brake_preset_is_brakes_only():
     model = make_model()
     with pytest.raises(ValueError):
         model.set_pedal_preset('clutch', 'spring_brake')
+
+
+def test_a_refused_write_is_not_marked_written():
+    model = make_model()
+    model.device.set_pedal_response = lambda *a: False
+    model.data['brakes_response'] = (0, 80, 60)
+    model.pedal_response_written.discard('brakes')
+    model.apply_pedal_response('brakes')
+    assert 'brakes' not in model.pedal_response_written
+
+
+def test_values_read_at_construction_count_as_written():
+    model = make_model(held={4: (60, 70, 50)})
+    assert model.pedal_response_written == {'clutch', 'accelerator', 'brakes'}
+    model.refresh_pedal_responses()
+    assert model.device.written == []
+
+
+def test_missing_axis_warns_once(caplog):
+    import logging
+    model = make_model()
+    model.pedal_bit = lambda name: None
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(3):
+            model.apply_pedal_response('brakes')
+    assert [r.levelno for r in caplog.records if 'brakes axis' in r.getMessage()] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
+
+
+def test_moving_one_slider_keeps_the_others_stored_values():
+    from types import SimpleNamespace
+    from oversteer.gtk_ui import GtkUi
+
+    class Scale:
+        def __init__(self, value, maximum):
+            self.value, self.maximum = value, maximum
+
+        def get_value(self):
+            return min(self.value, self.maximum)
+
+    model = make_model(held={4: (50, 90, 40)})
+    scales = [Scale(50, 45), Scale(90, 100), Scale(45, 100)]   # start shown clamped to 45
+    ui = SimpleNamespace(updating_pedal_response=False, controller=SimpleNamespace(model=model),
+                         pedal_response={'brakes': (None, *scales)}, shown=[])
+    ui.get_pedal_response = lambda name: GtkUi.get_pedal_response(ui, name)
+    ui._show_pedal_preset = lambda name: ui.shown.append(name)
+    GtkUi._on_pedal_response_changed(ui, scales[2], 'brakes')
+    assert model.get_brakes_response() == (50, 90, 45)
+    assert ui.shown == ['brakes']

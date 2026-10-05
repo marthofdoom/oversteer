@@ -1,7 +1,7 @@
 import configparser
 import csv
 from datetime import datetime
-from evdev import ecodes
+from evdev import ecodes, InputEvent
 import glob
 import locale as Locale
 from locale import gettext as _
@@ -1482,7 +1482,8 @@ class Gui:
         if active_keys is None:
             return True
         try:
-            return code in active_keys()
+            normalize = self.device.normalize_event
+            return code in {normalize(InputEvent(0, 0, ecodes.EV_KEY, c, 1)).code for c in active_keys()}
         except OSError:
             return False
 
@@ -1496,7 +1497,15 @@ class Gui:
         """Events were dropped or the input device was reopened (input
         thread): a release may be among them, so nothing counts as held."""
         self.hat_held.clear()
-        self.ui.safe_call(self.hotkey_repeater.stop)
+        # at the priority of the presses, so it stays in order with them
+        GLib.idle_add(self._stop_wheel_repeat, priority=GLib.PRIORITY_DEFAULT)
+
+    def _stop_wheel_repeat(self):
+        """Main thread: end a repeat the wheel started; a keyboard
+        repeat has its own release."""
+        if (self.hotkey_repeater.holder or '').startswith('wheel:'):
+            self.hotkey_repeater.stop()
+        return False
 
     def _hotkeys_suppressed(self):
         """Presses that belong to something else: the Preferences button

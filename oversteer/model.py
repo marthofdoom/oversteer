@@ -103,6 +103,7 @@ class Model:
         self.reference_values = None
         self.data = self.defaults.copy()
         self.pedal_response_written = set()   # pedals whose response the driver has
+        self.pedal_axis_warned = set()        # pedals already warned about as missing
         if device != None:
             self.set_device(device)
 
@@ -220,6 +221,10 @@ class Model:
 
     def update_from_device_settings(self):
         self.data.update(self.read_device_settings())
+        for name in self.PEDAL_RESPONSES:
+            if self.data[name + '_response'] is not None:
+                # what the driver holds: nothing to write back
+                self.pedal_response_written.add(name)
 
     def get_profile(self):
         return self.profile
@@ -402,11 +407,14 @@ class Model:
             return
         bit = self.pedal_bit(name)
         if bit is None:
-            logging.warning("No %s axis on the input device (yet); pedal response not written", name)
+            # once per pedal: update_pedals gets here on every refresh
+            level = logging.debug if name in self.pedal_axis_warned else logging.warning
+            self.pedal_axis_warned.add(name)
+            level("No %s axis on the input device (yet); pedal response not written", name)
             return
         try:
-            self.device.set_pedal_response(bit, *response)
-            self.pedal_response_written.add(name)
+            if self.device.set_pedal_response(bit, *response):
+                self.pedal_response_written.add(name)
         except OSError as e:
             logging.warning("Can't set the %s response: %s", name, e)
 
