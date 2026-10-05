@@ -61,6 +61,7 @@ COAST_SPEED = 10.0               # m/s
 OVERLAP = 0.2                    # both pedals past this
 STRAIGHT = 100.0                 # m from every corner: a straight
 BLIP = 0.2                       # s either side of an H-pattern change down left out of the overlap
+MATCH_CORNER = 15.0              # m: the same corner in two runs has its slowest point within this
 MATCH_APEX = 25.0                # m: sections match by apex within this where the windows do not overlap
 HAIRPIN = 135.0                  # degrees of heading change (calibrate)
 LONG_BEND = 90.0                 # degrees: more than a radius of grade 3 or 4 implies
@@ -780,31 +781,52 @@ def section_loss(trace, sections, reference):
     return total if found else None
 
 
+def _matched_corner(corner, corners):
+    """The stored corner of `corners` that is the same bend as `corner`: the same direction (where both
+    have one), its slowest point within MATCH_CORNER m of its; the nearest, None where there is none."""
+    best = None
+    for k in corners:
+        if k.get('d') is None or abs(k['d'] - corner['d']) > MATCH_CORNER:
+            continue
+        if corner.get('direction') and k.get('direction') and corner['direction'] != k['direction']:
+            continue
+        if best is None or abs(k['d'] - corner['d']) < abs(best['d'] - corner['d']):
+            best = k
+    return best
+
+
 def spread(sections, others):
     """[event dict] per section of this run whose minimum speed can be
-    compared: the SD of the minimum speed through the same section over
+    compared: the spread of the speed at the section's slowest corner over
     this run and the other runs' `others` ([(run row, stored corners)],
     newest first; the runs to compare are the caller's choice), the last
-    SPREAD_RUNS runs, at least SPREAD_MIN of them. A section's minimum is
-    the lowest of its corners'. Sections an off touched are left out of the
-    run that had it."""
+    SPREAD_RUNS runs, at least SPREAD_MIN of them. The corner is matched
+    run to run by its slowest point (MATCH_CORNER m, the same direction), not
+    by section: how the corners were joined depends on each run's pace. A run
+    whose matching corner was off, or has none, is left out, never the
+    neighbour; so is a section an off touched, in this run. The spread is the
+    median absolute deviation scaled to a standard deviation, which one odd
+    run does not move."""
     out = []
-    pool = []
-    for run, corners in others[:SPREAD_RUNS - 1]:
-        pool.append((run, [s for s in sections_of(corners) if not s.get('off')]))
+    pool = [(run, [k for k in corners if k.get('d') is not None]) for run, corners in others[:SPREAD_RUNS - 1]]
     for s in sections:
         if any(k.get('off') for k in s['corners']):
             continue
-        speeds = [min(k['min_speed'] for k in s['corners'])]
-        for run, grid in pool:
-            match = match_sections([s], grid)
-            if 0 in match:
-                g = grid[match[0]]
-                speeds.append(min(k['min_speed'] for k in g['corners'] if k.get('min_speed') is not None))
+        key = key_corner(s)
+        if key.get('min_speed') is None:
+            continue
+        speeds = [key['min_speed']]
+        for run, corners in pool:
+            k = _matched_corner(key, corners)
+            if k is None or k.get('off') or k.get('min_speed') is None or k.get('complex') is None:
+                continue
+            speeds.append(k['min_speed'])
         if len(speeds) >= SPREAD_MIN:
+            median = statistics.median(speeds)
+            mad = statistics.median(abs(v - median) for v in speeds)
             out.append({'kind': 'spread', 'class': None, 'd0': s['d0'], 'd1': s['d1'], 't0': None, 't1': None,
-                        'gear': None, 'value': statistics.stdev(speeds),
-                        'detail': {'median': statistics.median(speeds), 'min': min(speeds), 'max': max(speeds),
+                        'gear': None, 'value': 1.4826 * mad,
+                        'detail': {'median': median, 'min': min(speeds), 'max': max(speeds),
                                    'runs': len(speeds), 'apex': s['apex']}})
     return out
 

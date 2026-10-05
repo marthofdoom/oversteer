@@ -595,7 +595,7 @@ def test_the_spread_of_the_minimum_speed_across_runs_names_the_unsure_section():
     events = cc.spread(mine, others)
     assert [e['kind'] for e in events] == ['spread', 'spread']
     wide, steady = events
-    assert wide['value'] > 2.5 and steady['value'] == 0.0 and wide['detail']['runs'] == 6
+    assert wide['value'] > 2.0 and steady['value'] == 0.0 and wide['detail']['runs'] == 6
     assert cc.spread(mine, others[:2]) == []                       # fewer than four runs: nothing to say
     mine[0]['corners'][0]['off'] = 1
     assert [e['d0'] for e in cc.spread(mine, others)] == [1080.0]  # an off section is not compared
@@ -782,3 +782,24 @@ def test_the_exit_is_timed_to_full_throttle_not_to_the_next_braking():
     last = sections[1]['lead']
     assert last['loss_entry'] + last['loss_exit'] < 0.3     # ...and no section is blamed for them
     assert abs(total) < 0.5
+
+
+def test_the_spread_matches_corners_not_neighbours_and_skips_a_run_whose_corner_was_off():
+    def run(speed, d=1100.0, off=0, extra=None):
+        corners = [{'d': 500.0, 'd0': 480.0, 'd1': 520.0, 'complex': 0, 'min_speed': 10.0, 'off': 0, 'direction': 1},
+                   {'d': d, 'd0': d - 20, 'd1': d + 20, 'complex': 1, 'min_speed': speed, 'off': off, 'direction': -1}]
+        return corners + (extra or [])
+    mine = cc.sections_of(run(12.0))
+    # a run whose hairpin was marked off is left out: the 60 km/h corner 80 m on is not its stand-in
+    neighbour = {'d': 1180.0, 'd0': 1160.0, 'd1': 1200.0, 'complex': 2, 'min_speed': 16.7, 'off': 0, 'direction': -1}
+    others = [({'id': i}, run(12.0 + 0.2 * i)) for i in range(3)] + [({'id': 9}, run(5.0, off=1, extra=[neighbour]))]
+    [first, second] = cc.spread(mine, others)
+    assert second['detail']['runs'] == 4 and second['detail']['max'] < 13.0 and second['value'] < 0.5
+    # a corner the other way, or further than MATCH_CORNER m, is not the same corner
+    far = [({'id': i}, run(12.0, d=1100.0 + 20)) for i in range(5)]
+    assert [e['d0'] for e in cc.spread(mine, far)] == [480.0]
+    wrong_way = [({'id': i}, [dict(k, direction=-k['direction']) for k in run(12.0)]) for i in range(5)]
+    assert cc.spread(mine, wrong_way) == []
+    # one odd run does not make the corner a spread
+    odd = [({'id': i}, run(20.0 if i == 0 else 12.0)) for i in range(5)]
+    assert [e for e in cc.spread(mine, odd) if e['d0'] == 1080.0][0]['value'] == 0.0
