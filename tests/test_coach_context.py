@@ -876,6 +876,23 @@ def test_a_hit_that_fits_in_one_row_is_a_hit_and_a_reset_is_an_off():
     assert cc.hits(tr) == []
 
 
+def test_a_game_whose_speed_is_not_checked_has_no_hits_from_one_row_of_speed_and_no_off_for_them():
+    # a noisy speed channel: 12 m/s lost across a row now and then, the slow stretch after it
+    def speed(i, t):
+        return 2.0 if 120 <= i < 135 else (8.0 if i % 40 == 0 else 20.0)
+
+    tr = rows(300, speed=speed, gear=3.0)
+    assert len(cc.hits(tr)) > 3 and len(cc.hits(tr, 'acr')) == len(cc.hits(tr))
+    assert cc.hits(tr, 'wrcg') == []
+    course = tr[-1][C['distance']]
+    assert [e['class'] for e in cc.incidents(tr, course=course) if e['kind'] == 'off'] == ['hit']
+    events = cc.incidents(tr, course=course, game='wrcg')
+    assert not [e for e in events if e['kind'] in ('hit', 'off')] and [e['kind'] for e in events] == ['stop']
+    # the game reaches the context layer through the run summary
+    out = cc.analyse({'finished': 1, 'course': course, 'game': 'wrcg'}, tr, [], [], {})
+    assert out['run_class'] != 'off'
+
+
 def test_a_corners_call_ignores_a_crash_row_and_follows_the_reference():
     # 20 m/s through a 0.6 rad/s bend is a 33 m radius; one row at 3 m/s and 2 rad/s is no 1.5 m radius
     def yaw(i, t):

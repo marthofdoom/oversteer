@@ -35,6 +35,7 @@ OFF_TIME = 3.0                   # s: a slow stretch this long is an off (calibr
 HIT_G = 2.5                      # g held for HIT_ROWS rows: a hit (calibrate)
 HIT_ROWS = 2
 HIT_ONE_G = 4.0                  # g in a single row: a hit by itself (a 10 Hz row can hold all of an impact; calibrate)
+UNCHECKED_GAMES = ('wrcg',)     # games whose speed and acceleration channels are not checked (coach.LAUNCH_OUT, ATTITUDE_OUT)
 HIT_DECEL = 3.0                  # g of speed lost across one row: a hit by itself (calibrate)
 RESET_BACK = 2.0                 # m the distance goes back between two rows, with the car stopped: the game's reset
 HIT_BEFORE = 2.0                 # s: a slow stretch this soon after a hit is an off
@@ -202,19 +203,21 @@ def stage_rows(trace, course=None, finished=False, result_time=None):
     return rows
 
 
-def hits(trace):
+def hits(trace, game=None):
     """[(first row, last row)] of the stretches with the car's
     acceleration, either way, over HIT_G for HIT_ROWS rows or more, and of
     the single rows that are a hit alone: over HIT_ONE_G, or with the speed
     dropping by more than HIT_DECEL g across the row (a 10 Hz row holds all
-    of a wall)."""
+    of a wall). In a game whose speed channel is not checked (UNCHECKED_GAMES;
+    WRCG's is noisy enough for a hundred of these in a run) a drop of speed is
+    no hit: only the acceleration is read."""
     t, speed = CH['t'], CH['speed']
     big, strong = [], []
     for i, row in enumerate(trace):
         a_long, a_lat = row[CH['a_long']], row[CH['a_lat']]
         big.append((_fin(a_long) and abs(a_long) > HIT_G * G) or (_fin(a_lat) and abs(a_lat) > HIT_G * G))
         hard = (_fin(a_long) and abs(a_long) > HIT_ONE_G * G) or (_fin(a_lat) and abs(a_lat) > HIT_ONE_G * G)
-        if i and _fin(row[speed]) and _fin(trace[i - 1][speed]):
+        if i and game not in UNCHECKED_GAMES and _fin(row[speed]) and _fin(trace[i - 1][speed]):
             dt = max(0.05, row[t] - trace[i - 1][t])
             hard = hard or (trace[i - 1][speed] - row[speed]) / dt > HIT_DECEL * G
         strong.append(hard)
@@ -234,7 +237,7 @@ def hits(trace):
     return out
 
 
-def incidents(trace, corners=(), course=None, unfinished=False):
+def incidents(trace, corners=(), course=None, unfinished=False, game=None):
     """The located trouble in a run: dicts (kind, class, d0, d1, t0, t1,
     value) of kinds
     - `off`: a slow stretch (under SLOW m/s for SLOW_TIME s, past the first
@@ -249,14 +252,16 @@ def incidents(trace, corners=(), course=None, unfinished=False):
       SPIN_HEADING, or reverses its yaw hard after the slowest point.
     A run that did not finish has no finish to be slow at: SLOW_END is not
     applied to it, and a slow stretch that runs to the end of its trace is an
-    off (the crash, the stop before the restart)."""
+    off (the crash, the stop before the restart). `game` is the trace's game
+    (in a game of UNCHECKED_GAMES hits() does not read speed drops, and a slow
+    stretch is not an off for a hit before it)."""
     out = []
     if not trace:
         return out
     t, speed, gear = CH['t'], CH['speed'], CH['gear']
     track = along(trace)
     end = float('inf') if unfinished else (course if course is not None and _fin(course) else track[-1]) - SLOW_END
-    knocks = hits(trace)
+    knocks = hits(trace, game)
     i, n = 0, len(trace)
     while i < n:
         if not (_fin(trace[i][speed]) and trace[i][speed] < SLOW):
@@ -269,8 +274,8 @@ def incidents(trace, corners=(), course=None, unfinished=False):
         d0, d1 = track[i], track[j]
         if duration >= SLOW_TIME and d0 > SLOW_START and d1 < end:
             reverse = any(_fin(trace[k][gear]) and trace[k][gear] < 0 for k in range(i, j + 1))
-            hit_before = next((k for k, last in knocks if trace[i][t] - HIT_BEFORE <= trace[last][t] <= trace[j][t]),
-                              None)
+            hit_before = None if game in UNCHECKED_GAMES else next(
+                (k for k, last in knocks if trace[i][t] - HIT_BEFORE <= trace[last][t] <= trace[j][t]), None)
             event = {'d0': d0, 'd1': d1, 't0': trace[i][t], 't1': trace[j][t] + _dt(trace, j), 'value': duration}
             if reverse or duration >= OFF_TIME or hit_before is not None or (unfinished and j == n - 1):
                 event.update(kind='off', **{'class': 'reverse' if reverse else (
@@ -1384,7 +1389,7 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     length = stage_length or summary.get('stage_length')
     unfinished = summary.get('finished') == 0 or (
         summary.get('finished') is None and bool(length) and (course or 0.0) < FINISH_SHARE * length)
-    events = incidents(rows, corners, course, unfinished)
+    events = incidents(rows, corners, course, unfinished, summary.get('game'))
     mark_off(corners, events)
     klass = run_class(summary.get('finished'), course, length, events, started, last_started)
     top = summary.get('gears') or context.get('shipped_top') or context.get('top_gear')
