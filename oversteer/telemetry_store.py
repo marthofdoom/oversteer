@@ -25,7 +25,7 @@ from array import array
 
 from . import stage_tables
 
-VERSION = 2
+VERSION = 3
 
 SCHEMA = """
 CREATE TABLE cars (
@@ -88,7 +88,9 @@ CREATE TABLE runs (                 -- one stage attempt, one lap session, one s
     discipline TEXT, discipline_conf TEXT, discipline_evidence TEXT,   -- evidence: JSON list of sentences
     surface TEXT, surface_conf TEXT, surface_evidence TEXT,
     wet TEXT, wet_evidence TEXT,
-    detector_version INTEGER        -- which calibration produced the verdicts
+    detector_version INTEGER,       -- which calibration produced the verdicts
+    course REAL,                    -- m along the stage at the finish, or where the trace ends (coach_context.stage_rows)
+    run_class TEXT                  -- 'clean', 'learning', 'off', 'partial', 'restart' (coach_context.run_class)
 );
 CREATE TABLE traces (               -- kept apart so list queries on runs never page through blobs
     run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
@@ -116,7 +118,19 @@ CREATE TABLE corners (
     entry_speed REAL, min_speed REAL, exit_speed REAL,
     gear_min INTEGER, heading_change REAL, duration REAL,
     counter_steer REAL,             -- fraction of the corner steering against the yaw
-    handbrake INTEGER, exit_spin REAL
+    handbrake INTEGER, exit_spin REAL,
+    d0 REAL, d1 REAL,               -- distance at the ends of the yaw window
+    complex INTEGER,                -- the section (a run of linked corners) this corner belongs to, from 0
+    tightness TEXT,                 -- the call: '1'..'6', 'hairpin', 'long', 'fast'... (coach_context.tightness)
+    radius REAL,                    -- m at the slowest point
+    brake_d REAL, brake_peak REAL,  -- m before the slowest point where the strongest braking began, and its peak
+    throttle_on_t REAL, throttle_t REAL,   -- s from the slowest point to the throttle past 0.2, and to 0.95
+    relifts INTEGER,
+    coast_entry REAL, coast_exit REAL,     -- s with both pedals off, by phase
+    overlap_entry REAL, overlap_exit REAL, -- s with both pedals on, by phase
+    section_t REAL,                 -- s through the section (on its first corner)
+    loss_entry REAL, loss_exit REAL,       -- s lost to the reference run, split at the slowest point
+    off INTEGER                     -- within 100 m of an off, a stall, a spin or a hit: not compared
 );
 CREATE TABLE shifts (
     id INTEGER PRIMARY KEY,
@@ -134,7 +148,17 @@ CREATE TABLE shifts (
     engage_rpm REAL,
     flat_out INTEGER,               -- counts for shift-point coaching
     slip REAL,                      -- driven-wheel slip at the change, when known
-    flags TEXT                      -- 'missed', 'skip', 'over-rev', 'double-tap'
+    flags TEXT,                     -- 'missed', 'skip', 'over-rev', 'double-tap', 'cut', 'launch'
+    d REAL                          -- distance along the run at the change
+);
+CREATE TABLE events (               -- located things that happened in a run (coach_context)
+    id INTEGER PRIMARY KEY,
+    run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,             -- 'limiter', 'off', 'stop', 'stall', 'spin', 'hit', 'launch', 'spread'
+    class TEXT,                     -- limiter: 'shift', 'held-corner' and so on, off: 'reverse', 'long', 'hit'
+    d0 REAL, d1 REAL, t0 REAL, t1 REAL,
+    gear INTEGER, value REAL,
+    detail TEXT                     -- JSON
 );
 CREATE TABLE metrics (
     id INTEGER PRIMARY KEY,
@@ -183,6 +207,7 @@ CREATE INDEX metrics_name ON metrics (name, discipline, surface, session);
 CREATE INDEX metrics_session ON metrics (session, name);
 CREATE INDEX segments_run ON segments (run);
 CREATE INDEX corners_run ON corners (run);
+CREATE INDEX events_run ON events (run, kind);
 """
 
 # The first schema, as development builds after Oversteer 0.13.1 created it
@@ -229,6 +254,14 @@ TRACE_CHANNELS = ('t', 'distance', 'speed', 'rpm', 'gear', 'throttle', 'brake', 
                   'a_long', 'a_lat', 'yaw_rate', 'slip_drive', 'susp_rms', 'x', 'y', 'z')
 TRACE_VERSION = 1
 TRACES_CAP = 200 * 1024 * 1024       # bytes of traces kept; the oldest go first (their runs stay)
+
+# The corners table's columns, as a corner dict has them (find_corners and
+# coach_context fill them); and the events table's
+CORNER_FIELDS = ('d', 'direction', 'entry_speed', 'min_speed', 'exit_speed', 'gear_min', 'heading_change',
+                 'duration', 'counter_steer', 'handbrake', 'exit_spin', 'd0', 'd1', 'complex', 'tightness', 'radius',
+                 'brake_d', 'brake_peak', 'throttle_on_t', 'throttle_t', 'relifts', 'coast_entry', 'coast_exit',
+                 'overlap_entry', 'overlap_exit', 'section_t', 'loss_entry', 'loss_exit', 'off')
+EVENT_FIELDS = ('kind', 'class', 'd0', 'd1', 't0', 't1', 'gear', 'value', 'detail')
 
 STAGE_LENGTH_TOLERANCE = {'dirt': 2.0, 'wrcg': 2.0, 'acr': 10.0}     # m, a measured length on a rounding boundary
 STAGE_START_TOLERANCE = 15.0                                         # m of start z (DiRT)
@@ -456,6 +489,46 @@ def _migrate_v1(db, path):
     logging.info("telemetry store: upgraded to version %d (%d cars, %d sessions)", VERSION, len(kept), len(sessions))
 
 
+# Version 2 to 3 is additive: the columns the coach's context layer fills
+# (docs/coach-techniques.md, section 7.2) and the events table. The fresh
+# schema above has the same columns, in the same order.
+V3_COLUMNS = (
+    ('runs', 'course REAL'), ('runs', 'run_class TEXT'),
+    ('corners', 'd0 REAL'), ('corners', 'd1 REAL'), ('corners', 'complex INTEGER'), ('corners', 'tightness TEXT'),
+    ('corners', 'radius REAL'), ('corners', 'brake_d REAL'), ('corners', 'brake_peak REAL'),
+    ('corners', 'throttle_on_t REAL'), ('corners', 'throttle_t REAL'), ('corners', 'relifts INTEGER'),
+    ('corners', 'coast_entry REAL'), ('corners', 'coast_exit REAL'), ('corners', 'overlap_entry REAL'),
+    ('corners', 'overlap_exit REAL'), ('corners', 'section_t REAL'), ('corners', 'loss_entry REAL'),
+    ('corners', 'loss_exit REAL'), ('corners', 'off INTEGER'),
+    ('shifts', 'd REAL'),
+)
+
+
+def _migrate_v2(db, path):
+    """Version 2 to 3, in one transaction, after copying the database to
+    `<path>.v2.bak` once. Nothing is recomputed here: the drive log's
+    backfill (drive_log.backfill_step) fills the new columns of the runs
+    that have a trace, a few at a time."""
+    if path is not None and not os.path.exists(path + '.v2.bak'):
+        try:
+            _backup(db, path + '.v2.bak')
+        except (OSError, sqlite3.Error) as e:
+            logging.warning("telemetry store: no backup before the upgrade: %s", e)
+    db.execute('BEGIN')
+    try:
+        for table, column in V3_COLUMNS:
+            db.execute('ALTER TABLE {} ADD COLUMN {}'.format(table, column))
+        for statement in _split(SCHEMA):
+            if statement.startswith(('CREATE TABLE events', 'CREATE INDEX events_run')):
+                db.execute(statement)
+        db.execute('PRAGMA user_version = 3')
+        db.execute('COMMIT')
+    except sqlite3.Error:
+        db.execute('ROLLBACK')
+        raise
+    logging.info("telemetry store: upgraded to version 3")
+
+
 def _connect(path):
     db = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=10.0)
     db.execute('PRAGMA journal_mode = WAL')
@@ -481,7 +554,9 @@ def open_store(path):
             rescale_codemasters(db, path)
             version = 1
         if version == 1:
-            _migrate_v1(db, path)
+            _migrate_v1(db, path)                 # builds the current schema
+        elif version == 2:
+            _migrate_v2(db, path)
         elif version > VERSION:
             db.close()
             raise sqlite3.DatabaseError("{} is from a newer Oversteer (version {})".format(path, version))
@@ -633,10 +708,22 @@ class Reader:
                                     'WHERE run = ? ORDER BY d0', (run_id,))]
 
     def corners(self, run_id):
-        names = ('d', 'direction', 'entry_speed', 'min_speed', 'exit_speed', 'gear_min', 'heading_change',
-                 'duration', 'counter_steer', 'handbrake', 'exit_spin')
-        return [dict(zip(names, r)) for r in self._rows(
-            'SELECT {} FROM corners WHERE run = ? ORDER BY d'.format(', '.join(names)), (run_id,))]
+        return [dict(zip(CORNER_FIELDS, r)) for r in self._rows(
+            'SELECT {} FROM corners WHERE run = ? ORDER BY d, id'.format(', '.join(CORNER_FIELDS)), (run_id,))]
+
+    def events(self, run_id, kind=None):
+        """The run's located events (kind: one of them), in order."""
+        where, args = 'run = ?', [run_id]
+        if kind is not None:
+            where += ' AND kind = ?'
+            args.append(kind)
+        out = []
+        for r in self._rows('SELECT {} FROM events WHERE {} ORDER BY COALESCE(d0, 0), id'.format(
+                ', '.join(EVENT_FIELDS), where), tuple(args)):
+            event = dict(zip(EVENT_FIELDS, r))
+            event['detail'] = json.loads(event['detail']) if event['detail'] else None
+            out.append(event)
+        return out
 
     def trace(self, run_id):
         rows = self._rows('SELECT version, data FROM traces WHERE run = ?', (run_id,))
@@ -685,7 +772,7 @@ class Reader:
 
     def run_shifts(self, run_id):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle',
-                 'method', 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags')
+                 'method', 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags', 'd', 'id')
         return [dict(zip(names, r)) for r in self._rows(
             'SELECT {} FROM shifts WHERE session = (SELECT session FROM runs WHERE id = ?) AND run = ? '    # by the session's index
             'ORDER BY at, id'.format(', '.join(names)), (run_id, run_id))]
@@ -694,12 +781,57 @@ class Reader:
         rows = self._rows('SELECT session FROM runs WHERE id = ?', (run_id,))
         return rows[0][0] if rows else None
 
-    def stage_runs(self, key, exclude=None, limit=20):
-        """The stage's recent runs that ended, newest first."""
-        names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time')
-        return [dict(zip(names, r)) for r in self._rows(
-            'SELECT {} FROM runs WHERE stage = ? AND id IS NOT ? AND ended IS NOT NULL '
-            'ORDER BY started DESC LIMIT ?'.format(', '.join(names)), (key, exclude, limit))]
+    def stage_runs(self, key, exclude=None, limit=20, car=None, run_class=None):
+        """The stage's recent runs that ended, newest first. `car` (a
+        cars.id) keeps the runs of that car, `run_class` (a class or a
+        tuple of them) the runs of those classes. Each run: id, started,
+        distance, duration, finished, result_time, course, run_class, wet,
+        car, session."""
+        names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time', 'course', 'run_class', 'wet')
+        where, args = ['r.stage = ?', 'r.id IS NOT ?', 'r.ended IS NOT NULL'], [key, exclude]
+        if car is not None:
+            where.append('s.car = ?')
+            args.append(car)
+        if run_class is not None:
+            classes = (run_class,) if isinstance(run_class, str) else tuple(run_class)
+            where.append('r.run_class IN ({})'.format(', '.join('?' * len(classes))))
+            args.extend(classes)
+        return [dict(zip(names + ('car', 'session'), r)) for r in self._rows(
+            'SELECT {}, s.car, r.session FROM runs r JOIN sessions s ON r.session = s.id WHERE {} '
+            'ORDER BY r.started DESC, r.id DESC LIMIT ?'.format(', '.join('r.' + n for n in names), ' AND '.join(where)),
+            tuple(args) + (limit,))]
+
+    def run(self, run_id):
+        """One run's row: id, session, car (cars.id), stage, started, ended, distance, duration, finished,
+        result_time, course, run_class, discipline, surface, wet; None when there is none."""
+        names = ('id', 'session', 'stage', 'started', 'ended', 'distance', 'duration', 'finished', 'result_time',
+                 'course', 'run_class', 'discipline', 'surface', 'wet')
+        rows = self._rows('SELECT {}, s.car FROM runs r JOIN sessions s ON r.session = s.id WHERE r.id = ?'.format(
+            ', '.join('r.' + n for n in names)), (run_id,))
+        return dict(zip(names + ('car',), rows[0])) if rows else None
+
+    def runs_to_backfill(self, limit=3):
+        """The oldest runs with a trace that the context layer has not
+        worked over (run_class not set), at most `limit`: run ids."""
+        return [r[0] for r in self._rows(
+            'SELECT r.id FROM runs r JOIN traces t ON t.run = r.id WHERE r.run_class IS NULL '
+            'AND r.ended IS NOT NULL ORDER BY r.id LIMIT ?', (limit,))]
+
+    def car_row(self, car_id):
+        """(profile, key) of a car id, or None."""
+        rows = self._rows('SELECT profile, key FROM cars WHERE id = ?', (car_id,))
+        return rows[0] if rows else None
+
+    def other_corners(self, car, stage, exclude=None, classes=None, limit=20):
+        """[(run id, [corner dicts])] of the car's runs on the stage, newest
+        first, for the section statistics: the runs of those classes
+        (default: any), without `exclude`."""
+        out = []
+        for run in self.stage_runs(stage, exclude=exclude, limit=limit, car=car, run_class=classes):
+            corners = self.corners(run['id'])
+            if corners:
+                out.append((run, corners))
+        return out
 
     METRIC_FIELDS = ('session', 'run', 'started', 'name', 'value', 'count', 'gear', 'method', 'discipline',
                      'surface', 'stage', 'distance', 'car', 'tune')
@@ -1147,15 +1279,42 @@ class Store(Reader):
                         (run, d0, d1, t0, t1, json.dumps(features), pushed, surface, margin)).lastrowid
 
     def add_corners(self, run, corners):
-        names = ('d', 'direction', 'entry_speed', 'min_speed', 'exit_speed', 'gear_min', 'heading_change',
-                 'duration', 'counter_steer', 'handbrake', 'exit_spin')
+        names = CORNER_FIELDS
         for corner in corners:
             self._do('INSERT INTO corners (run, {}) VALUES (?, {})'.format(', '.join(names), ', '.join('?' * len(names))),
                      (run,) + tuple(corner.get(n) for n in names))
 
+    def add_events(self, run, events):
+        """Events (dicts of EVENT_FIELDS; `detail` any JSON-able value)."""
+        for e in events:
+            detail = e.get('detail')
+            self._do('INSERT INTO events (run, {}) VALUES (?, {})'.format(
+                ', '.join(EVENT_FIELDS), ', '.join('?' * len(EVENT_FIELDS))),
+                (run,) + tuple(_json(detail) if n == 'detail' else e.get(n) for n in EVENT_FIELDS))
+
+    def clear_derived(self, run, keep_metrics=()):
+        """Forget what the context layer works out from a run's trace
+        (its corners, events and metrics, but the metrics named in
+        `keep_metrics`): the backfill writes them again."""
+        self._do('DELETE FROM corners WHERE run = ?', (run,))
+        self._do('DELETE FROM events WHERE run = ?', (run,))
+        marks = ', '.join('?' * len(keep_metrics))
+        self._do('DELETE FROM metrics WHERE run = ?{}'.format(' AND name NOT IN ({})'.format(marks) if keep_metrics else ''),
+                 (run,) + tuple(keep_metrics))
+
+    def update_run(self, run, **fields):
+        """Set columns of a run (unlike end_run, counts nothing)."""
+        names = sorted(fields)
+        if names:
+            self._do('UPDATE runs SET {} WHERE id = ?'.format(', '.join(n + ' = ?' for n in names)),
+                     tuple(fields[n] for n in names) + (run,))
+
+    def update_shift(self, shift_id, flags=None, d=None):
+        self._do('UPDATE shifts SET flags = ?, d = ? WHERE id = ?', (flags, d, shift_id))
+
     def add_shift(self, session, run, shift):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle', 'method',
-                 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags')
+                 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags', 'd')
         return self._do('INSERT INTO shifts (session, run, {}) VALUES (?, ?, {})'.format(
             ', '.join(names), ', '.join('?' * len(names))), (session, run) + tuple(shift.get(n) for n in names)).lastrowid
 

@@ -1,4 +1,5 @@
 import math
+from oversteer import telemetry_store
 from oversteer.shift_learner import ShiftLearner, CarModel
 from oversteer.telemetry import Sample
 from tests.sim import LIMITER, RATIOS, power, analytic_shift, drive, cruise, exits
@@ -246,7 +247,7 @@ def test_dirt_cars_learnt_in_the_wrong_unit_are_rescaled(tmp_path):
     assert abs(model.limiter - 7215.0 / f) < 0.01 and abs(model.upshifts[2][0] - 6800.0) < 0.01
     assert list(model.power) in ([59], [60])                     # around 6000 rpm, not 6283
     assert abs(learner.history('codemasters/7500-800-6')[0]['error'] + 200.0) < 0.01
-    assert learner.db.execute('PRAGMA user_version').fetchone()[0] == 2
+    assert learner.db.execute('PRAGMA user_version').fetchone()[0] == telemetry_store.VERSION
     assert (tmp_path / 'telemetry.db.v0.bak').exists()
     learner.close()
     again = ShiftLearner(path, profile='rally')                 # done once only

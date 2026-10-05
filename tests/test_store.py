@@ -330,3 +330,91 @@ def test_the_shipped_tables():
         'gravel', None)                                                        # 2 % tarmac: a gravel stage
     assert stage_tables.surface_of({'surface': 'mixed', 'surface_parts': {'tarmac': 0.62, 'gravel': 0.38}}) == (
         None, 'mixed:tarmac,gravel')
+
+
+def v2_database(path):
+    """A file as version 2 left it: the current schema without the columns
+    and the table version 3 added."""
+    db = sqlite3.connect(path)
+    db.executescript(telemetry_store.SCHEMA)
+    db.execute('DROP INDEX events_run')
+    db.execute('DROP TABLE events')
+    added = {}
+    for table, column in telemetry_store.V3_COLUMNS:
+        added.setdefault(table, set()).add(column.split()[0])
+    db.execute('PRAGMA legacy_alter_table = ON')          # references to a table are left as they are
+    for table, names in added.items():                  # rebuilt without them (DROP COLUMN trips on the comments)
+        old = [(r[1], r[2], r[5]) for r in db.execute('PRAGMA table_info({})'.format(table)) if r[1] not in names]
+        db.execute('CREATE TABLE {}_x ({})'.format(table, ', '.join(
+            '{} {}{}'.format(n, t, ' PRIMARY KEY' if pk else '') for n, t, pk in old)))
+        db.execute('DROP TABLE {}'.format(table))
+        db.execute('ALTER TABLE {0}_x RENAME TO {0}'.format(table))
+    db.execute("INSERT INTO cars (profile, game, key, model) VALUES ('rally', 'acr', 'acr/car', '{}')")
+    db.execute("INSERT INTO sessions (profile, car, game, started) VALUES ('rally', 1, 'acr', 10)")
+    db.execute("INSERT INTO runs (session, n, started, ended, distance) VALUES (1, 1, 11, 12, 500)")
+    db.execute("INSERT INTO corners (run, d) VALUES (1, 100)")
+    db.execute('PRAGMA user_version = 2')
+    db.commit()
+    db.close()
+
+
+def _columns(db, table):
+    return [r[1] for r in db.execute('PRAGMA table_info({})'.format(table))]
+
+
+def test_upgrade_from_version_2_adds_the_context_columns(tmp_path):
+    path = str(tmp_path / 'telemetry.db')
+    v2_database(path)
+    store = open_store(path)
+    assert store.db.execute('PRAGMA user_version').fetchone()[0] == 3
+    assert (tmp_path / 'telemetry.db.v2.bak').exists()
+    fresh = open_store(str(tmp_path / 'fresh.db'))
+    for table in ('runs', 'corners', 'shifts', 'events'):
+        assert _columns(store.db, table) == _columns(fresh.db, table), table
+    assert store.db.execute("SELECT name FROM sqlite_master WHERE name = 'events_run'").fetchone()
+    # What was there is kept, the new columns empty and waiting for the backfill
+    assert store.corners(1)[0]['d'] == 100 and store.corners(1)[0]['d0'] is None
+    run = store.run(1)
+    assert run['run_class'] is None and run['course'] is None
+    assert store.runs_to_backfill() == []                       # no trace: nothing to recompute
+    store.add_trace(1, [tuple([0.0] * len(TRACE_CHANNELS))] * 3)
+    assert store.runs_to_backfill() == [1]
+    store.db.close()
+    again = open_store(path)                                     # nothing more to do
+    assert again.corners(1)[0]['d'] == 100
+
+
+def test_corner_columns_events_and_stage_runs_filters(tmp_path):
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car_a = store.car_id('p', 'acr/a', 'acr')
+    car_b = store.car_id('p', 'acr/b', 'acr')
+    ids = {}
+    for name, car, finished, result, klass, wet in (('a1', car_a, 1, 230.0, 'clean', 'dry'),
+                                                    ('a2', car_a, 0, None, 'restart', 'dry'),
+                                                    ('b1', car_b, 1, 220.0, 'clean', 'wet')):
+        session = store.start_session('p', car, 'acr', 100.0)
+        run = store.start_run(session, 1, 100.0 + len(ids), 'acr:x:y', 'acr', 5000.0)
+        store.end_run(run, ended=200.0, distance=5000.0, finished=finished, result_time=result, course=4900.0,
+                      run_class=klass, wet=wet)
+        ids[name] = run
+    assert [r['id'] for r in store.stage_runs('acr:x:y')] == [ids['b1'], ids['a2'], ids['a1']]
+    assert [r['id'] for r in store.stage_runs('acr:x:y', car=car_a)] == [ids['a2'], ids['a1']]
+    assert [r['id'] for r in store.stage_runs('acr:x:y', car=car_a, run_class='clean')] == [ids['a1']]
+    assert [r['id'] for r in store.stage_runs('acr:x:y', run_class=('clean', 'restart'), exclude=ids['a1'])] == [
+        ids['b1'], ids['a2']]
+    first = store.stage_runs('acr:x:y', car=car_a, run_class='clean')[0]
+    assert first['course'] == 4900.0 and first['wet'] == 'dry' and first['car'] == car_a
+    store.add_corners(ids['a1'], [{'d': 900.0, 'direction': 1, 'min_speed': 12.0, 'd0': 880.0, 'd1': 930.0,
+                                   'complex': 0, 'tightness': '3', 'brake_d': 70.0, 'section_t': 9.5, 'off': 0}])
+    [corner] = store.corners(ids['a1'])
+    assert corner['d0'] == 880.0 and corner['tightness'] == '3' and corner['brake_d'] == 70.0 and corner['off'] == 0
+    assert corner['loss_entry'] is None
+    store.add_events(ids['a1'], [{'kind': 'limiter', 'class': 'shift', 'd0': 100.0, 'd1': 120.0, 't0': 5.0,
+                                  't1': 5.4, 'gear': 3, 'value': 0.4, 'detail': {'next': 'brake'}},
+                                 {'kind': 'off', 'class': 'reverse', 'd0': 50.0}])
+    assert [e['kind'] for e in store.events(ids['a1'])] == ['off', 'limiter']       # in order along the stage
+    [limiter] = store.events(ids['a1'], 'limiter')
+    assert limiter['detail'] == {'next': 'brake'} and limiter['gear'] == 3
+    store.clear_derived(ids['a1'])
+    assert store.corners(ids['a1']) == [] and store.events(ids['a1']) == []
+    store.close()
