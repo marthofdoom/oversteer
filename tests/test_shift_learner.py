@@ -167,20 +167,18 @@ def test_braking_teaches_no_ratio(tmp_path):
     assert learner.car.ratio(3) is None
 
 
-def test_coaching_says_early_or_late(tmp_path):
-    """The changes up are judged as shares against the band (the learnt crossover to the limiter less a
-    margin where the game ships no lights): early, from 60 % of them, on tarmac; on the cut, from a quarter."""
+def test_live_advice_leaves_early_and_cut_shares_to_the_coach(tmp_path):
+    """The live snapshot pools every surface and the launch and has no cost floor: it does not nag about the
+    cut or early changes (the coach judges those by surface, without the launch, by what they cost a stage)."""
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
     exits(learner)
     drive(learner, shift_at=5200, runs=5)            # well short of ~6700
-    tips = learner.car.advice(surface='tarmac')
-    assert any(t.startswith('2→3') and 'come before' in t and '% less drive' in t for t in tips), tips
-    assert learner.car.advice() == []                # the surface is not known: short-shifting can be right
+    assert not any('come before' in t or 'limiter cut' in t for t in learner.car.advice(surface='tarmac'))
     learner.car.upshifts = {}
     drive(learner, shift_at=LIMITER, runs=5)         # on the limiter every time
     tips = learner.car.advice(surface='tarmac')
-    assert any(t.startswith('2→3') and 'sit on the limiter cut' in t for t in tips), tips
-    assert not any('come before' in t for t in tips)
+    assert not any('limiter cut' in t or 'come before' in t for t in tips), tips
+    assert not any('Spot on: 2→3' in t for t in tips)
 
 
 def test_sessions_keep_every_shift_and_how_it_was_made(tmp_path):
@@ -299,7 +297,7 @@ def test_shifts_per_method(tmp_path):
 
 
 def test_coaching_is_short():
-    """At most three tips, the biggest first, and one line of praise."""
+    """No early or cut lines live (the coach has them); the held limiter and one line of praise."""
     car = CarModel('x')
     car.limiter = LIMITER
     car.slope_free = True                                  # a pooled curve: the slope was taken out
@@ -312,9 +310,8 @@ def test_coaching_is_short():
     car.upshifts = {g: [best[g] - 600] * early + [best[g]] * (5 - early) for g, early in {1: 5, 2: 4, 3: 3, 4: 2}.items()}
     car.upshifts[5] = [car.best_shift(5)[0]] * 5                             # and one spot on
     tips = car.advice(held_limiter_time=1.0, surface='tarmac')
-    assert [t[:3] for t in tips[:3]] == ['1→2', '2→3', '3→4'], tips
-    assert tips[3] == 'Spot on: 4→5 and 5→6 on the shift band (10 changes).', tips
-    assert len(tips) == 4
+    assert tips[0] == 'Spot on: 4→5 and 5→6 on the shift band (10 changes).', tips
+    assert not any('come before' in t for t in tips)
     # the limiter held on straights counts only once it is more than a few seconds
     assert not any('held on the limiter' in t for t in tips)
     held = car.advice(held_limiter_time=12.0, surface='tarmac')
@@ -894,8 +891,7 @@ def test_advice_waits_for_the_grip_on_a_loose_surface():
     car = CarModel(FABIA)
     car.upshifts[3] = [6500.0] * 5
     lines = car.advice(surface='tarmac')
-    assert lines[0].startswith('3→4: 100 % of your changes up come before 6800 rpm, the start of the lights band '
-                               '(6900 to 7100); stay in the gear to the lights.')
+    assert not any('come before' in line for line in lines)
     lines = car.advice(surface='gravel')
     assert not any('come before' in line for line in lines)
     assert any(line.startswith('3→4 on gravel: early, but not coached until the grip') for line in lines)

@@ -560,3 +560,13 @@ def test_nothing_the_coach_says_claims_to_know_the_drivers_mind(tmp_path):
                 text = node.value.lower()
                 for word in banned:
                     assert word not in text, (name, word, node.value)
+
+
+def test_both_pedals_on_a_straight_are_not_coached_in_a_front_wheel_drive_car_on_tarmac(tmp_path):
+    h = fabia_history(tmp_path, 'tarmac')
+    from oversteer.shift_learner import CarModel
+    model = CarModel.from_dict(h.store.car_by_id(h.car)['model'])
+    context = coach.car_context(model, 'tarmac')
+    assert context['drivetrain'] == 'fwd' or context['turbo']
+    h.session([{'name': 'pedal.drag', 'value': 0.8, 'count': 10}], surface='tarmac')
+    assert not [t for t in h.tips() if t.id.startswith('pedal.drag')]

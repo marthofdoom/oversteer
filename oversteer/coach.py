@@ -826,7 +826,7 @@ class Coach:
         self._method_tips(rows, candidates)
         self._rate_tips(slices, rows, candidates, praise, judged)
         self._launch_tips(slices, rows, candidates, praise)
-        self._stage_tips(rows, candidates, praise, placed)
+        self._stage_tips(rows, candidates, praise, placed, model)
         if model is not None:
             self._model_notes(model, now, candidates)
         state = self.reader.coach_state(profile, car_id)
@@ -1126,7 +1126,7 @@ class Coach:
                                       ['{} launches on {}.'.format(len(group), surface)], len(late) / len(last),
                                       cost=mean * len(late) / len(last) * COST_LAUNCH_CUT, count=len(last)))
 
-    def _stage_tips(self, rows, candidates, praise, placed=()):
+    def _stage_tips(self, rows, candidates, praise, placed=(), model=None):
         """What only the same stage can say that the sections do not (_place_tips, which has the
         stages it could name): the three worst sections' total where the sections are not stored,
         both pedals down on the straights, consistency."""
@@ -1145,6 +1145,11 @@ class Coach:
                                       value=loss[0]['value'], cost=loss[0]['value'], count=1, ref=True))
             drag = [r for r in stage_rows if r['name'] == 'pedal.drag'
                     and (r['discipline'] == 'circuit' or r['surface'] == 'tarmac')]
+            if model is not None and drag and drag[0]['surface'] == 'tarmac':
+                # A front-wheel drive or turbo car left-foot brakes on tarmac: technique (_left_foot)
+                context = car_context(model, 'tarmac')
+                if context.get('drivetrain') == 'fwd' or context.get('turbo'):
+                    drag = []
             found = recent(drag, 3)
             if found is not None and found[0] > DRAG_PER_KM:
                 # Both pedals down on a straight is dead weight on tarmac; on loose ground it is the technique

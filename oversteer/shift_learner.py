@@ -790,7 +790,8 @@ class CarModel:
         word = 'lights band' if lights else 'shift band'
         context = {'limiter': limiter, 'lights': lights, 'surface': surface,
                    'best_for': lambda gear: self.best_for(gear, surface if surface in SURFACES else None),
-                   'pulls': lambda gear: len({v[3] for v in self.drive.get((surface, gear), ())})}
+                   'pulls': lambda gear: len({v[3] for v in self.drive.get(
+                       (surface if surface in SURFACES else None, gear), ())})}
         for gear in range(1, (top or 0)):
             best = self.best_for(gear, surface if surface in SURFACES else None)
             peaks = self.upshifts.get(gear) or []
@@ -808,31 +809,14 @@ class CarModel:
             change = '{}→{}'.format(gear, gear + 1)
             if best['grip_limited'] and best['engine_rpm'] > best['rpm']:
                 grip_limited.append('{} from {:.0f} to {:.0f} rpm'.format(change, best['rpm'], best['engine_rpm']))
-            if cut >= ADVICE_CUT and early >= ADVICE_TWO:
-                tips.append((cut + early, '{}: {:.0f} % of your changes up come before {:.0f} rpm and {:.0f} % sit on '
-                             'the limiter cut; the {} is {:.0f} to {:.0f} rpm.'.format(
-                                 change, early * 100, low - cc.EARLY_BELOW, cut * 100, word, low, high)))
-            elif cut >= ADVICE_CUT:
-                tips.append((cut, '{}: {:.0f} % of your changes up sit on the limiter cut; change inside the {}, '
-                             '{:.0f} to {:.0f} rpm.'.format(change, cut * 100, word, low, high)))
-            elif early >= ADVICE_EARLY:
-                tarmac = surface == 'tarmac'
-                if not tarmac:
-                    if surface not in SURFACES:
-                        if not (best['source'] == 'game' and not self.grip_limited_anywhere(gear)):
-                            continue                     # the surface is not known: short-shifting can be right
-                    elif surface in ('snow', 'ice') or gear < 3:
-                        continue
-                    elif best['grip_limited'] is None:
-                        waiting.append(change)
-                        continue
-                    elif best['grip_limited']:
-                        continue                         # measured grip-limited: changing early gives the same drive
-                tips.append((early, '{}: {:.0f} % of your changes up come before {:.0f} rpm, the start of the {} '
-                             '({:.0f} to {:.0f}); stay in the gear {}.{}'.format(
-                                 change, early * 100, low - cc.EARLY_BELOW, word, low, high,
-                                 'to the lights' if lights else 'longer',
-                                 self.drive_lost(gear, low - 300) if tarmac else '')))
+            # The cut and early shares are not told here: the coach judges them per surface, without the
+            # launch and by what they cost a stage (coach.Coach._shift_tips), and a pooled live share
+            # nagged about changes it calls technique or too cheap to coach. Grip-limited and unmeasured
+            # gears are still named below, for the coach's lines to be read by.
+            if early >= ADVICE_EARLY and not cut >= ADVICE_CUT and surface not in ('tarmac',) \
+                    and surface in SURFACES and surface not in ('snow', 'ice') and gear >= 3 \
+                    and best['grip_limited'] is None:
+                waiting.append(change)
             elif on >= ADVICE_ON and cut <= ADVICE_ON_CUT:
                 spot_on.append((change, n))
         if held_limiter_time > 3:

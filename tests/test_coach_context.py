@@ -747,3 +747,21 @@ def test_a_held_straight_is_measured_against_the_reference_to_the_next_braking()
     assert abs(even['lost']) < 1e-9
     nobrake = rows(300, speed=20.0, gear=3.0, brake=0.0)
     assert cc.held_vs_reference(nobrake, theirs, 100.0) is None                # never braked again
+
+
+def test_both_pedals_in_a_braking_zone_are_not_drag_on_a_straight():
+    # 600 m straight at 40 m/s: the corner's yaw window is at 500-520 m, its braking began 180 m before the
+    # slowest point, which is more than STRAIGHT m before the window
+    corner = {'d0': 500.0, 'd1': 520.0, 'd': 510.0, 'brake_d': 180.0}
+    tr = rows(150, speed=40.0, throttle=0.0, brake=0.0)
+    both = lambda i, t: 0.3 if 84 <= i < 110 else 0.0              # on both at 336-440 m: in the braking zone
+    held = rows(150, speed=40.0, throttle=both, brake=both)
+    assert cc.pedal_time(held, [corner])[1] == 0.0
+    # the same without the braking onset is a straight 100 m clear of the window: rows 84-110 are 336-440 m
+    corner['brake_d'] = None
+    assert cc.pedal_time(held, [corner])[1] > 1.0
+    # braking harder than the throttle with the speed falling on a straight is braking too
+    slowing = rows(150, speed=lambda i, t: 40.0 - 0.05 * i, throttle=lambda i, t: 0.3 if 20 <= i < 40 else 0.0,
+                   brake=lambda i, t: 0.5 if 20 <= i < 40 else 0.0)
+    assert cc.pedal_time(slowing, [])[1] == 0.0
+    assert tr and cc.pedal_time(tr, [])[1] == 0.0

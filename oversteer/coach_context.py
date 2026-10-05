@@ -652,7 +652,10 @@ def pedal_time(trace, corners, shift_times=(), skip=()):
     corner's yaw window (and outside the `skip` distance windows, an off's
     surroundings), and the distance covered there."""
     track = along(trace)
-    near = [(k['d0'] - STRAIGHT, k['d1'] + STRAIGHT) for k in corners if k.get('d0') is not None] + list(skip)
+    # A corner's window starts at its braking onset where that is earlier than STRAIGHT m before the
+    # yaw window: the braking zone of a fast corner is not a straight
+    near = [(min(k['d0'] - STRAIGHT, k['d'] - (k.get('brake_d') or 0.0)), k['d1'] + STRAIGHT)
+            for k in corners if k.get('d0') is not None] + list(skip)
     blips = [(x - BLIP, x + BLIP) for x in shift_times]
     t, speed, throttle, brake = CH['t'], CH['speed'], CH['throttle'], CH['brake']
     coast = both = metres = 0.0
@@ -668,7 +671,10 @@ def pedal_time(trace, corners, shift_times=(), skip=()):
             continue
         if row[speed] > COAST_SPEED and v < COAST and w < COAST:
             coast += dt
-        if row[speed] > 1.0 and v > OVERLAP and w > OVERLAP and not any(lo <= row[t] <= hi for lo, hi in blips):
+        # Braking harder than the throttle with the speed falling is braking, however late the corner
+        slowing = i > 0 and _fin(trace[i - 1][speed]) and row[speed] < trace[i - 1][speed] and w > v
+        if (row[speed] > 1.0 and v > OVERLAP and w > OVERLAP and not slowing
+                and not any(lo <= row[t] <= hi for lo, hi in blips)):
             both += dt
     return coast, both, metres / 1000.0
 
