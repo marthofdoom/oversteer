@@ -95,6 +95,7 @@ ZERO_PLAUSIBLE = 0.05            # a zero further than this from 0: the ratio is
 # -- launch --
 LAUNCH_HELD = 0.5                # s of held revs before moving: a launch (as drive_detect.LAUNCH)
 LAUNCH_G = 0.3                   # g over the first half second under which the car bogged (calibrate)
+LAUNCH_LOOSE = ('gravel', 'snow', 'ice', 'loose-low')   # surfaces on which no g is a bog (a snow launch is 0.13-0.28 g)
 LAUNCH_SLOW = 0.5                # s over the median time to 50 km/h: a bog (calibrate)
 LAUNCH_HISTORY = 10              # launches the median is of
 LAUNCH_ABORT = 10.0              # s: a run restarted this soon dropped its launch
@@ -1169,7 +1170,7 @@ def held_seconds(episodes):
 
 # -- 7.3 R3: the launch --
 
-def launch_outcome(summary, trace, slip=None, history=(), limiter=None):
+def launch_outcome(summary, trace, slip=None, history=(), limiter=None, surface=None):
     """What the launch did, or None when there was none to judge: a dict
     with `gear` (held at the release), `g` (mean a_long over the first
     LAUNCH_WINDOW s, in g), `t50`, `spin` (the most slip_rpm over those
@@ -1177,7 +1178,9 @@ def launch_outcome(summary, trace, slip=None, history=(), limiter=None):
     never rose above CLUTCH_DOWN while standing) and `dropped` (the run was
     restarted within LAUNCH_ABORT s). `history` are the last launches' t50
     on this surface: a bog is `g` under LAUNCH_G, or a time to 50 km/h more
-    than LAUNCH_SLOW over their median (3 or more). The revs are read only
+    than LAUNCH_SLOW over their median (3 or more); on a loose surface (`surface`
+    in LAUNCH_LOOSE, or mixed) the car's own history is the only judge, as the g
+    of a launch there says what the surface and the drivetrain allow. The revs are read only
     in the launch gear, from the release to the first change: a drop of
     them is not a bog. `cut`: the seconds of that stretch the revs sat on
     the limiter (`limiter`, LIMITER_BAND of it), None where it is not
@@ -1228,7 +1231,8 @@ def launch_outcome(summary, trace, slip=None, history=(), limiter=None):
     if len(history) >= 3 and out['t50'] is not None:
         slow = out['t50'] > statistics.median(list(history)[:LAUNCH_HISTORY]) + LAUNCH_SLOW
     if out['g'] is not None or slow is not None:
-        out['bog'] = float((out['g'] is not None and out['g'] < LAUNCH_G) or bool(slow))
+        loose = surface in LAUNCH_LOOSE or (surface or '').startswith('mixed:')
+        out['bog'] = float((out['g'] is not None and out['g'] < LAUNCH_G and not loose) or bool(slow))
     return out
 
 
@@ -1394,7 +1398,7 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     klass = run_class(summary.get('finished'), course, length, events, started, last_started)
     top = summary.get('gears') or context.get('shipped_top') or context.get('top_gear')
     episodes = limiter_episodes(rows, context.get('limiter'), top, corners, slip)
-    launch = launch_outcome(summary, rows, slip, history, context.get('limiter'))
+    launch = launch_outcome(summary, rows, slip, history, context.get('limiter'), context.get('surface'))
     loss = section_loss(rows, sections, reference, unfinished) if reference is not None else None
     if reference is not None:
         # The same corner has the same call in every run: the reference's, not what this run's line made of it

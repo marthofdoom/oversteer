@@ -313,6 +313,12 @@ def test_a_launch_is_judged_by_its_outcome():
     assert slow['bog'] == 1.0
     fine = cc.launch_outcome(summary, launch_trace(g=0.5, t50=2.2), history=[2.4, 2.5, 2.6, 2.5])
     assert fine['bog'] == 0.0
+    # on snow or gravel the g says what the surface allows: only a slow time against the car's own launches is a bog
+    for loose in ('snow', 'ice', 'gravel', 'mixed:gravel'):
+        assert cc.launch_outcome(summary, launch_trace(g=0.2), surface=loose)['bog'] == 0.0
+        assert cc.launch_outcome(summary, launch_trace(g=0.2, t50=3.0), history=[2.4, 2.5, 2.6, 2.5],
+                                 surface=loose)['bog'] == 1.0
+    assert cc.launch_outcome(summary, launch_trace(g=0.2), surface='tarmac')['bog'] == 1.0
     # a stall is the revs gone in the launch gear
     stalled = rows(40, speed=5.0, gear=1.0, rpm=lambda i, t: 6000.0 if i < 5 else 150.0, a_long=0.0)
     assert cc.launch_outcome(summary, stalled)['stall'] == 1.0
