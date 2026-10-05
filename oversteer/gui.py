@@ -310,8 +310,8 @@ class Gui:
         from .proxy.manager import wine_running
         if not wine_running():
             return True
-        return self.ui.confirmation_dialog(_("A game is running under Wine or Proton. " +
-                "Applying this restarts the combined device, which can crash some " +
+        return self.ui.confirmation_dialog(_("A game is running under Wine or Proton. "
+                "Applying this restarts the combined device, which can crash some "
                 "games (Assetto Corsa Rally). Apply anyway?"))
 
     def start_proxy_service(self):
