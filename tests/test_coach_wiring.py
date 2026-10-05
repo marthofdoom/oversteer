@@ -172,16 +172,26 @@ def test_the_backfill_works_old_runs_over_a_few_at_a_time(tmp_path):
     learner.close()
 
 
-def test_a_run_the_backfill_cannot_read_is_marked_so_it_is_not_tried_again(tmp_path, monkeypatch):
+def test_a_run_the_backfill_cannot_read_keeps_what_it_had_and_is_tried_again_next_start(tmp_path, monkeypatch):
     learner, reader = drive_stages(tmp_path, (30.0,))
     make_old(learner, reader)
+    store = learner.log.store
+    count = 'SELECT (SELECT COUNT(*) FROM corners), (SELECT COUNT(*) FROM metrics)'
+    had = reader.db.execute(count).fetchone()
+    assert had[0] and had[1]
 
     def broken(*args, **kwargs):
         raise ValueError('a trace from another age')
     monkeypatch.setattr(coach_context, 'analyse', broken)
-    assert learner.backfill() == 1
+    assert learner.backfill() == 1 and learner.backfill() == 0         # not tried over and over
     [(klass,)] = reader.db.execute('SELECT run_class FROM runs').fetchall()
-    assert klass == 'unclassified' and learner.log.store.runs_to_backfill() == []
+    assert klass is None and len(store.runs_to_backfill()) == 1         # as it was, and left to retry
+    assert reader.db.execute(count).fetchone() == had                    # the rewrite was rolled back
+    assert reader.db.execute("SELECT COUNT(*) FROM metrics WHERE name = 'limiter.per_km'").fetchone()[0] == 1
+    # the next start (a learner without the failure) works it over
+    monkeypatch.undo()
+    del learner._backfill_failed
+    assert learner.backfill() == 1 and not store.runs_to_backfill()
     learner.close()
 
 

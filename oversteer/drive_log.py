@@ -723,16 +723,25 @@ def backfill_step(learner, limit=3):
     trace and no class. The trace does not hold what the run tracker's
     summary did (the launch, the game's gear count): the launch metrics that
     were written stay, the rest is recomputed from what is stored. Returns
-    the number of runs worked over, 0 when nothing is left."""
+    the number of runs worked over, 0 when nothing is left. A run that fails is
+    left as it was (the rewrite is rolled back) and is not tried again until
+    the app next starts."""
     store = learner.log.store
+    failed = learner.__dict__.setdefault('_backfill_failed', set())
     done = 0
-    for run in store.runs_to_backfill(limit):
+    for run in store.runs_to_backfill(limit + len(failed)):
+        if run in failed:
+            continue
+        if done >= limit:
+            break
+        store.savepoint('backfill')
         try:
             _backfill_run(learner, store, run)
+            store.release_savepoint('backfill')
         except Exception:
             logging.exception("drive log: backfill of run %s", run)
-            store.clear_derived(run, BACKFILL_KEEP)
-            store.update_run(run, run_class=BACKFILL_FAILED)
+            store.rollback_savepoint('backfill')
+            failed.add(run)
         done += 1
     return done
 

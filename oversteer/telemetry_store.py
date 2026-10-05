@@ -926,6 +926,19 @@ class Store(Reader):
         if self.db.in_transaction:
             self.db.execute('ROLLBACK')
 
+    def savepoint(self, name):
+        """Start a nested transaction: what is written until release_savepoint() can be undone with
+        rollback_savepoint() without touching what was written before it."""
+        self._do('SAVEPOINT ' + name)
+
+    def release_savepoint(self, name):
+        self._do('RELEASE ' + name)
+
+    def rollback_savepoint(self, name):
+        """Undo what was written since savepoint(name), and close it."""
+        self._do('ROLLBACK TO ' + name)
+        self._do('RELEASE ' + name)
+
     def _do(self, sql, args=()):
         with self.lock:
             return self.db.execute(sql, args)
