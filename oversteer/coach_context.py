@@ -1381,6 +1381,12 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     episodes = limiter_episodes(rows, context.get('limiter'), top, corners, slip)
     launch = launch_outcome(summary, rows, slip, history, context.get('limiter'))
     loss = section_loss(rows, sections, reference, unfinished) if reference is not None else None
+    if reference is not None:
+        # The same corner has the same call in every run: the reference's, not what this run's line made of it
+        for k in corners:
+            same = _matched_corner(k, reference['corners']) if k.get('d') is not None else None
+            if same is not None and same.get('tightness'):
+                k['tightness'] = same['tightness']
     # The changes of gear
     limiter = context.get('limiter')
     brake, t_col = CH['brake'], CH['t']

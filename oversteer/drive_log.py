@@ -915,6 +915,7 @@ CORNER_SMOOTH = 0.5              # s
 CORNER_TIME = 1.0                # s above CORNER_YAW...
 CORNER_HEADING = 30.0            # ...or this many degrees of heading: a corner (calibrate)
 CORNER_SIDE = 2.0                # s either side of the apex for entry and exit speeds
+RADIUS_SPEED = 5.0               # m/s: slower than this the speed over the yaw rate (a crash row, a stop) is no radius
 RADIUS_YAW = 0.1                 # rad/s: slower turning than this has no radius worth the name
 
 
@@ -987,7 +988,7 @@ def _corner(trace, yaw, i, j, sign):
     handbrake = [row[T['handbrake']] for row in trace[i:j + 1] if not math.isnan(row[T['handbrake']])]
     spin = [row[T['slip_drive']] for row in trace if t[apex] <= row[T['t']] <= t[apex] + CORNER_SIDE
             and not math.isnan(row[T['slip_drive']])]
-    speeds_in = [(speed[k] / abs(yaw[k]), k) for k in range(i, j + 1) if abs(yaw[k]) >= RADIUS_YAW and speed[k] > 0]
+    speeds_in = [(speed[k] / abs(yaw[k]), k) for k in range(i, j + 1) if abs(yaw[k]) >= RADIUS_YAW and speed[k] > RADIUS_SPEED]
     radius = min(speeds_in)[0] if speeds_in else None
     heading_deg = math.degrees(heading)
     return {

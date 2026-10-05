@@ -870,3 +870,22 @@ def test_a_hit_that_fits_in_one_row_is_a_hit_and_a_reset_is_an_off():
     assert cc.hits(tr) == [(50, 51)]
     tr = rows(300, speed=20.0, a_long=lambda i, t: 3 * G if i == 50 else 0.0)
     assert cc.hits(tr) == []
+
+
+def test_a_corners_call_ignores_a_crash_row_and_follows_the_reference():
+    # 20 m/s through a 0.6 rad/s bend is a 33 m radius; one row at 3 m/s and 2 rad/s is no 1.5 m radius
+    def yaw(i, t):
+        return 0.6 if 60 <= i < 80 else 0.0
+
+    def speed(i, t):
+        return 3.0 if i == 70 else 20.0
+    tr = rows(150, speed=speed, yaw_rate=yaw, gear=3.0)
+    tr = [tuple(2.0 if (n == 70 and name == 'yaw_rate') else v for name, v in zip(TRACE_CHANNELS, row))
+          for n, row in enumerate(tr)]
+    [corner] = find_corners(tr)
+    assert corner['radius'] is not None and corner['radius'] > 15.0 and corner['tightness'] in ('2', '3')
+    # the call the reference gave the same corner is kept
+    ref = reference_from(tr, [dict(corner, tightness='2', complex=0)])
+    mine = [dict(corner, tightness='4')]
+    out = cc.analyse({'finished': 1, 'course': tr[-1][C['distance']]}, tr, mine, [], {}, reference=ref)
+    assert out['corners'][0]['tightness'] == '2'
