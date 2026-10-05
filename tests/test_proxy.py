@@ -15,7 +15,28 @@ from evdev import InputDevice, UInput, AbsInfo, ecodes as e, ff, list_devices
 from oversteer.proxy import ProxySpec, ProxyDevice, ProxyState
 from oversteer.proxy import uinput_ff
 
-pytestmark = pytest.mark.skipif(not os.access('/dev/uinput', os.W_OK), reason="needs /dev/uinput")
+def wine_running():
+    """A Wine/Proton game sees every device these tests create and destroy
+    (some with real identities, like the G29's). Assetto Corsa Rally
+    crashes on that churn: its RawInput plugin re-points a device entry at
+    a re-created device without sizing its axis array (null read at
+    acr.exe+0x53c552a, five crashes all during test runs)."""
+    for pid in os.listdir('/proc'):
+        try:
+            with open('/proc/{}/comm'.format(pid)) as f:
+                if f.read().strip() in ('wineserver', 'wineserver64'):
+                    return True
+        except (OSError, ValueError):
+            pass
+    return False
+
+
+pytestmark = [
+    pytest.mark.skipif(not os.access('/dev/uinput', os.W_OK), reason="needs /dev/uinput"),
+    pytest.mark.skipif(wine_running() and not os.environ.get('OVERSTEER_TEST_UINPUT'),
+                       reason="a Wine game is running and would see the fake devices "
+                              "(set OVERSTEER_TEST_UINPUT=1 to run anyway)"),
+]
 
 FAKE_VENDOR, FAKE_PRODUCT = 0x1234, 0x5678
 
