@@ -2531,3 +2531,44 @@ matching can pair two different lines through one corner (the Fabia's 1.0 km), w
 look at the traces would settle; the `corner.loss` metric still includes the start's
 section; a launch that the game ran (the 208's) is not told from the driver's by the
 clutch channel alone.
+
+### Review of step 2, and what changed (2026-10-05)
+
+An Opus review replayed the default views against the traces and found that the tips above
+were judged "right" or "fair" too kindly. As fixed:
+
+- **Drag** (`pedal.drag`): the straight now starts at each corner's braking onset where
+  that is earlier than 100 m before its yaw window, and a row with the speed falling and
+  the brake past the throttle is braking, not drag. On tarmac the tip is silent for a
+  front-wheel drive or turbo car (as `_left_foot`), and it is a rough-cost tip (below).
+  The 208 and i20N verdicts above ("right") were wrong: it was left-foot braking into fast corners.
+- **Live advice** (`CarModel.advice`): no early or cut lines any more. It pooled every
+  surface and the launch and had no cost floor, so it contradicted the coach; those two
+  judgements belong to `_shift_tips`. Spot on, grip-limited, re-tuned and still-learning
+  lines stay.
+- **Section loss**: the exit is timed to where the reference has full throttle and is
+  straight (at most 150 m past the section's windows), not to the next braking; the straight
+  after it is not the corner's. A section is named net of the gain in the section right
+  before it. A section an unfinished run stopped in is not timed.
+- **Spread**: corners are matched by their slowest point (15 m, same direction) and a run
+  whose corner was off is left out, not matched to its neighbour; the spread is the
+  median absolute deviation (x 1.4826).
+- **Unfinished runs**: `SLOW_END` is not applied, a slow stretch to the end of the trace is
+  an off, a run that ended in silence short of 95 % of a known stage is unfinished (with no
+  stage length it is still taken as finished), and the last section is never named.
+- **Hits and resets**: one row over 4 g, or a speed drop over 3 g across one row, is a hit;
+  the distance going back with the car stopped is an off (`reset`). "Rotate the car less"
+  is told only where the corner shows rotation (a spin, steering against the yaw, the
+  handbrake); otherwise the stop is told neutrally.
+- **Launch praise**: five launches within 20 ms of each other are the game's launch and
+  are not praised. Which clutch channel the driver test reads on ACR is still to be verified (open).
+- **select()**: tips whose cost is a rough constant (drag, spin, stall, spread, launch cut,
+  bog, stall) go to the quiet lines whenever any tip has a reference run.
+- **corner.loss** leaves out the first section. References are ranked without the first
+  section's time. Only a clean run is set against its "previous best". A corner's radius
+  needs a speed over 5 m/s and its call is the reference's where it has one.
+- **Store**: the trace of each car's best finished run on a stage survives the cap; the
+  schema notes what `update_shift` overwrites.
+
+Not changed: runs whose traces were pruned keep their old-meaning metrics; a section whose
+numbers all agree with the reference's is still named ("were within a few km/h"), by design.
