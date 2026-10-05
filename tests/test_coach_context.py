@@ -168,6 +168,10 @@ def test_the_reference_is_the_fastest_finished_run_in_the_same_conditions():
     assert cc.reference_run(runs, wet='wet')['id'] == 2
     assert cc.reference_run(runs, wet=None)['id'] == 2
     assert cc.reference_run([runs[2]]) is None
+    # ranked without the first section, which holds the launch: a 38 s start is not a quick stage
+    slow_start = [{'id': 1, 'finished': 1, 'result_time': 251.9, 'wet': 'dry', 'first_section': 38.0},
+                  {'id': 2, 'finished': 1, 'result_time': 240.0, 'wet': 'dry', 'first_section': 5.0}]
+    assert cc.reference_run(slow_start)['id'] == 1
 
 
 # -- slip from the revs --

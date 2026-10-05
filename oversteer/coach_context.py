@@ -371,9 +371,16 @@ def run_class(finished, course, stage_length, events, started=None, last_started
     return 'clean'
 
 
+def _grid_time(r):
+    """The time a run is ranked by as a reference: its stage time less the first section's, which holds the
+    launch (a 38 s start is not a quick stage)."""
+    return r['result_time'] - (r.get('first_section') or 0.0)
+
+
 def reference_run(candidates, result_time=None, wet=None):
     """The fastest finished run among `candidates` (Store.stage_runs rows
-    of the same car and stage, class clean or learning) with the same
+    of the same car and stage, class clean or learning; by stage time less the
+    first section's, _grid_time) with the same
     wetness; None when there is none. A run with unknown wetness on either
     side is comparable."""
     best = None
@@ -382,7 +389,7 @@ def reference_run(candidates, result_time=None, wet=None):
             continue
         if wet not in (None, 'unknown') and r.get('wet') not in (None, 'unknown') and r['wet'] != wet:
             continue
-        if best is None or r['result_time'] < best['result_time']:
+        if best is None or _grid_time(r) < _grid_time(best):
             best = r
     return best
 

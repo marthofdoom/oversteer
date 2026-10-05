@@ -678,3 +678,12 @@ def test_a_rough_cost_is_not_weighed_against_seconds_from_a_reference_run():
     # with nothing that has a reference, the rough one leads
     out = select([rough], [], [], {}, 100.0)
     assert [t.id for t in out] == ['corner.spin:x:1']
+
+
+def test_a_quicker_run_that_was_not_clean_is_not_set_against_a_previous_best(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second={'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}),
+            result_time=197.0, run_class='off')
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    assert 'behind your best clean run here' in tip.text

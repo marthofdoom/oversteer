@@ -409,6 +409,8 @@ def test_corner_columns_events_and_stage_runs_filters(tmp_path):
     [corner] = store.corners(ids['a1'])
     assert corner['d0'] == 880.0 and corner['tightness'] == '3' and corner['brake_d'] == 70.0 and corner['off'] == 0
     assert corner['loss_entry'] is None
+    assert [r['first_section'] for r in store.stage_runs('acr:x:y', car=car_a, run_class='clean')] == [9.5]
+    assert store.stage_runs('acr:x:y', car=car_a, run_class='restart')[0]['first_section'] is None
     store.add_events(ids['a1'], [{'kind': 'limiter', 'class': 'shift', 'd0': 100.0, 'd1': 120.0, 't0': 5.0,
                                   't1': 5.4, 'gear': 3, 'value': 0.4, 'detail': {'next': 'brake'}},
                                  {'kind': 'off', 'class': 'reverse', 'd0': 50.0}])

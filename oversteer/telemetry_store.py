@@ -786,7 +786,8 @@ class Reader:
         cars.id) keeps the runs of that car, `run_class` (a class or a
         tuple of them) the runs of those classes. Each run: id, started,
         distance, duration, finished, result_time, course, run_class, wet,
-        car, session."""
+        car, session, first_section (s through the stage's first section,
+        which holds the launch; None where the run has no corners)."""
         names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time', 'course', 'run_class', 'wet')
         where, args = ['r.stage = ?', 'r.id IS NOT ?', 'r.ended IS NOT NULL'], [key, exclude]
         if car is not None:
@@ -796,9 +797,11 @@ class Reader:
             classes = (run_class,) if isinstance(run_class, str) else tuple(run_class)
             where.append('r.run_class IN ({})'.format(', '.join('?' * len(classes))))
             args.extend(classes)
-        return [dict(zip(names + ('car', 'session'), r)) for r in self._rows(
-            'SELECT {}, s.car, r.session FROM runs r JOIN sessions s ON r.session = s.id WHERE {} '
-            'ORDER BY r.started DESC, r.id DESC LIMIT ?'.format(', '.join('r.' + n for n in names), ' AND '.join(where)),
+        return [dict(zip(names + ('car', 'session', 'first_section'), r)) for r in self._rows(
+            'SELECT {}, s.car, r.session, (SELECT c.section_t FROM corners c WHERE c.run = r.id '
+            'AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1) FROM runs r JOIN sessions s ON r.session = s.id '
+            'WHERE {} ORDER BY r.started DESC, r.id DESC LIMIT ?'.format(
+                ', '.join('r.' + n for n in names), ' AND '.join(where)),
             tuple(args) + (limit,))]
 
     def run(self, run_id):

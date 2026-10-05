@@ -1232,7 +1232,8 @@ class Coach:
             return False
         ref_text = '{}, {:.1f} s on {}'.format(car, ref['result_time'], _date(ref['started']))
         # A run that is quicker than the reference is measured against the run it beat
-        beat = run['finished'] == 1 and run['result_time'] and run['result_time'] < ref['result_time']
+        beat = (run['finished'] == 1 and run['run_class'] == 'clean' and run['result_time']
+                and run['result_time'] < ref['result_time'])
         ref_name = 'your previous best clean run' if beat else 'your best clean run'
         named = []
         for n, it in enumerate(report):
