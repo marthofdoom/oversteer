@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Pedal response: a "Response..." button under each pedal's Invert box in
+  the Controls tab sets where the pedal starts (a deadzone at the released
+  end, 0 to 45 %), where it reaches full (55 to 100 %) and a curve
+  (sensitivity, 50 linear, lower softer at the start of the travel, higher
+  sharper). The settings apply live (the bars show what games see), are
+  kept in the profile and follow Invert, whichever end of the axis the
+  pedal rests at. Presets: Linear, and for the brakes Spring brake
+  (3 % / 85 % / 40) for stock spring-and-rubber brakes. Needs new-lg4ff
+  with `pedal_response`; with an older driver the button stays greyed out.
+  The udev rules make the new attributes writable.
+
 ## 0.14.2 — 2026-09-28
 
 ### Added
