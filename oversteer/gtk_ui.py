@@ -296,6 +296,7 @@ class GtkUi:
         self.wheel_sensitivity.set_value(int(sensitivity))
 
     def set_combine_pedals(self, combine_pedals):
+        self.set_pedal_response_combined(bool(combine_pedals))
         if combine_pedals is None:
             self.combine_brakes.set_sensitive(False)
             self.combine_clutch.set_sensitive(False)
@@ -343,6 +344,8 @@ class GtkUi:
         """{'clutch'|'accelerator'|'brakes': invert_pedals bit or None} for
         the current device."""
         self.pedal_bits = dict(bits)
+        for name in self.pedal_response:
+            self._update_pedal_response_button(name)
 
     def _pedal_boxes(self):
         return zip(self.PEDAL_BOXES, (self.invert_clutch, self.invert_accelerator, self.invert_brakes))
@@ -365,13 +368,17 @@ class GtkUi:
         """A 'Response...' button under each pedal's Invert box, opening a
         popover with the pedal's deadzone, full-travel point and curve."""
         self.updating_pedal_response = False
+        self.showing_pedal_preset = False
+        self.pedal_response_shown = {}       # name -> last response set, None if none
+        self.pedal_response_combined = False
         self.pedal_response = {}
         self.pedal_preset = {}
         grid = self.invert_clutch.get_parent()
         for name, column in self.PEDAL_COLUMNS.items():
             popover_box = Gtk.Grid(row_spacing=6, column_spacing=10, margin=10)
-            start = self._response_scale(0, 45, 5)
-            end = self._response_scale(55, 100, 5)
+            model = self.controller.model
+            start = self._response_scale(0, model.RESPONSE_START_MAX, 5)
+            end = self._response_scale(model.RESPONSE_END_MIN, 100, 5)
             sensitivity = self._response_scale(0, 100, 10)
             sensitivity.add_mark(0, Gtk.PositionType.BOTTOM, _("Soft"))
             sensitivity.add_mark(50, Gtk.PositionType.BOTTOM, _("Linear"))
@@ -392,7 +399,7 @@ class GtkUi:
             for row, (label, scale) in enumerate(((_("Starts at"), start), (_("Full at"), end), (_("Sensitivity"), sensitivity))):
                 label = Gtk.Label(label=label, halign=Gtk.Align.START, valign=Gtk.Align.START)
                 popover_box.attach(label, 0, row, 1, 1)
-                popover_box.attach(scale, 1, row, 1, 1)
+                popover_box.attach(self._response_row(scale), 1, row, 1, 1)
             popover_box.attach(Gtk.Label(label=_("Preset"), halign=Gtk.Align.START), 0, 3, 1, 1)
             popover_box.attach(preset, 1, 3, 1, 1)
             popover_box.attach(note, 1, 4, 1, 1)
@@ -405,6 +412,7 @@ class GtkUi:
             button.show()
             grid.attach(button, column, 4, 1, 1)
             self.pedal_response[name] = (button, start, end, sensitivity)
+            self.pedal_response_shown[name] = None
             self.pedal_preset[name] = (preset, note)
             preset.connect('changed', self._on_pedal_preset_changed, name)
             for scale in (start, end, sensitivity):
@@ -417,9 +425,23 @@ class GtkUi:
         scale.set_digits(0)
         scale.set_size_request(200, -1)
         scale.set_hexpand(True)
-        scale.set_value_pos(Gtk.PositionType.RIGHT)
+        scale.set_draw_value(False)
         scale.get_adjustment().set_page_increment(step)
         return scale
+
+    @staticmethod
+    def _response_row(scale):
+        """The scale with its value and a '%', in a label of a fixed width so
+        the three tracks come out the same length."""
+        value = Gtk.Label(label="", width_chars=5, xalign=1)
+        def show(scale):
+            value.set_text("{:.0f} %".format(scale.get_value()))
+        scale.connect('value-changed', show)
+        show(scale)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.pack_start(scale, True, True, 0)
+        row.pack_start(value, False, False, 0)
+        return row
 
     def get_pedal_response(self, name):
         _button, start, end, sensitivity = self.pedal_response[name]
@@ -428,8 +450,9 @@ class GtkUi:
     def set_pedal_response(self, name, response):
         """Show a pedal's (start, end, sensitivity); None greys the button
         out (the driver has no pedal response)."""
-        button, start, end, sensitivity = self.pedal_response[name]
-        button.set_sensitive(response is not None)
+        _button, start, end, sensitivity = self.pedal_response[name]
+        self.pedal_response_shown[name] = response
+        self._update_pedal_response_button(name)
         if response is None:
             return
         self.updating_pedal_response = True
@@ -440,19 +463,39 @@ class GtkUi:
         finally:
             self.updating_pedal_response = False
 
+    def set_pedal_response_combined(self, combined):
+        """The driver ignores the responses while the pedals are combined."""
+        self.pedal_response_combined = bool(combined)
+        for name in self.pedal_response:
+            self._update_pedal_response_button(name)
+
+    def _update_pedal_response_button(self, name):
+        """The Response button needs a value, a driver that has the
+        attributes, the pedal on this device and the pedals not combined."""
+        device = self.controller.model.get_device()
+        usable = (self.pedal_response_shown[name] is not None
+                  and device is not None and device.has_pedal_response()
+                  and self.pedal_bits.get(name) is not None
+                  and not self.pedal_response_combined)
+        self.pedal_response[name][0].set_sensitive(bool(usable))
+
     def _show_pedal_preset(self, name):
         """Preset box and note follow the three controls."""
         current = self.get_pedal_response(name)
         combo, note = self.pedal_preset[name]
         match = [(pid, text) for pid, _label, response, text in self.controller.model.PEDAL_PRESETS[name]
                  if response == current]
-        combo.set_active_id(match[0][0] if match else 'custom')
+        self.showing_pedal_preset = True
+        try:
+            combo.set_active_id(match[0][0] if match else 'custom')
+        finally:
+            self.showing_pedal_preset = False
         text = match[0][1] if match else None
         note.set_text(_(text) if text else "")
         note.set_visible(bool(text))
 
     def _on_pedal_preset_changed(self, combo, name):
-        if self.updating_pedal_response or combo.get_active_id() in (None, 'custom'):
+        if self.updating_pedal_response or self.showing_pedal_preset or combo.get_active_id() in (None, 'custom'):
             return
         response = self.controller.model.set_pedal_preset(name, combo.get_active_id())
         self.set_pedal_response(name, response)
