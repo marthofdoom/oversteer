@@ -102,6 +102,7 @@ class Model:
         self.ui = ui
         self.reference_values = None
         self.data = self.defaults.copy()
+        self.pedal_response_written = set()   # pedals whose response the driver has
         if device != None:
             self.set_device(device)
 
@@ -188,8 +189,9 @@ class Model:
     @classmethod
     def valid_response(cls, value):
         """A (start, end, sensitivity) of three ints with 0 <= start < end <=
-        100 and 0 <= sensitivity <= 100, kept to the ranges the UI offers;
-        None when it isn't one."""
+        100 and 0 <= sensitivity <= 100; None when it isn't one. Values past
+        the ranges the UI offers are kept (the UI clamps them for display),
+        so what the driver holds is never rewritten unless the user changes it."""
         try:
             start, end, sensitivity = value
             if not all(isinstance(v, int) and not isinstance(v, bool) for v in (start, end, sensitivity)):
@@ -198,17 +200,23 @@ class Model:
             return None
         if not 0 <= start < end <= 100 or not 0 <= sensitivity <= 100:
             return None
-        return (min(start, cls.RESPONSE_START_MAX), max(end, cls.RESPONSE_END_MIN), sensitivity)
+        return (start, end, sensitivity)
 
     def refresh_pedal_responses(self):
         """Read the pedal responses again where the model has none, for after
-        the udev rules made the attributes readable and writable."""
+        the udev rules made the attributes readable and writable or the input
+        device opened, and write the ones a profile set that never got out."""
         for name in self.PEDAL_RESPONSES:
             key = name + '_response'
             if self.data[key] is None:
                 self.data[key] = self.read_pedal_response(name)
-                if self.ui is not None and self.data[key] is not None:
-                    self.ui.set_pedal_response(name, self.data[key])
+                if self.data[key] is not None:
+                    # what the driver holds: nothing to write
+                    self.pedal_response_written.add(name)
+                    if self.ui is not None:
+                        self.ui.set_pedal_response(name, self.data[key])
+            elif name not in self.pedal_response_written:
+                self.apply_pedal_response(name)
 
     def update_from_device_settings(self):
         self.data.update(self.read_device_settings())
@@ -254,11 +262,14 @@ class Model:
         # Likewise for the pedal response: an older profile leaves it as is
         for name in self.PEDAL_RESPONSES:
             key = name + '_response'
+            valid = None
             if data[key] is not None:
                 valid = self.valid_response(data[key])
                 if valid is None:
                     logging.warning("Profile %s: ignoring invalid %s %s", profile_file, key, data[key])
                 data[key] = valid
+            if valid is not None:
+                self.pedal_response_written.discard(name)
             if data[key] is None:
                 data[key] = self.data.get(key)
         if data['rev_leds'] is not None:
@@ -391,10 +402,11 @@ class Model:
             return
         bit = self.pedal_bit(name)
         if bit is None:
-            logging.debug("No %s axis on the input device; pedal response not written", name)
+            logging.warning("No %s axis on the input device (yet); pedal response not written", name)
             return
         try:
             self.device.set_pedal_response(bit, *response)
+            self.pedal_response_written.add(name)
         except OSError as e:
             logging.warning("Can't set the %s response: %s", name, e)
 
@@ -410,6 +422,7 @@ class Model:
         if self.data[key] is None:
             return
         if self.set_if_changed(key, (start, end, sensitivity)):
+            self.pedal_response_written.discard(name)
             self.apply_pedal_response(name)
 
     def set_pedal_preset(self, name, preset_id):

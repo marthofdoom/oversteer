@@ -104,20 +104,54 @@ def test_reading_the_device_keeps_the_drivers_curves():
     assert model.device.held[4] == (3, 85, 40)
 
 
-def test_driver_values_outside_the_ui_ranges_are_clamped():
+def test_driver_values_outside_the_ui_ranges_are_kept():
     model = make_model(held={4: (60, 70, 50), 2: (0, 50, 20), 1: (9, 3, 50)})
-    assert model.get_brakes_response() == (45, 70, 50)
-    assert model.get_accelerator_response() == (0, 55, 20)
+    assert model.get_brakes_response() == (60, 70, 50)
+    assert model.get_accelerator_response() == (0, 50, 20)
     assert model.get_clutch_response() is None          # not a valid response
+    model.flush_device()                                # starting never rewrites them
+    assert model.device.held[4] == (60, 70, 50)
+    assert model.device.held[2] == (0, 50, 20)
 
 
-def test_set_is_kept_to_the_ui_ranges():
+def test_set_is_kept_to_valid_responses():
     model = make_model()
     with pytest.raises(ValueError):
-        model.set_brakes_response(50, 90, 50)
+        model.set_brakes_response(50, 50, 50)
     with pytest.raises(ValueError):
-        model.set_brakes_response(0, 50, 50)
+        model.set_brakes_response(0, 101, 50)
+    with pytest.raises(ValueError):
+        model.set_brakes_response(0, 50, 101)
     model.set_brakes_response(45, 55, 50)
+
+
+def test_responses_resolved_once_the_input_device_opens():
+    class Late(FakeDevice):
+        opened = False
+        def pedal_axes(self, mask=None):
+            return super().pedal_axes(mask) if self.opened else {}
+    model = Model(Late(held={4: (3, 85, 40)}))
+    assert model.get_brakes_response() is None
+    model.device.opened = True
+    model.refresh_pedal_responses()
+    assert model.get_brakes_response() == (3, 85, 40)
+    assert model.device.written == []                   # read back, not rewritten
+
+
+def test_profile_response_written_once_the_input_device_opens(tmp_path):
+    class Late(FakeDevice):
+        opened = False
+        def pedal_axes(self, mask=None):
+            return super().pedal_axes(mask) if self.opened else {}
+    model = Model(Late())
+    model.data['brakes_response'] = (3, 85, 40)         # from a profile
+    model.apply_pedal_responses()
+    assert model.device.written == []
+    model.device.opened = True
+    model.refresh_pedal_responses()
+    assert model.device.written == [(4, 3, 85, 40)]
+    model.refresh_pedal_responses()
+    assert model.device.written == [(4, 3, 85, 40)]     # once
 
 
 def test_combined_pedals_skip_the_writes_until_uncombined():

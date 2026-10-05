@@ -180,6 +180,9 @@ class Application:
             Gui(self, model, argv)
             return
 
+        if device and device.has_pedal_response():
+            # The input device may not have opened when the model was made
+            model.refresh_pedal_responses()
         model.flush_device()
         if args.command:
             subprocess.Popen(args.command, shell=True)
