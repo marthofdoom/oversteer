@@ -807,7 +807,12 @@ class CarModel:
             on = sum(1 for p in peaks if low - cc.EARLY_BELOW <= p <= high + cc.BAND_SLACK
                      and not (limiter and p >= limiter * LIMITER_BAND)) / n
             change = '{}→{}'.format(gear, gear + 1)
-            if best['grip_limited'] and best['engine_rpm'] > best['rpm']:
+            # The plausibility gate shift_band applies to a lowered band: measured over enough pulls, not above
+            # the engine's own drive, and never 3rd and up on tarmac
+            share = best.get('grip_share')
+            if (best['grip_limited'] and best['engine_rpm'] > best['rpm']
+                    and context['pulls'](gear) >= cc.GRIP_PULLS and share is not None and share <= cc.GRIP_SHARE_MAX
+                    and not (gear >= 3 and surface == 'tarmac')):
                 grip_limited.append('{} from {:.0f} to {:.0f} rpm'.format(change, best['rpm'], best['engine_rpm']))
             # The cut and early shares are not told here: the coach judges them per surface, without the
             # launch and by what they cost a stage (coach.Coach._shift_tips), and a pooled live share
@@ -817,7 +822,8 @@ class CarModel:
                     and surface in SURFACES and surface not in ('snow', 'ice') and gear >= 3 \
                     and best['grip_limited'] is None:
                 waiting.append(change)
-            elif on >= ADVICE_ON and cut <= ADVICE_ON_CUT:
+            elif on >= ADVICE_ON and cut <= ADVICE_ON_CUT and gear > 1:
+                # 1st's changes up include the launch's, which the learnt peaks cannot tell from the rest
                 spot_on.append((change, n))
         if held_limiter_time > 3:
             # Seconds held on the limiter on a straight weigh like a few hundred rpm of error

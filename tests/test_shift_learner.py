@@ -912,7 +912,8 @@ def test_a_grip_limited_gear_is_on_target_up_to_the_engine_best(tmp_path):
     assert car.best_for(2, 'gravel')['engine_rpm'] == car.best_for(2, 'gravel')['rpm'] == 7500.0
     car.upshifts[1] = [6500.0] * 5
     lines = car.advice(surface='gravel')
-    assert lines[0].startswith('Spot on: 1→2') and not any('late' in line for line in lines)
+    assert not any(line.startswith('Spot on') for line in lines)       # 1st's changes include the launch's
+    assert not any('late' in line for line in lines)
     assert any('1→2 from {:.0f} to 7500 rpm'.format(best['rpm']) in line for line in lines)
     car.upshifts[1] = [best['rpm'] - 800] * 5                # below the lowered best: early, but 1st is technique on gravel
     assert not any(line.startswith('1→2:') for line in car.advice(surface='gravel'))
@@ -940,3 +941,22 @@ def test_the_game_data_is_set_aside_when_the_gearing_does_not_match():
     assert snapshot['power_source'] is None and abs(snapshot['gearing_aside'] - 0.06) < 0.001
     assert snapshot['limiter'] == 7500.0                        # the engine's limit still stands
     assert "the game's data set aside: the gearing learnt is 6 % off" in telemetry_view.shift_summary(snapshot)
+
+
+def test_the_grip_limited_line_applies_the_gate_the_band_does_and_spot_on_leaves_out_1st(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    fabia_pulls(learner, grip=5000.0, surface='tarmac', runs=8)
+    car = learner.car
+    assert car.best_for(3, 'tarmac')['grip_limited']                  # measured so, but never 3rd and up on tarmac
+    for gear in range(1, 6):
+        car.upshifts[gear] = [6500.0] * 5
+    lines = car.advice(surface='tarmac')
+    [grip] = [line for line in lines if 'grip-limited' in line]
+    assert '1→2' in grip and '2→3' in grip and '3→4' not in grip
+    assert [line for line in lines if line.startswith('Spot on')] == ['Spot on: 2→3 on the lights band (5 changes).']
+    # too few pulls to trust the limit: no line
+    few = ShiftLearner(str(tmp_path / 'few.db'))
+    fabia_pulls(few, grip=5000.0, surface='tarmac', runs=4)
+    for gear in range(1, 6):
+        few.car.upshifts[gear] = [6500.0] * 5
+    assert not any('grip-limited' in line for line in few.car.advice(surface='tarmac'))
