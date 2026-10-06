@@ -326,7 +326,10 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
   .run-work .strips { grid-column: 1; grid-row: 1; border-top: 1px solid var(--line); border-radius: 10px; }
   .rgrid { grid-template-columns: 1fr; }
   .readout .where { flex-wrap: wrap; }
-  #rv-head { padding: 8px 10px; margin-bottom: 8px; }
+  #rv-head { padding: 6px 10px; margin-bottom: 8px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 14px; align-items: center; }
+  #rv-head .panel-h { grid-column: 1 / -1; }
+  #rv-head .chips { margin: 0; justify-content: flex-end; }
+  #tele-seg { max-width: 300px; margin-bottom: 6px; }
   #rv-head .chips { margin-top: 4px; } #rv-head .panel-h { margin-bottom: 2px; }
   .run-work .readout { top: calc(var(--stick, 80px) + 4px); }
   .run-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 10px; align-items: start; }
