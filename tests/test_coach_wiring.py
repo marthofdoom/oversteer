@@ -296,13 +296,14 @@ def test_a_shifts_band_is_stored_with_its_flags(tmp_path):
 
 # -- ACR runs timed to the old finish line --
 
-def _timed_run(store, stage, result=230.0, course=5278.0, finished=1):
+def _timed_run(store, stage, result=230.0, course=5278.0, finished=1, end_speed=0.0):
     """A finished run with a trace of 10 m/s steps every second, 1 m/s^2 of pace: t = d / 10."""
     car = store.car_id('p', FABIA, 'acr', 'Fabia')
     session = store.start_session('p', car, 'acr', 1.0, stage=stage)
     run = store.start_run(session, 1, 1.0, stage)
     store.update_run(run, finished=finished, result_time=result, course=course, run_class='clean', ended=2.0)
-    rows = [tuple(i / 10.0 if name == 't' else float(i) if name == 'distance' else 0.0 for name in TRACE_CHANNELS)
+    rows = [tuple(i / 10.0 if name == 't' else float(i) if name == 'distance' else
+                  end_speed if name == 'speed' else 0.0 for name in TRACE_CHANNELS)
             for i in range(0, int(course) + 1)]
     store.add_trace(run, rows)
     return run
@@ -336,5 +337,16 @@ def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     run = _timed_run(store, 'acr:wales:afon-bidno-severn', course=100.0)      # shorter than the gap
     assert retime_finishes(store) == 0
     assert store.run(run)['result_time'] == 230.0 and store.run(run)['run_class'] == 'clean'
+    assert store.finished_untimed('acr') == []
+    learner.close()
+
+
+def test_a_run_that_ends_at_speed_was_timed_at_the_flying_finish_already(tmp_path):
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    run = _timed_run(store, 'acr:wales:afon-bidno-severn', result=196.0, course=5056.0, end_speed=40.0)
+    assert retime_finishes(store) == 0                   # a build without the marker timed it at the line
+    assert store.run(run)['result_time'] == 196.0 and store.run(run)['run_class'] == 'clean'
     assert store.finished_untimed('acr') == []
     learner.close()

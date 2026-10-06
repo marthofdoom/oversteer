@@ -844,6 +844,21 @@ def _trace_t_at(trace, value):
     return None
 
 
+def _trace_speed_at(trace, value):
+    """The speed of the last trace row at or before driven distance `value`."""
+    speed = None
+    for row in trace or ():
+        if row[T['distance']] > value:
+            break
+        speed = row[T['speed']]
+    return speed
+
+
+# A run that ends this fast was already timed at the flying finish (marth's
+# Afon Bidno runs: 120-160 km/h there, 20-40 km/h at the stop control)
+AT_SPEED = 20.0                 # m/s
+
+
 def retime_finishes(store):
     """A finished ACR run timed to the old line (the last pace note, the stop
     control: its time holds the slow-down) on a stage that now has a flying
@@ -863,6 +878,10 @@ def retime_finishes(store):
             continue                                     # no flying finish known: the run stays as timed
         try:
             trace = store.trace(run)
+            end_speed = _trace_speed_at(trace, course) if trace and course is not None else None
+            if end_speed is not None and end_speed > AT_SPEED:
+                store.set_run_finish(run, flying)        # it ends at speed: timed at the flying finish already
+                continue
             new = course - (old - flying) if course is not None else None
             t_old = _trace_t_at(trace, course) if trace and new is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
