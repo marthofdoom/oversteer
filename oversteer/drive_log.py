@@ -1106,6 +1106,7 @@ def repair_shipped(store):
             changed += 1
     changed += learn_missing_stops(store)
     changed += retime_finishes(store)
+    changed += requeue_moved_stages(store)
     if changed:
         store.commit()
     return changed
@@ -1205,6 +1206,35 @@ def learn_missing_stops(store):
         if after is not None and (before[stage] is None or abs(after - before[stage]) >= FINISH_MOVED):
             store.queue_stage_runs(stage)
     return added
+
+
+def _lines_fingerprint(entry):
+    """The lines of an ACR stage's table entry that the runs' sectors, course and corners are measured on, as one
+    string: the start line, the finish (flying, else the last pace note) and the road length. None without an entry."""
+    if not entry:
+        return None
+    start, finish, length = stage_tables.start_line(entry), entry.get('finish_m'), stage_tables.road_length(entry)
+    return '|'.join('-' if v is None else '{:.1f}'.format(v) for v in (start, finish, length))
+
+
+def requeue_moved_stages(store):
+    """A stage whose start line, finish or road length is not what the last start saw (the shipped table or a learnt
+    line moved: STAGE_LINES) has all its finished runs, the game-clock ones too, queued for the backfill (run_class
+    cleared), their classes, sectors and potentials worked out on the new lines, and its stored potentials dropped to
+    be built again. A stage not seen before counts as moved (a database from before the fingerprints). Returns the
+    number of stages queued."""
+    moved = 0
+    for stage in store.stage_keys():
+        if not stage.startswith('acr:'):
+            continue
+        now = _lines_fingerprint(stage_tables.entry(stage))
+        if now is None or store.stage_fingerprint(stage) == now:
+            continue
+        store.queue_stage_runs(stage)
+        store.drop_stage_potentials(stage)
+        store.set_stage_fingerprint(stage, now)
+        moved += 1
+    return moved
 
 
 def retime_finishes(store):

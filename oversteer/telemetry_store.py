@@ -258,6 +258,15 @@ CREATE TABLE IF NOT EXISTS run_stop (
     stop_m REAL NOT NULL
 )"""
 
+# The lines of an ACR stage as the last start saw them (drive_log.repair_shipped): a fingerprint of its start line,
+# finish and road length, so a start whose shipped table moved any of them works that stage's runs over again. A table
+# of its own for the reason run_finish is one.
+STAGE_LINES_DDL = """
+CREATE TABLE IF NOT EXISTS stage_lines (
+    stage TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL
+)"""
+
 # -- potential time (oversteer/potential.py, docs/telemetry-extrapolation.md section 6.1) --
 # Two tables made when a file is opened, for the reason run_finish is one. `envelopes`: the driver's g-g envelope per
 # car and surface (the P98 and the car's P99.5 bins of lateral, braking and drive acceleration by speed, as JSON),
@@ -651,6 +660,7 @@ def open_store(path):
     db.execute(RUN_START_DDL)
     db.execute(RUN_CLOCK_DDL)
     db.execute(RUN_STOP_DDL)
+    db.execute(STAGE_LINES_DDL)
     for ddl in POTENTIAL_DDL:
         db.execute(ddl)
     store = Store(db, path)
@@ -1623,6 +1633,18 @@ class Store(Reader):
     def queue_stage_runs(self, stage):
         """Queue the finished runs of a stage for the backfill (run_class cleared)."""
         self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))
+
+    def stage_fingerprint(self, stage):
+        """The lines of `stage` as the last start saw them (see STAGE_LINES_DDL), None where none were stored."""
+        rows = self._do('SELECT fingerprint FROM stage_lines WHERE stage = ?', (stage,)).fetchall()
+        return rows[0][0] if rows else None
+
+    def set_stage_fingerprint(self, stage, fingerprint):
+        self._do('INSERT OR REPLACE INTO stage_lines (stage, fingerprint) VALUES (?, ?)', (stage, fingerprint))
+
+    def drop_stage_potentials(self, stage):
+        """Forget every car's stored potential of a stage: potentials_missing() offers them for building again."""
+        self._do('DELETE FROM stage_potential WHERE stage = ?', (stage,))
 
     def set_run_clock(self, run, clock):
         """Record that a run's result_time is on `clock` ('game': the game's own; see RUN_CLOCK_DDL)."""

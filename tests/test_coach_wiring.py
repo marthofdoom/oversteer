@@ -546,6 +546,46 @@ def test_once_a_stage_and_car_have_a_clock_run_only_clock_runs_rank(tmp_path):
     learner.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
+def test_a_stage_whose_lines_changed_since_the_last_start_is_worked_over_again(tmp_path):
+    """The start line, the finish and the road length of a stage are fingerprinted per stage; where they differ from
+    what the last start saw (a shipped table with other lines), every finished run of the stage (the game-clock
+    ones too) is queued for the backfill and the stage's potentials are dropped to be built again."""
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    other = 'acr:alsace:steigenbach'
+    run = _timed_run(store, stage, result=196.0, course=5056.0, end_speed=40.0)
+    clock = _timed_run(store, stage, result=195.0, course=5056.0, end_speed=40.0)
+    store.set_run_clock(clock, 'game')
+    elsewhere = _timed_run(store, other, result=196.0, course=5056.0, end_speed=40.0)
+    car = store.run(run)['car']
+    pot = {'runs': 4, 'ds': 2.0, 'pb_s': 100.0, 'user_s': 99.0, 'grip_s': 90.0, 'car_s': 85.0, 'sections': [],
+           'profile': {}}
+    for key in (stage, other):
+        store.save_potential(key, car, 'v1', 12.0, pot)
+    repair_shipped(store)                                    # nothing was fingerprinted yet: every stage is new
+    assert all(store.run(r)['run_class'] is None for r in (run, clock, elsewhere))
+    assert store.potential(stage, car) is None and store.potential(other, car) is None
+    for r in (run, clock, elsewhere):
+        store.update_run(r, run_class='clean')
+    store.save_potential(stage, car, 'v1', 12.0, pot)
+    repair_shipped(store)                                    # the same lines: left alone
+    assert all(store.run(r)['run_class'] == 'clean' for r in (run, clock, elsewhere))
+    assert store.potential(stage, car) is not None
+    stage_tables.set_learnt({stage: {'finish_m': stage_tables.entry(stage)['finish_m'] + 6.7, 'finish_runs': 3,
+                                     'finish_spread_m': 0.5}})
+    try:
+        repair_shipped(store)                                # the finish moved on one stage only
+        assert store.run(run)['run_class'] is None and store.run(clock)['run_class'] is None
+        assert store.run(elsewhere)['run_class'] == 'clean'
+        assert store.potential(stage, car) is None
+    finally:
+        stage_tables.set_learnt({})
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))
@@ -629,6 +669,7 @@ def test_a_run_that_cannot_be_re_timed_keeps_a_class_that_is_still_to_be_worked_
 
 
 def test_runs_a_v2_database_marked_unknown_for_want_of_a_course_are_re_timed(tmp_path):
+    from oversteer import drive_log
     from oversteer.drive_log import repair_shipped
     learner = ShiftLearner(str(tmp_path / 't.db'))
     store = learner.log.store
@@ -639,6 +680,7 @@ def test_runs_a_v2_database_marked_unknown_for_want_of_a_course_are_re_timed(tmp
     other = _timed_run(store, stage, course=100.0)                   # a real failure: course known
     store.set_run_finish(other, None)
     store.update_run(other, run_class='partial')
+    store.set_stage_fingerprint(stage, drive_log._lines_fingerprint(stage_tables.entry(stage)))      # the lines are as seen
     repair_shipped(store)
     assert store.run(run)['result_time'] < 230.0 and store.run(run)['run_class'] is None
     assert store.finish_unknown(other) and store.run(other)['run_class'] == 'partial'
