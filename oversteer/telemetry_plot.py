@@ -4,7 +4,8 @@ tested by rendering to an ImageSurface."""
 import math
 
 # The web page's tokens (dark): LiveSplit's colours for the splits, the shift lights, the ink
-TONES = {'gold': '#d8af1f', 'ahead': '#29cc54', 'behind': '#cc7870', 'behind-lose': '#cc3729', 'none': '#2a313a'}
+TONES = {'gold': '#d8af1f', 'ahead-gain': '#29cc54', 'ahead-lose': '#70cc89', 'behind-gain': '#cc7870',
+         'behind-lose': '#cc3729', 'none': '#2a313a'}
 PANEL, LINE, TEXT, DIM, FAINT, ACCENT = '#11151a', '#232a33', '#eef2f6', '#8c96a3', '#56606c', '#4c9dff'
 LED_OFF, LED_G, LED_Y, LED_R, LED_B = '#1f252d', '#2fd27a', '#ffc21a', '#ff4d4d', '#4c9dff'
 LIGHTS = 15
@@ -40,8 +41,10 @@ def text(cr, s, x, y, size, colour, bold=False, align='left', alpha=1.0):
     cr.show_text(s)
 
 
-def ribbon(cr, w, h, tones, sector_tones=(), gap=1.5, sector_w=22.0):
-    """One cell per split, then (after a wider gap) one fixed-width cell per game sector, each in its tone."""
+def ribbon(cr, w, h, tones, sector_tones=(), bounds=None, gap=1.5, sector_w=22.0):
+    """One cell per split, then (after a wider gap) one fixed-width cell per game sector, each in its tone. The
+    split cells are as long as the splits are (`bounds`: (d0, d1) per split, in metres) when all are known, else
+    equal."""
     cells = list(tones)
     sectors = list(sector_tones)
     spare = 5.0 if sectors and cells else 0.0
@@ -49,8 +52,13 @@ def ribbon(cr, w, h, tones, sector_tones=(), gap=1.5, sector_w=22.0):
     avail = w - (sectors_w + spare if sectors else 0)
     x = 0.0
     if cells:
-        each = (avail - gap * (len(cells) - 1)) / len(cells)
-        for tone in cells:
+        usable = avail - gap * (len(cells) - 1)
+        lengths = [max(1.0, (b[1] - b[0])) if b and None not in b else None for b in (bounds or [])]
+        if len(lengths) != len(cells) or None in lengths:
+            lengths = [1.0] * len(cells)
+        total = sum(lengths)
+        for tone, length in zip(cells, lengths):
+            each = usable * length / total
             rounded(cr, x, 0, each, h, 1.5)
             rgb(cr, TONES.get(tone, TONES['none']))
             cr.fill()

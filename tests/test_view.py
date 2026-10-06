@@ -214,25 +214,55 @@ def test_the_splits_summary_and_rows():
 
 def test_the_splits_row_tones_rows_and_sectors():
     assert view.splits_row(None) is None
-    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'last': 198.8, 'runs': 3, 'splits': [
-        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': True, 'delta': 0.0, 'finish': False},
-        {'name': 'the 1 left at 0.7 km', 'last': 8.38, 'best': 7.94, 'gold': False, 'delta': 0.44, 'finish': False},
-        {'name': 'the 2 right', 'last': 9.9, 'best': 9.0, 'gold': False, 'delta': 0.9, 'finish': False},
-        {'name': 'the 5 left', 'last': None, 'best': 3.5, 'gold': False, 'delta': None, 'finish': True}],
+    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'last': 198.8, 'runs': 3,
+             'new_pb': False, 'finish_m': 5287.0, 'splits': [
+        # gold: the split's own best, margin over the previous best; the PB's time through it was 7.1
+        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': True, 'delta': 0.0, 'finish': False,
+         'pb': 7.1, 'cum': -0.34, 'margin': 0.3, 'd0': 0.0, 'd1': 300.0},
+        # ahead of the PB overall (cum < 0) but lost time in the split: ahead-lose
+        {'name': 'the 1 left at 0.7 km', 'last': 8.38, 'best': 7.94, 'gold': False, 'delta': 0.44, 'finish': False,
+         'pb': 8.1, 'cum': -0.06, 'margin': None, 'd0': 300.0, 'd1': 700.0},
+        # behind overall and lost in the split; the PB's time was 9.0
+        {'name': 'the 2 right', 'last': 9.9, 'best': 9.0, 'gold': False, 'delta': 0.9, 'finish': False,
+         'pb': 9.0, 'cum': 0.84, 'margin': None, 'd0': 700.0, 'd1': 1000.0},
+        # behind overall but gained in the split: behind-gain
+        {'name': 'the 4 left', 'last': 5.0, 'best': 4.9, 'gold': False, 'delta': 0.1, 'finish': False,
+         'pb': 5.2, 'cum': 0.64, 'margin': None, 'd0': 1000.0, 'd1': 1100.0},
+        {'name': 'the 5 left', 'last': None, 'best': 3.5, 'gold': False, 'delta': None, 'finish': True,
+         'pb': 3.5, 'cum': None, 'margin': None, 'd0': 1100.0, 'd1': 1200.0}],
         'sectors': [{'name': 'S1', 'last': 75.9, 'best': 75.9, 'gold': True, 'delta': 0.0, 'confidence': 'medium'},
                     {'name': 'S2', 'last': 70.0, 'best': 69.6, 'gold': False, 'delta': 0.46, 'confidence': 'low'}]}
     row = view.splits_row(found)
-    assert row['stage'] == 'Afon Bidno' and row['tones'] == ['gold', 'behind', 'behind-lose', 'none']
-    assert row['rows'][0][:4] == ('1. left-left at 0.3 km', '6.8', '★ ±0.0', '6.8')
-    assert row['rows'][3][1:3] == ('–', '–')                                  # not run
-    assert row['rows'][-2][:2] == ('Stage', '3:18.8') and row['rows'][-1][2] == '−3.2'
+    assert row['stage'] == 'Afon Bidno'
+    assert row['tones'] == ['gold', 'ahead-lose', 'behind-lose', 'behind-gain', 'none']
+    assert row['bounds'][1] == (300.0, 700.0) and row['finish_m'] == 5287.0 and not row['new_pb']
+    assert row['rows'][0][:4] == ('1. left-left at 0.3 km', '6.8', '★ −0.3', '6.8')       # gold: the margin, not ±0.0
+    assert row['rows'][1][2] == '+0.3' and row['rows'][1][5] == '0.4'                       # against the PB; what is left to save
+    assert row['rows'][4][1:3] == ('–', '–')                                               # not run
+    assert row['rows'][-2][:3] == ('Stage', '3:18.8', '+1.1') and row['rows'][-2][4] == 'behind-lose'
+    assert row['rows'][-1][2] == '−3.2'
     # Sectors: n is whatever the game has; low confidence is marked
     assert [s[:2] for s in row['sectors']] == [('S1', '75.9'), ('S2', '≈70.0')] and row['estimated']
-    assert [s[3] for s in row['sectors']] == ['gold', 'behind']
+    assert [s[3] for s in row['sectors']] == ['gold', 'behind-lose']
     none = view.splits_row(dict(found, sectors=None, last=None))
     assert none['sectors'] == [] and not none['estimated'] and none['delta'] is None
+    assert none['rows'][-2][4] == 'none' and none['rows'][-2][2] == '–'              # no time: not painted
     assert view.splits_row(dict(found, splits=[dict(r, last=r['best'], delta=0.0, gold=True) for r in found['splits']]))['tones'] \
-        == ['gold'] * 4
+        == ['gold'] * 5
+    # a new PB says PB (the badge is the caller's, on new_pb); a difference of nothing is ±0.0
+    assert view.splits_row(dict(found, new_pb=True, last=197.74))['rows'][-2][2] == '★ ±0.0'
+    assert view.signed(0.04) == '±0.0' and view.signed(-0.04) == '±0.0' and view.signed(0.06) == '+0.1'
+    assert view.signed(-1.04) == '−1.0' and view.signed(None) == '–'
+
+
+def test_split_tone_is_livesplits_rule_against_the_pb():
+    tone = view.split_tone
+    assert tone(None, None, False) == 'none' and tone(5.0, 0.0, True, -1.0, 5.5) == 'gold'
+    assert tone(5.0, 0.2, False, -0.5, 5.5) == 'ahead-gain'     # ahead overall, quicker than the PB's split
+    assert tone(5.0, 0.2, False, -0.5, 4.8) == 'ahead-lose'     # ahead overall, slower in the split
+    assert tone(5.0, 0.2, False, 0.5, 5.5) == 'behind-gain' and tone(5.0, 0.2, False, 0.5, 4.8) == 'behind-lose'
+    assert tone(5.0, 0.0, False, 0.04, 5.0) == 'ahead-gain'     # level to the tenth is not behind
+    assert tone(5.0, 0.3, False) == 'behind-lose' and tone(5.0, 0.0, False) == 'ahead-gain'   # no PB data: against the best
 
 
 def test_splits_row_takes_a_sector_with_no_times():

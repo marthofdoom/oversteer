@@ -17,11 +17,15 @@ def colour(hex_):
 
 def test_the_ribbon_has_a_cell_per_split_and_wider_sector_cells():
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 300, 10)
-    plot.ribbon(cairo.Context(surface), 300, 10, ['gold', 'behind-lose', 'none'], ['ahead', 'behind'])
+    plot.ribbon(cairo.Context(surface), 300, 10, ['gold', 'behind-lose', 'none'], ['ahead-gain', 'behind-gain'])
     assert pixel(surface, 5, 5) == colour(plot.TONES['gold'])
     assert pixel(surface, 100, 5) == colour(plot.TONES['behind-lose'])
-    assert pixel(surface, 295, 5) == colour(plot.TONES['behind'])           # the last sector at the right edge
-    assert pixel(surface, 295 - 23, 5) == colour(plot.TONES['ahead'])
+    assert pixel(surface, 295, 5) == colour(plot.TONES['behind-gain'])      # the last sector at the right edge
+    assert pixel(surface, 295 - 23, 5) == colour(plot.TONES['ahead-gain'])
+    # cells as long as the splits: the first a quarter of the stage, the second three quarters
+    long = cairo.ImageSurface(cairo.FORMAT_ARGB32, 400, 10)
+    plot.ribbon(cairo.Context(long), 400, 10, ['gold', 'behind-lose'], [], bounds=[(0, 250), (250, 1000)])
+    assert pixel(long, 90, 5) == colour(plot.TONES['gold']) and pixel(long, 110, 5) == colour(plot.TONES['behind-lose'])
     empty = cairo.ImageSurface(cairo.FORMAT_ARGB32, 100, 10)
     plot.ribbon(cairo.Context(empty), 100, 10, [])                          # nothing to draw is not an error
 

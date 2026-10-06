@@ -181,10 +181,11 @@ def clock(seconds):
 
 
 def signed(delta):
-    """±s.s with a real minus sign, '–' for none."""
+    """±s.s with a real minus sign, '–' for none; a difference that rounds to nothing is ±0.0, never +0.0 or -0.0."""
     if delta is None:
         return '–'
-    return '{}{:.1f}'.format('+' if delta > 0.05 else '\u2212' if delta < -0.05 else '\u00b1', abs(delta))
+    r = round(delta, 1)
+    return '{}{:.1f}'.format('+' if r > 0 else '\u2212' if r < 0 else '\u00b1', abs(r))
 
 
 def splits_lines(found):
@@ -206,54 +207,80 @@ def splits_lines(found):
     return summary, rows
 
 
-def split_tone(last, delta, gold):
-    """LiveSplit's colour rule for a split (the web page's splitTone): 'gold' for a best split, else 'ahead'
-    (level with the best), 'behind' (the lighter red, under half a second lost) or 'behind-lose' (more), 'none'
-    when not run. The comparison is each split's best: coach.splits() has no PB per split yet."""
+def split_tone(last, delta, gold, cum=None, pb=None):
+    """LiveSplit's colour rule for a split (LiveSplitStateHelper.GetSplitColor; the web page's splitTone):
+    'gold' for a best split, else 'ahead' or 'behind' by the cumulative time against the PB (`cum`, the last run's
+    elapsed time at the split's end less the PB's: ahead when it is not over zero) and 'gain' or 'lose' by what
+    the split itself did against the PB's (`last` less `pb`): 'ahead-gain', 'ahead-lose', 'behind-gain',
+    'behind-lose'; 'none' when not run. Without `cum` and `pb` (older data) `delta`, against the best, stands in
+    for both."""
     if last is None or delta is None:
         return 'none'
     if gold:
         return 'gold'
-    if delta <= 0.05:
-        return 'ahead'
-    return 'behind-lose' if delta > 0.5 else 'behind'
+    if cum is None or pb is None:
+        cum = seg = delta
+    else:
+        seg = last - pb
+    return ('ahead' if round(cum, 1) <= 0 else 'behind') + '-' + ('gain' if round(seg, 1) <= 0 else 'lose')
+
+
+def _split_cells(r):
+    """(Δ PB text, save text, tone) of a split of coach.splits(): the split against the PB's (a gold one shows
+    how far it beat the previous best), what it could still save against the best."""
+    tone = split_tone(r['last'], r['delta'], r['gold'], r.get('cum'), r.get('pb'))
+    if r['last'] is None:
+        return '–', '–', tone
+    if r['gold']:
+        text = '\u2605' + (' ' + signed(-r['margin']) if r.get('margin') else '')
+    else:
+        text = signed(r['last'] - r['pb'] if r.get('pb') is not None else r['delta'])
+    save = r['delta'] if r['delta'] is not None and round(r['delta'], 1) > 0 else None
+    return text, '–' if save is None else '{:.1f}'.format(save), tone
 
 
 def splits_row(found):
     """coach.splits() for the splits row of the Coaching and Telemetry views, or None without splits: a dict
     with `stage` (short name), `name`, `pb`, `sob`, `gain`, `last`, `delta` (last less PB, None unless the last
-    run finished), `tones` (one per split, for the ribbon), `rows` ((name, last, delta, best, tone) per split,
-    the stage total and the sum of best at the end), `sectors` ((name, last, delta, tone) per game sector,
-    the last time marked with a leading '≈' where the position is estimated; [] without) and `estimated`."""
+    run finished), `new_pb` (the last run is the PB, and clean: the only time the row says PB), `finish_m` and
+    `finish_confidence` (the times end at the stage's flying finish), `tones` (one per split, for the ribbon),
+    `bounds` ((d0, d1) per split, for cells as long as the splits), `rows` ((name, last, Δ PB, best, tone, save)
+    per split, the stage total and the sum of best at the end), `sectors` ((name, last, delta, tone) per game
+    sector, the last time marked with a leading '≈' where the position is estimated; [] without) and
+    `estimated`."""
     if not found:
         return None
     pb, last = found.get('best'), found.get('last')
-    tones, rows = [], []
+    tones, rows, bounds = [], [], []
     for n, r in enumerate(found['splits'], 1):
-        tone = split_tone(r['last'], r['delta'], r['gold'])
+        text, save, tone = _split_cells(r)
         tones.append(tone)
+        bounds.append((r.get('d0'), r.get('d1')))
         name = r['name'][4:] if r['name'].startswith('the ') else r['name']
         rows.append(('{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
-                     '–' if r['last'] is None else '{:.1f}'.format(r['last']),
-                     '–' if r['last'] is None else ('\u2605 ' if r['gold'] else '') + signed(r['delta']),
-                     '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone))
+                     '–' if r['last'] is None else '{:.1f}'.format(r['last']), text,
+                     '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone, save))
     delta = None if last is None or pb is None else last - pb
-    rows.append((_("Stage"), clock(last), '–' if delta is None else signed(delta), clock(pb),
-                 'none' if delta is None else 'ahead' if delta <= 0.05 else 'behind-lose'))
+    new_pb = bool(found.get('new_pb'))
+    rows.append((_("Stage"), clock(last), '–' if delta is None else ('\u2605 ' if new_pb else '') + signed(delta), clock(pb),
+                 'none' if delta is None else 'gold' if new_pb else 'ahead-gain' if round(delta, 1) <= 0 else 'behind-lose',
+                 '–' if delta is None or round(delta, 1) <= 0 else '{:.1f}'.format(delta)))
     gain = found.get('gain')
-    rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')), 'gold'))
+    rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')),
+                 'gold', ''))
     sectors, estimated = [], False
     for r in found.get('sectors') or []:
         low = r.get('confidence') == 'low'
         estimated = estimated or low
         mark = '\u2248' if low else ''
-        text = '–' if r['last'] is None else mark + '{:.1f}'.format(r['last'])
-        sectors.append((r['name'], text, ('\u2605 ' if r['gold'] else '') + signed(r['delta']) if r['last'] is not None
-                        else '–' if r['best'] is None else _("best {}").format(mark + '{:.1f}'.format(r['best'])),
-                        split_tone(r['last'], r['delta'], r['gold'])))
+        text, _save, tone = _split_cells(r)
+        sectors.append((r['name'], '–' if r['last'] is None else mark + '{:.1f}'.format(r['last']),
+                        text if r['last'] is not None else '–' if r['best'] is None
+                        else _("best {}").format(mark + '{:.1f}'.format(r['best'])), tone))
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
-            'gain': gain, 'last': last, 'delta': delta, 'tones': tones, 'rows': rows, 'sectors': sectors,
-            'estimated': estimated, 'runs': found.get('runs')}
+            'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
+            'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
+            'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs')}
 
 
 def _splits(reader, profile, car_id):

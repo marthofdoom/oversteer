@@ -1519,8 +1519,9 @@ class GtkUi:
             listbox.add(row)
         listbox.show_all()
 
-    SPLIT_TONES = {'gold': 'telemetry-split-gold', 'ahead': 'telemetry-split-ahead',
-                   'behind': 'telemetry-split-behind', 'behind-lose': 'telemetry-split-lose', 'none': 'dim-label'}
+    SPLIT_TONES = {'gold': 'telemetry-split-gold', 'ahead-gain': 'telemetry-split-ahead',
+                   'ahead-lose': 'telemetry-split-ahead', 'behind-gain': 'telemetry-split-behind',
+                   'behind-lose': 'telemetry-split-lose', 'none': 'dim-label'}
 
     def _build_splits_row(self):
         """The splits row above Coaching and Telemetry (docs/telemetry-ui-design.md, 4.4): the stage, PB, sum of
@@ -1559,13 +1560,14 @@ class GtkUi:
         button.connect('clicked', lambda w: revealer.set_reveal_child(not revealer.get_reveal_child()))
         self.splits_revealer = revealer
         self.splits_box = box
-        self._splits_tones = ([], [])
+        self._splits_tones = ([], [], None)
         box.show_all()
         box.set_no_show_all(True)               # shown by _show_splits_row() when there are splits
         return box
 
     def _draw_ribbon(self, area, cr):
-        telemetry_plot.ribbon(cr, area.get_allocated_width(), area.get_allocated_height(), *self._splits_tones)
+        tones, sectors, bounds = self._splits_tones
+        telemetry_plot.ribbon(cr, area.get_allocated_width(), area.get_allocated_height(), tones, sectors, bounds)
         return False
 
     def _show_splits_row(self):
@@ -1580,32 +1582,35 @@ class GtkUi:
         for child in self.splits_body.get_children():
             child.destroy()
         if found is None:
-            self._splits_tones = ([], [])
+            self._splits_tones = ([], [], None)
             self._show_splits_row()
             return
-        self._splits_tones = (found['tones'], [tone for _n, _t, _d, tone in found['sectors']])
+        self._splits_tones = (found['tones'], [tone for _n, _t, _d, tone in found['sectors']], found['bounds'])
         summary = '<b>{}</b>   PB <tt><b>{}</b></tt>   {} <tt><b>{}</b></tt>'.format(
             GLib.markup_escape_text(found['stage']), clock(found['pb']), _("SoB"), clock(found['sob']))
         if found['last'] is not None and found['delta'] is not None:
-            tone = 'gold' if found['delta'] <= 0.05 else 'behind-lose'
+            # PB only for a clean run that is the best: a learning or off run quicker than that is not a PB
+            tone = 'gold' if found['new_pb'] else 'ahead-gain' if round(found['delta'], 1) <= 0 else 'behind-lose'
             summary += '   {} <tt>{}</tt> <span foreground="{}"><tt><b>{}</b></tt></span>'.format(
                 _("Last"), clock(found['last']), telemetry_plot.TONES[tone],
-                _("PB") if found['delta'] <= 0.05 else signed(found['delta']))
+                _("PB") if found['new_pb'] else signed(found['delta']))
         self.splits_label.set_markup(summary)
+        self.splits_label.set_tooltip_text(
+            _("Times run to the estimated flying finish of the stage.") if found.get('finish_m') else None)
         grid = Gtk.Grid(column_spacing=16, row_spacing=4)
-        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 best"), _("Best"))):
+        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 PB"), _("Best"), _("Save"))):
             label = Gtk.Label(xalign=0 if col == 0 else 1)
             label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(head)))
             label.get_style_context().add_class('telemetry-header')
             grid.attach(label, col, 0, 1, 1)
         for n, row in enumerate(found['rows'], 1):
             tone = row[4]
-            for col, value in enumerate(row[:4]):
+            for col, value in enumerate((row[0], row[1], row[2], row[3], row[5])):
                 label = Gtk.Label(xalign=0 if col == 0 else 1)
                 markup = GLib.markup_escape_text(value)
                 if col:
                     markup = '<span font_features="tnum"><tt>{}</tt></span>'.format(markup)
-                if col == 2 and tone in telemetry_plot.TONES and tone != 'none':
+                if col == 2 and tone in telemetry_plot.TONES and tone != 'none' and value != '\u2013':
                     markup = '<span foreground="{}">{}</span>'.format(telemetry_plot.TONES[tone], markup)
                 elif n > len(found['rows']) - 2:
                     markup = '<b>{}</b>'.format(markup)
@@ -1625,9 +1630,12 @@ class GtkUi:
                 note = Gtk.Label(label=_("\u2248 Sector positions estimated from the game's sector lengths."), xalign=0)
                 note.get_style_context().add_class('dim-label')
                 self.splits_body.pack_start(note, False, False, 0)
-        note = Gtk.Label(label=_("Gold: your last run set that split's best. Green: level with the best; red: behind it, "
-                                 "the darker the more it lost. The finish split includes the slow-down to the stop."),
-                         xalign=0)
+        text = _("Gold \u2605: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: "
+                 "behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what "
+                 "the split could still gain against its best.")
+        if found.get('finish_m') is None:
+            text += ' ' + _("The finish split includes the slow-down to the stop.")
+        note = Gtk.Label(label=text, xalign=0)
         note.set_line_wrap(True)
         note.get_style_context().add_class('dim-label')
         self.splits_body.pack_start(note, False, False, 0)
