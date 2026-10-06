@@ -78,9 +78,9 @@ class Reference:
     """The run the live run is measured against, read once (load_reference)
     and never changed after: shared by the drive-log and listener threads."""
 
-    __slots__ = ('run', 'stage', 'result_time', 'course', 'trace', 'track', 'splits', 'sectors', 'sector_start', 'view')
+    __slots__ = ('run', 'stage', 'result_time', 'course', 'trace', 'track', 'splits', 'sectors', 'sector_start', 'origin', 'view')
 
-    def __init__(self, run, stage, result_time, course, trace, splits=(), sectors=(), sector_start=None):
+    def __init__(self, run, stage, result_time, course, trace, splits=(), sectors=(), sector_start=None, origin=None):
         self.run = run                              # runs.id
         self.stage = stage
         self.result_time = result_time              # s, the run's own clock to the finish
@@ -90,6 +90,7 @@ class Reference:
         self.splits = tuple(splits)                 # ((name, d0, d1), ...): the coach's grid
         self.sectors = tuple(sectors)               # ((name, d0, d1), ...): the game's sectors
         self.sector_start = sector_start            # m along the road spline where the sectors' d is 0 (where the reference began)
+        self.origin = origin if origin is not None else sector_start      # m along the road spline where its distance 0 is
         self.view = {'run': self.run, 'time': self.result_time, 'course': self.course,       # never changed
                      'splits': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.splits],
                      'sectors': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.sectors]}
@@ -132,14 +133,14 @@ def load_reference(store, stage, car, exclude=None):
     sectors, sector_start = (), None
     entry = stage_tables.entry(stage)
     placed = stage_tables.sector_bounds(entry)
+    origin = store.run_start(ref['id'])
+    if origin is None:
+        origin = stage_tables.run_origin(entry)
     if placed is not None:
         # from where the reference began (its trace's distance 0), as coach._sectors places a run's lines
-        start = store.run_start(ref['id'])
-        if start is None:
-            start = stage_tables.run_origin(entry)
-        start = sector_start = placed['start_m'] if start is None else start
+        start = sector_start = placed['start_m'] if origin is None else origin
         sectors = tuple(('S{}'.format(i + 1), a - start, b - start) for i, (a, b) in enumerate(placed['bounds']))
-    return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors, sector_start)
+    return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors, sector_start, origin)
 
 
 JOIN_SLACK = 30.0                # m: a first row this far into split 0 or less is the run leaving the line
@@ -233,7 +234,7 @@ class LiveBuffer:
         self._run = {'n': number, 'id': None, 'game': game, 'first': self._seq + 1, 'at': now,
                      'stage': {'key': stage, 'name': track, 'length': stage_length} if (stage or track) else None,
                      'ref': None, 'ref_status': 'pending', 'adopted': False, 'last': None, 'delta': None, 'd0': None,
-                     'mid': False, 'spline': start_d,
+                     'mid': False, 'spline': start_d, 'off': 0.0,
                      'splits': _Splits(()), 'sectors': _Splits(()), 'final': None}
         self._adopt()
         self._publish(now)
@@ -253,7 +254,7 @@ class LiveBuffer:
         ref = run['ref']
         delta = None
         if ref is not None and not run['mid'] and _fin(t) and _fin(d):
-            t_ref = ref.t_at(d)
+            t_ref = ref.t_at(d + run['off'])
             if t_ref is not None:
                 delta = t - t_ref
             self._feed(run, ref, t, d)
@@ -275,7 +276,7 @@ class LiveBuffer:
         def delta_at(x):
             # The run's own time at x m (between the last row and this
             # one), less the reference's there
-            t_ref_x = ref.t_at(x)
+            t_ref_x = ref.t_at(x + run['off'])           # the same road point on the reference
             if t_ref_x is None:
                 return None
             if last is not None and last[1] < x < d:
@@ -353,8 +354,9 @@ class LiveBuffer:
             run['id'] = run_id
         if ref is not None:
             self._check_mid(run)
-            run['splits'] = _Splits(ref.splits)
-            shift = run['spline'] - ref.sector_start if _fin(run['spline']) and ref.sector_start is not None else 0.0
+            # Both runs' distance 0 is where they began: the same road point is `off` m on in the reference's
+            run['off'] = shift = run['spline'] - ref.origin if _fin(run['spline']) and ref.origin is not None else 0.0
+            run['splits'] = _Splits(tuple((n, a - shift, b - shift) for n, a, b in ref.splits))
             run['sectors'] = _Splits(tuple((n, a - shift, b - shift) for n, a, b in ref.sectors))
             if not run['mid']:
                 self._replay(run, ref)

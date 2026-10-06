@@ -383,6 +383,29 @@ def test_the_references_sector_lines_are_placed_from_where_it_began_not_from_the
     store.close()
 
 
+def test_the_delta_pairs_the_runs_at_the_same_road_point_not_the_same_distance():
+    """The reference began at 100 m along the road, the live run at 106: at 100 m driven the live run is on the road
+    106 m on, which the reference reached at 106 m driven, 0.3 s later at 20 m/s: 0.3 s ahead, not level."""
+    buffer = LiveBuffer()
+    buffer.start_run(1, 0.0, 'acr', None, 'x', 5000.0, 106.0)
+    base = reference()
+    ref = Reference(41, 'acr:test', 100.0, 2000.0, base.trace, splits=base.splits, sector_start=100.0)
+    assert ref.origin == 100.0
+    buffer.offer_reference(1, ref)
+    for i in range(51):
+        buffer.push(1, i / 10.0, row(i / 10.0, 20.0 * i / 10.0, 20.0))
+    state = buffer.read(0, now=5.0)
+    assert state['delta'] == pytest.approx(-0.3, abs=1e-6)
+    assert [(a, b) for a, b in [b[1:] for b in buffer._run['splits'].bounds]][0] == (-6.0, 494.0)
+    # the same start: level, as before
+    buffer = LiveBuffer()
+    buffer.start_run(1, 0.0, 'acr', None, 'x', 5000.0, 100.0)
+    buffer.offer_reference(1, ref)
+    for i in range(51):
+        buffer.push(1, i / 10.0, row(i / 10.0, 20.0 * i / 10.0, 20.0))
+    assert buffer.read(0, now=5.0)['delta'] == pytest.approx(0.0, abs=1e-6)
+
+
 def test_sector_bounds_are_placed_from_where_the_run_began():
     """As coach._sectors: a bound is less where along the spline the run began, past the line or not."""
     def sectors_of(start_d):
