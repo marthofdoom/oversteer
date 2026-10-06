@@ -1,45 +1,137 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — 2026-10-06
 
-### Added
-- Devices tab: applying the combined device, the handbrake direction or
-  starting the proxy service while a Wine/Proton game runs now asks first:
-  re-creating the virtual wheel under Assetto Corsa Rally crashes the game.
-  The proxy tests skip themselves while a game runs for the same reason.
-- Hotkeys: hold a wheel button (or the keyboard shortcut) to repeat a
-  step: the first repeat after 0.4 s, then every 0.12 s, for the
-  strength, spring, damper and similar steps, the shift point and the
-  rotation range. It stops when you let go, at the control's limit (the
-  rev lights still show the level), when you start setting a button, or
+### Read this first
+- **The telemetry database moves to schema v3** the first time this version
+  starts. The migration is automatic and keeps a backup next to the file
+  (`telemetry.db.v2.bak`). Afterwards a one-time background job works through
+  your old runs: it re-analyses them, re-times them, re-classes them (clean,
+  learning, off, partial) and rebuilds the potentials. It runs a few runs per
+  tick, off the hot path, so the Telemetry tab fills in over a few minutes.
+- **Assetto Corsa Rally: the shared-memory bridge is now v4** and needs this
+  version of Oversteer. Relaunch ACR through `oversteer-run` to get it; an
+  older bridge keeps working, without the game's own stage clock.
+- **Pedal response needs new-lg4ff 0.8.0 or later** and the udev rule changed:
+  re-run the permission prompt (or reinstall the rules) so the new attributes
+  are writable.
+
+### Coaching
+- The coach is technique-aware. Tips come by place and cause ("the left-left
+  at 2.1 km: ...") instead of by metric, name the reference (your best clean
+  run) and say where the gain is. Good driving is praised: a section quicker
+  than your next best, a clean launch, a well-timed exit. Offs and resets are
+  stated as facts; there is no labelling of the driver, and a technique line
+  is shown neutral.
+- Runs are classed (clean, learning, off, partial) before they are judged. Only
+  clean runs are a reference; a run that did not finish keeps its slow tail as
+  an off and leaves the last section out; a stage's tips appear as soon as it
+  is finished, not at the start of the next one.
+- Fewer false alarms: a launch is a bog only against the car's own launches on
+  a loose surface, a corner's radius needs more than 5 m/s, a drop of speed
+  across one row is no hit in a game whose speed channel is not checked, and
+  praise or advice is given only against a reference section without an off.
+- Potential time: for each stage and car, a quasi-steady-state simulation
+  gives three layers: you (the sum of your best sections), grip (what the
+  tyres allow on this road) and car (what the engine and mass allow). The top
+  three sections to work on are shown after every run, quoting the splits'
+  sections (name, bounds, time), and the splits sheet has an Avail column.
+  The car's mass is the shipped one plus crew and fuel; tight corners are read
+  through a short window, so a 5.5 m hairpin is no longer read as 8.8 m.
+- Splits and sum of best: every grid section is timed by distance for any run
+  that covered it, in the LiveSplit table and colours (gold best ever, green
+  or red against the PB by cumulative time, dark or light by the section).
+  Assetto Corsa Rally's own sectors are the splits S1 to Sn; where a time is
+  estimated it is marked with a ≈. A run that began mid-stage is left off the
+  reference.
+
+### Telemetry pages
+- Coaching | Telemetry sub-tabs on the web page (phone and desktop) and in GTK.
+- **Live**: the delta to your PB (big ±0.00 and a ±2 s bar), the splits row,
+  pedal and steering strips, a g-g plot and a minimap.
+- **Run**: traces against the PB, the previous run or any run; the stage map
+  (START and FINISH labels flip at the map's edge); where the time went, each
+  section with the coach's advice. A run picker and compare chips.
+- New JSON endpoints behind them: `/api/v1/live?since=` (the live run's ring
+  and its delta) and `/api/v1/runs`, `/api/v1/runs/<id>`,
+  `/api/v1/runs/<id>/trace`.
+- Maps are drawn from one plan per game: ACR was drawn mirrored and WRC
+  Generations rotated. **Corner left/right from positions changed** for games
+  with no yaw-rate channel (DiRT, EA SPORTS WRC, OutGauge): they now use that
+  same plan view, so old corner records of these games may read mirrored
+  against new ones.
+- The shift points table shows the coach's lights band (6900-7100 rpm
+  (lights)) instead of the limiter the engine data ends at.
+
+### Assetto Corsa Rally
+- **Flying finish**: Oversteer learns each stage's finish line from the game's
+  own clock (where it stopped, per run), so result times stop at the line
+  instead of at the stop control. At the first start, old runs are re-timed;
+  runs that cannot be are classed partial and stay out of best, reference and
+  sum of best. A run that began mid-stage is not recorded finished.
+- **Results on the game's own stage clock** (bridge v4): the time of a run is
+  the game's, not an estimate from packets; a clock that restarts on a looped
+  stage is a lap, not a restart.
+- The car's position is read again (map, elevation), and the maps are no
+  longer mirrored.
+- Rev lights light to the car's limiter from the game's files, as ACR sends no
+  max rpm.
+- Tyre radius is learnt so slip is filled in; a stage the track name does not
+  give is no longer guessed.
+
+### Other games
+- Every channel the games send is decoded: ACR per-tyre loads, forces, slip,
+  radius, ride height, grip and angular velocity; Forza torque, tyre
+  temperatures and wear, fuel and laps; EA SPORTS WRC and OutGauge extras.
+- WRC Generations: forward direction (was backwards), steering sign, suspension
+  travel in metres, the two fake g channels dropped, brake temperatures read.
+- Assetto Corsa and ACC: a lap of a circuit is no finish and its wrapping lap
+  distance is not the run's distance.
+- DiRT: a frozen packet counts as a stop past the finish only once progress is
+  1 or the stage clock ran past the result, so a pause is no finish.
+- EA SPORTS WRC: progress is clamped to 0..1.
+- Codemasters games: the rpm unit is the one that makes the maximum roundest,
+  and acceleration the format lacks is unknown, not 0.
+- A bridge newer than the decoder is logged once.
+
+### Wheel and devices
+- Hotkeys: hold a wheel button (or the keyboard shortcut) to repeat a step:
+  the first repeat after 0.4 s, then every 0.12 s, for the strength, spring,
+  damper and similar steps, the shift point and the rotation range. It stops
+  when you let go, at the control's limit, when you start setting a button, or
   when you switch device. Toggles and profile switches fire once.
+- Pedal response: a "Response..." button under each pedal's Invert box in the
+  Controls tab sets the deadzone at the released end (0 to 45 %), where the
+  pedal reaches full (55 to 100 %) and a curve (50 linear, lower softer at the
+  start of the travel, higher sharper), in pedal travel whichever way Invert
+  has the axis. It applies live, is kept in the profile and is ignored by the
+  driver while the pedals are combined (the buttons grey out then). Presets:
+  Linear, and Spring brake for stock spring-and-rubber brakes. Needs new-lg4ff
+  0.8.0 or later with `pedal_response`.
 - Devices tab: a "Steam launch options for wheels under Proton" row with a
-  Copy button: `SDL_JOYSTICK_HIDAPI=0 %command%` keeps SDL (in Proton)
-  from driving a Logitech wheel itself through its HIDAPI driver (SDL 3.4
-  has one for the G29 PS3 mode, G27, G25 and DFGT, on by default on Linux),
-  which bypasses the kernel driver and Oversteer's settings. The
-  line under it reminds you to set the game's Steam Input to Disabled and
-  shows the combined form with the shared-memory bridge
-  (`SDL_JOYSTICK_HIDAPI=0 <oversteer-run> %command%`) for the Assetto
-  Corsa family. The tooltip mentions PROTON_LOG=1 for diagnosis.
-- Pedal response: a "Response..." button under each pedal's Invert box in
-  the Controls tab sets where the pedal starts (a deadzone at the released
-  end, 0 to 45 %), where it reaches full (55 to 100 %) and a curve
-  (sensitivity, 50 linear, lower softer at the start of the travel, higher
-  sharper). All of it is in pedal travel, from the released end,
-  whichever way Invert has the axis; the driver does the mirroring. The
-  settings apply live (the bars show what games see) and are kept in the
-  profile; the driver ignores them while the pedals are combined, and the
-  buttons grey out then. Oversteer reads the driver's current values, so
-  starting it never resets them. Presets: Linear, and for the brakes
-  Spring brake (3 % / 85 % / 40) for stock spring-and-rubber brakes. Needs
-  new-lg4ff with `pedal_response`; with an older driver the button stays
-  greyed out.
-  The udev rules make the new attributes writable.
+  Copy button: `SDL_JOYSTICK_HIDAPI=0 %command%` keeps SDL (in Proton) from
+  driving a Logitech wheel itself, bypassing the kernel driver and Oversteer's
+  settings. The line under it reminds you to set the game's Steam Input to
+  Disabled and shows the combined form with the shared-memory bridge.
+- Applying the combined device, the handbrake direction or starting the proxy
+  service while a Wine/Proton game runs now asks first: re-creating the virtual
+  wheel under Assetto Corsa Rally crashes the game.
+- A library of known device profiles for the proxy (identity and capability
+  set per device, with a validating loader), starting with the G29's axis
+  ranges and effects as read from a real rig.
 
-### Fixed
-- Coach: a stage's tips appear as soon as it is finished, not at the start of
-  the next one.
+### Under the hood
+- The proxy tests skip themselves while a Wine game runs, for the same reason.
+- A car's shipped drivetrain replaces a learnt one at the next start; a stage
+  the shipped table knows takes its discipline from it.
+- A run whose backfill fails keeps its old rows and class and is tried again at
+  the next start; the trace of each car's best finished run on a stage
+  survives the cap.
+- The drive log's change stamp moves only after the run is committed, so a
+  reader that sees it move finds the run in the file.
+- Design and research notes: the technique-aware coach, the telemetry UI,
+  anti-cheat policy for proxy identities and telemetry extrapolation under
+  `docs/` and `research/`.
 
 ## 0.14.2 — 2026-09-28
 
