@@ -186,27 +186,35 @@ def _near_multiple(x, step, tolerance):
     return abs(x - round(x / step) * step) <= tolerance
 
 
+RPM_MIN = 1000.0                                     # a maximum below this is no engine's
+
+
 def codemasters_unit(raw_max):
     """rpm per unit of the Codemasters engine rate fields (37, 63, 64),
-    decided from the raw maximum. DiRT Rally 1/2 send rad/s (every car's
+    decided from the raw maximum, or None where no unit gives a plausible
+    rpm (RPM_MIN to RPM_LIMIT). DiRT Rally 1/2 send rad/s (every car's
     max is then a round rpm times pi/30), WRC Generations copies the
     layout with a unit nobody has verified, and the format was long
     documented as rpm / 10. A real maximum is a round figure in the true
-    unit, so the first unit that makes it one wins; rad/s when none does."""
-    if _near_multiple(raw_max * RAD_S, 50.0, 1.0):
-        return RAD_S
-    if 3000.0 <= raw_max < RPM_LIMIT and _near_multiple(raw_max, 50.0, 1.0):
-        return 1.0
-    if _near_multiple(raw_max * 10.0, 50.0, 1.0):
-        return 10.0
-    return RAD_S
+    unit: of the units that give a plausible rpm, the one that makes it
+    the roundest wins (ties to rad/s, then rpm, then rpm / 10); rad/s,
+    where none is round, if it is plausible, else the first that is."""
+    fits = [(unit, raw_max * unit) for unit in (RAD_S, 1.0, 10.0)
+            if RPM_MIN <= raw_max * unit < RPM_LIMIT and (unit != 1.0 or raw_max >= 3000.0)]
+    round_ones = [(abs(rpm - round(rpm / 50.0) * 50.0), n, unit) for n, (unit, rpm) in enumerate(fits)
+                  if _near_multiple(rpm, 50.0, 1.0)]
+    if round_ones:
+        return min(round_ones)[2]
+    return fits[0][0] if fits else None
 
 
 def _codemasters_unit(game, raw_max):
-    """codemasters_unit(), decided once per car and logged."""
+    """codemasters_unit(), decided once per car and logged; None (not remembered) where no unit fits."""
     unit = _codemasters_units.get((game, raw_max))
     if unit is None:
         unit = codemasters_unit(raw_max)
+        if unit is None:
+            return None
         if len(_codemasters_units) >= 1000:
             _codemasters_units.clear()   # a maximum that jitters: start over rather than log every packet
         _codemasters_units[(game, raw_max)] = unit
@@ -431,6 +439,8 @@ def _codemasters(data, n):
     if not (math.isfinite(raw_max) and 0 < raw_max < RPM_LIMIT and math.isfinite(floats[37])):
         return None
     unit = _codemasters_unit(game, raw_max)
+    if unit is None:
+        return None
     rpm, max_rpm = floats[37] * unit, raw_max * unit
     if not (_plausible(max_rpm) and _plausible(rpm)):
         return None

@@ -87,6 +87,20 @@ def test_codemasters_true_rpm_and_rpm_over_10():
     assert codemasters_unit(733.3) == RAD_S                             # nothing round: DiRT's unit
 
 
+def test_codemasters_unit_is_the_one_that_makes_the_roundest_plausible_rpm():
+    from oversteer import telemetry_formats
+    # 1000 raw is 9549.3 rpm as rad/s (0.7 off a round figure: the first unit to pass) and exactly 10000 as rpm / 10
+    assert codemasters_unit(1000.0) == 10.0
+    assert codemasters_unit(785.398) == RAD_S and codemasters_unit(7000.0) == 1.0
+    # a unit never gives 30000 rpm or more: 4000 raw is 38197 as rad/s
+    assert codemasters_unit(4000.0) == 1.0
+    # no unit gives a plausible rpm: none, and nothing is cached for it
+    assert codemasters_unit(50.0) is None
+    telemetry_formats._codemasters_units.clear()
+    assert decode_sample(codemasters(40, 50, unit=1.0, size=280)) is None
+    assert telemetry_formats._codemasters_units == {}
+
+
 def test_codemasters_gears():
     assert decode_sample(codemasters(3000, 7500, gear=0.0)).gear == 0
     assert decode_sample(codemasters(3000, 7500, gear=10.0)).gear == -1     # reverse in DiRT Rally
