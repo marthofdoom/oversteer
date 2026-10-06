@@ -308,12 +308,12 @@ def run_origin(entry):
 
 
 def road_length(entry):
-    """The road a run drives on an ACR stage, from the start line to the finish (the flying finish, else the
-    last pace note), or None where either end is not known. The `length` the game sends is the length of its
-    spline, which is longer than the road."""
+    """The road a run drives on an ACR stage, from where its runs begin (run_origin: the measured start, else the
+    start line) to the finish (the flying finish, else the last pace note), or None where either end is not known.
+    The `length` the game sends is the length of its spline, which is longer than the road."""
     if not entry:
         return None
-    start = start_line(entry)
+    start = run_origin(entry)
     end = entry.get('finish_m') or entry.get('pacenote_last_m')
     return end - start if start is not None and end is not None and end > start else None
 

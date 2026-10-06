@@ -62,7 +62,9 @@ def test_afon_bidno_finishes_at_the_line_and_a_run_timed_at_the_old_estimate_is_
     assert stage_tables.tables()['acr'][BIDNO]['finish_m'] == 5287.4                 # the shipped estimate stays
     assert stage_tables.entry(BIDNO)['finish_m'] == 5294.1
     assert stage_tables.acr_stage('Wales Afon Bidno', start=239.0)['finish_m'] == 5294.1
-    assert stage_tables.road_length(stage_tables.entry(BIDNO)) == pytest.approx(5294.1 - 242.9)
+    # the road a run drives is from where its runs begin (the measured start), not from the real line a few metres on
+    assert stage_tables.road_length(stage_tables.entry(BIDNO)) == pytest.approx(5294.1 - 238.2)
+    assert stage_tables.road_length({'start_m': 100.0, 'finish_m': 1100.0, 'sector_lines_m': [110.0, 600.0, 1100.0]}) == 1000.0
     learner = ShiftLearner(str(tmp_path / 't.db'))
     store = learner.log.store
     run = _timed_run(store, BIDNO, result=200.0, course=5100.0, end_speed=40.0)
