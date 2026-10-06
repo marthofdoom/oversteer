@@ -9,7 +9,7 @@ from . import hotkeys
 from . import steam_options
 from .telemetry import DEFAULT_PORT
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
-from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_items, live_status, shift_summary, shift_table
+from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_items, live_status, splits_lines, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -1408,11 +1408,14 @@ class GtkUi:
         lines behind an expander at the end."""
         tips = self._telemetry_history['tips'] if self._telemetry_history else []
         items = coaching_items(tips, self._telemetry_advice_lines)
-        if items == self._telemetry_coaching_shown:
+        splits = splits_lines(self._telemetry_history.get('splits') if self._telemetry_history else None)
+        if (items, splits) == self._telemetry_coaching_shown:
             return                          # an open expander stays open
-        self._telemetry_coaching_shown = items
+        self._telemetry_coaching_shown = (items, splits)
         listbox = self.telemetry_coaching
         self._clear_rows(listbox)
+        if splits[0]:
+            self._splits_row(listbox, *splits)
         shown = [item for item in items if item[2] != 'still']
         quiet = [item for item in items if item[2] == 'still']
         if not shown:
@@ -1446,6 +1449,32 @@ class GtkUi:
             row.add(expander)
             listbox.add(row)
         listbox.show_all()
+
+    SPLIT_COLOURS = {'gold': '#d4a017', 'good': '#2e9e5b', 'bad': '#d03a3a'}
+
+    def _splits_row(self, listbox, summary, rows):
+        """The split summary line, a LiveSplit-style table (split, last, best, difference) behind it."""
+        row = Gtk.ListBoxRow(activatable=False, selectable=False)
+        expander = Gtk.Expander(label=summary)
+        expander.set_margin_top(8)
+        expander.set_margin_bottom(8)
+        grid = Gtk.Grid(column_spacing=16, row_spacing=4)
+        grid.set_margin_top(6)
+        for col, head in enumerate((_("Split"), _("Last"), _("Best"), _("Difference"))):
+            label = Gtk.Label(xalign=0 if col == 0 else 1)
+            label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(head)))
+            grid.attach(label, col, 0, 1, 1)
+        for n, (name, last, best, delta, tone) in enumerate(rows, 1):
+            for col, text in enumerate((name, last, best, delta)):
+                label = Gtk.Label(xalign=0 if col == 0 else 1)
+                markup = '<tt>{}</tt>'.format(GLib.markup_escape_text(text)) if col else GLib.markup_escape_text(text)
+                if col == 3 and tone in self.SPLIT_COLOURS:
+                    markup = '<span foreground="{}">{}</span>'.format(self.SPLIT_COLOURS[tone], markup)
+                label.set_markup(markup)
+                grid.attach(label, col, n, 1, 1)
+        expander.add(grid)
+        row.add(expander)
+        listbox.add(row)
 
     LABEL_CHOICES = (
         ('discipline', _("Discipline"), ('rally-stage', 'hillclimb', 'circuit', 'rallycross', 'drift', 'free-roam',

@@ -96,6 +96,7 @@ def test_gather_from_the_database(tmp_path):
     assert found['car_id'] == h.car and found['tips'][0].id == 'limiter.held'
     assert found['context'][0].startswith('discipline unknown') and len(found['sessions']) == 3
     assert found['tuning'][0].startswith('No setup recorded yet')
+    assert found['splits'] is None                      # no run with corners to split
     assert view.gather(h.store, 'rally', 'nothing/1')['car_id'] is None
 
 
@@ -182,3 +183,17 @@ def test_a_technique_line_is_labelled_neutrally_in_both_windows():
     assert 'technique: "Technique"' in page and '.k-technique' in page          # not the raw kind, not the tip's blue
     assert '.telemetry-technique' in (root / 'oversteer/main.css').read_text()
     assert "'technique': 'telemetry-technique'" in (root / 'oversteer/gtk_ui.py').read_text()
+
+
+def test_the_splits_summary_and_rows():
+    assert view.splits_lines(None) == (None, [])
+    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'splits': [
+        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': True, 'delta': 0.0, 'finish': False},
+        {'name': 'the 1 left at 0.7 km', 'last': 8.38, 'best': 7.94, 'gold': False, 'delta': 0.44, 'finish': False},
+        {'name': 'the 2 right at 1.6 km', 'last': None, 'best': 6.36, 'gold': False, 'delta': None, 'finish': False},
+        {'name': 'the 6 right at 4.8 km', 'last': 70.0, 'best': 71.0, 'gold': False, 'delta': -1.0, 'finish': True}]}
+    summary, rows = view.splits_lines(found)
+    assert summary == 'Afon Bidno  ·  Best 3:17.7  ·  SoB 3:14.5 (−3.2)'
+    assert rows[0] == ('left-left at 0.3 km', '0:06.8', '0:06.8', 'gold', 'gold')
+    assert rows[1][3:] == ('+0.4', 'bad') and rows[2][1:] == ('–', '0:06.4', '–', '')
+    assert rows[3][3:] == ('−1.0', 'good') and rows[3][0].endswith('(finish)')

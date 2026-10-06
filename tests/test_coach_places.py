@@ -743,3 +743,23 @@ def test_the_section_with_the_finish_is_not_praised(tmp_path):
     drive_traced(h, v2=10.0, v3=13.0, reference=a)
     drive_traced(h, v2=12.0, v3=16.0, reference=a)                 # best only through the last corner
     assert h.by_id('corner.bestsection') == []
+
+
+def test_the_splits_of_the_latest_run_against_the_best_of_each_section(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    assert coach.splits(h.store, h.profile, h.car) is None             # one run: nothing to compare
+    drive_traced(h, v2=10.0, v3=13.0, reference=a)
+    drive_traced(h, v2=16.0, v3=11.0, reference=a)                     # the latest: its second corner is the best yet
+    found = coach.splits(h.store, h.profile, h.car)
+    assert found['name'] == 'Test Stage' and found['stage'] == STAGE_KEY and found['runs'] == 3
+    assert found['last'] and found['best'] and found['possible'] <= found['best']
+    assert found['gain'] == found['best'] - found['possible']
+    rows = found['splits']
+    assert [r['finish'] for r in rows] == [False] * (len(rows) - 1) + [True]
+    second = next(r for r in rows if r['name'].endswith('at 1.1 km'))
+    assert second['gold'] and second['delta'] == 0.0 and second['last'] == second['best']
+    third = next(r for r in rows if r['name'].endswith('at 1.7 km'))
+    assert not third['gold'] and third['delta'] > 0 and third['last'] == third['best'] + third['delta']
+    # the first section holds the launch and is no split
+    assert all(not r['name'].endswith('at 0.5 km') for r in rows)

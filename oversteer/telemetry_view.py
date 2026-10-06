@@ -161,6 +161,40 @@ def coaching_lines(tips, advice=None):
             for badge, text, kind in coaching_items(tips, advice)]
 
 
+def clock(seconds):
+    """m:ss.s, '–' for none."""
+    if seconds is None:
+        return '–'
+    minutes = int(seconds // 60)
+    return '{}:{:04.1f}'.format(minutes, seconds - 60 * minutes)
+
+
+def signed(delta):
+    """±s.s with a real minus sign, '–' for none."""
+    if delta is None:
+        return '–'
+    return '{}{:.1f}'.format('+' if delta > 0.05 else '\u2212' if delta < -0.05 else '\u00b1', abs(delta))
+
+
+def splits_lines(found):
+    """coach.splits() as (summary, rows): the summary line ('Afon Bidno · Best 3:17.7 · SoB 3:14.5 (−3.2)')
+    and one (name, last, best, delta, tone) per split, tone 'gold' (the last run set the best), 'good'
+    (level with or ahead of it), 'bad' or '' (not run). (None, []) without splits."""
+    if not found:
+        return None, []
+    summary = '{}  ·  {} {}  ·  {} {}'.format(found['name'].split(' - ')[0], _("Best"), clock(found['best']),
+                                              _("SoB"), clock(found['possible']))
+    if found.get('gain') is not None:
+        summary += ' (\u2212{:.1f})'.format(found['gain'])
+    rows = []
+    for r in found['splits']:
+        tone = '' if r['last'] is None else 'gold' if r['gold'] else 'good' if r['delta'] <= 0.05 else 'bad'
+        name = r['name'][4:] if r['name'].startswith('the ') else r['name']
+        rows.append((name + (_(" (finish)") if r['finish'] else ''), clock(r['last']), clock(r['best']),
+                     'gold' if tone == 'gold' else signed(r['delta']), tone))
+    return summary, rows
+
+
 def tuning_lines(tune, notes):
     """The current tune (ratios, what changed, the measured extras or why
     they are missing) and the tuning notes."""

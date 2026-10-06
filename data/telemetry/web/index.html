@@ -10,7 +10,7 @@
 <style>
 :root {
   --bg: #0b0d10; --card: #14171c; --raised: #1b1f26; --text: #f2f4f7; --dim: #98a1ac; --faint: #5d6570;
-  --line: #262b33; --accent: #4c9dff; --good: #3ddc84; --warn: #ffb020; --bad: #ff4d4d; --off: #242933;
+  --line: #262b33; --accent: #4c9dff; --good: #3ddc84; --warn: #ffb020; --bad: #ff4d4d; --gold: #ffd23f; --off: #242933;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -48,6 +48,23 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; }
 #wake .sun { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--faint); flex: none; }
 #wake.on .sun { border-color: var(--good); background: var(--good); }
 #wake.tap .sun { border-color: var(--accent); }
+
+/* The splits: a chip in the top bar (no new row), its table dropping over the page below it */
+#splits { flex: 1 1 0; cursor: pointer; justify-content: space-between; gap: 8px; color: var(--text); }
+#splits[hidden] { display: none; }
+#splits .sname { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--dim); }
+#splits .snums { flex: none; }
+#splits .snums i { font-style: normal; font-weight: 700; }
+#splits[aria-expanded="true"] { border-color: var(--accent); }
+#splits-panel { position: absolute; left: 0; right: 0; top: 100%; max-height: 70vh; overflow-y: auto; z-index: 3;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px 10px 8px; }
+#splits-panel[hidden] { display: none; }
+#splits-panel table { font-size: 14px; }
+#splits-panel th, #splits-panel td { padding: 6px 4px; font-size: 14px; }
+#splits-panel td:first-child { white-space: normal; }
+#splits-panel tr.fin td:first-child { color: var(--dim); }
+#splits-panel p { margin: 6px 0 0; color: var(--dim); font-size: 12px; }
+.sgold { color: var(--gold); } .sgood { color: var(--good); } .sbad { color: var(--bad); }
 
 /* Live: the numbers to read at arm's length */
 .live {
@@ -157,7 +174,9 @@ footer { color: var(--faint); font-size: 12px; margin-top: 18px; }
   <div class="top">
     <span class="brand">Oversteer</span>
     <span class="chip" id="conn"><span class="dot"></span><span id="status">Connecting…</span></span>
+    <button type="button" class="chip" id="splits" hidden aria-expanded="false" aria-controls="splits-panel"><span class="sname" id="splits-name"></span><span class="snums" id="splits-nums"></span></button>
     <button type="button" class="chip" id="wake" title="Keep this screen on while the page is open"><span class="sun"></span><span id="wake-text">Screen</span></button>
+    <div id="splits-panel" hidden></div>
   </div>
 
   <div class="layout">
@@ -335,6 +354,56 @@ function tipItem(t, kind) {
   return li;
 }
 
+// -- the splits: the best of each section and what they put together (in the top bar; the table drops down) --
+
+function clock(t) {
+  if (t == null) return "–";
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
+}
+function signed(d) { return d == null ? "–" : (d > 0.05 ? "+" : d < -0.05 ? "−" : "±") + Math.abs(d).toFixed(1); }
+
+let splitsOpen = false;
+try { splitsOpen = localStorage.getItem("splitsOpen") === "1"; } catch (e) {}
+function setSplitsOpen(open) {
+  splitsOpen = open;
+  try { localStorage.setItem("splitsOpen", open ? "1" : "0"); } catch (e) {}
+  $("splits").setAttribute("aria-expanded", String(open));
+  $("splits-panel").hidden = !open || $("splits").hidden;
+}
+
+function showSplits(sp) {
+  const chip = $("splits"), panel = $("splits-panel");
+  clear(panel);
+  if (!sp) { chip.hidden = true; panel.hidden = true; return; }
+  chip.hidden = false;
+  $("splits-name").textContent = sp.name.replace(/ - .*/, "");
+  const nums = $("splits-nums");
+  clear(nums);
+  nums.appendChild(document.createTextNode(clock(sp.best) + " · SoB "));
+  nums.appendChild(el("i", clock(sp.possible)));
+  if (sp.gain != null) nums.appendChild(document.createTextNode(" (−" + sp.gain.toFixed(1) + ")"));
+  chip.title = sp.name + ": best " + clock(sp.best) + ", sum of best " + clock(sp.possible);
+  panel.appendChild(el("h2", sp.name + " · last " + clock(sp.last)));
+  const table = el("table");
+  const head = el("tr");
+  for (const h of ["Split", "Last", "Best", "Δ"]) head.appendChild(el("th", h));
+  table.appendChild(head);
+  for (const r of sp.splits) {
+    const tr = el("tr", null, r.finish ? "fin" : "");
+    tr.appendChild(el("td", r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "")));
+    tr.appendChild(el("td", clock(r.last)));
+    tr.appendChild(el("td", clock(r.best)));
+    tr.appendChild(el("td", r.gold ? "gold" : signed(r.delta),
+      r.last == null ? "dim" : r.gold ? "sgold" : r.delta <= 0.05 ? "sgood" : "sbad"));
+    table.appendChild(tr);
+  }
+  panel.appendChild(table);
+  panel.appendChild(el("p", "Gold: your last run set the best. SoB: the best of every split put together. The finish split includes the slow-down to the stop."));
+  setSplitsOpen(splitsOpen);
+}
+$("splits").addEventListener("click", () => setSplitsOpen(!splitsOpen));
+
 let shown = null;
 async function loadCar() {
   const table = $("shifts"), note = $("shifts-note"), coach = $("coach"), tuningList = $("tuning");
@@ -351,6 +420,7 @@ async function loadCar() {
   shown = key;
   clear(table); clear(coach); clear(tuningList); clear($("sessions"));
   note.textContent = ""; $("tune").textContent = "";
+  showSplits(c && c.splits);
   if (carId == null) {
     note.textContent = "Drive with telemetry on and Oversteer learns each car's shift points.";
     coach.appendChild(el("li", "Coaching starts once Oversteer has seen you drive.", "empty"));

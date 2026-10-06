@@ -247,3 +247,21 @@ def test_public_addresses_are_refused(served):
     assert web.verify_request(None, ('127.0.0.1', 1)) and web.verify_request(None, ('192.168.1.20', 1))
     assert web.verify_request(None, ('100.101.102.103', 1))        # a tailnet's shared addresses
     assert not web.verify_request(None, ('8.8.8.8', 1)) and not web.verify_request(None, ('not an address', 1))
+
+
+def test_the_coach_json_carries_the_splits(tmp_path):
+    from tests.test_coach_places import Stage, drive_traced
+    h = Stage(tmp_path / 'telemetry.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=13.0, reference=a)
+    drive_traced(h, v2=16.0, v3=11.0, reference=a)
+    web = TelemetryWeb(port=0, bind='local', reader_path=str(tmp_path / 'telemetry.db'), profile=lambda: h.profile)
+    assert web.start()
+    try:
+        found = get_json(web, '/api/v1/coach?car={}'.format(h.car))
+        splits = found['splits']
+        assert splits['name'] == 'Test Stage' and splits['splits'] and splits['possible'] <= splits['best']
+        assert {'name', 'last', 'best', 'gold', 'delta', 'finish'} <= set(splits['splits'][0])
+        assert get_json(web, '/api/v1/coach')['splits'] is None
+    finally:
+        web.stop()
