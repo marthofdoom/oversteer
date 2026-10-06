@@ -225,6 +225,16 @@ CREATE TABLE IF NOT EXISTS run_finish (
     finish_m REAL
 )"""
 
+# Where along the road spline (metres, the game's lap distance) a run began:
+# the start line for a run that began standing at it, anywhere else for one
+# that began mid-stage (a restart after a silence). A table of its own for the
+# reason run_finish is one. The traces' distances are driven from this point.
+RUN_START_DDL = """
+CREATE TABLE IF NOT EXISTS run_start (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    start_m REAL
+)"""
+
 # The first schema, as development builds after Oversteer 0.13.1 created it
 # (no release had a database): kept to migrate from, and for the tests that
 # build such a file
@@ -576,6 +586,7 @@ def open_store(path):
             db.close()
             raise sqlite3.DatabaseError("{} is from a newer Oversteer (version {})".format(path, version))
     db.execute(RUN_FINISH_DDL)
+    db.execute(RUN_START_DDL)
     return Store(db, path)
 
 
@@ -623,6 +634,14 @@ class Reader:
     def _rows(self, sql, args=()):
         with self.lock:
             return self.db.execute(sql, args).fetchall()
+
+    def run_start(self, run_id):
+        """Where along the road spline a run began (metres), or None where it was not recorded."""
+        try:
+            rows = self._rows('SELECT start_m FROM run_start WHERE run = ?', (run_id,))
+        except sqlite3.OperationalError:
+            return None                              # a file the writer has not opened since this table
+        return rows[0][0] if rows else None
 
     def cars(self, profile):
         """[(key, name)] of the profile's cars, by name."""
@@ -1406,6 +1425,10 @@ class Store(Reader):
     def set_run_finish(self, run, finish_m):
         """Record the finish line a run was timed at (None: it was not re-timed)."""
         self._do('INSERT OR REPLACE INTO run_finish (run, finish_m) VALUES (?, ?)', (run, finish_m))
+
+    def set_run_start(self, run, start_m):
+        """Record where along the road spline a run began."""
+        self._do('INSERT OR REPLACE INTO run_start (run, start_m) VALUES (?, ?)', (run, start_m))
 
     def update_run(self, run, **fields):
         """Set columns of a run (unlike end_run, counts nothing)."""

@@ -790,6 +790,28 @@ def test_the_games_sectors_beside_the_splits(tmp_path):
     assert coach.splits(h.store, h.profile, h.car)['sectors'] is None
 
 
+def test_a_run_that_began_mid_stage_has_its_sectors_placed_from_where_it_began(tmp_path):
+    """The traces' distances are driven from the run's start: a bound is taken less where along the spline the
+    run began (run_start), the start line only where that was not recorded."""
+    from oversteer import stage_tables
+    stage_tables.set_tables({'acr': {STAGE_KEY: {'sectors_km': [0.8, 0.8, 0.7], 'start_m': 100.0, 'finish_m': 2400.0,
+                                                 'finish_confidence': 'medium', 'length_m': 2300}}})
+    try:
+        h = Stage(tmp_path / 't.db')
+        a = drive_traced(h, v2=14.0, v3=10.0)
+        drive_traced(h, v2=10.0, v3=13.0, reference=a)
+        drive_traced(h, v2=16.0, v3=11.0, reference=a)
+        line = coach.splits(h.store, h.profile, h.car)['sectors']
+        assert line[0]['last'] is not None
+        h.store.set_run_start(h.runs[-1], 500.0)                           # the latest began 400 m past the line
+        mid = coach.splits(h.store, h.profile, h.car)['sectors']
+        assert mid[0]['last'] is None                                      # it did not drive the first sector
+        assert mid[1]['last'] is not None and mid[1]['last'] != line[1]['last']
+        assert h.store.run_start(h.runs[-1]) == 500.0 and h.store.run_start(h.runs[0]) is None
+    finally:
+        stage_tables.set_tables(None)
+
+
 def test_the_sector_bounds_of_a_stage_entry():
     from oversteer import stage_tables
     bidno = stage_tables.entry('acr:wales:afon-bidno-severn')

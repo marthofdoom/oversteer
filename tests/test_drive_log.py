@@ -501,6 +501,17 @@ def test_acr_finish_restart_and_shared_names(tmp_path):
     assert 225 < runs[1]['result_time'] < 235              # (5287 - 238) / 22 m/s from moving off: the flying finish, not the stop control
 
 
+def test_a_run_stores_where_along_the_spline_it_began(tmp_path):
+    standing = acr_drive(0.0, 238.0, 1500.0)
+    learner, reader, session = drive_runs(tmp_path, standing)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert reader.run_start(run['id']) == 238.0
+    mid = acr_drive(0.0, 3000.0, 3600.0, track='Wales Afon Bidno')        # a run that began mid-stage, rolling
+    learner, reader, session = drive_runs(tmp_path, mid, name='mid.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert reader.run_start(run['id']) == mid[0][1].lap_distance
+
+
 def test_acr_stages_of_one_name_told_apart_by_the_start():
     from oversteer import stage_tables
     # "Alsace For_t" is Foret de Munster (first note 3811.6) or de Saverne

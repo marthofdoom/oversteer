@@ -449,7 +449,7 @@ class RunTracker:
         self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
                          sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track,
-                         self._acr_start)
+                         self._acr_start, sample.lap_distance)
 
     def _clock(self, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
@@ -624,7 +624,7 @@ class RunTracker:
     # -- the drive-log thread --
 
     def _write_start(self, number, session, n, started, stage, game, stage_length, start_pos, track=None,
-                     start_d=None):
+                     start_d=None, spline=None):
         learner = self.learner
         row = learner._session_rows.get(session)
         if row is None:
@@ -645,6 +645,8 @@ class RunTracker:
             # DiRT names no stage: its length and where it starts do
             stage = store.match_stage(game, stage_length, start_pos[2])
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
+        if spline is not None:
+            store.set_run_start(self.run_rows[number], spline)
         self.run_batch[number] = learner.log.batch
         surface = stage_surface(store, game, stage)
         if surface is not None and learner.run_surface.get(number) is None:
