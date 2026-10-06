@@ -491,26 +491,46 @@ def _codemasters(data, n):
     sample.game_time, sample.stage_time = _finite(floats[0]), _finite(floats[1])
     sample.lap_distance, sample.progress = _finite(floats[2]), _finite(floats[3])
     sample.pos = _vector(floats[4:7])
-    # The "pitch" vector points forward and the "roll" vector sideways,
-    # taken as to the left (verify: sideways velocity in a left-hand slide)
+    # DiRT: the "pitch" vector points forward and the "roll" vector sideways,
+    # taken as to the left (verify: sideways velocity in a left-hand slide).
+    # WRC Generations (marth's captures, research/extrapolation): its pitch
+    # vector points backwards (cosine -0.99 with the motion), its roll vector
+    # is the left (0.999 with up x forward, z being up there)
     forward, left = _vector(floats[14:17]), _vector(floats[11:14])
+    if game == 'wrcg' and forward is not None:
+        forward = tuple(-c for c in forward)
     sample.forward = forward
     if forward is not None and left is not None:
         sample.up = _cross(forward, left)
     sample.vel = _to_car(_vector(floats[8:11]), forward, left, sample.up)
     rl, rr, fl, fr = floats[17:21]
-    sample.susp = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))    # mm (verify unit and sign)
-    rl, rr, fl, fr = floats[21:25]
-    sample.susp_vel = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))
+    rate = floats[21:25]
+    if game == 'wrcg':
+        # Metres, not mm, and the position falls as the wheel compresses
+        # (front down and rear up under power, the outside wheels down in a
+        # turn: r 0.9), so negated for compression positive; the velocity
+        # is m/s with compression positive (against d/dt of the position:
+        # slope -0.5). The zero is the game's, not the unloaded wheel's
+        sample.susp = _vector((-fl, -fr, -rl, -rr))
+        rl, rr, fl, fr = rate
+        sample.susp_vel = _vector((fl, fr, rl, rr))
+    else:
+        sample.susp = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))    # mm (verify unit and sign)
+        rl, rr, fl, fr = rate
+        sample.susp_vel = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))
     rl, rr, fl, fr = floats[25:29]
     sample.wheel_speed = _vector((fl, fr, rl, rr))                         # m/s (verify sign in reverse)
-    sample.steer = _finite(-floats[30])                                    # the game's is negative left (verify)
-    lateral, longitudinal = floats[34], floats[35]
-    # g in DiRT Rally; WRCG probably sends m/s^2 (verify)
-    scale = G if game == 'dirt' else 1.0
-    flat = _vector((longitudinal * scale, lateral * scale))                 # lateral sign: verify
-    sample.accel = flat + (float('nan'),) if flat else None                 # no vertical channel: unknown, not 0
-    sample.accel_kind = 'kinematic'
+    # DiRT's is negative left (verify). WRCG's is positive left: it
+    # correlates with the heading rate (left positive) at r 0.2 to 0.5
+    sample.steer = _finite(floats[30] if game == 'wrcg' else -floats[30])
+    if game == 'dirt':
+        # g in DiRT Rally. WRC Generations' floats 34 and 35 match no motion
+        # (r 0.0 with speed x yaw rate, -0.4 with the change of speed, best
+        # at a lag): no acceleration channel there
+        lateral, longitudinal = floats[34], floats[35]
+        flat = _vector((longitudinal * G, lateral * G))                     # lateral sign: verify
+        sample.accel = flat + (float('nan'),) if flat else None            # no vertical channel: unknown, not 0
+        sample.accel_kind = 'kinematic'
     if len(floats) > 61:
         sample.lap = int(floats[36]) if math.isfinite(floats[36]) else None
         sample.laps = int(floats[60]) if math.isfinite(floats[60]) and 0 <= floats[60] < 1000 else None

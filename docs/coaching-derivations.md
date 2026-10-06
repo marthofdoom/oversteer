@@ -85,8 +85,9 @@ These pieces of evidence back the ACR statuses:
   because a replay has no rig presses and both cars are sequential.
 - **Found along the way.** On marth's WRC Generations capture of the same
   day, counter-steer came out at 0.55 of cornering time, against 0.09 on
-  ACR. The WRCG steer sign (or its yaw from positions) is probably
-  inverted. Verify it before coaching counter-steer or balance there.
+  ACR. The WRCG steer sign was inverted (fixed 2026-10-05: the decoder
+  negated it, but WRCG's is positive left, r +0.14 to +0.50 with the
+  heading rate). Measure counter-steer there again.
 
 ## Tables
 
@@ -218,21 +219,21 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `game_time` | - | - | - | C | D | D | D | D | D | D |
 | `running` | - | - | - | - | - | D | D | D | - | - |
 | `handbrake` | - | - | - | - | - | D | D | D | d | d |
-| `steer` | C | - | - | D | D | D | D | D | - | - |
+| `steer` | C | - | - | C | D | D | D | D | - | - |
 | `pos` | C | D | D | C | D | D | D | D | - | - |
-| `vel` | C | - | - | D | D | D | D | D | - | - |
-| `accel` | C | - | - | D | D | D | D | D | - | - |
-| `accel_kind` | C | - | - | D | D | D | D | D | - | - |
+| `vel` | C | - | - | C | D | D | D | D | - | - |
+| `accel` | C | - | - | - | D | D | D | D | - | - |
+| `accel_kind` | C | - | - | - | D | D | D | D | - | - |
 | `yaw_rate` | C | d | d | d | d | d | D | D | - | - |
-| `forward` | - | - | - | D | D | D | - | - | - | - |
-| `up` | - | - | - | D | D | D | - | - | - | - |
+| `forward` | - | - | - | C | D | D | - | - | - | - |
+| `up` | - | - | - | C | D | D | - | - | - | - |
 | `wheel_speed` | d | D | D | D | D | D | d | d | - | - |
 | `wheel_rot` | C | D | D | - | - | - | D | D | - | - |
 | `slip_ratio` | - | - | - | - | - | - | D | D | - | - |
 | `slip_kind` | - | - | - | - | - | - | D | D | - | - |
 | `slip_angle` | - | - | - | - | - | - | D | D | - | - |
-| `susp` | D | D | D | D | D | - | D | D | - | - |
-| `susp_vel` | d | d | d | D | D | - | d | d | - | - |
+| `susp` | D | D | D | C | D | - | D | D | - | - |
+| `susp_vel` | d | d | d | C | D | - | d | d | - | - |
 | `susp_norm` | - | D | D | - | - | - | D | D | - | - |
 | `puddle` | - | - | - | - | - | - | D | D | - | - |
 | `rumble` | - | - | - | - | - | - | D | D | - | - |
@@ -250,7 +251,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `clock` | d | d | d | d | d | d | d | d | d | d |
 | `a_long` | d | d | d | d | d | d | d | d | d | d |
 | `a_lat` | d | d | d | d | d | d | d | d | - | - |
-| `a_vert` | d | - | - | d | d | d | d | d | - | - |
+| `a_vert` | d | - | - | - | d | d | d | d | - | - |
 | `g_total` | d | d | d | d | d | d | d | d | - | - |
 | `body_slip` | d | - | - | d | d | d | d | d | - | - |
 | `curvature` | d | d | d | d | d | d | d | d | - | - |
@@ -262,7 +263,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `pedal_rate` | d | d | d | d | d | d | d | d | d | d |
 | `run_distance` | d | d | d | d | d | d | d | d | d | d |
 | `run_time` | d | d | d | d | d | d | d | d | d | d |
-| `airborne` | d | d | d | d | d | d | d | d | - | - |
+| `airborne` | d | d | d | - | d | d | d | d | - | - |
 | `rig_throttle` | C | C | C | C | C | C | C | C | C | C |
 | `rig_clutch` | C | C | C | C | C | C | C | C | C | C |
 | `rig_handbrake` | C | C | C | C | C | C | C | C | C | C |

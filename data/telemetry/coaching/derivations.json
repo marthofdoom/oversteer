@@ -1317,34 +1317,32 @@
      "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)"
     },
     "steer": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "confirmed",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "positive left: r +0.14 to +0.50 with the heading rate from positions (left positive), where the old negated sign gave r -0.37"
     },
     "vel": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "confirmed",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "car frame from the corrected forward and the roll vector as left: forward component = +speed; world velocity matches the positions' derivative (cosine 0.99999)"
     },
     "accel": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "absent",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "floats 34 and 35 match no motion (r 0.0 with speed x yaw rate, -0.4 with the change of speed): not decoded; derive from pos or speed"
     },
     "accel_kind": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "absent"
     },
     "forward": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "confirmed",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "the game's pitch vector points backwards (cosine -0.99 with the motion): negated"
     },
     "up": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "confirmed",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "cross(forward, left); z is up in WRCG, so the plan view is (x, y)"
     },
     "wheel_speed": {
      "status": "decoded",
@@ -1352,14 +1350,14 @@
      "note": "present; unit or sign still to verify"
     },
     "susp": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "confirmed",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "metres (not mm); the value falls as the wheel compresses, so negated; zero is the game's, not the unloaded wheel's. Left minus right wheels r 0.85-0.91 with the heading rate"
     },
     "susp_vel": {
-     "status": "decoded",
-     "evidence": "marth's WRC Generations capture of 2026-09-25 (Mexico, Media Luna and Autodromo de Leon)",
-     "note": "present; unit or sign still to verify"
+     "status": "confirmed",
+     "evidence": "decoder review of 2026-10-05 on marth's 3 WRC Generations captures (80175 packets)",
+     "note": "m/s, compression positive (slope -0.5 against d/dt of the position)"
     },
     "lap": {
      "status": "decoded",
@@ -1383,9 +1381,9 @@
     }
    },
    "gaps": [
-    "Counter-steer on the 2026-09-25 capture came out at 0.55 of cornering time (ACR: 0.09): the steer sign (or the yaw rate from positions) is probably wrong for WRCG; verify before coaching it.",
+    "Floats 34 and 35 are not an acceleration (no motion matches them): no acceleration channel; derive it from the positions and speed.",
     "No handbrake channel.",
-    "Acceleration units (m/s^2 or g) and suspension units unverified."
+    "Counter-steer: the steer sign is now fixed (positive left); the 0.55 counter-steer fraction of 2026-09-25 came from the old sign and has to be measured again."
    ]
   },
   "dirt": {

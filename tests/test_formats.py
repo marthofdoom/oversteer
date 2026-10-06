@@ -244,6 +244,40 @@ def test_codemasters_motion_and_wheels():
     assert abs(sample.idle_rpm - 800) < 0.01
 
 
+def wrcg_full():
+    """A WRC Generations packet as marth's captures show it: z is up, the
+    "pitch" vector (14:17) points backwards, the "roll" vector (11:14) is the
+    car's left, suspension in metres that fall as it compresses."""
+    floats = list(struct.unpack('<70f', codemasters(6000, 7500, idle=800, size=280)))
+    floats[0:4] = [95.0, 90.0, 1200.0, 3.98]
+    floats[4:7] = [100.0, -40.0, 5.0]                           # position, z up
+    floats[8:11] = [0.0, 20.0, 0.0]                             # world velocity: heading +y
+    floats[11:14] = [-1.0, 0.0, 0.0]                            # sideways: the car's left
+    floats[14:17] = [0.0, -1.0, 0.0]                            # "forward", reversed
+    floats[17:21] = [0.40, 0.42, 0.44, 0.46]                    # suspension RL, RR, FL, FR (m)
+    floats[21:25] = [0.1, 0.2, 0.3, 0.4]                        # suspension velocity (m/s)
+    floats[25:29] = [19.0, 19.5, 20.0, 20.5]
+    floats[30] = 0.5                                            # steering: half left
+    floats[34:36] = [0.5, -1.0]
+    return struct.pack('<70f', *floats)
+
+
+def test_wrcg_motion_steer_and_suspension():
+    # Against marth's WRCG captures: the vector at 14:17 has cosine -0.99
+    # with the direction of motion, the one at 11:14 is the left (cosine
+    # 0.999 with up x forward), steer 30 correlates +0.2..0.5 with the
+    # heading rate (left positive) and the left wheels' suspension reads
+    # high in a left turn (r 0.9 with it) and the rear's falls under power
+    sample = decode_sample(wrcg_full())
+    assert sample.game == 'wrcg'
+    assert sample.forward == (0.0, 1.0, 0.0) and sample.up == (0.0, 0.0, 1.0)
+    assert sample.vel == (20.0, 0.0, 0.0)
+    assert sample.steer == 0.5
+    assert all(abs(a - b) < 1e-5 for a, b in zip(sample.susp, (-0.44, -0.46, -0.40, -0.42)))   # FL, FR, RL, RR
+    assert all(abs(a - b) < 1e-5 for a, b in zip(sample.susp_vel, (0.3, 0.4, 0.1, 0.2)))
+    assert sample.accel is None                                  # floats 34, 35 are not an acceleration
+
+
 def test_eawrc_motion_and_stage():
     sample = decode_sample(eawrc(vehicle_forward_direction_z=1.0, vehicle_left_direction_x=1.0,
                                  vehicle_up_direction_y=1.0, vehicle_velocity_x=1.0, vehicle_velocity_z=25.0,
