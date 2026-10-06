@@ -7,6 +7,8 @@ import time
 from locale import gettext as _
 from xml.sax.saxutils import escape
 
+from .timefmt import clock
+
 DISCIPLINES = {
     'rally-stage': _("Rally stage"), 'hillclimb': _("Hillclimb"), 'circuit': _("Circuit"),
     'rallycross': _("Rallycross"), 'drift': _("Drift"), 'free-roam': _("Free roam"),
@@ -172,14 +174,6 @@ def coaching_lines(tips, advice=None):
             for badge, text, kind in coaching_items(tips, advice)]
 
 
-def clock(seconds):
-    """m:ss.s, '–' for none."""
-    if seconds is None:
-        return '–'
-    minutes = int(seconds // 60)
-    return '{}:{:04.1f}'.format(minutes, seconds - 60 * minutes)
-
-
 def signed(delta):
     """±s.s with a real minus sign, '–' for none; a difference that rounds to nothing is ±0.0, never +0.0 or -0.0."""
     if delta is None:
@@ -270,15 +264,15 @@ def splits_row(found):
         bounds.append((r.get('d0'), r.get('d1')))
         name = r['name'][4:] if r['name'].startswith('the ') else r['name']
         rows.append((name if unit == 'sectors' else '{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
-                     '–' if r['last'] is None else '{:.1f}'.format(r['last']), text,
-                     '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone, save))
+                     clock(r['last']), text,
+                     clock(r['best']), tone, save))
     delta = None if last is None or pb is None else last - pb
     new_pb = bool(found.get('new_pb'))
     rows.append((_("Stage"), clock(last), '–' if delta is None else ('\u2605 ' if new_pb else '') + signed(delta), clock(pb),
                  'none' if delta is None else 'gold' if new_pb else 'ahead-gain' if round(delta, 1) <= 0 else 'behind-lose',
                  '–' if delta is None or round(delta, 1) <= 0 else '{:.1f}'.format(delta)))
     gain = found.get('gain')
-    rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')),
+    rows.append((_("Sum of best"), '', '' if gain is None else signed(-gain), clock(found.get('possible')),
                  'gold', ''))
     pot = found.get('potential')
     avail = []
@@ -294,12 +288,13 @@ def splits_row(found):
         estimated = estimated or low
         mark = '\u2248' if low else ''
         text, _save, tone = _split_cells(r)
-        sectors.append((r['name'], '–' if r['last'] is None else mark + '{:.1f}'.format(r['last']),
+        sectors.append((r['name'], '–' if r['last'] is None else mark + clock(r['last']),
                         text if r['last'] is not None else '–' if r['best'] is None
-                        else _("best {}").format(mark + '{:.1f}'.format(r['best'])), tone))
+                        else _("best {}").format(mark + clock(r['best'])), tone))
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
             'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
-            'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
+            'finish_confidence': found.get('finish_confidence'),
+            'finish_real': bool(found.get('finish_real')), 'tones': tones, 'bounds': bounds, 'rows': rows,
             'unit': unit, 'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs'), 'potential': pot,
             'potential_line': potential_line(pot), 'avail': avail}
 
@@ -648,6 +643,10 @@ def live_cursor(body, bounds):
     return found
 
 
+SPLIT_MATCH = 15.0               # m: a row's split is the reference's whose start is this close (the sectors' lines
+                                 # are placed from where the reference began, a few metres from the row's 0)
+
+
 def live_ribbon(body, track, bounds):
     """(tones per cell, current cell) for the splits ribbon while a run is on, or None: completed splits in the tone
     they were completed in, the rest unlit."""
@@ -658,12 +657,18 @@ def live_ribbon(body, track, bounds):
     for b in bounds:
         g = -1
         if ref and b and b[0] is not None:
-            for i, s in enumerate(ref['splits']):
-                if abs(s['d0'] - b[0]) < 2.0:
-                    g = i
-                    break
+            near = min(range(len(ref['splits'])), key=lambda i: abs(ref['splits'][i]['d0'] - b[0]), default=None)
+            if near is not None and abs(ref['splits'][near]['d0'] - b[0]) < SPLIT_MATCH:     # S1 starts a couple of m on
+                g = near
         tones.append(track.tones.get(g, 'none'))
     return tones, live_cursor(body, bounds)
+
+
+def ref_name(ref):
+    """What the live reference is called: 'PB' only when it is the stage's PB, else 'Run n'."""
+    if ref.get('pb') is False:
+        return _("Run {}").format(ref['n']) if ref.get('n') is not None else _("best run")
+    return _("PB")
 
 
 def live_delta_view(body, bounds=None, unit='sections'):
@@ -684,7 +689,7 @@ def live_delta_view(body, bounds=None, unit='sections'):
             label = '{}{} {}'.format('S' if unit == 'sectors' else '', cur + 1, signed2(split['delta'])) if cur is not None else '–'
         else:
             label = signed2(split['delta'])
-    return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'split': label,
+    return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'ref_name': ref_name(ref), 'split': label,
             'finish': clock(body['predicted']), 'dim': body['state'] == 'stale'}
 
 
@@ -693,7 +698,7 @@ def live_done_view(body, found=None, calls=None):
     · SoB 3:04.0 · 3 gold splits · 3 calls in the debrief', from the splits row `found` and the debrief's count)."""
     final = body.get('final') or {}
     ref = body.get('ref')
-    parts = ['PB ' + clock(ref['time'])] if ref else [_("No PB to compare with yet")]
+    parts = [ref_name(ref) + ' ' + clock(ref['time'])] if ref else [_("No PB to compare with yet")]
     if found:
         if found.get('sob') is not None:
             parts.append(_("SoB") + ' ' + clock(found['sob']))

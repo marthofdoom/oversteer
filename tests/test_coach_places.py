@@ -81,7 +81,7 @@ def test_a_section_that_lost_time_is_named_with_its_place_numbers_and_action(tmp
     two_runs(h, second={'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'exit_speed': 20.0 - 5 * KMH, 'loss': (0.4, 0.2)})
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert tip.id == 'corner.section:{}:600'.format(STAGE_KEY) and tip.kind == 'tip'
-    ref = 'Test car, 200.0 s on {}'.format(coach._date(h.t - DAY))
+    ref = 'Test car, 3:20.0 on {}'.format(coach._date(h.t - DAY))
     assert tip.text == ('On Test Stage, the 3 right at 0.6 km, 0.6 s behind your best clean run here ({}): you braked 25 m '
                         'earlier, were 7 km/h slower at the slowest point and left 5 km/h slower. '
                         'Brake about 25 m later, as your best run did.'.format(ref))
@@ -245,7 +245,7 @@ def test_the_best_run_yet_is_praised_with_where_it_was_won(tmp_path):
     h.drive(corners_with(second={'brake_d': 30.0, 'min_speed': 10.0, 'exit_speed': 20.0 + 5 * KMH,
                                  'loss': (-0.5, -1.4)}), result_time=197.0)
     [praise] = h.by_id('corner.best')
-    assert praise.text == ('On Test Stage, your best clean run yet in the Test car: 3.0 s quicker than {} (200.0 s). '
+    assert praise.text == ('On Test Stage, your best clean run yet in the Test car: 3.0 s quicker than {} (3:20.0). '
                            '1.9 s of it in the 3 right at 0.6 km, where you braked 20 m later, took the same '
                            'minimum speed and left 5 km/h faster.'.format(coach._date(h.t - DAY)))
     assert praise.kind == 'praise'
@@ -290,17 +290,17 @@ def test_best_run_yet_needs_to_beat_every_earlier_clean_run_not_just_the_referen
         corners = corners_with(second={'loss': loss} if loss else None)
         corners[0]['section_t'] = first
         return corners
-    # the reference is ranked by the time after the start: run 1 (212 - 10) is ahead of run 2 (208.3 - 4)
+    # the reference is the PB by stage time: run 2 (208.3), not run 1 (212, but 202 after its long start)
     h.drive(timed(10.0), result_time=212.0)
     h.drive(timed(4.0), result_time=208.3)
     h.drive(timed(4.0, loss=(0.4, 0.5)), result_time=210.5)
     assert not h.by_id('corner.best:')
     texts = ' '.join(t.text for t in h.tips(show_all=True))
-    assert 'your quickest run after the start' in texts and 'your best clean run yet' not in texts
+    assert 'your best clean run' in texts and 'Test car, 3:28.3' in texts and 'your best clean run yet' not in texts
     # quicker than all of them is still praised, against the quickest run
     h.drive(timed(4.0), result_time=207.0)
     [praise] = h.by_id('corner.best:')
-    assert '1.3 s quicker than' in praise.text and '(208.3 s)' in praise.text
+    assert '1.3 s quicker than' in praise.text and '(3:28.3)' in praise.text
 
 
 def test_a_learning_run_a_first_run_and_other_conditions_get_no_corner_tips(tmp_path):
@@ -719,7 +719,8 @@ def test_a_section_with_both_traces_is_diagnosed_on_the_same_metres(tmp_path):
     a = drive_traced(h, v2=14.0, v3=10.0)
     drive_traced(h, v2=10.0, v3=10.0, reference=a)
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
-    ref = 'Test car, {:.1f} s on {}'.format(a[0][-1][C['t']], coach._date(h.t - DAY))
+    from oversteer.timefmt import span
+    ref = 'Test car, {} on {}'.format(span(a[0][-1][C['t']]), coach._date(h.t - DAY))
     assert tip.text == ('On Test Stage, the 2 right at 1.1 km, 1.3 s behind your best clean run here ({}): you braked at the '
                         'same place, took 64 km/h off on the brake where your best run took 50 km/h and were 14 km/h slower '
                         'at the slowest point (36 against 51). Keep that braking point and brake less: carry 14 km/h '
@@ -788,7 +789,7 @@ def test_a_learning_run_has_its_spin_described_and_a_run_that_beat_the_reference
                          third={'brake_d': 30.0, 'exit_speed': 20.0 + 5 * KMH, 'loss': (-0.5, -1.4)}),
             result_time=197.0)
     [tip] = [t for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
-    assert 's behind your previous best clean run here (Test car, 200.0 s on ' in tip.text
+    assert 's behind your previous best clean run here (Test car, 3:20.0 on ' in tip.text
 
 
 def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):

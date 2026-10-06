@@ -50,23 +50,23 @@ What you get, all from the game's telemetry (no overlay, nothing injected into t
   it can be limited to this computer.
 
 <p align="center">
-  <img src="docs/images/splits-mobile.png" width="300" alt="The web page on a phone with the splits table open (real output)">
+  <img src="docs/images/splits-mobile.png" width="300" alt="The web page on a phone with the sector table open: S1, S2, S3 against the PB, the sum of best and the potential lap (real output)">
   &nbsp;&nbsp;
   <img src="docs/images/telemetry-web.png" width="560" alt="The web page on a laptop: the splits ribbon with the potential lap, the last run, the splits and the coaching (real output)">
 </p>
-<p align="center"><sub>The phone/laptop page on the author's own runs: the splits sheet and the coaching.</sub></p>
+<p align="center"><sub>The phone/laptop page on the author's own runs: the game's three sectors (S1 to S3) with the potential lap, and the coaching.</sub></p>
 
 The Telemetry > Run view lines the run up against your best: speed, pedals, steering, gear and
 revs as strips over the stage, a stage map drawn from the game's positions, and where the time went
 with the coach's advice for each split. The Live view shows the delta to your best as you drive.
 
 <p align="center">
-  <img src="docs/images/telemetry-run.png" width="640" alt="Telemetry, Run view: strips against the personal best, the stage map coloured by time per split and where the time went, with the advice for one split (real output)">
+  <img src="docs/images/telemetry-run.png" width="640" alt="Telemetry, Run view of the PB compared with the next best run: strips, the stage map coloured by time per split and where the time went, with the advice for one split (real output)">
   &nbsp;
-  <img src="docs/images/telemetry-live.png" width="640" alt="Telemetry, Live view in the middle of a run: gear, speed, delta to the best, pedals, steering, G-G and the stage position (a capture replayed through the live path)">
+  <img src="docs/images/telemetry-live.png" width="640" alt="Telemetry, Live view in the middle of a run: gear, speed, delta to the PB, the sector ribbon (S1 done, S2 under way), pedals, steering, G-G and the stage position (a capture replayed through the live path)">
 </p>
-<p align="center"><sub>Run view (left) and Live view (right), both from the author's own captures; the live image is a capture
-replayed through the live path.</sub></p>
+<p align="center"><sub>Run view (left, the PB against the next best run) and Live view (right, a slower run against the PB), both from the
+author's own captures; the live image is a capture replayed through the live path.</sub></p>
 
 ### Quick setup
 

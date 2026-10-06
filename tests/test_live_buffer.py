@@ -440,3 +440,18 @@ def test_the_live_position_is_the_plan_of_the_game():
 
     assert position('acr', (10.0, 700.0, -30.0)) == (10.0, 700.0, 30.0)
     assert position('wrcg', (10.0, 20.0, 5.0)) == (10.0, 5.0, 20.0)
+
+
+def test_the_live_reference_says_whether_it_is_the_pb(tmp_path):
+    from oversteer.telemetry_store import open_store
+    from tests.test_coach_wiring import _timed_run
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    stage = 'acr:wales:afon-bidno-severn'
+    quick = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
+    slow = _timed_run(store, stage, result=210.0, course=5000.0, end_speed=40.0)
+    car = store.run(quick)['car']
+    ref = live_buffer.load_reference(store, stage, car, exclude=slow)
+    assert ref.run == quick and ref.view['pb'] is True and ref.view['n'] is not None
+    ref = live_buffer.load_reference(store, stage, car, exclude=quick)       # the PB is the run shown: the next best
+    assert ref.run == slow and ref.view['pb'] is False and ref.view['n'] is not None
+    store.close()

@@ -434,16 +434,17 @@ def run_class(finished, course, stage_length, events, started=None, last_started
     return 'clean'
 
 
-def _grid_time(r):
-    """The time a run is ranked by as a reference: its stage time less the first section's, which holds the
-    launch (a 38 s start is not a quick stage)."""
-    return r['result_time'] - (r.get('first_section') or 0.0)
+def stage_pb_id(reader, stage, car_id):
+    """The id of the PB: the quickest finished clean run of the car on the stage among those that rank, or None."""
+    ranked = reader.stage_runs(stage, car=car_id, limit=60, ranked=True)
+    finished = [r for r in ranked if r['finished'] == 1 and r['result_time'] and r['run_class'] == 'clean']
+    return min(finished, key=lambda r: r['result_time'])['id'] if finished else None
 
 
 def reference_run(candidates, result_time=None, wet=None):
     """The fastest finished run among `candidates` (Store.stage_runs rows
-    of the same car and stage, class clean or learning; by stage time less the
-    first section's, _grid_time) with the same
+    of the same car and stage, class clean or learning; by stage time, so the
+    reference is the PB) with the same
     wetness; None when there is none. A run with unknown wetness on either
     side is comparable."""
     best = None
@@ -452,7 +453,7 @@ def reference_run(candidates, result_time=None, wet=None):
             continue
         if wet not in (None, 'unknown') and r.get('wet') not in (None, 'unknown') and r['wet'] != wet:
             continue
-        if best is None or _grid_time(r) < _grid_time(best):
+        if best is None or r['result_time'] < best['result_time']:
             best = r
     return best
 

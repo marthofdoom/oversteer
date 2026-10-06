@@ -73,6 +73,9 @@ def _label(row, n):
     return 'Run {} · {}'.format(n, day) if day else 'Run {}'.format(n)
 
 
+stage_pb_id = cc.stage_pb_id
+
+
 def recent_runs(reader, car_id, limit=12, namespace=None):
     """The car's recent runs on the stage of its latest run, newest first: id, n, started, time, finished,
     run_class, wet, stage, stage_name, pb (the quickest finished clean run), trace (it has one). []
@@ -87,9 +90,7 @@ def recent_runs(reader, car_id, limit=12, namespace=None):
         return []
     rows = reader.stage_runs(stage, car=car_id, limit=60)
     classes = {r['id']: r['run_class'] for r in rows}
-    ranked = reader.stage_runs(stage, car=car_id, limit=60, ranked=True)           # the PB among the runs that rank
-    finished = [r for r in ranked if r['finished'] == 1 and r['result_time'] and r['run_class'] == 'clean']
-    pb = min(finished, key=lambda r: r['result_time'])['id'] if finished else None
+    pb = stage_pb_id(reader, stage, car_id)
     shown = [r for r in rows if r['run_class'] in RUN_CLASSES][:limit]
     have = reader.trace_runs(r['id'] for r in shown)
     numbers, out = {}, []
@@ -123,9 +124,25 @@ def previous_run(reader, run, before=None):
 
 
 def candidates(reader, run):
-    """{'pb': the PB run row or None, 'prev': the previous run's row or None}, rows as stage_runs gives them."""
+    """{'pb': the PB run row or None, 'prev': the previous run's row or None}, rows as stage_runs gives them. For
+    the PB itself 'pb' is the next best run (any other ranked run, later ones too): a run is never its own PB."""
     before = _before(reader, run)
-    return {'pb': pb_run(reader, run, before), 'prev': previous_run(reader, run, before)}
+    pb_before = before
+    if run['stage'] and stage_pb_id(reader, run['stage'], run['car']) == run['id']:
+        pb_before = reader.stage_runs(run['stage'], exclude=run['id'], limit=60, car=run['car'], ranked=True)
+    return {'pb': pb_run(reader, run, pb_before), 'prev': previous_run(reader, run, before)}
+
+
+ROLE_NAMES = {'pb': 'PB', 'next': 'next best', 'best': 'best earlier', 'previous': 'previous'}     # (untranslated keys)
+
+
+def role(reader, run, kind, other):
+    """What the comparison `other` (a row or None) is to `run`: 'pb' (the stage's PB), 'next' (the next best, where
+    `run` is the PB), 'best' (the best earlier run, which is not the PB), 'previous' or 'run' (a chosen one)."""
+    if kind != 'pb' or other is None:
+        return 'previous' if kind == 'prev' else kind
+    pb = stage_pb_id(reader, run['stage'], run['car'])
+    return 'next' if pb == run['id'] else 'pb' if pb == other['id'] else 'best'
 
 
 def resolve(reader, run, vs):
@@ -145,7 +162,7 @@ def resolve(reader, run, vs):
 
 def head(reader, run_id, tips=None, namespace=None):
     """One run's header: id, n, started, time, finished, run_class, stage, stage_name, car, car_name, wet,
-    compare (the PB and the previous run as {id, run, n, time, label, delta}: delta is this run's time less
+    compare (the PB and the previous run as {id, run, n, time, label, delta, role}: delta is this run's time less
     theirs), `delta_pb`, `limiter` (rpm, from the car's model), `game`, and `advice` (the coach's tips about this run, as Tip.to_dict() gives them, when
     `tips` -- all of the car's tips -- is given). None for a run that does not exist."""
     run = reader.run(run_id)
@@ -159,10 +176,10 @@ def head(reader, run_id, tips=None, namespace=None):
     compare = []
     for kind in ('pb', 'prev'):
         other = found[kind]
-        entry = {'id': kind, 'run': None, 'n': None, 'time': None, 'label': None, 'delta': None}
+        entry = {'id': kind, 'run': None, 'n': None, 'time': None, 'label': None, 'delta': None, 'role': kind}
         if other is not None:
             n = _numbers(reader, other['session'], numbers).get(other['id'])
-            entry.update(run=other['id'], n=n, time=other['result_time'], label=_label(other, n),
+            entry.update(run=other['id'], n=n, role=role(reader, run, kind, other), time=other['result_time'], label=_label(other, n),
                          delta=None if mine is None else mine - other['result_time'])
         compare.append(entry)
     advice = [t for t in (tips or []) if (t.get('place') or {}).get('run') == run_id]
@@ -445,7 +462,7 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
 
 def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
     """The Run view's data for `run_id` against `vs` ('pb', 'prev' or a run id):
-    {run, vs, ref ({id, n, time, label} or None), step, length, limiter (rpm), time, ref_time, channels, this, cmp, x, z, sections,
+    {run, vs, ref ({id, n, time, label, role} or None), step, length, limiter (rpm), time, ref_time, channels, this, cmp, x, z, sections,
     sectors}: `this` and `cmp` (None without a comparison) map each of CHANNELS to its values on the grid (points `step` m apart from 0), `x`
     and `z` are this run's position (None where it has none), `sections` the coach's sections (_section_rows) and
     `sectors` the game's, and `potential` (the stage's three layers, user / grip / car seconds, or None). None for an
@@ -479,7 +496,8 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
         info = None
         if other_rows:
             n = _numbers(reader, other['session'], numbers).get(other['id'])
-            info = {'id': other['id'], 'n': n, 'time': other['result_time'], 'label': _label(other, n)}
+            info = {'id': other['id'], 'n': n, 'time': other['result_time'], 'label': _label(other, n),
+                    'role': role(reader, run, kind, other)}
         car = reader.car_by_id(run['car']) if run['car'] is not None else None
         return {'run': run['id'], 'vs': kind, 'ref': info, 'step': step, 'length': length,
                 'limiter': ((car or {}).get('model') or {}).get('limiter'),

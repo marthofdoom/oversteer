@@ -471,7 +471,7 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
             <div class="delta" id="deltabox" hidden>
               <div class="dv num" id="dv">±0.00</div>
               <div class="dbar" id="dbar"><i id="dbar-i"></i></div>
-              <div class="dmeta"><span>vs PB <b class="num" id="pb2">–</b> · split <b class="num" id="dsplit">–</b></span><span>finish ≈ <b class="num" id="pred">–</b></span></div>
+              <div class="dmeta"><span><span id="refname">vs PB</span> <b class="num" id="pb2">–</b> · split <b class="num" id="dsplit">–</b></span><span>finish ≈ <b class="num" id="pred">–</b></span></div>
             </div>
             <p class="note delta-note" id="delta-note" hidden></p>
           </div>
@@ -802,17 +802,18 @@ function tipItem(t, kind) {
 
 // -- times: m:ss.s, signed tenths with the true minus --
 
-function clock(t) {
+function clock(t) {                       // m:ss.s; 28.7 under a minute, h:mm:ss.s from an hour (oversteer/timefmt.py)
   if (t == null) return "–";
-  const m = Math.floor(t / 60), s = t - m * 60;
-  return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
+  const q = Math.round(t * 10), h = Math.floor(q / 36000), m = Math.floor(q % 36000 / 600), s = (q % 600) / 10;
+  const ss = (s < 10 && (h || m) ? "0" : "") + s.toFixed(1);
+  return h ? h + ":" + (m < 10 ? "0" : "") + m + ":" + ss : m ? m + ":" + ss : ss;
 }
 function signed(d, dp) {                 // a difference that rounds to nothing is ±0.0, never +0.0 or −0.0
   if (d == null) return "–";
   const k = Math.pow(10, dp == null ? 1 : dp), r = Math.round(Math.abs(d) * k) / k * (d < 0 ? -1 : 1);
   return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp == null ? 1 : dp);
 }
-function seconds(t) { return t == null ? "–" : t.toFixed(1); }
+function seconds(t) { return clock(t); }
 
 // -- the splits row and its sheet --
 // LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when ahead of
@@ -843,7 +844,7 @@ function lastBadge(sp) {
   return {text: signed(d), cls: Math.round(d * 10) <= 0 ? "t-ahead-gain" : "pos-slower"};
 }
 // The times end at the stage's flying finish where the stage table has one
-function finishNote(sp) { return sp.finish_m != null ? "Times run to the estimated flying finish of the stage." : ""; }
+function finishNote(sp) { return sp.finish_m == null ? "" : sp.finish_real ? "Times run to the stage's finish line." : "Times run to the estimated flying finish of the stage."; }
 
 let splitsOpen = false;
 try { splitsOpen = localStorage.getItem("splitsOpen") === "1"; } catch (e) {}
@@ -887,7 +888,7 @@ function splitsTable(sp) {
   const sob = el("tr");
   sob.appendChild(el("td", "Sum of best", "name"));
   sob.appendChild(el("td", ""));
-  sob.appendChild(el("td", sp.gain != null ? MINUS + sp.gain.toFixed(1) : "", "t-gold"));
+  sob.appendChild(el("td", sp.gain != null ? signed(-sp.gain) : "", "t-gold"));
   sob.appendChild(el("td", clock(sp.possible)));
   sob.appendChild(el("td", ""));
   if (avail) sob.appendChild(el("td", ""));
@@ -992,7 +993,7 @@ function lastRun(sp, sessionList) {
   $("lr-d").title = finishNote(sp);
   $("lr-pb").textContent = clock(sp.best);
   $("lr-sob").textContent = clock(sp.possible);
-  $("lr-gain").textContent = sp.gain == null ? "–" : MINUS + sp.gain.toFixed(1);
+  $("lr-gain").textContent = sp.gain == null ? "–" : signed(-sp.gain);
   stats.hidden = false;
   // The times of the finished runs on this stage, from the sessions already read: the last twelve, oldest left
   const times = [];
@@ -1161,6 +1162,8 @@ const LV_WINDOW = 12, LV_KEEP = 30, GRAV = 9.80665, LV_GAP = 0.5;
 let lastSplits = null;                     // the splits row's data (showSplits): the ribbon's cells and their bounds
 const bySector = (sp) => !!sp && sp.unit === "sectors";
 // A difference to dp decimals (two live): one that rounds to nothing is ±0.00, never +0.00 or −0.00
+// what the live reference is called: "PB" only when it is the stage's PB, else its run number
+function liveRefName(ref) { return ref.pb === false ? (ref.n != null ? "Run " + ref.n : "best run") : "PB"; }
 function lvSigned(d, dp) {
   if (d == null) return "–";
   const k = Math.pow(10, dp), r = Math.round(Math.abs(d) * k) / k * (d < 0 ? -1 : 1);
@@ -1246,7 +1249,8 @@ function liveRibbon(b) {
   let cur = null;
   sp.splits.forEach((r, j) => { if (!fin && d != null && r.d0 != null && r.d1 != null && d >= r.d0 && d < r.d1) cur = j; });
   sp.splits.forEach((r, j) => {
-    const g = ref && r.d0 != null ? rs.findIndex((x) => Math.abs(x.d0 - r.d0) < 2) : -1;
+    let g = -1, gap = 15;                     // the reference's split whose start is within 15 m (S1's line is a couple of m on)
+    if (ref && r.d0 != null) rs.forEach((x, k) => { const e = Math.abs(x.d0 - r.d0); if (e < gap) { gap = e; g = k; } });
     cells[j].className = j === cur ? "cur" : lr.tones[g] ? "ls-" + lr.tones[g] : "";
   });
   return cur == null ? -1 : cur;
@@ -1307,6 +1311,7 @@ function liveShow(b, force) {
     bar.style.background = f > 0 ? "var(--slower)" : "var(--faster)";
     bar.style.left = f > 0 ? "50%" : (50 + f * 50) + "%";
     bar.style.width = Math.abs(f) * 50 + "%";
+    $("refname").textContent = "vs " + liveRefName(b.ref);
     $("pb2").textContent = clock(b.ref.time);
     const sp = liveUnit(b).split;
     let label = "–";
@@ -1329,7 +1334,7 @@ function liveFillDone(b) {
   d.textContent = f.delta != null ? lvSigned(f.delta, 2) : "";
   d.className = "d num " + (f.delta != null && f.delta > 0.005 ? "pos-slower" : f.delta != null && f.delta < -0.005 ? "pos-faster" : "");
   const parts = [];
-  if (b.ref) parts.push("PB " + clock(b.ref.time));
+  if (b.ref) parts.push(liveRefName(b.ref) + " " + clock(b.ref.time));
   else parts.push("No PB to compare with yet");
   if (lastSplits) {
     if (lastSplits.possible != null) parts.push("SoB " + clock(lastSplits.possible));
@@ -1918,6 +1923,18 @@ function rvMapFrame(w, h, pad) {
   const ox = (w - (x1 - x0) * sc) / 2, oy = (h - (z1 - z0) * sc) / 2;
   return (i) => D.x[i] == null ? null : [ox + (D.x[i] - x0) * sc, h - (oy + (D.z[i] - z0) * sc)];
 }
+// where the START label goes: beside the marker, the spot furthest from the road (right or left of it, above or below), kept on the map
+function rvStartLabel(road, a, w, h, tw) {
+  let best = null;
+  for (const [dx, right] of [[6, false], [-6, true]]) for (const dy of [14, -8, 26, -20]) {
+    const x0 = a[0] + dx - (right ? tw : 0), y1 = a[1] + dy;
+    if (x0 < 0 || x0 + tw > w || y1 - 9 < 0 || y1 + 3 > h) continue;
+    let gap = 1e9;
+    for (const p of road) { if (!p) continue; const ex = Math.max(x0 - p[0], 0, p[0] - x0 - tw), ey = Math.max(y1 - 9 - p[1], 0, p[1] - y1 - 3); gap = Math.min(gap, ex * ex + ey * ey); }
+    if (!best || gap > best[0] + 1e-6) best = [gap, a[0] + dx, y1, right];
+  }
+  return best ? [best[1], best[2], best[3]] : [a[0] + 6, a[1] + 12, false];
+}
 function rvDrawMap() {
   const D = RV.data, cv = $("c-map"), C = RV.colors;
   const hasPos = D.x && D.x.some((v) => v != null);
@@ -1955,7 +1972,7 @@ function rvDrawMap() {
   }
   const a = P(rvIdx(0)), b = P(D.x.length - 1);
   g.font = "700 10px " + C.sans;
-  if (a) { g.fillStyle = C.faster; g.fillRect(a[0] - 3, a[1] - 3, 6, 6); g.fillText("START", a[0] > w - 44 ? a[0] - 6 - g.measureText("START").width : a[0] + 6, a[1] + 12); }
+  if (a) { g.fillStyle = C.faster; g.fillRect(a[0] - 3, a[1] - 3, 6, 6); const L = rvStartLabel(path(0, D.x.length - 1), a, w, h, g.measureText("START").width); g.fillText("START", L[2] ? L[0] - g.measureText("START").width : L[0], L[1]); }
   if (b) { g.fillStyle = C.text; g.fillRect(b[0] - 3, b[1] - 3, 6, 6); g.fillText("FINISH", b[0] > w - 60 ? b[0] - 44 : b[0] + 6, b[1] + 12); }
   const c = P(rvIdx(RV.cursor));
   if (c) { g.fillStyle = C.text; g.beginPath(); g.arc(c[0], c[1], 5.5, 0, 7); g.fill(); g.strokeStyle = C.panel; g.lineWidth = 2; g.stroke(); }
@@ -2082,6 +2099,8 @@ function rvRenderCharts() {
   RV.colors = rvColors();
   rvDrawStrips(); rvDrawMap(); rvReadout(); rvMarkNow();
 }
+// what the comparison run is: [the chip's name, the legend's name]; the PB is only ever named PB when it is the PB
+const RV_ROLE = {pb: ["PB", "PB"], next: ["next best", "next best"], best: ["best earlier", "best earlier"], previous: ["previous", "previous"]};
 function rvHead() {
   const H = RV.head, D = RV.data;
   $("rv-stage").textContent = rvShortStage(H.stage_name) || "Run";
@@ -2096,13 +2115,16 @@ function rvHead() {
   const ref = D.ref;
   $("rv-ref").textContent = ref ? "vs " + ref.label + " " + clock(ref.time) : "No run to compare with yet";
   $("lg-this").textContent = "Run " + H.n;
-  $("lg-ref").textContent = ref ? ref.label + (D.vs === "pb" ? " · PB" : D.vs === "prev" ? " · previous" : "") : "no comparison";
+  $("lg-ref").textContent = ref ? ref.label + (RV_ROLE[ref.role] ? " · " + RV_ROLE[ref.role][1] : "") : "no comparison";
   $("gg-ref").textContent = ref ? "Run " + ref.n : "–";
   for (const b of document.querySelectorAll("[data-cmp]")) {
     const c = H.compare.find((x) => x.id === b.dataset.cmp);
     b.disabled = !c || c.run == null;
-    b.setAttribute("aria-pressed", String(b.dataset.cmp === D.vs));
-    b.textContent = b.dataset.cmp === "pb" ? "vs PB" + (c && c.n != null ? " · Run " + c.n : "") : "vs previous" + (c && c.n != null ? " · Run " + c.n : "");
+    const pc = H.compare.find((x) => x.id === "pb"), vc = H.compare.find((x) => x.id === "prev");
+    const same = pc && vc && pc.run != null && pc.run === vc.run;        // one run is both: one chip says so
+    b.hidden = same && b.dataset.cmp === "prev";
+    b.setAttribute("aria-pressed", String(b.dataset.cmp === D.vs || (same && b.dataset.cmp === "pb" && D.vs === "prev")));
+    b.textContent = (b.dataset.cmp === "pb" ? "vs " + (RV_ROLE[c && c.role] || RV_ROLE.pb)[0] + (same ? " · previous" : "") : "vs previous") + (c && c.n != null ? " · Run " + c.n : "");
   }
   $("map-key").hidden = !D.cmp;
 }

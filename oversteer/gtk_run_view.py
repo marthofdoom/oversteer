@@ -284,9 +284,15 @@ class RunView(Gtk.Box):
         self._advice = run_analysis.advice_by_section(head['advice'], data['sections'])
         self._quiet = True
         self._combo.set_active_id(str(run_id))
-        self._pb.set_active(vs == 'pb')
-        self._prev.set_active(vs == 'prev')
-        self._pb.set_sensitive(head['compare'][0]['run'] is not None)
+        pb = head['compare'][0]
+        same = pb['run'] is not None and pb['run'] == head['compare'][1]['run']     # one run is both: one chip says so
+        self._pb.set_active(vs == 'pb' or (same and vs == 'prev'))
+        self._prev.set_active(vs == 'prev' and not same)
+        self._prev.set_visible(not same)
+        self._pb.set_label(_("vs {}").format(_(run_analysis.ROLE_NAMES.get(pb['role'], 'PB'))) +
+                           (' · ' + _("previous") if same else '') +
+                           ('' if pb['n'] is None else ' · ' + _("Run {}").format(pb['n'])))
+        self._pb.set_sensitive(pb['run'] is not None)
         self._prev.set_sensitive(head['compare'][1]['run'] is not None)
         self._quiet = False
         self._show_state(None)
@@ -323,7 +329,7 @@ class RunView(Gtk.Box):
             _("vs {} {}").format(ref['label'], clock(ref['time'])) if ref else _("No run to compare with yet")) if x))
         self._legend.set_markup('<span foreground="{}">—</span> {}   <span foreground="{}">—</span> {}'.format(
             plot.SPEED, _("Run {}").format(head['n']), plot.REF,
-            GLib.markup_escape_text((ref['label'] + (' · PB' if data['vs'] == 'pb' else ' · ' + _("previous"))) if ref
+            GLib.markup_escape_text((ref['label'] + (' · ' + _(run_analysis.ROLE_NAMES[ref['role']]) if ref['role'] in run_analysis.ROLE_NAMES else '')) if ref
                                     else _("no comparison"))))
         self._store.clear()
         top = max([0.1] + [abs(s['loss']) for s in data['sections'] if s['loss'] is not None and not s['off']])
@@ -340,7 +346,7 @@ class RunView(Gtk.Box):
                                 if s['loss'] < -0.05 else plot.DIM, s['apex'],
                                 '–' if s.get('avail') is None or s['off'] else '{:.1f}'.format(s['avail'])])
         self._sectors.set_markup('   '.join('<b>{}</b> <tt>{}</tt> <span foreground="{}"><tt>{}</tt></span>'.format(
-            s['name'], '–' if s['time'] is None else ('≈' if s.get('confidence') == 'low' else '') + '{:.1f}'.format(s['time']),
+            s['name'], '–' if s['time'] is None else ('≈' if s.get('confidence') == 'low' else '') + clock(s['time']),
             plot.DIM if s['delta'] is None else plot.SLOWER if round(s['delta'], 1) > 0 else plot.FASTER,
             '' if s['delta'] is None else signed(s['delta'])) for s in data.get('sectors') or []))
         self._row_advice.set_text('')
