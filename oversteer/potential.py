@@ -568,87 +568,97 @@ def _ordinal(n):
     return {1: '1st', 2: '2nd', 3: '3rd'}.get(n, '{}th'.format(n))
 
 
-def _apex_sentence(s):
-    """What the grip allows at the apex against what the run took, '' where either is not known."""
-    pot, took = s.get('apex_kmh_pot'), s.get('apex_kmh')
-    if not pot or not took:
-        return ''
-    return 'The grip allows about {:.0f} km/h at the apex, you took {:.0f}.'.format(pot, took)
-
-
 def _slow_apex(s):
     pot, took = s.get('apex_kmh_pot'), s.get('apex_kmh')
     return bool(pot and took and pot - took >= SPEED_SAME)
 
 
-def _entry_how(s):
-    """What to say about the entry of a place from the run's own braking (no diagnosis against another pass): brake
-    later only where the run began braking BRAKE_SAME m or more before the grip layer needs to; a slow apex with
-    the braking there is braking less; else the apex sentence. Where the trace did not say, the general advice."""
+# Where a diagnosis puts the time it names (the phase said after "about N s is there")
+PHASE = {'EARLY-BRAKE': ', mostly into the bend', 'OVER-SLOWED': ', mostly into the bend',
+         'OVERSHOT': ', mostly into the bend', 'COASTING': ', mostly into the bend',
+         'LATE-THROTTLE': ', mostly on the exit', 'EXIT-BRAKE': ', mostly on the exit', 'GEAR': ', mostly on the exit',
+         'EARLY-APEX': ', mostly on the exit', 'SLOW-ARRIVAL': ', mostly before the braking'}
+GRIP_LEFT = 0.85                 # grip used at the apex under this: there was grip to spare (coach_diagnosis.GRIP_LEFT)
+
+
+def _trace_fix(s):
+    """(fix, side) from the run's own trace through a place, or None: braking BRAKE_SAME m or more before the grip
+    layer's point is "Brake N m later"; an apex that much under the layer's with grip left over is carrying that
+    much more (brake or lift less, by whether the run braked); an exit throttle that was not full is full throttle
+    sooner. `side` is 'entry' or 'exit': where the fix is. Never the apex sentence alone."""
     early = s.get('brake_early')
-    if (early is None and s.get('braked') is None) or (early is not None and early >= BRAKE_SAME):
-        return 'Brake later and carry the speed to the turn-in.'
-    if _slow_apex(s) and s.get('braked') is not False:
-        return 'Brake less: the grip allows about {:.0f} km/h at the apex, you took {:.0f}.'.format(
-            s['apex_kmh_pot'], s['apex_kmh'])
-    return _apex_sentence(s)
-
-
-def _exit_how(s):
-    """The same for the exit: full throttle sooner unless the exit's throttle was already full."""
+    if early is not None and early >= BRAKE_SAME:
+        return 'Brake {:.0f} m later.'.format(early), 'entry'
+    used = s.get('grip_used')
+    if _slow_apex(s) and used is not None and used < GRIP_LEFT:
+        return '{}: carry {:.0f} km/h more to the apex (the grip allows {:.0f}, you took {:.0f}).'.format(
+            'Brake less' if s.get('braked') else 'Lift less', s['apex_kmh_pot'] - s['apex_kmh'], s['apex_kmh_pot'],
+            s['apex_kmh']), 'entry'
     thr = s.get('exit_throttle')
-    if thr is None or thr < THROTTLE_FULL:
-        return 'Get to full throttle sooner after the apex.'
-    return _apex_sentence(s)
+    if thr is not None and thr < THROTTLE_FULL:
+        return 'Get to full throttle sooner after the apex.', 'exit'
+    return None
+
+
+def _term_side(term):
+    """Where a critique term's time is: the gear and the revs are on the exit, counter-steer is nowhere in particular."""
+    return 'exit' if term.startswith(('You were in', 'The revs')) else None
+
+
+def fix(s, term=None, diag=None):
+    """(the one thing to do, the phase said after the time) for a place, or None where nothing actionable is
+    known: the diagnosis's fix (with the phase its code gives), else the costliest critique term `term`, else what
+    the run's own trace shows (_trace_fix). The phase of a fix that is not the diagnosis's is the potential's own
+    cause where the fix agrees with it ('entry' is into the bend, 'exit' on the exit), else none."""
+    if diag is not None and diag.get('fix'):
+        return diag['fix'], PHASE.get(diag.get('code'), '')
+    found = (term, _term_side(term)) if term else _trace_fix(s)
+    if found is None:
+        return None
+    how, side = found
+    cause = s.get('cause')
+    return how, (', mostly into the bend' if side == 'entry' and cause == 'entry' else
+                 ', mostly on the exit' if side == 'exit' and cause == 'exit' else '')
 
 
 def call(s, term=None, diag=None):
-    """The fix for one place, in the coach's sentence: where, how much of the grip is used at the apex (not at a
-    kink: GRIP_QUOTE_MIN), how much time is there, then one thing to do. `diag` is the diagnosis of the run against
-    the quickest pass through the place (coach_diagnosis.diagnose_section): its fix is the one thing, else (no
-    fix) the critique's costliest sentence `term` where there is one, else what the grip allows at the apex. Without
-    a diagnosis `term` stands in for the general advice, which is said only where the run's own braking or throttle
-    agrees (_entry_how, _exit_how)."""
+    """The fix for one place, in the coach's sentence, or None where there is no fix to give (the place is then
+    not one the coach says: top3 goes on to the next). With a diagnosis that has a fix (`diag`: the run against the
+    quickest pass through the place, coach_diagnosis.diagnose_section) it owns the cause and the fix: "{Place}:
+    about {avail} s is there{phase}. {fix}", the phase from its code (PHASE). Without one, the potential's own
+    cause: a bend says where the time is, a corner how much of the grip is used at the apex (not at a kink:
+    GRIP_QUOTE_MIN), then the one thing to do, the critique's costliest sentence `term`, else the run's trace says
+    (fix)."""
+    found = fix(s, term, diag)
+    if found is None:
+        return None
+    how, phase = found
     place = where(s)
     place = place[0].upper() + place[1:]
     avail = s['available']
-    bend = s['grade'] == 'straight' or s['radius_m'] > CORNER_MAX_RADIUS
-    cause = s.get('cause') or 'exit'
-    if diag is not None:
-        how = diag.get('fix') or term or _apex_sentence(s)
-    elif term:
-        how = term
-    elif cause == 'entry':
-        how = _entry_how(s)
-    elif cause == 'exit':
-        how = _exit_how(s)
-    else:
-        how = _apex_sentence(s)
-    if bend:
-        head = '{}: about {:.1f} s is there, mostly {}'.format(
-            place, avail, 'on the exit' if cause == 'exit' else 'into the bend')
-        if how == 'Get to full throttle sooner after the apex.':
-            how = 'full throttle sooner and longer.'
-        elif how == 'Brake later and carry the speed to the turn-in.':
-            how = 'brake later.'
-        if how[:1].islower():
-            return head + ': ' + how
-        return head + ('. ' + how if how else '.')
+    if diag is not None and diag.get('fix'):
+        return '{}: about {:.1f} s is there{}. {}'.format(place, avail, phase, how)
+    if s['grade'] == 'straight' or s['radius_m'] > CORNER_MAX_RADIUS:
+        return '{}: about {:.1f} s is there{}. {}'.format(place, avail, phase, how)
     used = s.get('grip_used')
     grip = ''
     if used is not None and used >= GRIP_QUOTE_MIN:
         grip = 'you use {} of the grip; '.format('all' if used >= GRIP_ALL else '{:d} %'.format(round(100 * used)))
-    return '{}: {}about {:.1f} s is there.{}'.format(place, grip, avail, ' ' + how if how else '')
+    return '{}: {}about {:.1f} s is there. {}'.format(place, grip, avail, how)
+
+
+def places(rows, minimum=AVAILABLE_MIN):
+    """The places with at least `minimum` s available among `rows` (analyse_run's), the most first: a section an off
+    touched (time None) and the first section, which holds the launch, are not among them, nor is the last section
+    of a stage with no flying finish (the slow-down to the stop control)."""
+    found = [r for n, r in enumerate(rows) if r['time'] is not None and r['available'] is not None
+             and r['available'] >= minimum and r.get('split', n) > 0 and not r.get('tail')]
+    return sorted(found, key=lambda r: -r['available'])
 
 
 def top3(rows, minimum=AVAILABLE_MIN, count=TOP):
-    """The places with the most time available among `rows` (analyse_run's): the biggest `count` of at least
-    `minimum` s, a section an off touched (time None) and the first section, which holds the launch, not among
-    them, and the last section of a stage with no flying finish (the slow-down to the stop control), biggest
-    first."""
-    found = [r for n, r in enumerate(rows) if r['time'] is not None and r['available'] is not None
-             and r['available'] >= minimum and r.get('split', n) > 0 and not r.get('tail')]
-    return sorted(found, key=lambda r: -r['available'])[:count]
+    """The places with the most time available among `rows` (places()): the biggest `count`."""
+    return places(rows, minimum)[:count]
 
 
 def improved(now_rows, before_rows, minimum=IMPROVED_MIN):

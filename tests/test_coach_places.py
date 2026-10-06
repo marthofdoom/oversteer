@@ -125,11 +125,13 @@ def test_a_section_with_no_difference_in_the_numbers_says_where_the_time_went(tm
     two_runs(h, second={'loss': (0.7, 0.1)})
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert tip.text.endswith('The time went before the slowest point: look at where you braked.')
+    # no fix to give is no tip: a note, said once
     h = Stage(tmp_path / 'v.db')
     two_runs(h, second={'loss': (0.3, 0.3)})
-    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
-    assert tip.text.endswith('The time went across the whole section.')
-    assert 'line' not in tip.text.split('): ', 1)[1]
+    assert not [t for t in h.tips() if t.id.startswith('corner.section')]
+    [note] = [t for t in h.tips() if t.id.startswith('corner.note')]
+    assert note.kind == 'note' and note.text.endswith('The time went across the whole section.')
+    assert 'line' not in note.text.split('): ', 1)[1]
 
 
 def test_the_start_is_not_a_corner(tmp_path):
@@ -275,7 +277,7 @@ def test_a_gain_beside_an_off_or_at_the_finish_is_not_praised_and_slower_numbers
     # the last of the four sections is not named even for a loss
     h = Stage(tmp_path / 'v.db')
     h.drive(reference_corners(), result_time=200.0)
-    mine = corners_with(second={'loss': (0.4, 0.4)})
+    mine = corners_with(second={'loss': (0.4, 0.4), 'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'exit_speed': 20.0 - 5 * KMH})
     mine[3]['loss_entry'], mine[3]['loss_exit'] = 3.0, 3.0
     h.drive(mine, result_time=203.0)
     assert [t.id.split(':')[-1] for t in h.by_id('corner.section')] == ['600']
@@ -694,8 +696,9 @@ def test_a_run_through_the_real_path_is_coached_section_by_section(tmp_path):
     learner, reader = drive_stages(tmp_path, (30.0, 26.0))
     car = reader.car_list('_no_profile')[0]['id']
     tips = Coach(reader, now=2e9).tips('_no_profile', car, show_all=True)
-    sections = [t for t in tips if t.id.startswith('corner.section')]
-    assert sections and all(t.ref for t in sections)
+    # the sim's section lost 0.1 s with nothing to change that the numbers point at: a note, not a tip
+    sections = [t for t in tips if t.id.startswith(('corner.section', 'corner.note'))]
+    assert sections and all(t.ref or t.kind == 'note' for t in sections)
     assert sections[0].text.startswith('On stage eawrc:4:12, the ') and 's behind your best clean run here (' in sections[0].text
     assert not [t for t in tips if t.id.startswith('corner.loss')]     # the section tips replace the total
     learner.close()
@@ -751,7 +754,7 @@ def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):
 def test_the_last_section_of_a_run_that_did_not_finish_is_never_named(tmp_path):
     h = Stage(tmp_path / 't.db')
     h.drive(reference_corners(), result_time=200.0)
-    h.drive(corners_with(second={'loss': (0.4, 0.4)}, third={'loss': (7.0, 7.0)})[:3], finished=0, run_class='partial',
+    h.drive(corners_with(second={'loss': (0.4, 0.4), 'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'exit_speed': 20.0 - 5 * KMH}, third={'loss': (7.0, 7.0)})[:3], finished=0, run_class='partial',
             course=1500.0)
     named = [t.id for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert named == ['corner.section:{}:600'.format(STAGE_KEY)]

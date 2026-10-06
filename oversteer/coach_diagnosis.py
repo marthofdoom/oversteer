@@ -324,10 +324,11 @@ def measures_section(run_arr, ref_arr, sec, env=None):
     return out
 
 
-def diagnose_section(parts, loss=None):
+def diagnose_section(parts, loss=None, before=None):
     """The diagnosis of a section from measures_section's parts: the corner that lost the most time is diagnosed
     (diagnose()) and named; the section's own `loss` (the sum of the parts where None) is the time said. Returns
-    diagnose()'s dict plus `corner` (the corner diagnosed), `part_loss` and `parts` ([(corner d, loss, code)])."""
+    diagnose()'s dict plus `corner` (the corner diagnosed), `part_loss` and `parts` ([(corner d, loss, code)]).
+    `before` names the corner before the section (a slow arrival's fix)."""
     if not parts:
         return None
     total = sum(m['loss'] for _, m in parts) if loss is None else loss
@@ -336,7 +337,8 @@ def diagnose_section(parts, loss=None):
     else:
         k, m = max(parts, key=lambda p: p[1]['loss'])
     own = m['loss'] if abs(m['loss']) >= LOSS_MIN else total
-    d = diagnose(m, own)
+    n = [kk for kk, _ in parts].index(k)
+    d = diagnose(m, own, cc.corner_name(parts[n - 1][0]) if n else before)       # the corner before, in the section or out
     d.update(corner=k, part_loss=m['loss'], m=m,
              parts=[(round(kk['d']), round(mm['loss'], 2), diagnose(mm)['code']) for kk, mm in parts])
     return d
@@ -443,12 +445,13 @@ def _pick(code, f):
     return [f[k] for k in keys if k in f]
 
 
-def diagnose(m, loss=None):
+def diagnose(m, loss=None, before=None):
     """The one diagnosis of a stretch's measures `m` (measures()), given its time `loss` against the reference (s,
     negative: quicker; m['loss'] where None). Returns {'code', 'confidence' (high, medium, low), 'facts' [str: the
     ones this diagnosis states], 'fix' (str or None), 'evidence' [the conditions that fired]}. The rows are tried
     in order and the first that holds wins (docs/coach-diagnosis.md, the table). Facts are measured; a fix is given
-    only where the measures name it, and never names a cause that is not measured (the line only from positions)."""
+    only where the measures name it, and never names a cause that is not measured (the line only from positions).
+    `before` is the name of the corner before the stretch, for the fix of a slow arrival."""
     loss = m['loss'] if loss is None else loss
     f = _facts(m)
 
@@ -481,7 +484,8 @@ def diagnose(m, loss=None):
     # 1. SLOW-ARRIVAL: slower before either run braked, and the time went before the slowest point: the run-up
     if m['pre_dv'] <= -SLOW_ARRIVAL and entry_share >= 0.6:
         return out('SLOW-ARRIVAL', 'medium',
-                   'The time here was lost before the braking: look at the exit of the corner before.',
+                   'Leave {} {} faster: you were {} slower before braking here.'.format(
+                       before or 'the corner before', _km(m['pre_dv']), _km(m['pre_dv'])),
                    ['pre-braking {:.0f} km/h'.format(m['pre_dv']), 'entry share {:.0%}'.format(entry_share)])
     # 2. OVERSHOT: in faster, and it showed (at the grip limit, a slide, or the slowest point pushed later with the
     # grip not left over: with grip to spare a later slowest point is no overshoot), with the speed then lost

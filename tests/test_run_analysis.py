@@ -141,7 +141,8 @@ def test_advice_goes_to_the_section_its_place_falls_in():
 def test_tips_carry_their_place_in_the_coach_json(tmp_path):
     h = Stage(tmp_path / 't.db')
     first = h.drive(reference_corners(), result_time=200.0)
-    last = h.drive(corners_with(second={'brake_d': 75.0, 'loss': (0.4, 0.2)}), result_time=203.0)
+    last = h.drive(corners_with(second={'brake_d': 75.0, 'min_speed': 10.0 - 7 / 3.6, 'exit_speed': 20.0 - 5 / 3.6,
+                                      'loss': (0.4, 0.2)}), result_time=203.0)
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert tip.place['run'] == last and tip.place['stage'] == STAGE_KEY and tip.place['d'] == 600.0
     assert tip.place['d0'] < 600.0 < tip.place['d1'] and 'section_index' in tip.place

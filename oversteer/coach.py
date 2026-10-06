@@ -821,7 +821,15 @@ def _section_action(pattern, c, it):
         return 'The time went after the slowest point: look at how early you were back on the throttle.'
     if it['entry'] >= 0.7 * it['loss']:
         return 'The time went before the slowest point: look at where you braked.'
-    return 'The time went across the whole section.'
+    return None                 # no fix to give: the section is a note
+
+
+def _name_the_pass(diag, name):
+    """The diagnosis's words (facts and fix) with the run it compares against called `name` ('your best run' in
+    coach_diagnosis: the PB; a top-3 place is read against the quickest pass through it)."""
+    diag['facts'] = [f.replace('your best run', name) for f in diag['facts']]
+    if diag['fix']:
+        diag['fix'] = diag['fix'].replace('your best run', name)
 
 
 def _facts_say(facts):
@@ -841,13 +849,18 @@ def _diagnosed_where(it):
 
 def _worth_saying(lost):
     """The sections that lost time (biggest first) that are worth a tip of their own: a slow arrival is the corner
-    before's time, said there when that one lost too; a diagnosis with no fix (unclear, lost speed, at the limit)
-    only when no section of the run has a fix to say."""
+    before's time, said there when that one lost too; a diagnosis with no fix (unclear, lost speed, at the limit) is
+    no tip (_unexplained): a tip always has a fix."""
     lost_ns = {it['n'] for it in lost}
     said = [it for it in lost if not (it.get('diag') is not None and it['diag']['code'] == 'SLOW-ARRIVAL'
                                       and it['n'] - 1 in lost_ns)]
-    fixed = [it for it in said if it.get('diag') is None or it['diag']['fix']]
-    return fixed or said
+    return [it for it in said if it.get('diag') is None or it['diag']['fix']]
+
+
+def _unexplained(lost):
+    """The sections that lost time that the diagnosis could not give a fix for (unclear, lost speed, at the limit
+    with no positions): said as notes, not tips (_worth_saying has the ones with a fix)."""
+    return [it for it in lost if it.get('diag') is not None and not it['diag']['fix']]
 
 
 class Coach:
@@ -860,6 +873,7 @@ class Coach:
         self._games = {}
         self._stages = {}
         self._lead = []                  # the potential's top 3 and what improved, said before everything else
+        self._claimed = []               # (stage, run, d0, d1) of the top 3's places: the section tips inside them are theirs
         self._loaded = {}                # run id: {'rows', 'arr'} of the traces read for this view (_arrays)
 
     def _game(self, car):
@@ -895,17 +909,19 @@ class Coach:
         mine, theirs = self._arrays(run), self._arrays(ref)
         if mine is None or theirs is None:
             return
-        spans = {g['id']: (g, a, b, lo, floor) for g, a, b, lo, floor in coach_context.spans(
-            {'trace': theirs['rows'], 'corners': ref_corners, 'course': ref.get('course')})}
+        found = coach_context.spans({'trace': theirs['rows'], 'corners': ref_corners, 'course': ref.get('course')})
+        spans = {g['id']: (g, a, b, lo, floor, found[n - 1][0] if n else None)
+                 for n, (g, a, b, lo, floor) in enumerate(found)}
         env, game = self._envelope(stage, run['car']), self._game(run['car'])
         for it in items:
             span = spans.get((it['ref'] or {}).get('id'))
             if span is None or it['loss'] is None:
                 continue
-            g, a, b, lo, floor = span
+            g, a, b, lo, floor, behind = span
             parts = coach_diagnosis.measures_section(mine['arr'], theirs['arr'], {
                 'a': a, 'b': b, 'lo': lo, 'floor': floor, 'corners': g['corners'], 'game': game}, env)
-            d = coach_diagnosis.diagnose_section(parts, it['loss'])
+            d = coach_diagnosis.diagnose_section(parts, it['loss'],
+                                                 None if behind is None else coach_context.section_name(behind))
             if d is not None:
                 it['diag'] = d
 
@@ -1378,29 +1394,42 @@ class Coach:
         else:
             spread = None
         shown = 0
-        for it in top:
+        mine = [(d0, d1) for stg, rid, d0, d1 in self._claimed if stg == stage and rid == run['id']]
+        for it in top + _unexplained(lost)[:SECTION_TIPS]:
             d = it.get('diag')
             if it['pattern'] in claimed.get(it['d'], ()) or (d is not None and d['code'] in claimed.get(it['d'], ())):
                 continue
+            if any(d0 <= it['d'] < d1 for d0, d1 in mine):
+                continue                    # inside one of the top 3 places, which has its own fix for it
+            if d is not None and d['code'] == 'SLOW-ARRIVAL' and it['n'] \
+                    and any(d0 <= report[it['n'] - 1]['d'] < d1 for d0, d1 in mine):
+                continue                    # the corner before it is one, with a fix of its own
             c = it['compare']
             pattern = it['pattern']
             evidence = ['{:.1f} s of it before the slowest point and {:.1f} s after.'.format(it['entry'], it['exit'])]
             if d is not None:
                 text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}.{}'.format(
                     name, _diagnosed_where(it), it['loss'], ref_name, ref_text, _facts_say(d['facts']),
-                    ' ' + d['fix'] if d['fix'] else '')
+                    ' ' + d['fix'] if d['fix'] else ' The numbers do not point to one thing to change.')
                 if d['evidence']:
                     evidence.append('Measured on the same metres as your best run: {}.'.format(', '.join(d['evidence'])))
             else:                           # no trace of the run or the reference (evicted): the section's numbers
                 how = _how(c, late_throttle=pattern == 'late-throttle')
                 if not how:
                     how = ['were within a few km/h and metres of it']
-                text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}. {}'.format(
-                    name, it['name'], it['loss'], ref_name, ref_text, _say(how), _section_action(pattern, c, it))
+                action = _section_action(pattern, c, it)
+                text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}.{}'.format(
+                    name, it['name'], it['loss'], ref_name, ref_text, _say(how),
+                    ' ' + action if action else ' The time went across the whole section.')
+                d = {'fix': action}
             if it.get('gained_before'):
                 evidence.append('Net of the {:.1f} s the section before it gained.'.format(it['gained_before']))
             if spread:
                 evidence.append('{:.1f} s behind {} over {} sections. {}'.format(total, ref_name, len(lost), spread))
+            if d is not None and not d['fix']:           # nothing to do that the numbers point at: a note, not a tip
+                notes.append(Tip('corner.note:{}:{:.0f}'.format(stage, it['d']), 'note', text, evidence, it['loss'],
+                                 cost=0.0, count=1, place=_section_place(stage, run, it)))
+                continue
             candidates.append(Tip('corner.section:{}:{:.0f}'.format(stage, it['d']), 'tip', text, evidence,
                                   it['loss'], cost=it['loss'], count=1, ref=True,
                                   place=_section_place(stage, run, it)))
@@ -1751,12 +1780,16 @@ class Coach:
         car = reader.car_by_id(run['car']) or {}
         data = car_data.entry(car.get('key'))
         band = potential.power_band(data) if data else None
-        top = potential.top3(rows)
         layers = potential.layers(pot, None if found is None else found['possible'])
-        for rank, row in enumerate(top, 1):
+        rank = 0
+        for row in potential.places(rows):
             diag = self._diagnose_place(stage, run, row, found)
             terms = potential.critique(row, row.get('best_gear'), band, measures=diag['m'] if diag else None)
             said = potential.call(row, terms[0][1] if terms else None, diag)
+            if said is None:
+                continue                    # nothing to do that the run shows: the next place is the third
+            rank += 1
+            self._claimed.append((stage, run['id'], row['d0'], row['d1']))
             text = 'On {}, {}{}'.format(name, said[0].lower(), said[1:])
             evidence = ['{:.1f} s through it: the grip layer {:.1f} s{}.'.format(
                 row['time'], row['grip_s'], ', the car {:.1f} s'.format(row['car_s']) if row.get('car_s') else '')]
@@ -1770,6 +1803,8 @@ class Coach:
             self._lead.append(Tip('potential.top3:{}:{}'.format(stage, rank), 'top3', text, evidence, row['available'],
                                   cost=row['available'], count=1, rank=rank,
                                   place=place(stage, run, row['apex_d'], row['d0'], row['d1'])))
+            if rank == potential.TOP:
+                break
         before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=20, car=run['car'])
                   if r['started'] <= run['started'] and r['finished'] == 1 and r['result_time']
                   and r['run_class'] in ('clean', 'learning', 'off')]
@@ -1823,7 +1858,11 @@ class Coach:
         parts = coach_diagnosis.measures_section(mine['arr'], theirs['arr'], {
             'a': d0, 'b': d1, 'lo': lo, 'floor': lo if prev is None else prev, 'corners': corners,
             'game': self._game(run['car'])}, self._envelope(stage, run['car']))
-        return coach_diagnosis.diagnose_section(parts)
+        before = max((k for k in stored if k['d'] < corners[0]['d']), key=lambda k: k['d'], default=None)
+        d = coach_diagnosis.diagnose_section(parts, None, None if before is None else coach_context.corner_name(before))
+        if d is not None and found is not None and found['best']['who'].get(row.get('split')) is not None:
+            _name_the_pass(d, 'your quickest pass')          # the comparison is the split's quickest pass, not the PB
+        return d
 
     def _potential_rows(self, pot, run, corners, found=None):
         """potential.analyse_run() of a run (stage_runs row or run row), its off ranges left out and the seconds it
