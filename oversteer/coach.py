@@ -18,6 +18,7 @@ import time
 import numpy as np
 
 from . import car_data, coach_context, coach_diagnosis, potential, stage_tables
+from .timefmt import span
 from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SURFACES, _listed
 
 # -- metrics of one run (section 9.1) --
@@ -1358,7 +1359,7 @@ class Coach:
         self._spread(stage, name, run, events, sections, report, candidates, praise)
         if report is None or run['run_class'] in ('learning', 'unclassified'):
             return False
-        ref_text = '{}, {:.1f} s on {}'.format(car, ref['result_time'], _date(ref['started']))
+        ref_text = '{}, {} on {}'.format(car, span(ref['result_time']), _date(ref['started']))
         # A run is "best yet" only when quicker than every earlier clean run; it is then measured against
         # the run it beat. The reference is chosen by the time after the start, so it may not be the quickest
         prior = _prior_best(run, before)
@@ -1779,8 +1780,8 @@ class Coach:
         if (prior is not None and run['finished'] == 1 and run['result_time'] and run['run_class'] in ('clean',)
                 and run['result_time'] < prior['result_time']):
             gain = prior['result_time'] - run['result_time']
-            sentence = 'On {}, your best clean run yet in the {}: {:.1f} s quicker than {} ({:.1f} s).'.format(
-                name, car, gain, _date(prior['started']), prior['result_time'])
+            sentence = 'On {}, your best clean run yet in the {}: {:.1f} s quicker than {} ({}).'.format(
+                name, car, gain, _date(prior['started']), span(prior['result_time']))
             if gained and prior['id'] == ref['id']:                 # the gains are against the reference
                 it = gained[0]
                 c = it['compare']
@@ -1821,9 +1822,9 @@ class Coach:
             gains = {j: t - best['best'][j] for j, t in mine_pb.items() if j in best['best'] and j != 0}
             j = max(gains, key=lambda k: gains[k]) if gains else None
             notes.append(Tip('corner.possible:' + stage, 'note',
-                             'On {}, your best sections put together make {:.1f} s, {:.1f} s under {} in '
-                             'the {} ({:.1f} s).{}'.format(
-                                 name, found['possible'], found['gain'], 'your best clean run', car, pb['result_time'],
+                             'On {}, your best sections put together make {}, {:.1f} s under {} in '
+                             'the {} ({}).{}'.format(
+                                 name, span(found['possible']), found['gain'], 'your best clean run', car, span(pb['result_time']),
                                  ' The biggest gain is {}, {:.1f} s.'.format(
                                      coach_context.section_name(best['grid'][j]), gains[j]) if j is not None else ''),
                              [], found['gain'], cost=0.0, count=len(loaded) + 1))
@@ -1861,8 +1862,8 @@ class Coach:
             rank += 1
             self._claimed.append((stage, run['id'], row['d0'], row['d1']))
             text = 'On {}, {}{}'.format(name, said[0].lower(), said[1:])
-            evidence = ['{:.1f} s through it: the grip layer {:.1f} s{}.'.format(
-                row['time'], row['grip_s'], ', the car {:.1f} s'.format(row['car_s']) if row.get('car_s') else '')]
+            evidence = ['{} through it: the grip layer {}{}.'.format(
+                span(row['time']), span(row['grip_s']), ', the car {}'.format(span(row['car_s'])) if row.get('car_s') else '')]
             if row.get('apex_kmh') and row.get('apex_kmh_pot'):
                 evidence.append('Slowest point {:.0f} km/h; the grip allows {:.0f}.'.format(
                     row['apex_kmh'], row['apex_kmh_pot']))

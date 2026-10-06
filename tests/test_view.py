@@ -207,8 +207,8 @@ def test_the_splits_summary_and_rows():
         {'name': 'the 6 right at 4.8 km', 'last': 70.0, 'best': 71.0, 'gold': False, 'delta': -1.0, 'finish': True}]}
     summary, rows = view.splits_lines(found)
     assert summary == 'Afon Bidno  ·  Best 3:17.7  ·  SoB 3:14.5 (−3.2)'
-    assert rows[0] == ('left-left at 0.3 km', '0:06.8', '0:06.8', 'gold', 'gold')
-    assert rows[1][3:] == ('+0.4', 'bad') and rows[2][1:] == ('–', '0:06.4', '–', '')
+    assert rows[0] == ('left-left at 0.3 km', '6.8', '6.8', 'gold', 'gold')
+    assert rows[1][3:] == ('+0.4', 'bad') and rows[2][1:] == ('–', '6.4', '–', '')
     assert rows[3][3:] == ('−1.0', 'good') and rows[3][0].endswith('(finish)')
 
 
@@ -242,7 +242,7 @@ def test_the_splits_row_tones_rows_and_sectors():
     assert row['rows'][-2][:3] == ('Stage', '3:18.8', '+1.1') and row['rows'][-2][4] == 'behind-lose'
     assert row['rows'][-1][2] == '−3.2'
     # Sectors: n is whatever the game has; low confidence is marked
-    assert [s[:2] for s in row['sectors']] == [('S1', '75.9'), ('S2', '≈70.0')] and row['estimated']
+    assert [s[:2] for s in row['sectors']] == [('S1', '1:15.9'), ('S2', '≈1:10.0')] and row['estimated']
     assert [s[3] for s in row['sectors']] == ['gold', 'behind-lose']
     none = view.splits_row(dict(found, sectors=None, last=None))
     assert none['sectors'] == [] and not none['estimated'] and none['delta'] is None

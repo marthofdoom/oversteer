@@ -13,6 +13,8 @@
 - Comparison labels say what the comparison is: viewing your PB compares with
   "next best", the Live view names its reference "Run N" unless it is the PB, and
   the stage map's START label sits away from the route.
+- Absolute times are written one way everywhere (coach sentences, split and sector tables,
+  GTK and web): m:ss.s, 28.7 under a minute; differences stay signed seconds.
 
 ## 0.15.1 — 2026-10-06
 

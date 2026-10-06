@@ -802,17 +802,18 @@ function tipItem(t, kind) {
 
 // -- times: m:ss.s, signed tenths with the true minus --
 
-function clock(t) {
+function clock(t) {                       // m:ss.s; 28.7 under a minute, h:mm:ss.s from an hour (oversteer/timefmt.py)
   if (t == null) return "–";
-  const m = Math.floor(t / 60), s = t - m * 60;
-  return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
+  const q = Math.round(t * 10), h = Math.floor(q / 36000), m = Math.floor(q % 36000 / 600), s = (q % 600) / 10;
+  const ss = (s < 10 && (h || m) ? "0" : "") + s.toFixed(1);
+  return h ? h + ":" + (m < 10 ? "0" : "") + m + ":" + ss : m ? m + ":" + ss : ss;
 }
 function signed(d, dp) {                 // a difference that rounds to nothing is ±0.0, never +0.0 or −0.0
   if (d == null) return "–";
   const k = Math.pow(10, dp == null ? 1 : dp), r = Math.round(Math.abs(d) * k) / k * (d < 0 ? -1 : 1);
   return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp == null ? 1 : dp);
 }
-function seconds(t) { return t == null ? "–" : t.toFixed(1); }
+function seconds(t) { return clock(t); }
 
 // -- the splits row and its sheet --
 // LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when ahead of

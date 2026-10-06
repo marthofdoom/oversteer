@@ -343,7 +343,7 @@ class RunView(Gtk.Box):
                                 if s['loss'] < -0.05 else plot.DIM, s['apex'],
                                 '–' if s.get('avail') is None or s['off'] else '{:.1f}'.format(s['avail'])])
         self._sectors.set_markup('   '.join('<b>{}</b> <tt>{}</tt> <span foreground="{}"><tt>{}</tt></span>'.format(
-            s['name'], '–' if s['time'] is None else ('≈' if s.get('confidence') == 'low' else '') + '{:.1f}'.format(s['time']),
+            s['name'], '–' if s['time'] is None else ('≈' if s.get('confidence') == 'low' else '') + clock(s['time']),
             plot.DIM if s['delta'] is None else plot.SLOWER if round(s['delta'], 1) > 0 else plot.FASTER,
             '' if s['delta'] is None else signed(s['delta'])) for s in data.get('sectors') or []))
         self._row_advice.set_text('')

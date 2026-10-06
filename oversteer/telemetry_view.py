@@ -7,6 +7,8 @@ import time
 from locale import gettext as _
 from xml.sax.saxutils import escape
 
+from .timefmt import clock
+
 DISCIPLINES = {
     'rally-stage': _("Rally stage"), 'hillclimb': _("Hillclimb"), 'circuit': _("Circuit"),
     'rallycross': _("Rallycross"), 'drift': _("Drift"), 'free-roam': _("Free roam"),
@@ -172,14 +174,6 @@ def coaching_lines(tips, advice=None):
             for badge, text, kind in coaching_items(tips, advice)]
 
 
-def clock(seconds):
-    """m:ss.s, '–' for none."""
-    if seconds is None:
-        return '–'
-    minutes = int(seconds // 60)
-    return '{}:{:04.1f}'.format(minutes, seconds - 60 * minutes)
-
-
 def signed(delta):
     """±s.s with a real minus sign, '–' for none; a difference that rounds to nothing is ±0.0, never +0.0 or -0.0."""
     if delta is None:
@@ -270,8 +264,8 @@ def splits_row(found):
         bounds.append((r.get('d0'), r.get('d1')))
         name = r['name'][4:] if r['name'].startswith('the ') else r['name']
         rows.append((name if unit == 'sectors' else '{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
-                     '–' if r['last'] is None else '{:.1f}'.format(r['last']), text,
-                     '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone, save))
+                     clock(r['last']), text,
+                     clock(r['best']), tone, save))
     delta = None if last is None or pb is None else last - pb
     new_pb = bool(found.get('new_pb'))
     rows.append((_("Stage"), clock(last), '–' if delta is None else ('\u2605 ' if new_pb else '') + signed(delta), clock(pb),
@@ -294,9 +288,9 @@ def splits_row(found):
         estimated = estimated or low
         mark = '\u2248' if low else ''
         text, _save, tone = _split_cells(r)
-        sectors.append((r['name'], '–' if r['last'] is None else mark + '{:.1f}'.format(r['last']),
+        sectors.append((r['name'], '–' if r['last'] is None else mark + clock(r['last']),
                         text if r['last'] is not None else '–' if r['best'] is None
-                        else _("best {}").format(mark + '{:.1f}'.format(r['best'])), tone))
+                        else _("best {}").format(mark + clock(r['best'])), tone))
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
             'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
             'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
