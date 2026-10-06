@@ -643,6 +643,14 @@ class Reader:
             return None                              # a file the writer has not opened since this table
         return rows[0][0] if rows else None
 
+    def finish_unknown(self, run_id):
+        """Whether a run was timed to the old finish line and could not be re-timed (a run_finish row with no finish)."""
+        try:
+            rows = self._rows('SELECT finish_m FROM run_finish WHERE run = ?', (run_id,))
+        except sqlite3.OperationalError:
+            return False
+        return bool(rows) and rows[0][0] is None
+
     def cars(self, profile):
         """[(key, name)] of the profile's cars, by name."""
         return [(k, n or k) for k, n in self._rows(

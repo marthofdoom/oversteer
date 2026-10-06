@@ -336,7 +336,10 @@ def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     store = learner.log.store
     run = _timed_run(store, 'acr:wales:afon-bidno-severn', course=100.0)      # shorter than the gap
     assert retime_finishes(store) == 0
-    assert store.run(run)['result_time'] == 230.0 and store.run(run)['run_class'] == 'clean'
+    # kept as it was, but its stop-control time is not ranked beside flying-finish times
+    assert store.run(run)['result_time'] == 230.0 and store.run(run)['run_class'] == 'partial'
+    assert store.finish_unknown(run)
+    assert 'clean' not in {r['run_class'] for r in store.stage_runs('acr:wales:afon-bidno-severn') if r['id'] == run}
     assert store.finished_untimed('acr') == []
     learner.close()
 

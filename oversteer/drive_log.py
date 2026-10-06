@@ -788,7 +788,10 @@ class RunTracker:
                 learner.session_held_time += coach_context.held_seconds(analysis['episodes'])
         store.add_corners(run, corners)
         store.add_events(run, analysis['events'])
-        store.update_run(run, course=course, run_class=analysis['run_class'])
+        klass = analysis['run_class']
+        if klass in ('clean', 'learning') and store.finish_unknown(run):
+            klass = 'partial'                            # timed to the old line and not re-timable (retime_finishes)
+        store.update_run(run, course=course, run_class=klass)
         for s in analysis['shifts']:
             store.update_shift(s['id'], s['flags'], s['d'], s.get('band'))
         metrics = coach.run_metrics(summary, rows, TRACE_CHANNELS, analysis['shifts'], corners, context, analysis)
@@ -909,6 +912,9 @@ def retime_finishes(store):
                 logging.warning("drive log: run %s cannot be re-timed to the flying finish (no trace or out of range)",
                                 run)
                 store.set_run_finish(run, None)
+                # Its time holds the slow-down to the stop control, next to flying-finish times: not for
+                # ranking (best, reference, sum of best) on a stage with a flying finish. Kept, not deleted
+                store.update_run(run, run_class='partial')
                 continue
             store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
             store.set_run_finish(run, flying)
