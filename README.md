@@ -4,13 +4,14 @@
 Shift lights learnt from the game's own car data, a launch limiter, coaching that names the
 corner where you lost time, speedrun-style splits, and a stage page for your phone.
 
-<!-- The coaching / telemetry images below (coaching.png, telemetry-web.png, splits-mobile.png) show the
-     current Telemetry tab and web page with mock-up coaching text. They will be replaced when the
-     telemetry/coaching redesign ships. -->
+**[Live demo](https://marthofdoom.github.io/oversteer/)**: the trackside page running on the author's real
+Assetto Corsa Rally runs (live, run analysis and coaching), in your browser, nothing to install.
+
 <p align="center">
-  <img src="docs/images/coaching.png" width="620" alt="The Telemetry tab: shift points, coaching tips with place-specific advice, splits and sessions (example output)">
+  <img src="docs/images/coaching.png" width="620" alt="The Telemetry tab: splits with the game's sector times, the potential lap, the three coaching tips with the corner diagnosis, shift points and tips">
 </p>
-<p align="center"><sub>The Telemetry tab (Assetto Corsa Rally, Hyundai i20N Rally2). The coaching text is example output.</sub></p>
+<p align="center"><sub>The Telemetry tab (Assetto Corsa Rally, Hyundai i20N Rally2, Sommet de Munster). Real output from the author's own
+runs, not a mock-up. The three tips say what the corner needs (brake later, brake less, carry speed) from the grip left there.</sub></p>
 
 > **Status.** Countersteer is the new name of this fork of Oversteer. The code, the app ID, the
 > binaries (`oversteer`, `oversteer-run`), the Flatpak and the paths still use the old name for now;
@@ -37,7 +38,9 @@ What you get, all from the game's telemetry (no overlay, nothing injected into t
   [technique catalogue](docs/coach-techniques.md) to see what it does and does not know.
 - **Splits and sum of best.** Each stage is cut into sections; the Telemetry tab and the web page
   show last, best and difference per split (gold when your last run set the best) and the sum of
-  best, LiveSplit-style.
+  best, LiveSplit-style. The three sectors are the game's own sector lines, not an even cut of
+  the stage, and the coach diagnoses each corner (late braking, braking too hard, too little
+  speed through it) against the grip the car has there.
 - **Stage recognition.** The stage is recognised from the game's stage table, and times are taken
   at the flying finish line rather than at the stop, so the result time stops before the
   slow-down.
@@ -47,11 +50,23 @@ What you get, all from the game's telemetry (no overlay, nothing injected into t
   it can be limited to this computer.
 
 <p align="center">
-  <img src="docs/images/splits-mobile.png" width="300" alt="The web page on a phone with the splits table open (example output)">
+  <img src="docs/images/splits-mobile.png" width="300" alt="The web page on a phone with the splits table open (real output)">
   &nbsp;&nbsp;
-  <img src="docs/images/telemetry-web.png" width="560" alt="The web page on a laptop (example output)">
+  <img src="docs/images/telemetry-web.png" width="560" alt="The web page on a laptop: the splits ribbon with the potential lap, the last run, the splits and the coaching (real output)">
 </p>
-<p align="center"><sub>The phone/laptop page, with example coaching and splits.</sub></p>
+<p align="center"><sub>The phone/laptop page on the author's own runs: the splits sheet and the coaching.</sub></p>
+
+The Telemetry > Run view lines the run up against your best: speed, pedals, steering, gear and
+revs as strips over the stage, a stage map drawn from the game's positions, and where the time went
+with the coach's advice for each split. The Live view shows the delta to your best as you drive.
+
+<p align="center">
+  <img src="docs/images/telemetry-run.png" width="640" alt="Telemetry, Run view: strips against the personal best, the stage map coloured by time per split and where the time went, with the advice for one split (real output)">
+  &nbsp;
+  <img src="docs/images/telemetry-live.png" width="640" alt="Telemetry, Live view in the middle of a run: gear, speed, delta to the best, pedals, steering, G-G and the stage position (a capture replayed through the live path)">
+</p>
+<p align="center"><sub>Run view (left) and Live view (right), both from the author's own captures; the live image is a capture
+replayed through the live path.</sub></p>
 
 ### Quick setup
 
