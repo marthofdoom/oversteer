@@ -926,6 +926,19 @@ def test_run_clock():
     assert abs(own.t - 0.3) < 1e-9
 
 
+def test_run_clock_frozen_at_the_first_packet_is_not_a_clock_that_stopped():
+    """A non-zero clock standing still from the first packet (the last run's finish, not yet reset) has not run: it
+    is not 'stopped past the finish', and t follows the run's own time until the clock moves."""
+    from oversteer.drive_log import RunClock, CLOCK_STOPPED
+    c = RunClock(58.0)
+    for _ in range(int(CLOCK_STOPPED / 0.1) + 5):
+        c.tick(58.0, 0.1)
+    assert c.still == 0.0 and abs(c.t - (58.0 + 1.5)) < 1e-6          # on from where it stood, by the run's own time
+    c.tick(58.1, 0.1)                                                  # then it moves: the game's clock from here
+    c.tick(58.2, 0.1)
+    assert abs(c.t - (58.0 + 1.5 + 0.2)) < 1e-6 and not c.exact
+
+
 def test_a_stage_that_ends_by_its_clock_stopping_finishes_the_live_run(tmp_path, monkeypatch):
     from oversteer import stage_tables
     from tests.test_store import _tables

@@ -243,9 +243,12 @@ class RunClock:
     back without the run ending (a lap's clock) or one that was missing
     sets `offset` where t takes it up, so t never goes back. Where the
     game's clock stands still for over CLOCK_STOPPED (past its finish) t
-    goes on by the run's own time until it moves again."""
+    goes on by the run's own time until it moves again; a clock standing
+    still from the first packet, not yet seen to move, is not one that
+    stopped (the last run's finish, not reset): t goes on by the run's own
+    time until it does."""
 
-    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved')
+    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved', 'proven')
 
     def __init__(self, stage_time):
         running = stage_time is not None and stage_time > 0.0
@@ -255,6 +258,7 @@ class RunClock:
         self.last = stage_time                       # the game's clock at the last packet
         self.still = 0.0                             # s of the run's own time the game's clock has stood still
         self.moved = running                         # it moved at the last packet
+        self.proven = False                          # it has been seen to move: until then a clock standing still is not 'stopped'
 
     def tick(self, stage_time, dt):
         last, self.last = self.last, stage_time
@@ -270,15 +274,20 @@ class RunClock:
                 self.t += stage_time - last
                 self.offset = self.t - stage_time
                 self.moved = True
+                self.proven = True
             else:
                 self.t += dt
             return
         if last is not None and stage_time == last:
+            if not self.proven:
+                self.t += dt                         # frozen from the first packet (a finish not yet reset): not a stop
+                return
             self.still += dt
             if self.still > CLOCK_STOPPED:
                 self.t += dt                         # stopped (past the finish): the run's own time goes on
             return
         self.moved = True
+        self.proven = True
         self.still = 0.0
         candidate = stage_time + self.offset
         if candidate >= self.t and (forward or last is None):
