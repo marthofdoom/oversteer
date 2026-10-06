@@ -4,6 +4,7 @@ from locale import gettext as _
 import logging
 import math
 import os
+import time
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
 from . import steam_options
@@ -1235,27 +1236,26 @@ class GtkUi:
         self.telemetry_run.open_run(run_id, vs, True, distance)
 
     def _telemetry_live_view(self):
-        """The Telemetry view: the live dash (gear, speed, revs, the shift lights, the way through the stage), on
-        the web page's visual system; the run analysis is not built yet and says so."""
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        page.set_border_width(12)
-        page.get_style_context().add_class('telemetry-page')
-        self.telemetry_dash = Gtk.DrawingArea()
-        self.telemetry_dash.set_size_request(-1, 240)
-        self.telemetry_dash.set_halign(Gtk.Align.FILL)
+        """The Live view: the dash and its delta block on the left; the pedal and steering strips, g-g and the
+        stage minimap on the right (gtk_live_view), on the web page's visual system. Its data is read in process
+        from the live run's buffer by a timer that runs while the view is shown."""
+        from .gtk_live_view import LiveView
+        self.telemetry_live_view = LiveView(
+            read=lambda since: self.controller.shift_learner.live_run.read(since),
+            found=lambda: self._splits_shown, on_debrief=lambda: self.telemetry_stack.set_visible_child_name('coaching'),
+            on_ribbon=lambda: self.splits_ribbon.queue_draw(), calls=self._debrief_calls,
+            on_open_run=lambda run_id: self.show_run(run_id))
+        self.telemetry_dash = self.telemetry_live_view.dash_area
         self.telemetry_dash.connect('draw', self._draw_dash)
-        page.pack_start(self.telemetry_dash, False, False, 0)
-        soon = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        soon.pack_start(self._heading(_("Run analysis"), _("Not built yet.")), False, False, 0)
-        text = Gtk.Label(label=_("Traces against your best run, the delta to it, the stage map and where the time "
-                                 "went will appear here once they are built. Nothing here is made up in the "
-                                 "meantime."), xalign=0)
-        text.set_line_wrap(True)
-        text.set_max_width_chars(80)
-        text.get_style_context().add_class('dim-label')
-        soon.pack_start(text, False, False, 0)
-        page.pack_start(soon, False, False, 0)
-        return self._scrolled(page)
+        return self._scrolled(self.telemetry_live_view)
+
+    def _debrief_calls(self):
+        """'3 calls' for the finished card, from the debrief's own count."""
+        history = self._telemetry_history or {}
+        tips = [t for t in history.get('tips') or [] if (t.get('kind') if isinstance(t, dict) else getattr(t, 'kind', None)) != 'still']
+        if not tips:
+            return ''
+        return _("1 call") if len(tips) == 1 else _("{} calls").format(len(tips))
 
     DASH_PAUSE = 30.0                   # s a pause keeps the last values (dimmed) before the dash empties
 
@@ -1600,7 +1600,14 @@ class GtkUi:
 
     def _draw_ribbon(self, area, cr):
         tones, sectors, bounds = self._splits_tones
-        telemetry_plot.ribbon(cr, area.get_allocated_width(), area.get_allocated_height(), tones, sectors, bounds)
+        current, pulse = None, 1.0
+        live = getattr(self, 'telemetry_live_view', None)
+        state = live.ribbon_state() if live is not None else None
+        if state is not None and len(state[0]) == len(tones):
+            tones, current = state                      # a run is on: the splits completed in their tones, the current one lit
+            pulse = 0.675 + 0.325 * math.cos(2 * math.pi * time.monotonic())
+        telemetry_plot.ribbon(cr, area.get_allocated_width(), area.get_allocated_height(), tones, sectors, bounds,
+                              current=current, pulse=pulse)
         return False
 
     def _show_splits_row(self):

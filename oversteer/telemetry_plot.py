@@ -42,7 +42,7 @@ def text(cr, s, x, y, size, colour, bold=False, align='left', alpha=1.0):
     cr.new_path()                       # show_text leaves a current point that a later arc would draw a line from
 
 
-def ribbon(cr, w, h, tones, sector_tones=(), bounds=None, gap=1.5, sector_w=22.0):
+def ribbon(cr, w, h, tones, sector_tones=(), bounds=None, gap=1.5, sector_w=22.0, current=None, pulse=1.0):
     """One cell per split, then (after a wider gap) one fixed-width cell per game sector, each in its tone. The
     split cells are as long as the splits are (`bounds`: (d0, d1) per split, in metres) when all are known, else
     equal."""
@@ -58,10 +58,13 @@ def ribbon(cr, w, h, tones, sector_tones=(), bounds=None, gap=1.5, sector_w=22.0
         if len(lengths) != len(cells) or None in lengths:
             lengths = [1.0] * len(cells)
         total = sum(lengths)
-        for tone, length in zip(cells, lengths):
+        for j, (tone, length) in enumerate(zip(cells, lengths)):
             each = usable * length / total
             rounded(cr, x, 0, each, h, 1.5)
-            rgb(cr, TONES.get(tone, TONES['none']))
+            if j == current:                            # a live run: the split the car is in, pulsing
+                rgb(cr, TEXT, pulse)
+            else:
+                rgb(cr, TONES.get(tone, TONES['none']))
             cr.fill()
             x += each + gap
     x = w - sectors_w
@@ -462,3 +465,251 @@ def gg(cr, w, h, data):
                 continue
             cr.rectangle(cx - lat * sc - 1, cy - lon * sc - 1, 2.2, 2.2)
         cr.fill()
+
+
+# -- the live view (docs/telemetry-ui-design.md, 7.2 and 7.8): the delta block, the rolling strips, g-g with its
+# trail and the stage minimap, on plain data from telemetry_view.LiveTrack --
+
+LV_SLOWER, LV_FASTER, LV_GRID, LV_BG = '#ff5a4e', '#2fd27a', '#1a2028', '#0a0c0f'
+LV_THR, LV_BRK, LV_STEER, LV_SPEED, LV_CLUTCH, LV_HB = '#2fd27a', '#ff4d4d', '#b58cff', '#4cc3ff', '#5fc4c4', '#ff8a3d'
+LV_WINDOW, LV_GAP = 12.0, 0.5
+LV_STRIPS_H = (64.0, 44.0, 24.0)             # pedals, steering, handbrake
+
+
+def _live_panel(cr, w, h):
+    rgb(cr, PANEL)
+    rounded(cr, 0.5, 0.5, w - 1, h - 1, 10)
+    cr.fill_preserve()
+    rgb(cr, LINE)
+    cr.set_line_width(1)
+    cr.stroke()
+
+
+def _live_path(cr, pts, colour, width, alpha=1.0):
+    """A polyline through the points, lifting the pen at None."""
+    pen = False
+    cr.set_line_width(width)
+    cr.set_line_join(1)                                     # cairo.LINE_JOIN_ROUND
+    rgb(cr, colour, alpha)
+    for p in pts:
+        if p is None:
+            pen = False
+        elif pen:
+            cr.line_to(*p)
+        else:
+            cr.move_to(*p)
+            pen = True
+    cr.stroke()
+
+
+def live_delta(cr, w, h, d):
+    """The delta block on its own panel: the big ±0.00, the ±2 s bar, and 'vs PB · split n ±x.xx' with the predicted
+    finish. `d`: text (the ±0.00), delta (s), pb, split, finish (strings), or note (a line shown instead: no PB yet);
+    dim (the last values of a pause); None draws the empty panel."""
+    _live_panel(cr, w, h)
+    if not d:
+        return
+    pad = 14.0
+    alpha = 0.38 if d.get('dim') else 1.0
+    if d.get('note'):
+        text(cr, d['note'], pad, h / 2.0 + 5, 13, DIM, False, 'left', alpha)
+        return
+    delta = d.get('delta') or 0.0
+    colour = LV_SLOWER if delta > 0.005 else LV_FASTER if delta < -0.005 else TEXT
+    text(cr, d['text'], pad, pad + 34, 40, colour, True, 'left', alpha)
+    bx, by, bh = pad + 150.0, pad + 12.0, 14.0
+    bw = w - pad - bx
+    if bw > 20:
+        rgb(cr, LV_GRID)
+        rounded(cr, bx, by, bw, bh, 3)
+        cr.fill()
+        f = max(-1.0, min(1.0, delta / 2.0))
+        rgb(cr, LV_SLOWER if f > 0 else LV_FASTER, alpha)
+        cr.rectangle(bx + bw / 2.0 + (0 if f > 0 else f * bw / 2.0), by, abs(f) * bw / 2.0, bh)
+        cr.fill()
+        rgb(cr, DIM)
+        cr.rectangle(bx + bw / 2.0 - 0.75, by - 2, 1.5, bh + 4)
+        cr.fill()
+    y = pad + 34 + 22
+    text(cr, 'vs PB {} · split {}'.format(d.get('pb', '–'), d.get('split', '–')), pad, y, 12, DIM, False, 'left', alpha)
+    text(cr, 'finish ≈ {}'.format(d.get('finish', '–')), w - pad, y, 12, DIM, False, 'right', alpha)
+
+
+def live_rolling_height(handbrake=False):
+    return 10 + 16 + LV_STRIPS_H[0] + (16 + LV_STRIPS_H[2] if handbrake else 0) + 8 + 16 + LV_STRIPS_H[1] + 10
+
+
+def _live_series(rows, now, fn, x_of):
+    """The last LV_WINDOW s of `rows` through fn(row) -> y or None, as points with None where a row is missing for
+    over LV_GAP s (a pause, a page away): the line breaks instead of crossing the gap."""
+    pts, last = [], None
+    for r in rows:
+        if r['t'] < now - LV_WINDOW - LV_GAP:
+            continue
+        y = fn(r)
+        if y is None or (last is not None and r['t'] - last > LV_GAP):
+            if pts and pts[-1] is not None:
+                pts.append(None)
+        if y is not None:
+            pts.append((x_of(r['t']), y))
+            last = r['t']
+    return pts
+
+
+def live_rolling(cr, w, h, rows, now):
+    """Pedals (throttle and brake, a thin clutch line while it is used) and steering over the last 12 s, the
+    newest at the right; a handbrake strip only while the rig reads it. `rows`: dicts with t, thr, brk, clu, hb,
+    steer (None where unknown); `now`: the clock of the newest row."""
+    _live_panel(cr, w, h)
+    pad = 10.0
+    inner = w - 2 * pad
+    window = [r for r in rows if r['t'] >= now - LV_WINDOW]
+    clutch = any(r.get('clu') is not None and r['clu'] > 0.05 for r in window)
+    handbrake = any(r.get('hb') is not None and r['hb'] > 0.02 for r in window)
+
+    def x_of(t):
+        return pad + inner - (now - t) / LV_WINDOW * inner
+
+    def label(y, left, right=''):
+        text(cr, left, pad, y + 11, 10.5, DIM, True)
+        if right:
+            text(cr, right, w - pad, y + 11, 10.5, DIM, True, 'right')
+
+    def grid(y, sh, lines):
+        rgb(cr, LV_GRID)
+        cr.set_line_width(1)
+        for f in lines:
+            cr.move_to(pad, y + f * sh)
+            cr.line_to(pad + inner, y + f * sh)
+        cr.stroke()
+
+    def filled(y, sh, key, colour):
+        pts = _live_series(rows, now, lambda r: None if r.get(key) is None
+                           else y + sh - 1 - max(0.0, min(1.0, r[key])) * (sh - 2), x_of)
+        run = []
+        for p in pts + [None]:
+            if p is None:
+                if len(run) > 1:
+                    rgb(cr, colour, 0.18)
+                    cr.move_to(run[0][0], y + sh)
+                    for q in run:
+                        cr.line_to(*q)
+                    cr.line_to(run[-1][0], y + sh)
+                    cr.fill()
+                run = []
+            else:
+                run.append(p)
+        _live_path(cr, pts, colour, 1.75)
+
+    y = pad
+    label(y, 'PEDALS · LAST 12 S', 'THR · BRK' + (' · CLT' if clutch else ''))
+    y += 16
+    sh = LV_STRIPS_H[0]
+    grid(y, sh, (0.01, 0.5, 0.99))
+    filled(y, sh, 'thr', LV_THR)
+    filled(y, sh, 'brk', LV_BRK)
+    if clutch:
+        pts = _live_series(rows, now, lambda r: None if r.get('clu') is None
+                           else y + sh - 1 - max(0.0, min(1.0, r['clu'])) * (sh - 2), x_of)
+        _live_path(cr, pts, LV_CLUTCH, 1.0)
+    y += sh
+    if handbrake:
+        y += 8
+        label(y, 'HANDBRAKE')
+        y += 16
+        sh = LV_STRIPS_H[2]
+        grid(y, sh, (0.98,))
+        filled(y, sh, 'hb', LV_HB)
+        y += sh
+    y += 8
+    label(y, 'STEERING', 'L ▲ · R ▼')
+    y += 16
+    sh = LV_STRIPS_H[1]
+    grid(y, sh, (0.5,))
+    pts = _live_series(rows, now, lambda r: None if r.get('steer') is None
+                       else y + sh / 2.0 - max(-1.0, min(1.0, r['steer'])) * (sh / 2.0 - 2), x_of)
+    _live_path(cr, pts, LV_STEER, 1.75)
+
+
+def live_gg(cr, w, h, rows, total=None):
+    """g-g on its own panel: lateral against longitudinal acceleration (g), rings at 0.5 g and 1 g, the last 3 s as a
+    fading trail and the car as a dot. `rows`: dicts with alat and along in g (None where unknown)."""
+    _live_panel(cr, w, h)
+    text(cr, 'g-g', 12, 20, 10.5, DIM, True)
+    if total is not None:
+        text(cr, '{:.1f} g'.format(total), w - 12, 20, 10.5, DIM, True, 'right')
+    cx, cy = w / 2.0, h / 2.0 + 8
+    radius = min(w, h - 16) / 2.0 - 6
+    if radius < 10:
+        return
+    sc = radius / 1.4
+    rgb(cr, LV_GRID)
+    cr.set_line_width(1)
+    for r in (0.5, 1.0):
+        cr.new_sub_path()
+        cr.arc(cx, cy, r * sc, 0, 2 * math.pi)
+        cr.stroke()
+    cr.move_to(cx - radius, cy)
+    cr.line_to(cx + radius, cy)
+    cr.move_to(cx, cy - radius)
+    cr.line_to(cx, cy + radius)
+    cr.stroke()
+    text(cr, '1g', cx + sc + 2, cy - 3, 10, FAINT)
+    text(cr, 'BRK', cx - 10, cy + radius - 1, 10, FAINT)
+    text(cr, 'ACC', cx - 10, cy - radius + 9, 10, FAINT)
+    trail = [r for r in rows if r.get('alat') is not None and r.get('along') is not None][-30:]
+    for i, r in enumerate(trail):
+        rgb(cr, LV_SPEED, (i + 1) / len(trail) * 0.6)
+        cr.rectangle(cx - r['alat'] * sc - 1.5, cy - r['along'] * sc - 1.5, 3, 3)
+        cr.fill()
+    if trail:
+        rgb(cr, TEXT)
+        cr.new_sub_path()
+        cr.arc(cx - trail[-1]['alat'] * sc, cy - trail[-1]['along'] * sc, 5, 0, 2 * math.pi)
+        cr.fill()
+
+
+def live_map(cr, w, h, path, distance=None, length=None, ticks=(), label=''):
+    """The stage on its own panel: the way driven from the samples' positions (x, z) with the car as a dot; without
+    positions a straight bar by distance with the splits' ends (`ticks`, metres) marked. `length`: metres the bar
+    spans."""
+    _live_panel(cr, w, h)
+    text(cr, 'STAGE', 12, 20, 10.5, DIM, True)
+    if label:
+        text(cr, label, w - 12, 20, 10.5, DIM, True, 'right')
+    top, pad = 28.0, 10.0
+    if path and len(path) >= 2:
+        xs, zs = [p[0] for p in path], [p[1] for p in path]
+        x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
+        aw, ah = w - 2 * pad, h - top - pad
+        sc = min(aw / max(1.0, x1 - x0), ah / max(1.0, z1 - z0))
+        ox, oy = pad + (aw - (x1 - x0) * sc) / 2.0, top + (ah - (z1 - z0) * sc) / 2.0
+        step = max(1, len(path) // 400)
+        pts = [(ox + (x - x0) * sc, oy + (z1 - z) * sc) for x, z in path[::step]]
+        pts.append((ox + (path[-1][0] - x0) * sc, oy + (z1 - path[-1][1]) * sc))
+        _live_path(cr, pts, LINE, 4)
+        _live_path(cr, pts, DIM, 2)
+        rgb(cr, TEXT)
+        cr.new_sub_path()
+        cr.arc(pts[-1][0], pts[-1][1], 5, 0, 2 * math.pi)
+        cr.fill_preserve()
+        rgb(cr, LV_BG)
+        cr.set_line_width(2)
+        cr.stroke()
+        return
+    y = top + (h - top - pad) / 2.0
+    _live_path(cr, [(pad, y), (w - pad, y)], LINE, 4)
+    if length and distance is not None:
+        span = w - 2 * pad
+        x = pad + max(0.0, min(1.0, distance / length)) * span
+        _live_path(cr, [(pad, y), (x, y)], DIM, 4)
+        for t in ticks:
+            tx = pad + max(0.0, min(1.0, t / length)) * span
+            _live_path(cr, [(tx, y - 6), (tx, y + 6)], FAINT, 1)
+        rgb(cr, TEXT)
+        cr.new_sub_path()
+        cr.arc(x, y, 5, 0, 2 * math.pi)
+        cr.fill_preserve()
+        rgb(cr, LV_BG)
+        cr.set_line_width(2)
+        cr.stroke()

@@ -18,6 +18,7 @@
   --ls-ahead-gain: #29cc54; --ls-ahead-lose: #70cc89; --ls-behind-gain: #cc7870; --ls-behind-lose: #cc3729;
   --ls-gold: #d8af1f; --ls-pb: #16a6ff; --ls-none: #2a313a;
   --led-off: #1f252d; --led-g: #2fd27a; --led-y: #ffc21a; --led-r: #ff4d4d; --led-b: #4c9dff;
+  --clutch: #5fc4c4; --hb: #ff8a3d;
   --warn: #ffb020; --bad: #ff4d4d; --good: #2fd27a;
   --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
@@ -123,9 +124,28 @@ select { font: inherit; font-size: 15px; height: 44px; padding: 0 10px; border-r
 .bar { height: 6px; background: var(--grid); border-radius: 3px; margin-top: 8px; overflow: hidden; }
 .bar div { height: 100%; width: 0; background: var(--accent); }
 .live.idle-state .gear { color: var(--faint); }
-.soon .big-line { font-size: 17px; font-weight: 600; margin: 2px 0 6px; }
-.soon p { margin: 0 0 6px; color: var(--dim); }
-.soon ul { margin: 0; padding-left: 18px; color: var(--dim); }
+.delta { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.delta .dv { font: 700 40px/1 var(--mono); letter-spacing: -.03em; min-width: 5.2ch; }
+.dbar { position: relative; height: 14px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+.dbar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1.5px; background: var(--dim); }
+.dbar i { position: absolute; top: 0; bottom: 0; }
+.dmeta { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.dmeta b { color: var(--text); font-weight: 600; }
+.delta-note { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.delta-note button { color: var(--accent); font-size: 12.5px; margin-left: 8px; min-height: 32px; }
+canvas { display: block; width: 100%; touch-action: pan-y; }
+.duo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.duo .panel { margin-bottom: 0; }
+.strip-h { margin: 8px 0 4px; }
+.c-thr { color: var(--thr); } .c-brk { color: var(--brk); } .c-clutch { color: var(--clutch); }
+.done .runhead .t { font-size: 30px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 10px;
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn:disabled { opacity: .4; cursor: default; }
+.ribbon i.cur { background: var(--text); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
 
 /* -- Coaching: the last run, the debrief, shift points -- */
 .runhead { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; }
@@ -255,7 +275,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
   .deskonly { display: block; }
   footer { margin-top: 8px; }
 }
-@media (prefers-reduced-motion: reduce) { .leds.flash i { animation: none; } .view.fade { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .leds.flash i, .ribbon i.cur { animation: none; } .view.fade { animation: none; } }
 </style>
 <style>
 /* -- Telemetry > Run: the post-run worksheet (docs/telemetry-ui-design.md 7.3, 7.5, 7.6); its own block so the
@@ -442,7 +462,36 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
                 <div class="big mid"><b id="rpm">–</b><span>rpm</span></div>
                 <div class="shiftat">change up at <b class="num" id="shift">–</b><span id="shift-src"></span></div>
               </div>
-            </d    </div>
+            </div>
+            <div class="delta" id="deltabox" hidden>
+              <div class="dv num" id="dv">±0.00</div>
+              <div class="dbar" id="dbar"><i id="dbar-i"></i></div>
+              <div class="dmeta"><span>vs PB <b class="num" id="pb2">–</b> · split <b class="num" id="dsplit">–</b></span><span>finish ≈ <b class="num" id="pred">–</b></span></div>
+            </div>
+            <p class="note delta-note" id="delta-note" hidden></p>
+          </div>
+        </div>
+        <div class="panel done" id="done" hidden>
+          <div class="panel-h"><span class="lbl" id="done-h">Run finished</span><span class="lbl" id="done-stage"></span></div>
+          <div class="runhead"><span class="t num" id="done-t">–</span><span class="d num" id="done-d"></span>
+            <span class="s" id="done-s"></span></div>
+          <div class="btns"><button type="button" class="btn" id="open-run">Open the run</button><button type="button" class="btn ghost" id="open-debrief">Debrief</button><button type="button" class="btn ghost" id="back-live">Back to live</button></div>
+        </div>
+      </div>
+      <div id="live-side">
+        <div class="panel" id="strips-panel">
+          <div class="panel-h"><span class="lbl">Pedals · last 12 s</span><span class="lbl"><span class="c-thr">THR</span> · <span class="c-brk">BRK</span><span id="clutch-key" hidden> · <span class="c-clutch">CLT</span></span></span></div>
+          <canvas id="c-pedals" height="64"></canvas>
+          <div id="hb-box" hidden><div class="panel-h strip-h"><span class="lbl">Handbrake</span></div><canvas id="c-hb" height="24"></canvas></div>
+          <div class="panel-h strip-h"><span class="lbl">Steering</span><span class="lbl">L ▲ · R ▼</span></div>
+          <canvas id="c-steer" height="44"></canvas>
+        </div>
+        <div class="duo">
+          <div class="panel"><div class="panel-h"><span class="lbl">g-g</span><span class="lbl num" id="gtot">0.0 g</span></div><canvas id="c-gg"></canvas></div>
+          <div class="panel"><div class="panel-h"><span class="lbl">Stage</span><span class="lbl num" id="km">0.0 / 5.0 km</span></div><canvas id="c-minimap"></canvas></div>
+        </div>
+      </div>
+    </div>
     <!-- RUN: a run against the PB, laid out like a data engineer's worksheet -->
     <div id="tele-run" hidden>
       <div class="run-grid">
@@ -501,15 +550,6 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
         </div>
       </div>
     </div>
-made up in the meantime.</p>
-          <ul>
-            <li>Speed, pedals, steering and gear against the PB, by distance</li>
-            <li>The live delta to the PB and the split you are in</li>
-            <li>g-g and the stage map</li>
-          </ul>
-        </div>
-      </div>
-    </div>
   </section>
 
   <footer>Read-only: nothing here can change Oversteer. Plain HTTP on your network: anyone on it can read this page.</footer>
@@ -563,8 +603,10 @@ function showTab(name, chosen) {
   for (const t of TABS) { const v = $("tab-" + t); v.hidden = t !== name; v.classList.toggle("fade", !!chosen && t === name); }
   for (const b of document.querySelectorAll("[data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
   $("tabname").textContent = name === "coaching" ? "Coaching" : "Telemetry";
-  if (chosen) { try { history.replaceState(null, "", "#" + name); } catch (e) { location.hash = name; } }
+  if (chosen && location.hash.slice(1).split("/")[0] !== name) { try { history.replaceState(null, "", "#" + name); } catch (e) { location.hash = name; } }
+  if (name === "telemetry" && typeof resumeLive === "function" && started) resumeLive();
 }
+let started = false;
 for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab, true));
 $("livebar").addEventListener("click", () => showTab("telemetry", true));
 window.addEventListener("hashchange", () => showTab(location.hash.slice(1).split("/")[0], true));
@@ -581,6 +623,7 @@ function hms(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit", mi
 function connState() {
   const age = conn.last ? Date.now() - conn.last : null;
   if (conn.failed || conn.status === false) return "down";
+  if (lr.body && lr.body.state === "stale") return "stale";
   if (conn.sample) return "live";
   if (age != null && age >= STALE_MS && age < GONE_MS) return "stale";
   if (conn.receiving) return "live";
@@ -589,7 +632,7 @@ function connState() {
 function updateConn() {
   const state = connState(), chip = $("conn"), banner = $("banner"), s = conn.status || {};
   const game = s.game ? SHORT[s.game] || GAMES[s.game] || s.game : "";
-  const age = conn.last ? Math.round((Date.now() - conn.last) / 1000) : 0;
+  const age = lr.body && lr.body.state === "stale" && lr.body.age != null ? Math.round(lr.body.age) : conn.last ? Math.round((Date.now() - conn.last) / 1000) : 0;
   let text, note = null;
   if (state === "down") {
     text = "Oversteer not answering";
@@ -612,6 +655,7 @@ function updateConn() {
   $("live").classList.toggle("idle-state", state === "idle" || (!conn.sample && !conn.last));
   $("dashbox").classList.toggle("dimmed", dim);
   $("lights").classList.toggle("dimmed", dim);
+  $("live-side").classList.toggle("dimmed", dim);
 }
 
 // -- live --
@@ -628,25 +672,40 @@ function lights(value, target) {
   for (let i = 0; i < LIGHTS; i++) cells[i].className = over || i >= on ? "" : i < LIGHTS * 0.5 ? "g" : i < LIGHTS * 0.8 ? "y" : "r";
 }
 
-let liveTimer = null;
+let liveTimer = null, polling = false;
 async function live() {
-  let s = null, failed = false;
-  if (!document.hidden) {
-    try { s = await get("/api/v1/live"); } catch (e) { s = null; failed = true; }
-    conn.failed = failed;
-    conn.sample = s;
-    if (s) conn.last = Date.now();
-    showLive(s);
-    updateConn();
-  }
+  if (polling) return;                                  // one request at a time, whoever asks
+  polling = true;
+  let s = null, failed = false, body = null;
+  try {
+    if (!document.hidden) {
+      try { body = await get("/api/v1/live?since=" + lr.since); s = body.dash || null; } catch (e) { body = null; failed = true; }
+      conn.failed = failed;
+      conn.sample = s;
+      if (s || (body && body.state !== "idle")) conn.last = Date.now();
+      lr.body = body;
+      if (body) liveIngest(body);
+      showLive(s);
+      updateConn();
+      if (body) liveShow(body);
+    }
+  } catch (e) { failed = true; }
+  polling = false;
   clearTimeout(liveTimer);
-  liveTimer = setTimeout(live, s ? 250 : failed ? 2000 : 1000);
+  liveTimer = setTimeout(live, s || (body && body.state === "live") ? 250 : failed ? 2000 : 1000);
+}
+// Back on the Telemetry tab, or the page visible again: poll now, from the start of the buffer (what was
+// missed is dropped by time below), and draw at once: the canvases had no width while hidden
+function resumeLive() {
+  clearTimeout(liveTimer);
+  lr.since = 0;
+  live();
+  requestAnimationFrame(() => { if (lr.body) liveShow(lr.body); });
 }
 
 function blankLive() {
   $("gear").textContent = "–"; $("speed").textContent = "–"; $("rpm").textContent = "–";
   $("shift").textContent = "–"; $("shift-src").textContent = ""; $("gear").classList.remove("hot");
-  $("stage").textContent = "No telemetry arriving"; $("km").textContent = ""; $("progress").style.width = "0";
   lights(0, 0);
   if (liveGear !== null) { liveGear = null; markGear(); }
   $("livebar").hidden = true;
@@ -669,10 +728,6 @@ function showLive(s) {
   let km = "";
   if (s.distance != null && s.stage_length) km = (Math.max(0, s.distance) / 1000).toFixed(1) + " / " + (s.stage_length / 1000).toFixed(1) + " km";
   else if (s.distance != null) km = (Math.max(0, s.distance) / 1000).toFixed(1) + " km";
-  $("km").textContent = km;
-  const share = s.progress != null ? s.progress : s.distance != null && s.stage_length ? s.distance / s.stage_length : null;
-  $("progress").style.width = share == null ? "0" : Math.max(0, Math.min(100, share * 100)) + "%";
-  $("stage").textContent = stageName || (km ? "Stage" : "Driving");
   if (s.gear !== liveGear) { liveGear = s.gear; markGear(); }
   if (carFollowsLive && s.car) followCar(s.car);
   // The one live line the desktop Coaching tab keeps
@@ -747,39 +802,20 @@ function clock(t) {
   const m = Math.floor(t / 60), s = t - m * 60;
   return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
 }
-function signed(d, dp) {                 // a difference that rounds to nothing is ±0.0, never +0.0 or −0.0
-  if (d == null) return "–";
-  const k = Math.pow(10, dp == null ? 1 : dp), r = Math.round(Math.abs(d) * k) / k * (d < 0 ? -1 : 1);
-  return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp == null ? 1 : dp);
-}
+function signed(d) { return d == null ? "–" : (d > 0.05 ? "+" : d < -0.05 ? MINUS : "±") + Math.abs(d).toFixed(1); }
 function seconds(t) { return t == null ? "–" : t.toFixed(1); }
 
 // -- the splits row and its sheet --
-// LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when ahead of
-// the PB (cum: this run's elapsed time at the split's end less the PB's) and red when behind it, the darker
-// shade when the split itself gained time on the PB's and the lighter when it lost time. Without the PB's
-// times (older server) the split's best stands in for both.
+// LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when level
+// with or ahead of the comparison and red behind it, the darker shade when the split gained time and the
+// lighter when it lost time. The comparison here is each split's best (coach.splits() gives no PB per split
+// yet), so "behind" is by how much the split lost: the lighter red under half a second, the darker over.
 function splitTone(r) {
   if (r.last == null || r.delta == null) return "none";
   if (r.gold) return "gold";
-  const pb = r.cum != null && r.pb != null, cum = pb ? r.cum : r.delta, seg = pb ? r.last - r.pb : r.delta;
-  return (Math.round(cum * 10) <= 0 ? "ahead" : "behind") + "-" + (Math.round(seg * 10) <= 0 ? "gain" : "lose");
+  if (r.delta <= 0.05) return "ahead-gain";
+  return r.delta > 0.5 ? "behind-lose" : "behind-gain";
 }
-// A gold split shows how far it beat the previous best; others the split against the PB's.
-function splitDelta(r) {
-  if (r.last == null) return "–";
-  if (r.gold) return "★" + (r.margin ? " " + signed(-r.margin) : "");
-  return signed(r.pb != null ? r.last - r.pb : r.delta);
-}
-// "PB" is said for a clean run that is the best, never for a learning or off run that was merely quick
-function lastBadge(sp) {
-  if (sp.last == null || sp.best == null) return null;
-  if (sp.new_pb) return {text: "PB", cls: "t-gold"};
-  const d = sp.last - sp.best;
-  return {text: signed(d), cls: Math.round(d * 10) <= 0 ? "t-ahead-gain" : "pos-slower"};
-}
-// The times end at the stage's flying finish where the stage table has one
-function finishNote(sp) { return sp.finish_m != null ? "Times run to the estimated flying finish of the stage." : ""; }
 
 let splitsOpen = false;
 try { splitsOpen = localStorage.getItem("splitsOpen") === "1"; } catch (e) {}
@@ -796,7 +832,7 @@ function splitsTable(sp) {
   const box = el("div");
   const table = el("table");
   const head = el("tr");
-  for (const h of ["Split", "Last", "Δ PB", "Best", "Save"]) head.appendChild(el("th", h));
+  for (const h of ["Split", "Last", "Δ best", "Best"]) head.appendChild(el("th", h));
   table.appendChild(head);
   sp.splits.forEach((r, i) => {
     const tr = el("tr", null, r.finish ? "fin" : "");
@@ -804,25 +840,22 @@ function splitsTable(sp) {
     name.textContent = (i + 1) + ". " + r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "");
     tr.appendChild(name);
     tr.appendChild(el("td", seconds(r.last)));
-    tr.appendChild(el("td", splitDelta(r), "t-" + splitTone(r)));
+    tr.appendChild(el("td", (r.gold ? "★ " : "") + (r.last == null ? "–" : signed(r.delta)), "t-" + splitTone(r)));
     tr.appendChild(el("td", seconds(r.best)));
-    tr.appendChild(el("td", r.delta != null && Math.round(r.delta * 10) > 0 ? r.delta.toFixed(1) : "–", "dim"));
     table.appendChild(tr);
   });
   const sum = el("tr", null, "sum");
   sum.appendChild(el("td", "Stage", "name"));
   sum.appendChild(el("td", clock(sp.last)));
-  const badge = lastBadge(sp);
-  sum.appendChild(el("td", badge ? (sp.new_pb ? "★ " : "") + signed(sp.last - sp.best) : "–", badge ? badge.cls : "dim"));
+  sum.appendChild(el("td", sp.last != null && sp.best != null ? signed(sp.last - sp.best) : "–",
+    sp.last != null && sp.best != null && sp.last - sp.best <= 0.05 ? "t-ahead-gain" : "t-behind-lose"));
   sum.appendChild(el("td", clock(sp.best)));
-  sum.appendChild(el("td", badge && !sp.new_pb && Math.round((sp.last - sp.best) * 10) > 0 ? (sp.last - sp.best).toFixed(1) : "–", "dim"));
   table.appendChild(sum);
   const sob = el("tr");
   sob.appendChild(el("td", "Sum of best", "name"));
   sob.appendChild(el("td", ""));
   sob.appendChild(el("td", sp.gain != null ? MINUS + sp.gain.toFixed(1) : "", "t-gold"));
   sob.appendChild(el("td", clock(sp.possible)));
-  sob.appendChild(el("td", ""));
   table.appendChild(sob);
   box.appendChild(table);
   if (sp.sectors && sp.sectors.length) {
@@ -832,18 +865,18 @@ function splitsTable(sp) {
       cell.appendChild(el("span", r.name || "S" + (i + 1), "lbl"));
       const est = r.confidence === "low" ? "≈" : "";
       cell.appendChild(el("b", r.last == null ? "–" : est + seconds(r.last), "num"));
-      cell.appendChild(el("span", r.last == null ? "best " + est + seconds(r.best) : splitDelta(r), "d t-" + splitTone(r)));
+      cell.appendChild(el("span", (r.gold ? "★ " : "") + (r.last == null ? "best " + est + seconds(r.best) : signed(r.delta)), "d t-" + splitTone(r)));
       grid.appendChild(cell);
     });
     box.appendChild(grid);
     if (sp.sectors.some((r) => r.confidence === "low")) box.appendChild(el("p", "≈ Sector positions estimated from the game's sector lengths.", "foot"));
   }
-  box.appendChild(el("p", "Gold ★: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what the split could still gain against its best. Sum of best: every split's best put together. "
-    + (sp.finish_m != null ? finishNote(sp) : "The finish split includes the slow-down to the stop."), "foot"));
+  box.appendChild(el("p", "Gold ★: your last run set that split's best. Green: level with the best; red: behind it, the darker the more it lost. Sum of best: every split's best put together. The finish split includes the slow-down to the stop.", "foot"));
   return box;
 }
 
 function showSplits(sp) {
+  lastSplits = sp;
   splitsData = sp;
   const row = $("splits"), panel = $("splits-panel"), desk = $("desk-splits");
   clear(panel); clear($("desk-splits-body"));
@@ -854,22 +887,16 @@ function showSplits(sp) {
   $("sp-sob").textContent = clock(sp.possible);
   const now = $("sp-now");
   clear(now);
-  const badge = lastBadge(sp);
-  if (badge) {
+  if (sp.last != null && sp.best != null) {
+    const d = sp.last - sp.best;
     now.appendChild(el("i", "Last"));
     now.appendChild(document.createTextNode(clock(sp.last) + " "));
-    now.appendChild(el("span", badge.text, badge.cls));
+    now.appendChild(el("span", d <= 0.05 ? "PB" : signed(d), d <= 0.05 ? "t-gold" : "pos-slower"));
   }
-  row.title = sp.name + ": PB " + clock(sp.best) + ", sum of best " + clock(sp.possible) + (finishNote(sp) ? " (" + finishNote(sp) + ")" : "");
+  row.title = sp.name + ": PB " + clock(sp.best) + ", sum of best " + clock(sp.possible);
   const ribbon = $("ribbon");
   clear(ribbon);
-  const long = sp.splits.every((r) => r.d0 != null && r.d1 != null);           // cells as long as the splits are
-  sp.splits.forEach((r, i) => {
-    const c = el("i", null, "ls-" + splitTone(r));
-    if (long) c.style.flexGrow = String(Math.max(1, r.d1 - r.d0));
-    c.title = (i + 1) + ". " + r.name.replace(/^the /, "") + " " + seconds(r.last) + " " + splitDelta(r);
-    ribbon.appendChild(c);
-  });
+  for (const r of sp.splits) { const c = el("i", null, "ls-" + splitTone(r)); ribbon.appendChild(c); }
   if (sp.sectors && sp.sectors.length) {
     ribbon.appendChild(el("s"));
     sp.sectors.forEach((r, i) => { const c = el("i", null, "sec ls-" + splitTone(r)); c.title = (r.name || "S" + (i + 1)) + " " + (r.confidence === "low" ? "≈" : "") + seconds(r.last); ribbon.appendChild(c); });
@@ -900,9 +927,11 @@ function lastRun(sp, sessionList) {
   const facts = [sp.name, sp.runs + " runs", golds + (golds === 1 ? " gold split" : " gold splits")];
   if (sp.last == null) facts.unshift("Last run not finished");
   $("lr-s").textContent = facts.join(" · ");
-  const badge = lastBadge(sp);
-  if (badge) { $("lr-d").textContent = badge.text; $("lr-d").classList.add(badge.cls); }
-  $("lr-d").title = finishNote(sp);
+  if (sp.last != null && sp.best != null) {
+    const d = sp.last - sp.best;
+    $("lr-d").textContent = d <= 0.05 ? "PB" : signed(d);
+    $("lr-d").classList.add(d <= 0.05 ? "t-gold" : "pos-slower");
+  }
   $("lr-pb").textContent = clock(sp.best);
   $("lr-sob").textContent = clock(sp.possible);
   $("lr-gain").textContent = sp.gain == null ? "–" : MINUS + sp.gain.toFixed(1);
@@ -1064,6 +1093,285 @@ function sessions(list) {
   }
 }
 
+// -- the live run: /api/v1/live?since=<seq> (docs/telemetry-ui-design.md, "Phase 3 live API") --
+// The page keeps the rows of the run it was shown: the last 30 s for the strips, every position for the map.
+// Rows are told apart by their clock, so a poll that repeats rows (back on the tab: since=0) adds nothing, and
+// rows missed while the page was away leave a gap in the strips, not a line drawn across it.
+
+const lr = {since: 0, n: null, rows: [], path: [], lastT: -1, tones: {}, body: null, dismissed: null, chan: "", idx: {}, ribbon: false, loaded: null};
+const LV_WINDOW = 12, LV_KEEP = 30, GRAV = 9.80665, LV_GAP = 0.5;
+let lastSplits = null;                     // the splits row's data (showSplits): the ribbon's cells and their bounds
+// A difference to dp decimals (two live): one that rounds to nothing is ±0.00, never +0.00 or −0.00
+function lvSigned(d, dp) {
+  if (d == null) return "–";
+  const k = Math.pow(10, dp), r = Math.round(Math.abs(d) * k) / k * (d < 0 ? -1 : 1);
+  return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp);
+}
+const lvTokens = {};
+function lvTok(name) { return lvTokens[name] || (lvTokens[name] = getComputedStyle(document.documentElement).getPropertyValue(name).trim()); }
+function lvSized(cv, h) {
+  // null while the canvas has no width (its tab is hidden)
+  const dpr = Math.min(3, window.devicePixelRatio || 1), w = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 0;
+  if (!w) return null;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  cv.style.height = h + "px";
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  return {g, w, h};
+}
+function lvLine(g, pts, colour, width) {
+  if (pts.length < 2) return;
+  g.save(); g.strokeStyle = colour; g.lineWidth = width; g.lineJoin = "round"; g.beginPath();
+  pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]));
+  g.stroke(); g.restore();
+}
+// The rows of the last LV_WINDOW s as runs of points (xy(row) -> [x, y] or null), broken where rows are missing
+function lvRuns(xy) {
+  const out = [], rows = lr.rows, from = lr.lastT - LV_WINDOW - LV_GAP;
+  let cur = null, last = null;
+  for (const r of rows) {
+    if (r.t < from) continue;
+    const p = xy(r);
+    if (!p || (last != null && r.t - last > LV_GAP)) { cur = null; }
+    if (p) { if (!cur) { cur = []; out.push(cur); } cur.push(p); last = r.t; }
+  }
+  return out;
+}
+
+function liveClear() { lr.rows = []; lr.path = []; lr.lastT = -1; lr.tones = {}; lr.loaded = null; }
+
+function liveIngest(b) {
+  if (b.reset || (b.run ? b.run.n !== lr.n : lr.n !== null)) liveClear();
+  lr.n = b.run ? b.run.n : null;
+  lr.since = b.seq;
+  const key = b.channels.join();
+  if (key !== lr.chan) { lr.chan = key; lr.idx = {}; b.channels.forEach((c, i) => { lr.idx[c] = i; }); }
+  const I = lr.idx;
+  for (const r of b.samples) {
+    const t = r[I.t];
+    if (t == null || t <= lr.lastT) continue;
+    lr.lastT = t;
+    const o = {t, d: r[I.distance], thr: r[I.throttle], brk: r[I.brake], clu: r[I.clutch], hb: r[I.handbrake], steer: r[I.steer],
+      along: r[I.a_long], alat: r[I.a_lat], x: r[I.x], z: r[I.z]};
+    lr.rows.push(o);
+    if (o.x != null && o.z != null) lr.path.push([o.x, o.z]);
+  }
+  let drop = 0;
+  while (drop < lr.rows.length && lr.rows[drop].t < lr.lastT - LV_KEEP) drop++;
+  if (drop) lr.rows.splice(0, drop);
+  if (lr.path.length > 30000) lr.path.splice(0, 5000);
+  // The tone of a split as it is completed (LiveSplit's rule against the PB: ahead or behind by the clock at its
+  // end, gaining or losing by the split's own time); gold needs the best splits, which the live run does not have
+  const sp = b.split;
+  if (b.ref && sp && sp.prev && lr.tones[sp.prev.index] === undefined && b.delta != null) {
+    const cum = b.delta - (sp.delta != null ? sp.delta : 0), seg = sp.prev.delta;
+    lr.tones[sp.prev.index] = (Math.round(cum * 10) <= 0 ? "ahead" : "behind") + "-" + (Math.round(seg * 10) <= 0 ? "gain" : "lose");
+  }
+}
+
+// -- the ribbon follows the run: by distance, never by list position (the grid has a launch section the
+// splits list leaves out) --
+function liveRibbon(b) {
+  const sp = lastSplits, ref = b.ref;
+  const cells = [].filter.call($("ribbon").children, (c) => c.tagName === "I" && !c.classList.contains("sec"));
+  if (!sp || !sp.splits || !sp.splits.length || cells.length !== sp.splits.length) return null;
+  const d = b.distance, fin = b.state === "finished";
+  let cur = null;
+  sp.splits.forEach((r, j) => { if (!fin && d != null && r.d0 != null && r.d1 != null && d >= r.d0 && d < r.d1) cur = j; });
+  sp.splits.forEach((r, j) => {
+    const g = ref && r.d0 != null ? ref.splits.findIndex((x) => Math.abs(x.d0 - r.d0) < 2) : -1;
+    cells[j].className = j === cur ? "cur" : lr.tones[g] ? "ls-" + lr.tones[g] : "";
+  });
+  return cur == null ? -1 : cur;
+}
+
+function openRunLink() {
+  const id = lr.body && lr.body.run ? lr.body.run.id : null;
+  if (id == null) return;
+  if (typeof window.openRun === "function") window.openRun(id);
+  else location.hash = "telemetry/run/" + id;
+}
+$("open-run").addEventListener("click", openRunLink);
+$("open-debrief").addEventListener("click", () => showTab("coaching", true));
+$("back-live").addEventListener("click", () => { if (lr.body && lr.body.run) { lr.dismissed = lr.body.run.n; liveShow(lr.body); } });
+
+function liveShow(b, force) {
+  const live = b.state === "live" || b.state === "stale", fin = b.state === "finished";
+  const done = fin && lr.dismissed !== b.run.n;
+  $("done").hidden = !done;
+  $("live").hidden = done;
+  const ready = live && b.ref_status === "ready" && b.delta != null && b.ref;
+  $("deltabox").hidden = !ready;
+  const note = $("delta-note");
+  clear(note);
+  note.hidden = true;
+  if (live && b.ref_status === "none") {
+    note.textContent = "No PB yet on this stage: finish a clean run";
+    note.hidden = false;
+  } else if (fin && !done) {
+    note.appendChild(document.createTextNode("Run finished"));
+    const back = el("button", "Show the result");
+    back.type = "button";
+    back.addEventListener("click", () => { lr.dismissed = null; liveShow(b); });
+    note.appendChild(back);
+    note.hidden = false;
+  }
+  // The splits ribbon: where the run is, and each split's tone as it is completed
+  const cur = live || fin ? liveRibbon(b) : null;
+  const now = $("sp-now");
+  if (ready) {
+    clear(now);
+    const n = lastSplits && lastSplits.splits ? lastSplits.splits.length : b.split ? b.split.n : 0;
+    const at = cur != null && cur >= 0 ? cur + 1 : null;
+    now.appendChild(el("span", (at ? at + "/" + n + " " : "") + lvSigned(b.delta, 2), b.delta > 0.005 ? "pos-slower" : b.delta < -0.005 ? "pos-faster" : ""));
+  } else if (fin && b.final && b.final.time != null) {
+    clear(now);
+    now.appendChild(document.createTextNode("Run " + clock(b.final.time) + " "));
+    if (b.final.delta != null) now.appendChild(el("span", lvSigned(b.final.delta, 2), b.final.delta > 0.005 ? "pos-slower" : b.final.delta < -0.005 ? "pos-faster" : ""));
+  }
+  const active = (live || fin) && (cur != null || (fin && lastSplits));
+  if (active || ready || fin) lr.ribbon = true;
+  else if (lr.ribbon) { lr.ribbon = false; if (lastSplits) showSplits(lastSplits); }
+  if (ready) {
+    const dv = $("dv");
+    dv.textContent = lvSigned(b.delta, 2);
+    dv.className = "dv num " + (b.delta > 0.005 ? "pos-slower" : b.delta < -0.005 ? "pos-faster" : "");
+    const bar = $("dbar-i"), f = Math.max(-1, Math.min(1, b.delta / 2));
+    bar.style.background = f > 0 ? "var(--slower)" : "var(--faster)";
+    bar.style.left = f > 0 ? "50%" : (50 + f * 50) + "%";
+    bar.style.width = Math.abs(f) * 50 + "%";
+    $("pb2").textContent = clock(b.ref.time);
+    const sp = b.split;
+    let label = "–";
+    if (sp && sp.delta != null) label = cur != null && cur >= 0 ? (cur + 1) + " " + lvSigned(sp.delta, 2) : lastSplits && lastSplits.splits ? "–" : lvSigned(sp.delta, 2);
+    $("dsplit").textContent = label;
+    $("pred").textContent = b.predicted != null ? clock(b.predicted) : "–";
+  }
+  if (done) liveFillDone(b);
+  // The calls of the debrief and the splits are worked out after the run: read them again once it finishes
+  if (fin && lr.loaded !== b.run.n) { lr.loaded = b.run.n; loadCar(); setTimeout(() => { loadCar(); if (lr.body && lr.body.state === "finished") liveShow(lr.body); }, 5000); }
+  if ($("tab-telemetry").hidden || $("live-view").hidden || document.hidden) return;
+  liveDraw(b);
+}
+
+function liveFillDone(b) {
+  $("done-stage").textContent = b.stage && b.stage.name ? b.stage.name : "";
+  const f = b.final || {};
+  $("done-t").textContent = f.time != null ? clock(f.time) : "–";
+  const d = $("done-d");
+  d.textContent = f.delta != null ? lvSigned(f.delta, 2) : "";
+  d.className = "d num " + (f.delta != null && f.delta > 0.005 ? "pos-slower" : f.delta != null && f.delta < -0.005 ? "pos-faster" : "");
+  const parts = [];
+  if (b.ref) parts.push("PB " + clock(b.ref.time));
+  else parts.push("No PB to compare with yet");
+  if (lastSplits) {
+    if (lastSplits.possible != null) parts.push("SoB " + clock(lastSplits.possible));
+    const golds = (lastSplits.splits || []).filter((r) => r.gold).length;
+    if (golds) parts.push(golds + (golds === 1 ? " gold split" : " gold splits"));
+  }
+  const calls = $("coach-n").textContent;
+  if (calls) parts.push(calls + " in the debrief");
+  $("done-s").textContent = parts.join(" · ");
+  $("open-run").disabled = !(b.run && b.run.id != null);
+}
+
+// -- the canvases --
+
+function liveDraw(b) {
+  liveDrawPedals(); liveDrawSteer(); liveDrawGG(); liveDrawMini(b);
+  const last = lr.rows[lr.rows.length - 1];
+  $("gtot").textContent = last && last.alat != null && last.along != null ? (Math.hypot(last.alat, last.along) / GRAV).toFixed(1) + " g" : "0.0 g";
+  const len = b.ref && b.ref.course ? b.ref.course : b.stage && b.stage.length ? b.stage.length : null;   // the reference's own metres: the run's distance is in them
+  const d = b.distance;
+  $("km").textContent = d != null ? (Math.max(0, d) / 1000).toFixed(1) + (len ? " / " + (len / 1000).toFixed(1) : "") + " km" : "–";
+}
+
+function liveStrip(cv, h, series, grid) {
+  const c = lvSized(cv, h);
+  if (!c) return;
+  const {g, w} = c, now = lr.lastT, xOf = (t) => w - (now - t) / LV_WINDOW * w;
+  g.strokeStyle = lvTok("--grid"); g.lineWidth = 1;
+  for (const y of grid(h)) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+  for (const s of series) {
+    for (const pts of lvRuns((r) => { const y = s.fn(r, h); return y == null ? null : [xOf(r.t), y]; })) {
+      if (s.fill) {
+        g.save(); g.globalAlpha = .18; g.fillStyle = lvTok(s.colour); g.beginPath(); g.moveTo(pts[0][0], h);
+        pts.forEach((p) => g.lineTo(p[0], p[1])); g.lineTo(pts[pts.length - 1][0], h); g.fill(); g.restore();
+      }
+      lvLine(g, pts, lvTok(s.colour), s.width || 1.75);
+    }
+  }
+}
+function liveDrawPedals() {
+  const win = lr.rows.filter((r) => r.t >= lr.lastT - LV_WINDOW);
+  const clutch = win.some((r) => r.clu != null && r.clu > 0.05);            // as the game sees it: 0 released, 1 pressed
+  $("clutch-key").hidden = !clutch;
+  const pos = (v) => (h) => v == null ? null : h - 1 - Math.max(0, Math.min(1, v)) * (h - 2);
+  const series = [{colour: "--thr", fill: true, fn: (r, h) => pos(r.thr)(h)}, {colour: "--brk", fill: true, fn: (r, h) => pos(r.brk)(h)}];
+  if (clutch) series.push({colour: "--clutch", width: 1, fn: (r, h) => r.clu == null ? null : pos(r.clu)(h)});
+  liveStrip($("c-pedals"), 64, series, (h) => [0.5, h / 2, h - 0.5]);
+  const hb = win.some((r) => r.hb != null && r.hb > 0.02);                  // only while the rig reads it
+  $("hb-box").hidden = !hb;
+  if (hb) liveStrip($("c-hb"), 24, [{colour: "--hb", fill: true, fn: (r, h) => pos(r.hb)(h)}], (h) => [h - 0.5]);
+}
+function liveDrawSteer() {
+  liveStrip($("c-steer"), 44, [{colour: "--steer", fn: (r, h) => r.steer == null ? null : h / 2 - Math.max(-1, Math.min(1, r.steer)) * (h / 2 - 2)}], (h) => [h / 2]);
+}
+function liveDrawGG() {
+  const cv = $("c-gg"), c = lvSized(cv, Math.min(cv.clientWidth || 150, cv.clientWidth > 300 ? 240 : 170));
+  if (!c) return;
+  const {g, w, h} = c, cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 6, sc = R / 1.4;
+  g.strokeStyle = lvTok("--grid"); g.lineWidth = 1;
+  for (const r of [0.5, 1.0]) { g.beginPath(); g.arc(cx, cy, r * sc, 0, 7); g.stroke(); }
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  g.fillStyle = lvTok("--faint"); g.font = "10px " + lvTok("--mono"); g.fillText("1g", cx + sc + 2, cy - 3);
+  g.fillText("BRK", cx - 10, cy + R - 1); g.fillText("ACC", cx - 10, cy - R + 9);
+  const pts = lr.rows.filter((r) => r.alat != null && r.along != null).slice(-30);
+  pts.forEach((p, i) => { g.globalAlpha = (i + 1) / pts.length * .6; g.fillStyle = lvTok("--speed"); g.fillRect(cx - p.alat / GRAV * sc - 1.5, cy - p.along / GRAV * sc - 1.5, 3, 3); });
+  g.globalAlpha = 1;
+  const p = pts[pts.length - 1];
+  if (p) { g.fillStyle = lvTok("--text"); g.beginPath(); g.arc(cx - p.alat / GRAV * sc, cy - p.along / GRAV * sc, 5, 0, 7); g.fill(); }
+}
+// The stage: the way driven from the positions the samples carry (x, z), the car a dot; without them a straight
+// bar by distance with the splits' ends ticked
+function liveDrawMini(b) {
+  const cv = $("c-minimap"), size = Math.min(cv.clientWidth || 150, cv.clientWidth > 300 ? 240 : 170), path = lr.path;
+  const mapped = path.length >= 2;
+  const c = lvSized(cv, mapped ? size : Math.min(size, 56));
+  if (!c) return;
+  const {g, w, h} = c;
+  if (mapped) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of path) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const pad = 8, sc = Math.min((w - 2 * pad) / Math.max(1, x1 - x0), (h - 2 * pad) / Math.max(1, z1 - z0));
+    const ox = (w - (x1 - x0) * sc) / 2, oy = (h - (z1 - z0) * sc) / 2;
+    const P = ([x, z]) => [ox + (x - x0) * sc, h - (oy + (z - z0) * sc)];
+    const step = Math.max(1, Math.floor(path.length / 400)), pts = [];
+    for (let i = 0; i < path.length; i += step) pts.push(P(path[i]));
+    pts.push(P(path[path.length - 1]));
+    lvLine(g, pts, lvTok("--line"), 4);
+    lvLine(g, pts, lvTok("--dim"), 2);
+    const [x, y] = pts[pts.length - 1];
+    g.fillStyle = lvTok("--text"); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill();
+    g.strokeStyle = lvTok("--bg"); g.lineWidth = 2; g.stroke();
+    return;
+  }
+  const len = b.ref && b.ref.course ? b.ref.course : b.stage && b.stage.length ? b.stage.length : null;
+  const y = h / 2, pad = 8, span = w - 2 * pad;
+  lvLine(g, [[pad, y], [w - pad, y]], lvTok("--line"), 4);
+  if (len && b.distance != null) {
+    const x = pad + Math.max(0, Math.min(1, b.distance / len)) * span;
+    lvLine(g, [[pad, y], [x, y]], lvTok("--dim"), 4);
+    if (b.ref) for (const s of b.ref.splits) {
+      const tx = pad + Math.max(0, Math.min(1, s.d1 / len)) * span;
+      lvLine(g, [[tx, y - 6], [tx, y + 6]], lvTok("--faint"), 1);
+    }
+    g.fillStyle = lvTok("--text"); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill();
+    g.strokeStyle = lvTok("--bg"); g.lineWidth = 2; g.stroke();
+  }
+}
+
 // -- keeping the screen on --
 // The Screen Wake Lock API where the browser allows it: only in a secure
 // context (HTTPS or localhost), and this page is plain HTTP on the LAN.
@@ -1175,7 +1483,7 @@ $("wake").addEventListener("click", () => keepAwake());
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  status(); live();
+  status(); resumeLive();
   // A wake lock is released when the page is hidden; take it again
   if (wake.want && !wake.lock) {
     if (wake.video) wake.video.play().then(() => showWake(wake.state === "on" ? "on" : "video")).catch(() => showWake("tap"));
@@ -1188,9 +1496,12 @@ $("car").addEventListener("change", (e) => {
   if (!isNaN(id)) { carId = id; carFollowsLive = false; loadCar(); }
 });
 
+started = true;
 status();
 live();
 startWake();
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (lr.body) liveShow(lr.body, true); }, 100); });
+let resizeT = null;
 setInterval(status, 5000);
 setInterval(updateConn, 1000);
 setInterval(() => { if (!document.hidden && carId != null) loadCar(); }, 30000);
@@ -1228,6 +1539,7 @@ function showTele(v, chosen) {
   $("live-view").hidden = v !== "live"; $("tele-run").hidden = v !== "run";
   for (const b of document.querySelectorAll("[data-tv]")) b.setAttribute("aria-selected", String(b.dataset.tv === v));
   if (v === "run") rvEnsure();
+  else if (started) resumeLive();                 // the live canvases had no width while hidden
   if (chosen) rvHash();
 }
 function rvHash() {

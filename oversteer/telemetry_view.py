@@ -504,3 +504,165 @@ def gather(reader, profile, key, show_all=False):
             'tuning': tuning_lines(tuning.tune_summary(reader, car['id'], car['game']), notes),
             'sessions': session_rows(reader.history(profile, car['key'], 10)),
             'last_session': session, 'splits': _splits(reader, profile, car['id'])}
+
+
+# -- the live run (docs/telemetry-ui-design.md, "Phase 3 live API"): the rows of the run the tab has been shown,
+# and the strings of the delta block, the ribbon and the finished card; the web page's liveIngest/liveShow rules --
+
+GRAVITY = 9.80665
+LIVE_KEEP = 30.0                     # s of rows kept for the strips
+LIVE_BUS = ('t', 'distance', 'throttle', 'brake', 'clutch', 'handbrake', 'steer', 'a_long', 'a_lat', 'x', 'z')
+
+
+def signed2(delta):
+    """±s.ss with a real minus sign ('–' for none): the live delta's two decimals; a difference that rounds to
+    nothing is ±0.00, never +0.00 or -0.00."""
+    if delta is None:
+        return '–'
+    r = round(delta, 2)
+    return '{}{:.2f}'.format('+' if r > 0 else '−' if r < 0 else '±', abs(r))
+
+
+class LiveTrack:
+    """What the tab has seen of the live run: the rows of the last 30 s (dicts: t, d, thr, brk, clu, hb, steer,
+    along and alat in g, x, z), every position of the run, the tone of each split as it was completed (by the
+    reference's grid index), and the last body. Rows are told apart by their clock, so a read that repeats rows
+    (back on the tab) adds nothing, and rows missed while the tab was hidden leave a gap in the strips. The main
+    thread only."""
+
+    def __init__(self):
+        self.since = 0
+        self.n = None
+        self.rows = []
+        self.path = []
+        self.last_t = -1.0
+        self.tones = {}
+        self.body = None
+        self.dismissed = None                # the run number whose finished card was put away
+
+    def clear(self):
+        self.rows, self.path, self.last_t, self.tones = [], [], -1.0, {}
+
+    def resync(self):
+        """Read the whole buffer next time (back on the tab); what is already held is not added twice."""
+        self.since = 0
+
+    def ingest(self, body):
+        if body.get('reset') or (body['run']['n'] if body.get('run') else None) != self.n:
+            self.clear()
+        self.n = body['run']['n'] if body.get('run') else None
+        self.since = body['seq']
+        self.body = body
+        index = {c: i for i, c in enumerate(body['channels'])}
+        pick = {name: index.get(name) for name in LIVE_BUS}
+        for r in body['samples']:
+            def v(name):
+                i = pick[name]
+                return None if i is None else r[i]
+            t = v('t')
+            if t is None or t <= self.last_t:
+                continue
+            self.last_t = t
+            along, alat = v('a_long'), v('a_lat')
+            row = {'t': t, 'd': v('distance'), 'thr': v('throttle'), 'brk': v('brake'), 'clu': v('clutch'),
+                   'hb': v('handbrake'), 'steer': v('steer'),
+                   'along': None if along is None else along / GRAVITY, 'alat': None if alat is None else alat / GRAVITY,
+                   'x': v('x'), 'z': v('z')}
+            self.rows.append(row)
+            if row['x'] is not None and row['z'] is not None:
+                self.path.append((row['x'], row['z']))
+        keep = 0
+        while keep < len(self.rows) and self.rows[keep]['t'] < self.last_t - LIVE_KEEP:
+            keep += 1
+        del self.rows[:keep]
+        if len(self.path) > 30000:
+            del self.path[:5000]
+        # A split's tone as it is completed: ahead or behind the PB by the clock at its end, gaining or losing by the
+        # split's own time (LiveSplit's rule; gold needs the best splits, which the live run does not have)
+        split = body.get('split')
+        if body.get('ref') and split and split.get('prev') and body.get('delta') is not None \
+                and split['prev']['index'] not in self.tones:
+            cum = body['delta'] - (split['delta'] if split.get('delta') is not None else 0.0)
+            seg = split['prev']['delta']
+            self.tones[split['prev']['index']] = ('ahead' if round(cum, 1) <= 0 else 'behind') + '-' + \
+                ('gain' if round(seg, 1) <= 0 else 'lose')
+
+
+def live_phase(body, track):
+    """'idle', 'live', 'stale', 'finished' (shown as the finished card) or 'put-away' (finished, the card put away)."""
+    state = body['state']
+    if state == 'finished':
+        return 'put-away' if track.dismissed == body['run']['n'] else 'finished'
+    return state
+
+
+def live_cursor(body, bounds):
+    """The index of the splits-row cell the car is in, by distance (the row's `bounds`, not list position: the
+    grid has a launch section the row leaves out), or None between cells or past the finish."""
+    d = body.get('distance')
+    if d is None or body['state'] == 'finished':
+        return None
+    found = None
+    for j, b in enumerate(bounds or ()):
+        if b and None not in b and b[0] <= d < b[1]:
+            found = j
+    return found
+
+
+def live_ribbon(body, track, bounds):
+    """(tones per cell, current cell) for the splits ribbon while a run is on, or None: completed splits in the tone
+    they were completed in, the rest unlit."""
+    ref = body.get('ref')
+    if not bounds or body['state'] == 'idle':
+        return None
+    tones = []
+    for b in bounds:
+        g = -1
+        if ref and b and b[0] is not None:
+            for i, s in enumerate(ref['splits']):
+                if abs(s['d0'] - b[0]) < 2.0:
+                    g = i
+                    break
+        tones.append(track.tones.get(g, 'none'))
+    return tones, live_cursor(body, bounds)
+
+
+def live_delta_view(body, bounds=None):
+    """The dict telemetry_plot.live_delta draws, or None while there is nothing to say: the delta only with a
+    reference that is ready and a delta; 'no PB yet' as a note; 'vs PB · split n ±x.xx · finish ≈'."""
+    if body['state'] not in ('live', 'stale'):
+        return None
+    if body.get('ref_status') == 'none':
+        return {'note': _("No PB yet on this stage: finish a clean run"), 'dim': True}
+    ref = body.get('ref')
+    if body.get('ref_status') != 'ready' or body.get('delta') is None or not ref:
+        return None
+    split = body.get('split')
+    cur = live_cursor(body, bounds) if bounds else None
+    label = '–'
+    if split and split.get('delta') is not None:
+        if bounds:
+            label = '{} {}'.format(cur + 1, signed2(split['delta'])) if cur is not None else '–'
+        else:
+            label = signed2(split['delta'])
+    return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'split': label,
+            'finish': clock(body['predicted']), 'dim': body['state'] == 'stale'}
+
+
+def live_done_view(body, found=None, calls=None):
+    """The finished card: `time`, `delta` (text, or '' without a PB), `delta_value`, `stage`, and `line` ('PB 3:06.0
+    · SoB 3:04.0 · 3 gold splits · 3 calls in the debrief', from the splits row `found` and the debrief's count)."""
+    final = body.get('final') or {}
+    ref = body.get('ref')
+    parts = ['PB ' + clock(ref['time'])] if ref else [_("No PB to compare with yet")]
+    if found:
+        if found.get('sob') is not None:
+            parts.append(_("SoB") + ' ' + clock(found['sob']))
+        golds = sum(1 for t in found.get('tones') or () if t == 'gold')
+        if golds:
+            parts.append((_("{} gold split") if golds == 1 else _("{} gold splits")).format(golds))
+    if calls:
+        parts.append(_("{} in the debrief").format(calls))
+    delta = final.get('delta')
+    return {'time': clock(final.get('time')), 'delta': '' if delta is None else signed2(delta), 'delta_value': delta,
+            'stage': (body.get('stage') or {}).get('name') or '', 'line': ' · '.join(parts)}
