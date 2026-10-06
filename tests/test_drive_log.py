@@ -943,6 +943,36 @@ def test_run_clock():
     assert abs(own.t - 0.3) < 1e-9
 
 
+def test_acr_frozen_packets_with_the_car_stopped_count_as_time_at_rest(tmp_path, monkeypatch):
+    """The car stood with the game's clock standing too (ACR sends nothing in a pause, so this is a stop): the
+    run's duration and stops count it; the trace's clock does not."""
+    from oversteer import coach_context, drive_detect
+    seen = []
+    real = drive_detect.detect_run
+    monkeypatch.setattr(drive_detect, 'detect_run',
+                        lambda store, run, summary, *a, **k: (seen.append(summary), real(store, run, summary, *a, **k))[1])
+    base, _ = acr_clock_drive(0.0, 1500.0)
+    drive, _ = acr_clock_drive(0.0, 1500.0)
+    stuck = drive[300][1].stage_time
+    for _, s, _ in drive[300:350]:                             # five seconds
+        s.speed = 0.0
+        s.stage_time = stuck
+        s.lap_distance = drive[300][1].lap_distance
+    for _, s, _ in drive[350:]:
+        s.stage_time -= 5.0                                    # the clock stood those five seconds
+    a, _, sa = drive_runs(tmp_path, base)
+    b, _, sb = drive_runs(tmp_path, drive, name='stuck.db')
+    [one] = [r for r in sa['runs'] if r['distance'] > 300]
+    [two] = [r for r in sb['runs'] if r['distance'] > 300]
+    assert two['duration'] > one['duration'] - 1.0 and two['moving_time'] < two['duration'] - 4.0
+    assert [x['stops'] for x in seen] == [0, 1]
+    trace = b._reader().trace(two['id'])
+    t = coach_context.CH['t']
+    assert max(y[t] - x[t] for x, y in zip(trace, trace[1:])) < 0.5     # the trace's t is unaffected
+    a.close()
+    b.close()
+
+
 def test_run_clock_frozen_at_the_first_packet_is_not_a_clock_that_stopped():
     """A non-zero clock standing still from the first packet (the last run's finish, not yet reset) has not run: it
     is not 'stopped past the finish', and t follows the run's own time until the clock moves."""

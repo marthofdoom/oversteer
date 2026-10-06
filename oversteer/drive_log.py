@@ -628,6 +628,14 @@ class RunTracker:
                 self._still += dt
                 if self._still - dt < STOP <= self._still:
                     self._stops += 1
+        elif frozen and not self._paused and sample.game == 'acr':
+            # ACR sends nothing in a pause, so a packet repeating the clock with the car stopped is the car at
+            # rest: time, rest and a stop like any other (the run's clock t, which only the clock moves, is not
+            # ticked). DiRT repeats its last packet in a pause: there it is not counted
+            self._duration += dt
+            self._still += dt
+            if self._still - dt < STOP <= self._still:
+                self._stops += 1
         elif frozen and self._finish_counts and (
                 (sample.progress or 0.0) >= 1.0 or (sample.stage_time or 0.0) > (self._result_time or 0.0)):
             # Past the finish the game repeats its last packet (DiRT): the car is at rest all the same. Not in a
