@@ -373,7 +373,7 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run)
 
 def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
     """The Run view's data for `run_id` against `vs` ('pb', 'prev' or a run id):
-    {run, vs, ref ({id, n, time, label} or None), step, length, time, ref_time, channels, this, cmp, x, z, sections,
+    {run, vs, ref ({id, n, time, label} or None), step, length, limiter (rpm), time, ref_time, channels, this, cmp, x, z, sections,
     sectors}: `this` and `cmp` (None without a comparison) map each of CHANNELS to its values on the grid (points `step` m apart from 0), `x`
     and `z` are this run's position (None where it has none), `sections` the coach's sections (_section_rows) and
     `sectors` the game's. None for an unknown run or one without a trace. Cached per run and comparison."""
@@ -405,7 +405,9 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
         if other_rows:
             n = _numbers(reader, other['session'], numbers).get(other['id'])
             info = {'id': other['id'], 'n': n, 'time': other['result_time'], 'label': _label(other, n)}
+        car = reader.car_by_id(run['car']) if run['car'] is not None else None
         return {'run': run['id'], 'vs': kind, 'ref': info, 'step': step, 'length': length,
+                'limiter': ((car or {}).get('model') or {}).get('limiter'),
                 'time': run['result_time'] if run['finished'] == 1 else None,
                 'ref_time': other['result_time'] if other_rows else None, 'channels': list(CHANNELS),
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,

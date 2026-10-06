@@ -1065,7 +1065,7 @@ class GtkUi:
         stack = Gtk.Stack()
         stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         stack.add_titled(self._telemetry_overview(), 'coaching', _("Coaching"))
-        stack.add_titled(self._telemetry_live_view(), 'telemetry', _("Telemetry"))
+        stack.add_titled(self._telemetry_pane(), 'telemetry', _("Telemetry"))
         stack.add_titled(self._telemetry_settings_view(), 'settings', _("Settings"))
         self.telemetry_stack = stack
         switcher = Gtk.StackSwitcher(stack=stack, halign=Gtk.Align.CENTER)
@@ -1200,6 +1200,39 @@ class GtkUi:
         self.telemetry_tuning = self._list()
         self._section(page, _("Setup"), self.telemetry_tuning)
         return self._scrolled(page)
+
+    def _telemetry_pane(self):
+        """The Telemetry view: Live (the dash) and Run (a run against the PB: gtk_run_view) under a switcher."""
+        from .gtk_run_view import RunView
+        inner = Gtk.Stack()
+        inner.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        inner.add_titled(self._telemetry_live_view(), 'live', _("Live"))
+        self.telemetry_run = RunView()
+        inner.add_titled(self.telemetry_run, 'run', _("Run"))
+        self.telemetry_inner_stack = inner
+        switcher = Gtk.StackSwitcher(stack=inner, halign=Gtk.Align.CENTER)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.pack_start(switcher, False, False, 0)
+        box.pack_start(inner, True, True, 0)
+        inner.connect('notify::visible-child-name', lambda s, p: self._show_run_view())
+        box.connect('map', lambda w: self._show_run_view())
+        return box
+
+    def _show_run_view(self):
+        if self.telemetry_inner_stack.get_visible_child_name() == 'run':
+            self.telemetry_run.refresh()
+
+    def set_run_source(self, reader, profile, car_id):
+        """Where the Run view reads runs from (a callable giving a read-only Reader), set by the controller
+        with the history it reads."""
+        self.telemetry_run.set_source(reader, profile, car_id)
+        self._show_run_view()
+
+    def show_run(self, run_id, distance=None, vs='pb'):
+        """Open Telemetry > Run on a run, zoomed to `distance` m (a debrief call's place)."""
+        self.telemetry_stack.set_visible_child_name('telemetry')
+        self.telemetry_inner_stack.set_visible_child_name('run')
+        self.telemetry_run.open_run(run_id, vs, True, distance)
 
     def _telemetry_live_view(self):
         """The Telemetry view: the live dash (gear, speed, revs, the shift lights, the way through the stage), on

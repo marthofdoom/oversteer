@@ -199,3 +199,68 @@ def test_the_page_has_the_run_view_and_stays_inside_its_csp():
     for needle in ('id="tele-run"', 'id="c-strips"', 'id="loss"', '/api/v1/runs/', 'data-cmp="prev"'):
         assert needle in text, needle
     assert len(_hashes(text, 'script')) >= 2 and len(_hashes(text, 'style')) >= 2     # the Run view's own blocks are hashed
+
+
+def surface_of(draw, w, h):
+    import cairo
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+    cr = cairo.Context(surface)
+    draw(cr)
+    return surface
+
+
+def pixel_of(surface, x, y):
+    data = surface.get_data()
+    o = y * surface.get_stride() + x * 4
+    return data[o + 2], data[o + 1], data[o]
+
+
+def hexrgb(colour):
+    return int(colour[1:3], 16), int(colour[3:5], 16), int(colour[5:7], 16)
+
+
+def test_the_cairo_strips_map_and_gg_draw_the_analysis(runs, tmp_path):
+    from oversteer import telemetry_plot as plot
+    h, first, second, third = runs
+    data = ra.analysis(h.store, third, 'pb')
+    height = int(plot.strips_height(data, 1.0))
+    assert height == plot.LANE + sum(hh + plot.GAP for _k, _l, hh in plot._strips(data, 1.0))
+    seen = {}
+
+    def draw(cr):
+        seen['frame'] = plot.strips(cr, 500, height, data, (0.0, data['length']), 600.0)
+    surface = surface_of(draw, 500, height)
+    gutter, width = seen['frame']
+    assert gutter == plot.GUT and width == 500 - plot.GUT - 6
+    x = int(gutter + 600.0 / data['length'] * width)
+    assert pixel_of(surface, x, height - 3) == hexrgb(plot.TEXT)                  # the cursor runs through every strip
+    assert pixel_of(surface, x + 40, 2) != hexrgb(plot.TEXT)
+    assert plot.section_at(data, 650.0) == next(s['i'] for s in data['sections'] if s['d0'] <= 650.0 < s['d1'])
+    assert plot.section_at(data, 1e9) == data['sections'][-1]['i'] and plot.section_at({'sections': []}, 5) is None
+    # the map without a position is a bar of the splits' tones, the slow corner's in red
+    assert plot.map_points(data, 300, 100) is None and plot.stage_map_size(data, 400) == 44
+    bar = surface_of(lambda cr: plot.stage_map(cr, 300, 44, data, 600.0), 300, 44)
+    slow = next(s for s in data['sections'] if s['loss'] and s['loss'] > 0.5)
+    mid = int(4 + (slow['d0'] + slow['d1']) / 2 / data['length'] * 292)
+    assert pixel_of(bar, mid, 10)[0] > 200 > pixel_of(bar, mid, 10)[1]
+    assert plot.loss_tone(0.02) == plot.NEUTRAL and plot.loss_tone(0.3) == plot.SLOWER and plot.loss_tone(-0.3) == plot.FASTER
+    surface_of(lambda cr: plot.gg(cr, 200, 200, data), 200, 200)
+    # no comparison: no delta strip, nothing breaks
+    alone = ra.analysis(h.store, first, 'pb')
+    assert alone['cmp'] is None and plot.strips_height(alone) < plot.strips_height(data)
+    surface_of(lambda cr: plot.strips(cr, 400, 300, alone, (0.0, alone['length']), 0.0), 400, 300)
+    surface_of(lambda cr: plot.stage_map(cr, 300, 44, alone, 0.0), 300, 44)
+
+
+def test_the_map_with_a_position_gives_the_road(tmp_path):
+    from oversteer import telemetry_plot as plot
+    h = Stage(tmp_path / 'p.db')
+    drive(h, positions=True)
+    run = drive(h, positions=True, corners=corners_with())
+    data = ra.analysis(h.store, run, 'pb')
+    pts = plot.map_points(data, 300, 200)
+    assert pts is not None and len(pts) == len(data['x']) and pts[0] != pts[-1]
+    assert plot.stage_map_size(data, 400) == 320
+    got = {}
+    surface_of(lambda cr: got.setdefault('pts', plot.stage_map(cr, 300, 200, data, 500.0)), 300, 200)
+    assert got['pts'] is not None

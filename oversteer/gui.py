@@ -1021,6 +1021,7 @@ class Gui:
             return
         self._history = history
         self.ui.set_telemetry_history(history)
+        self.ui.set_run_source(learner._reader, learner.profile, history['car_id'])
         if history['tips'] and self.ui.telemetry_tab_visible() and learner.log is not None:
             profile, car, tips = learner.profile, history['car_id'], history['tips']
             learner.log.post(lambda: coach.seen(learner.log.store, profile, car, tips))
