@@ -1249,7 +1249,8 @@ function liveRibbon(b) {
   let cur = null;
   sp.splits.forEach((r, j) => { if (!fin && d != null && r.d0 != null && r.d1 != null && d >= r.d0 && d < r.d1) cur = j; });
   sp.splits.forEach((r, j) => {
-    const g = ref && r.d0 != null ? rs.findIndex((x) => Math.abs(x.d0 - r.d0) < 2) : -1;
+    let g = -1, gap = 15;                     // the reference's split whose start is within 15 m (S1's line is a couple of m on)
+    if (ref && r.d0 != null) rs.forEach((x, k) => { const e = Math.abs(x.d0 - r.d0); if (e < gap) { gap = e; g = k; } });
     cells[j].className = j === cur ? "cur" : lr.tones[g] ? "ls-" + lr.tones[g] : "";
   });
   return cur == null ? -1 : cur;

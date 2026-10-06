@@ -166,3 +166,13 @@ def test_the_live_reference_is_named_by_what_it_is():
     assert view.ref_name({'pb': False, 'n': 4}) == 'Run 4' and view.ref_name({'pb': False, 'n': None}) == 'best run'
     buffer, end = buffer_with_run(until=750.0)
     assert view.live_delta_view(buffer.read(0, now=end), [(0.0, 500.0), (500.0, 2000.0)])['ref_name'] == 'PB'
+
+
+def test_the_ribbons_first_sector_matches_the_reference_whose_line_is_a_few_metres_on():
+    """The sectors' lines are placed from where the reference began: S1 starts 2 m on in the reference, at 0 in the row."""
+    import types
+    track = types.SimpleNamespace(tones={0: 'behind-lose', 1: 'ahead-gain'})
+    body = {'state': 'live', 'distance': 1500.0,
+            'ref': {'splits': [{'name': 'S1', 'd0': 2.06, 'd1': 1022.7}, {'name': 'S2', 'd0': 1022.7, 'd1': 3642.9}]}}
+    tones, current = view.live_ribbon(body, track, [(0.0, 1020.0), (1020.0, 3640.0), (3640.0, 5330.0)])
+    assert tones == ['behind-lose', 'ahead-gain', 'none'] and current == 1

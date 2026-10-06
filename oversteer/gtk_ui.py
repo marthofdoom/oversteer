@@ -1688,6 +1688,7 @@ class GtkUi:
             text += ' ' + _("The finish split includes the slow-down to the stop.")
         note = Gtk.Label(label=text, xalign=0)
         note.set_line_wrap(True)
+        note.set_max_width_chars(100)               # wraps in a window as wide as the page instead of running off its edge
         note.get_style_context().add_class('dim-label')
         self.splits_body.pack_start(note, False, False, 0)
         self.splits_body.show_all()

@@ -642,6 +642,10 @@ def live_cursor(body, bounds):
     return found
 
 
+SPLIT_MATCH = 15.0               # m: a row's split is the reference's whose start is this close (the sectors' lines
+                                 # are placed from where the reference began, a few metres from the row's 0)
+
+
 def live_ribbon(body, track, bounds):
     """(tones per cell, current cell) for the splits ribbon while a run is on, or None: completed splits in the tone
     they were completed in, the rest unlit."""
@@ -652,10 +656,9 @@ def live_ribbon(body, track, bounds):
     for b in bounds:
         g = -1
         if ref and b and b[0] is not None:
-            for i, s in enumerate(ref['splits']):
-                if abs(s['d0'] - b[0]) < 2.0:
-                    g = i
-                    break
+            near = min(range(len(ref['splits'])), key=lambda i: abs(ref['splits'][i]['d0'] - b[0]), default=None)
+            if near is not None and abs(ref['splits'][near]['d0'] - b[0]) < SPLIT_MATCH:     # S1 starts a couple of m on
+                g = near
         tones.append(track.tones.get(g, 'none'))
     return tones, live_cursor(body, bounds)
 
