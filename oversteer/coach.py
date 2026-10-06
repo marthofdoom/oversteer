@@ -1639,11 +1639,11 @@ class Coach:
                                       bands, needed), value=0.0, cost=0.0))
 
 
-def _began_mid_stage(reader, run):
+def _began_mid_stage(reader, run_id, stage):
     """Whether an ACR run began further along the road than the start line (run_start more than
     stage_tables.START_LINE_PAST past it): its trace's distances are not the reference grid's."""
-    line = stage_tables.start_line(stage_tables.entry(run.get('stage')))
-    start = reader.run_start(run['id'])
+    line = stage_tables.start_line(stage_tables.entry(stage))
+    start = reader.run_start(run_id)
     return line is not None and start is not None and start > line + stage_tables.START_LINE_PAST
 
 
@@ -1672,7 +1672,7 @@ def stitch(reader, run, ref, ref_corners, before):
         if trace and found:
             loaded.append({'run': r['id'], 'trace': coach_context.stage_rows(
                 trace, r['course'], r['finished'] == 1, r['result_time']), 'corners': found,
-                'mid_stage': _began_mid_stage(reader, r)})
+                'mid_stage': _began_mid_stage(reader, r['id'], run['stage'])})
     # a run that began mid-stage keeps to `loaded` (the game's sectors place it from where it began) but is
     # not on the grid: its distance 0 is not the line
     best = coach_context.stitched(ref_rows, [x for x in loaded if not x['mid_stage']])

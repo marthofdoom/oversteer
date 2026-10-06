@@ -815,6 +815,29 @@ def test_a_run_that_began_mid_stage_has_its_sectors_placed_from_where_it_began(t
         stage_tables.set_tables(None)
 
 
+def test_a_run_that_began_mid_stage_is_not_timed_through_the_first_section_on_the_grid(tmp_path):
+    """A trace's distance is driven from where the run began: one that began far past the line is not on the
+    reference's grid (its metre 0 is not the line), so stitch leaves it off the grid (it stays loaded for the game's sectors)."""
+    from oversteer import stage_tables
+    stage_tables.set_tables({'acr': {STAGE_KEY: {'start_m': 100.0, 'finish_m': 2400.0, 'length_m': 2300}}})
+    try:
+        h = Stage(tmp_path / 't.db')
+        a = drive_traced(h, v2=14.0, v3=10.0)
+        drive_traced(h, v2=10.0, v3=13.0, reference=a)
+        drive_traced(h, v2=16.0, v3=11.0, reference=a)
+        a, b, c = h.runs
+        h.store.set_run_start(b, 600.0)                                    # began 500 m past the line
+        before = h.store.stage_runs(STAGE_KEY, exclude=c, limit=60, car=h.car)
+        run, ref = h.store.run(c), h.store.run(a)
+        found = coach.stitch(h.store, run, ref, h.store.corners(a), before)
+        assert b not in found['best']['per_run'] and b in [x['run'] for x in found['loaded'] if x['mid_stage']]
+        h.store.set_run_start(b, 110.0)                                    # within the slack of the line
+        found = coach.stitch(h.store, run, ref, h.store.corners(a), before)
+        assert b in found['best']['per_run']
+    finally:
+        stage_tables.set_tables(None)
+
+
 def test_the_sector_bounds_of_a_stage_entry():
     from oversteer import stage_tables
     bidno = stage_tables.entry('acr:wales:afon-bidno-severn')

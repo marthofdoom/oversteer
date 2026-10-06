@@ -212,7 +212,6 @@ FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the f
 FINISH_STILL = 2.0               # s the car stands (under MOVING) after the finish: the run is over
 FINISH_GRACE = 15.0              # s after the finish at most
 FINISH_ROLLOUT = 400.0           # m driven past the finish at most (ACR: the stop control is ~230 m on)
-START_LINE_PAST = 30.0           # m: an ACR run that began further along the road than this past the stage's start line did not start the stage
 FINISH_GRACE_PROGRESS = 60.0     # s: where the finish is progress >= FINISHED, the last of the stage is still to drive
 # Their progress is the position around the lap, near 1 at the end of every
 # lap: a circuit session is not ended there
@@ -645,7 +644,7 @@ class RunTracker:
             line = stage_tables.start_line(stage)
             # A run that began mid-stage (a restart after a silence, the second half of a run split by one) that
             # crosses the finish did not run the stage: its time is not the stage's
-            self._from_line = line is None or self._start_d is None or self._start_d <= line + START_LINE_PAST
+            self._from_line = line is None or self._start_d is None or self._start_d <= line + stage_tables.START_LINE_PAST
             # The track's name came after the run's first packet: the live
             # reference may have had no stage to look up (a no-op once it had)
             self.learner.log.post(self._live_reference, self.run, self._session, sample.game, sample.track,

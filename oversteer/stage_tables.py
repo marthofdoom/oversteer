@@ -222,6 +222,9 @@ def sector_bounds(entry):
     return {'start_m': start, 'bounds': bounds, 'confidence': confidence, 'source': source}
 
 
+START_LINE_PAST = 30.0           # m: an ACR run that began further along the road than this past the stage's start line did not start the stage
+
+
 def start_line(entry):
     """Where an ACR stage's start line is along the road spline: measured (`start_m`), else the first pace
     note less ROAD_BEFORE_NOTE, else None."""
