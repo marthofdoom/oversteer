@@ -11,7 +11,10 @@ earlier one found. `--reset` recomputes everything from these captures.
 
 The game's pace-note tables carry no finish marker, and `pacenote_last_m`
 is the stop control: marth's runs are at 120-160 km/h 200 m before it and
-at 20-40 km/h on it. The stage clock is not in what the bridge reads, so
+at 20-40 km/h on it. From bridge version 4 a capture carries the game's
+stage clock, which stops at the finish while the car rolls on: the place the
+car last moved it is the finish, exact (one run is enough; `exact` below),
+and it is preferred wherever a stage has one. Without it (older captures)
 the line is taken from where the final slowdown starts: per complete run
 (it reaches the last pace note), the first brake press past the fastest
 point of the last 300 m before the stop control. A stage gets `finish_m`
@@ -39,19 +42,22 @@ CAPTURES = ('~/.local/share/oversteer/captures',
 WINDOW = 300.0         # m before the stop control searched for the final slowdown
 BRAKE = 0.2
 MIN_RUNS = 2
+CLOCK_STILL = 1.0      # s the game's clock stands with the car moving: it stopped
+CLOCK_BEFORE = 400.0   # m before the stop control the clock may stop (45 stages: 194-320 m)
+CLOCK_PAST = 100.0     # m past it
 OUTLIER_M = 25.0       # a run further than this from the median is left out (a slow approach)
 SPREAD_M = 45.0        # widest gap between a stage's runs (Afon Bidno's 10 kept runs: 35 m)
 
 
 def runs_of(path):
-    """Each run of a capture as a list of (track, distance, speed, brake)."""
+    """Each run of a capture as a list of (track, distance, speed, brake, stage length, the game's clock or None, the capture's time)."""
     meta, records = read_capture(path)
     cur = []
-    for _t, _src, data in records:
+    for t, _src, data in records:
         s = decode_sample(data)
         if s is None or s.game != 'acr' or s.lap_distance is None:
             continue
-        row = (s.track, s.lap_distance, s.speed or 0.0, s.brake or 0.0, s.stage_length)
+        row = (s.track, s.lap_distance, s.speed or 0.0, s.brake or 0.0, s.stage_length, s.stage_time, t)
         if cur and (row[0] != cur[-1][0] or row[1] < cur[-1][1] - 300.0):
             yield cur
             cur = []
@@ -72,12 +78,48 @@ def onset(run, last):
     return after[0][1] - last if after else None
 
 
-def apply_finish(table, found, reset=False):
+def clock_stop(run, last):
+    """Where the game's clock stopped in a run (the lap distance of the last row it moved), or None: no clock
+    in the capture, it never moved, it did not stand still for CLOCK_STILL s with the car moving, or it stopped
+    away from `last` (the stop control: CLOCK_BEFORE before it to CLOCK_PAST past it)."""
+    moved = at = None
+    previous = None
+    still = 0.0
+    for row in run:
+        clock = row[5]
+        t = row[6]
+        if clock is None:
+            previous = None
+            continue
+        if previous is not None and clock > previous:
+            moved, at, still = row[1], t, 0.0
+        elif previous is not None and clock == previous and row[2] > 1.0 and at is not None:
+            still = t - at
+        previous = clock
+    if moved is None or still < CLOCK_STILL or not last - CLOCK_BEFORE <= moved <= last + CLOCK_PAST:
+        return None
+    return moved
+
+
+def apply_finish(table, found, reset=False, exact=None):
     """Set `finish_m` and its fields on the stages of `table` ({'stages': [...]}) that `found` ({stage key: the
     offsets of its runs from pacenote_last_m}) gives enough runs; the others keep what they have, unless
-    `reset` (then they lose it)."""
+    `reset` (then they lose it). `exact` ({stage key: offsets from pacenote_last_m of the game's clock stops}) is
+    preferred where a stage has any: one run is enough, and the median is the finish itself."""
+    exact = exact or {}
     for entry in table['stages']:
         key = stage_tables.stage_key('acr', entry)
+        if entry.get('track') and exact.get(key):
+            stops = exact[key]
+            entry['finish_m'] = round(entry['pacenote_last_m'] + statistics.median(stops), 1)
+            entry['finish_runs'] = len(stops)
+            entry['finish_spread_m'] = round(max(stops) - min(stops), 1)
+            entry['finish_confidence'] = 'high' if len(stops) >= 2 else 'medium'
+            entry['finish_source'] = ("marth's runs: where the game's own stage clock stopped (median of {}); "
+                                      "the game's pace notes have no finish marker".format(len(stops)))
+            print('{:28} finish_m {} (the game clock, {} runs, spread {})'.format(
+                entry['stage'], entry['finish_m'], len(stops), entry['finish_spread_m']))
+            continue
         offsets = found.get(key) if entry.get('track') else None
         if offsets:
             middle = statistics.median(offsets)
@@ -107,7 +149,7 @@ def main():
     parser.add_argument('--out', default=OUT)
     parser.add_argument('--reset', action='store_true', help='recompute every stage from these captures only')
     args = parser.parse_args()
-    found = {}
+    found, exact = {}, {}
     for folder in args.dirs or CAPTURES:
         for path in sorted(glob.glob(os.path.join(os.path.expanduser(folder), '*.ovcap.gz'))):
             try:
@@ -115,6 +157,9 @@ def main():
                     entry = stage_tables.acr_stage(run[0][0], run[0][1], run[0][4])
                     if not entry or not entry.get('pacenote_last_m'):
                         continue
+                    stop = clock_stop(run, entry['pacenote_last_m'])
+                    if stop is not None:
+                        exact.setdefault(entry['key'], []).append(stop - entry['pacenote_last_m'])
                     o = onset(run, entry['pacenote_last_m'])
                     if o is not None and o >= -WINDOW + 5.0:
                         found.setdefault(entry['key'], []).append(o)
@@ -122,7 +167,7 @@ def main():
                 continue
     with open(args.out, encoding='utf-8') as f:
         table = json.load(f)
-    apply_finish(table, found, args.reset)
+    apply_finish(table, found, args.reset, exact)
     with open(args.out, 'w', encoding='utf-8') as f:
         json.dump(table, f, indent=1, ensure_ascii=False)
         f.write('\n')
