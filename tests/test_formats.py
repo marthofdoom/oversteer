@@ -108,6 +108,13 @@ def test_eawrc_progress_stays_within_the_stage():
     assert under.progress == 0.0
 
 
+def test_codemasters_vertical_acceleration_is_unknown_not_zero():
+    import math
+    sample = decode_sample(codemasters(6000, 7500))
+    assert sample.accel is not None and math.isnan(sample.accel[2])            # the format has no vertical channel
+    assert all(math.isfinite(v) for v in sample.accel[:2])
+
+
 def test_codemasters_gears():
     assert decode_sample(codemasters(3000, 7500, gear=0.0)).gear == 0
     assert decode_sample(codemasters(3000, 7500, gear=10.0)).gear == -1     # reverse in DiRT Rally

@@ -485,7 +485,8 @@ def _codemasters(data, n):
     lateral, longitudinal = floats[34], floats[35]
     # g in DiRT Rally; WRCG probably sends m/s^2 (verify)
     scale = G if game == 'dirt' else 1.0
-    sample.accel = _vector((longitudinal * scale, lateral * scale, 0.0))   # lateral sign: verify
+    flat = _vector((longitudinal * scale, lateral * scale))                 # lateral sign: verify
+    sample.accel = flat + (float('nan'),) if flat else None                 # no vertical channel: unknown, not 0
     sample.accel_kind = 'kinematic'
     if len(floats) > 61:
         sample.lap = int(floats[36]) if math.isfinite(floats[36]) else None
