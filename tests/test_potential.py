@@ -415,3 +415,20 @@ def test_the_car_mass_scales_with_the_car():
     assert potential.car_mass(mini) == pytest.approx(588.0 + 165.0 + 0.1227 * 588.0)
     assert potential.car_mass(mini) - 588.0 < potential.car_mass(i20) - 1100.3          # a smaller car carries less
     assert potential.car_mass({}) > 1100.0
+
+
+def test_the_potentials_step_tries_one_pair_per_call(monkeypatch):
+    from oversteer import drive_log
+
+    class Store:
+        def potentials_missing(self):
+            return [('s1', 1, 10), ('s2', 1, 11), ('s3', 1, 12)]
+
+    class Learner:
+        pass
+
+    tried = []
+    monkeypatch.setattr(drive_log.potential, 'after_run', lambda store, run: tried.append(run))   # builds nothing
+    learner = Learner()
+    assert [drive_log._potentials_step(learner, Store()) for _ in range(4)] == [0, 0, 0, 0]
+    assert tried == [10, 11, 12]                                              # one pair a call, each once

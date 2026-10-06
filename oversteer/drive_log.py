@@ -1299,8 +1299,7 @@ def _potentials_step(learner, store):
         if (stage, car) in tried:
             continue
         tried.add((stage, car))
-        if potential.after_run(store, run) is not None:
-            return 1
+        return 1 if potential.after_run(store, run) is not None else 0
     return 0
 
 
