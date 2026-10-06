@@ -483,7 +483,10 @@ def span_times(pot, d0, d1):
 # -- the words --
 
 def where(s):
-    """'the 3 right at 1.3 km' for a section (its apex, from the start line), 'the straight at 1.3 km' for none."""
+    """'the 3 right at 1.3 km' for a section (its apex, from the start line), 'the straight at 1.3 km' for none; the
+    name of a split (on_splits) where it has one."""
+    if s.get('name'):
+        return s['name']
     km = s['apex_d'] / 1000.0
     if s['grade'] == 'straight':
         return 'the straight at {:.1f} km'.format(km)
@@ -547,17 +550,19 @@ def top3(rows, minimum=AVAILABLE_MIN, count=TOP):
     them, and the last section of a stage with no flying finish (the slow-down to the stop control), biggest
     first."""
     found = [r for n, r in enumerate(rows) if r['time'] is not None and r['available'] is not None
-             and r['available'] >= minimum and n > 0 and not r.get('tail')]
+             and r['available'] >= minimum and r.get('split', n) > 0 and not r.get('tail')]
     return sorted(found, key=lambda r: -r['available'])[:count]
 
 
 def improved(now_rows, before_rows, minimum=IMPROVED_MIN):
-    """The section whose gap to the grip layer closed the most since the run before (both analyse_run's), as
-    (row, seconds closer), or None under `minimum` s."""
+    """The section whose gap to the grip layer closed the most since the run before (both analyse_run's or on_splits'),
+    as (row, seconds closer), or None under `minimum` s; the first section (the launch) is not one, as in top3."""
     best = None
-    for a, b in zip(now_rows, before_rows):
-        if a['available'] is None or b['available'] is None:
-            continue
+    held = {b.get('split', n): b for n, b in enumerate(before_rows)}
+    for n, a in enumerate(now_rows):
+        b = held.get(a.get('split', n))
+        if b is None or a['available'] is None or b['available'] is None or a.get('split', n) == 0 or a.get('tail'):
+            continue                                     # the launch's section, and the slow-down's, are no places
         gain = b['available'] - a['available']
         if best is None or gain > best[1]:
             best = (a, gain)
@@ -730,7 +735,7 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
         return None
     game = car.get('game')
     data = car_data.entry(car.get('key'))
-    stage_rows = [r for r in store.stage_runs(stage_key, limit=STAGE_RUNS) if r['id'] is not None]
+    stage_rows = [r for r in store.stage_runs(stage_key, limit=STAGE_RUNS, ranked=True) if r['id'] is not None]
     mine_rows = [r for r in stage_rows if r['car'] == car_id and r['finished'] == 1]
     if not mine_rows:
         return None
@@ -774,17 +779,61 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
     return dict(pot, version=version, built=built)
 
 
-def sum_of_best(store, run):
-    """The splits' sum of best for `run`'s stage and car as coach.splits() has it with `run` the latest (the same
-    stitch of the same runs), or None where there is no reference run or grid."""
+def stitched(store, run):
+    """The splits' stitch for `run`'s stage and car as coach.splits() has it with `run` the latest (coach.stitch of the
+    same ranked runs: the best sections on the reference's grid), or None where there is no reference run or grid."""
     from . import coach
-    before = [r for r in store.stage_runs(run['stage'], exclude=run['id'], limit=60, car=run['car'])
+    before = [r for r in store.stage_runs(run['stage'], exclude=run['id'], limit=60, car=run['car'], ranked=True)
               if r['started'] <= run['started']]
     ref = cc.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')], wet=run['wet'])
     if ref is None:
         return None
-    found = coach.stitch(store, run, ref, store.corners(ref['id']), before)
+    return coach.stitch(store, run, ref, store.corners(ref['id']), before)
+
+
+def sum_of_best(store, run):
+    """The splits' sum of best for `run`'s stage and car as coach.splits() has it with `run` the latest, or None
+    where there is no reference run or grid."""
+    found = stitched(store, run)
     return None if found is None else found['possible']
+
+
+def stage_sob(store, stage_key, car_id):
+    """The splits' sum of best of a stage and car as the coach's splits() has it: with the car's newest run on the
+    stage that the coach reads (a class, not a drift run) the latest. None where there is none."""
+    for r in store.stage_runs(stage_key, car=car_id, limit=20):
+        run = store.run(r['id'])
+        if run is not None and run['run_class'] not in (None, 'restart', 'unclassified') \
+                and run['discipline'] != 'drift':
+            return sum_of_best(store, run)
+    return None
+
+
+def on_splits(pot, rows, found, run_id, bad=()):
+    """analyse_run's rows (`rows`, on the potential's sections) put on the splits' sections (`found`, stitch()'s: the
+    reference's grid), so that a place has one name, bounds and time wherever it is quoted: per split its name
+    (coach_context.section_name), `d0` and `d1`, `time` (the run's, as the splits sheet has it; None where an off
+    was within OFF_REACH of it: `bad`), `grip_s`, `car_s` and `available` through its bounds, and the fields of the
+    potential section whose apex is in it (the one with the most time available where several are: the place to
+    talk about) for the rest. A split no section's apex or bounds fall in is left out."""
+    best = found['best']
+    per = best['per_run'].get(run_id, {})
+    out = []
+    last = len(best['bounds']) - 1
+    for j, (a, b) in enumerate(best['bounds']):
+        inside = [r for r in rows if a <= r['apex_d'] < b] or [r for r in rows if r['d0'] < b and r['d1'] > a]
+        if not inside:
+            continue
+        src = max(inside, key=lambda r: -math.inf if r['available'] is None else r['available'])
+        t = per.get(j)
+        if t is not None and any(lo - OFF_REACH < b and hi + OFF_REACH > a for lo, hi in bad):
+            t = None
+        grip_s, car_s = span_times(pot, a, b)
+        row = dict(src, name=cc.section_name(best['grid'][j]), d0=a, d1=b, time=t, grip_s=grip_s, car_s=car_s,
+                   available=None if t is None else t - grip_s, split=j,
+                   tail=bool(j == last and pot['sections'] and pot['sections'][-1].get('tail')))
+        out.append(row)
+    return out
 
 
 def after_run(store, run_id):

@@ -182,7 +182,15 @@ def stage_potential(reader, run):
     pot = potential.stored(reader, run['stage'], run['car'])
     if pot is None:
         return None
-    return dict(potential.layers(pot), runs=pot['runs'], built=pot['built'], sections=pot['sections'])
+    return dict(potential.layers(pot, _sum_of_best(reader, run['stage'], run['car'], pot)), runs=pot['runs'],
+                built=pot['built'], sections=pot['sections'])
+
+
+def _sum_of_best(reader, stage, car, pot):
+    """The splits' sum of best of the stage and car (the user layer, the same number as the coach's and the splits
+    sheet's), cached with the stored potential's version (the runs it was built from)."""
+    key = (_ns(reader), 'sob', stage, car, pot['version'])
+    return _remember(key, lambda: potential.stage_sob(reader, stage, car))
 
 
 def car_tips(reader, profile, car_id, namespace=None):
@@ -439,7 +447,7 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
                 'time': run['result_time'] if run['finished'] == 1 else None,
                 'ref_time': other['result_time'] if other_rows else None, 'channels': list(CHANNELS),
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,
-                'potential': potential.layers(pot) if pot else None,
+                'potential': potential.layers(pot, _sum_of_best(reader, run['stage'], run['car'], pot)) if pot else None,
                 'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot),
                 'sectors': _sector_rows(run['stage'], rows, other_rows)}
     return _remember(key, build)

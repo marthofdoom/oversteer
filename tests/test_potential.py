@@ -277,6 +277,17 @@ def test_a_real_acr_run_through_the_whole_path(tmp_path):
     avail = [float(t.text.split('about ')[1].split(' s')[0]) for t in top]
     assert avail == sorted(avail, reverse=True) and avail[-1] >= potential.AVAILABLE_MIN
     assert top[0].to_dict()['rank'] == 1 and top[0].place['stage'] == 'acr:greece:elatia'
+    # one place, one name and one time wherever it is quoted: the tips say the splits' sections, with the splits
+    # sheet's seconds available, and the user layer is the splits' sum of best
+    from oversteer import run_analysis
+    by_name = {r['name']: r for r in found['splits']}
+    for t in top:
+        name = t.text[len('On Elatia, '):].split(': ')[0]
+        assert name in by_name and by_name[name]['available'] is not None
+        assert float(t.text.split('about ')[1].split(' s')[0]) == pytest.approx(by_name[name]['available'], abs=0.06)
+    assert coach._clock(found['possible']) in top[0].evidence[-1]
+    latest = reader.run(max(r['id'] for r in reader.stage_runs('acr:greece:elatia', car=car)))
+    assert run_analysis.stage_potential(reader, latest)['user'] == pytest.approx(found['possible'])
     # recomputing with the same runs changes nothing (the version holds), and a forced one gives the same numbers
     from oversteer.telemetry_store import open_store
     store = open_store(path)
@@ -342,3 +353,20 @@ def test_a_stage_with_runs_and_no_potential_gets_one_on_the_backfill_tick(tmp_pa
     assert learner.backfill() == 1 and learner.backfill() == 0                 # built once, not tried over and over
     assert open_reader(path).potential('acr:greece:elatia', car) is not None and not store.potentials_missing()
     learner.close()
+
+
+def test_on_splits_puts_the_potentials_sections_on_the_splits_bounds(monkeypatch):
+    found = {'best': {'bounds': [(0.0, 300.0), (300.0, 700.0), (700.0, 1000.0)], 'grid': [{'apex': 100.0}] * 3,
+                      'per_run': {7: {0: 20.0, 1: 30.0, 2: 15.0}}}}
+    pot = {'profile': {'ds': 2.0, 'v_grip': [20.0] * 501}, 'sections': [{}, {}, {'tail': True}]}
+    rows = [row(1.0, 0, d0=0.0, d1=250.0, apex_d=100.0), row(0.5, 1, d0=250.0, d1=500.0, apex_d=400.0),
+            row(1.5, 2, d0=500.0, d1=1000.0, apex_d=800.0)]
+    monkeypatch.setattr(potential.cc, 'section_name', lambda s: 'split at {:.0f}'.format(s['apex']))
+    out = potential.on_splits(pot, rows, found, 7)
+    assert [r['name'] for r in out] == ['split at 100'] * 3 and [(r['d0'], r['d1']) for r in out] == [
+        (0.0, 300.0), (300.0, 700.0), (700.0, 1000.0)]
+    assert [r['time'] for r in out] == [20.0, 30.0, 15.0] and [r['split'] for r in out] == [0, 1, 2]
+    assert out[1]['grip_s'] == pytest.approx(400.0 / 20.0) and out[1]['available'] == pytest.approx(10.0)
+    assert out[2]['tail'] and not out[0]['tail']
+    assert [r['split'] for r in potential.top3(out)] == [1]                   # not the launch's, not the slow-down's
+    assert potential.on_splits(pot, rows, found, 7, bad=[(650.0, 650.0)])[1]['time'] is None

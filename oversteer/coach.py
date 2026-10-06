@@ -1655,14 +1655,15 @@ class Coach:
         pot = potential.stored(reader, stage, run['car'])
         if pot is None:
             return
-        rows = self._potential_rows(pot, run, corners)
+        found = potential.stitched(reader, run)
+        rows = self._potential_rows(pot, run, corners, found)
         if rows is None:
             return
         car = reader.car_by_id(run['car']) or {}
         data = car_data.entry(car.get('key'))
         band = potential.power_band(data) if data else None
         top = potential.top3(rows)
-        layers = potential.layers(pot)
+        layers = potential.layers(pot, None if found is None else found['possible'])
         for rank, row in enumerate(top, 1):
             terms = potential.critique(row, row.get('best_gear'), band)
             said = potential.call(row, terms[0][1] if terms else None)
@@ -1684,7 +1685,7 @@ class Coach:
                   and r['run_class'] in ('clean', 'learning', 'off')]
         if not before:
             return
-        previous = self._potential_rows(pot, dict(before[0], stage=stage, car=run['car']), None)
+        previous = self._potential_rows(pot, dict(before[0], stage=stage, car=run['car']), None, found)
         found = potential.improved(rows, previous) if previous else None
         if found is not None:
             row, gain = found
@@ -1693,9 +1694,10 @@ class Coach:
                                       name, potential.where(row), gain), [], gain, cost=gain, count=1, delta_prev=gain,
                                   place=place(stage, run, row['apex_d'], row['d0'], row['d1'])))
 
-    def _potential_rows(self, pot, run, corners):
+    def _potential_rows(self, pot, run, corners, found=None):
         """potential.analyse_run() of a run (stage_runs row or run row), its off ranges left out and the seconds it
-        steered against the yaw in each section set; None without a trace."""
+        steered against the yaw in each section set; None without a trace. With `found` (the splits' stitch) the
+        rows are put on the splits' sections (potential.on_splits): the names, bounds and times the splits sheet has."""
         reader = self.reader
         trace = reader.trace(run['id'])
         if not trace:
@@ -1707,6 +1709,8 @@ class Coach:
         bad = [(e['d0'], e['d1'] if e['d1'] is not None else e['d0']) for e in reader.events(run['id'])
                if e['kind'] in ('off', 'spin', 'stall', 'hit') and e['d0'] is not None]
         rows = potential.analyse_run(pot, arr, bad)
+        if found is not None:
+            rows = potential.on_splits(pot, rows, found, run['id'], bad)
         corners = corners if corners is not None else reader.corners(run['id'])
         for row in rows:
             row['counter_steer_s'] = sum((k.get('counter_steer') or 0.0) * (k.get('duration') or 0.0) for k in corners
