@@ -284,4 +284,38 @@ def test_a_real_acr_run_through_the_whole_path(tmp_path):
     assert again['version'] == pot['version'] and again['built'] == pot['built']
     forced = potential.recompute(store, 'acr:greece:elatia', car, force=True)
     assert forced['grip_s'] == pytest.approx(pot['grip_s'])
+    # a run timed to the stop control ('partial') is no run to say time of
+    newest = max(r['id'] for r in store.stage_runs('acr:greece:elatia', car=car))
+    store.update_run(newest, run_class='partial')
+    store.commit()
+    assert not [t for t in coach.Coach(open_reader(path)).tips(profile, car) if t.kind == 'top3']
     store.close()
+
+
+def _cols(runs):
+    return [potential.envelope_rows(r['arr']) for r in runs]
+
+
+def test_a_partial_run_and_the_trace_past_the_road_do_not_make_the_stage_longer():
+    """A run timed to the stop control ('partial') holds the slow-down: not among the runs the road, the times and the
+    floor come from; the grid stops at the road's length where the table knows it."""
+    runs = synthetic_runs()
+    cols = _cols(runs)
+    pot = potential.stage(runs, None, 'gravel', False, cols, len(cols))
+    longer = potential.stage(runs, None, 'gravel', False, cols, len(cols), road_m=1200.0)
+    assert longer['length'] == 1200.0 and longer['sections'][-1]['d1'] <= 1200 and pot['length'] > 1500
+    slow = [dict(r, id=10 + n, **{'class': 'partial'}) for n, r in enumerate(runs)]
+    assert potential.stage(slow, None, 'gravel', False, cols, len(cols)) is None
+    # extra partial runs, longer than the clean ones, change nothing
+    stretched = [dict(r, id=20 + n, arr=dict(r['arr'], d=r['arr']['d'] * 1.5), **{'class': 'partial'})
+                 for n, r in enumerate(runs)]
+    again = potential.stage(runs + stretched, None, 'gravel', False, cols, len(cols))
+    assert again['length'] == pot['length'] and again['runs'] == pot['runs']
+
+
+def test_the_last_section_of_a_stage_with_no_flying_finish_is_no_place_for_time():
+    runs = synthetic_runs()
+    pot = potential.stage(runs, None, 'gravel', False, _cols(runs), len(runs), tail=True)
+    assert pot['sections'][-1].get('tail') is True and not pot['sections'][0].get('tail')
+    rows = [row(1.0, 0), row(0.9, 1), row(2.0, 2, tail=True)]
+    assert [r['available'] for r in potential.top3(rows)] == [0.9]

@@ -44,7 +44,7 @@ from .telemetry_store import TRACE_CHANNELS
 CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 G = cc.G
 
-ALGO = 2                         # bumps when the numbers a stored potential holds would change
+ALGO = 3                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)
@@ -70,6 +70,7 @@ CAR_MASS_EXTRA = 300.0           # kg the crew and fuel add to the shipped mass 
 CAR_DRAG = (0.0238, 9.3e-5)      # g * (c0 + c2 v^2): rolling and aero drag measured against positions
 LAUNCH_REVS = 0.53               # of the limiter: below it the clutch slips at launch (4000 of 7500 rpm)
 RADIUS_FALLBACK = 0.3265         # m, where the car's data names no tyre radius
+RANKED_CLASSES = ('clean', 'learning', 'off')        # the run classes whose times and roads the potential is built from
 GEAR_SET_TOLERANCE = 0.04        # a gear set that fits within this on the gears above first is the one used
 
 # The corner critique's costs (doc section 4.8, the i20N's, the one with the most passes): s per instance
@@ -540,9 +541,10 @@ def call(s, term=None):
 def top3(rows, minimum=AVAILABLE_MIN, count=TOP):
     """The places with the most time available among `rows` (analyse_run's): the biggest `count` of at least
     `minimum` s, a section an off touched (time None) and the first section, which holds the launch, not among
-    them, biggest first."""
+    them, and the last section of a stage with no flying finish (the slow-down to the stop control), biggest
+    first."""
     found = [r for n, r in enumerate(rows) if r['time'] is not None and r['available'] is not None
-             and r['available'] >= minimum and n > 0]
+             and r['available'] >= minimum and n > 0 and not r.get('tail')]
     return sorted(found, key=lambda r: -r['available'])[:count]
 
 
@@ -575,18 +577,25 @@ def _version(parts):
     return hashlib.sha1('|'.join(str(p) for p in parts).encode()).hexdigest()[:12]
 
 
-def stage(runs, data, surface, plan, env_rows, env_runs, sob=None):
+def stage(runs, data, surface, plan, env_rows, env_runs, sob=None, road_m=None, tail=False):
     """The potential of one stage for one car: `runs` [{'id', 'class', 'arr', 'mine' (a run of this car),
     'bad' (off ranges)}] the stage's runs (any car, for the road; the car's, `mine`, for the times and the floor),
     `data` the car's shipped entry or None, `env_rows` the car's envelope_rows on the surface (a list per run),
     `env_runs` their count, `sob` the splits' sum of best (coach.stitch) where the caller has it: the user layer,
-    else this module's own sum of the best section times. Returns the dict stored in stage_potential: {ds, length, runs, pb_run, pb_s, user_s,
+    else this module's own sum of the best section times, `road_m` the length of the road a run drives where the stage's
+    table knows it (the grid stops there: a run's trace goes on to the stop control) and `tail` that the stage has
+    no flying finish, so its last section holds the slow-down to the stop control and is no place to say time of.
+    Only runs classed clean, learning or off count for the road, the times and the floor (a 'partial' run holds the
+    slow-down in its time). Returns the dict stored in stage_potential: {ds, length, runs, pb_run, pb_s, user_s,
     grip_s, car_s, gear_set, sections, profile}, or None where there is too little to say (no finished full run of
     the car, fewer than ENV_MIN_RUNS runs for the envelope)."""
-    full = [r for r in runs if r['mine'] and r['finished'] and r['arr']['d'][-1] > 500]
+    full = [r for r in runs if r['mine'] and r['finished'] and r['arr']['d'][-1] > 500
+            and r['class'] in RANKED_CLASSES]
     if not full or env_runs < ENV_MIN_RUNS or not env_rows:
         return None
     length = float(np.median([r['arr']['d'][-1] for r in full]))
+    if road_m:
+        length = min(length, float(road_m))
     full = [r for r in full if covers(r['arr'], length - END_SLACK)]
     if not full:
         return None
@@ -636,6 +645,8 @@ def stage(runs, data, surface, plan, env_rows, env_runs, sob=None):
             s['best_gear'] = _mode(g)
         user += best if best is not None else float(T[pb_i, b] - T[pb_i, a])
         secs.append(s)
+    if tail and secs:
+        secs[-1]['tail'] = True
     # a place the car has been through faster is no slower in a layer: each section's layers are held in order, and
     # the totals are the sections' (they cover the stage), so a total can never contradict its sections
     for s in secs:
@@ -722,7 +733,11 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
         return None
     surface = _surface_of(store, stage_key, store.run(mine_rows[0]['id']) or {})
     env_rows = store.surface_runs(car_id, surface, ENV_RUNS) if surface else []
-    version = _version([ALGO, stage_key, car_id, surface] + [
+    entry = stage_tables.entry(stage_key) or {}
+    acr = stage_key.startswith('acr:')
+    road = stage_tables.road_length(entry) if acr else None
+    tail = acr and not entry.get('finish_m')
+    version = _version([ALGO, stage_key, car_id, surface, road, tail] + [
         (r['id'], r['run_class'], r['finished'], r['course'], r['result_time']) for r in stage_rows] + [
         (r['id'], r['run_class'], r['course']) for r in env_rows])
     held = store.potential(stage_key, car_id)
@@ -744,7 +759,7 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
                      'mine': r['car'] == car_id, 'bad': _bad_ranges(store, r['id']) if r['car'] == car_id else []})
     env_cols = [envelope_rows(a) for a in (arr_of(r) for r in env_rows) if a is not None]
     plan = stage_key.startswith('acr:')
-    pot = stage(runs, data, surface, plan, env_cols, len(env_cols), sob)
+    pot = stage(runs, data, surface, plan, env_cols, len(env_cols), sob, road, tail)
     if pot is None:
         return None
     built = now if now is not None else time.time()

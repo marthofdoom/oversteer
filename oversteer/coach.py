@@ -1649,8 +1649,8 @@ class Coach:
         select(): they are about this run. Nothing without a potential (fewer than ENV_MIN_RUNS runs of the car
         on the surface, or none finished on the stage) or a finished run with a trace."""
         reader = self.reader
-        if run['finished'] != 1 or run['car'] is None or run['run_class'] in (None, 'restart', 'unclassified') \
-                or run['discipline'] == 'drift':
+        if run['finished'] != 1 or run['car'] is None or run['discipline'] == 'drift' \
+                or run['run_class'] in (None, 'restart', 'unclassified', 'partial'):      # a partial one holds the slow-down
             return
         pot = potential.stored(reader, stage, run['car'])
         if pot is None:
