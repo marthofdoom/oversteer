@@ -876,13 +876,30 @@ def test_a_restart_starts_the_game_clock_again(tmp_path):
 
 
 def test_the_clock_alone_restarts_a_run(tmp_path):
-    """The clock back to 0 where the distance does not jump back (a timing line on a loop): a new run."""
+    """The clock back to 0 with the car at rest where the distance does not jump back (the stage restarted
+    within its first 100 m): a new run."""
     drive, _ = acr_clock_drive(0.0, 3000.0)
     for _, s, _ in drive[200:]:
         s.stage_time -= drive[200][1].stage_time
+    for _, s, _ in drive[198:204]:
+        s.speed = 0.0                                      # the car stood where it was put back
     learner, reader, session = drive_runs(tmp_path, drive)
     runs = [r for r in session['runs'] if r['distance'] > 300]
     assert len(runs) == 2 and runs[0]['finished'] == 0
+    learner.close()
+
+
+def test_a_looped_stage_clock_back_to_zero_while_moving_is_a_lap_not_a_restart(tmp_path):
+    """ACR's clock drops to 0 as the car crosses the line of a loop at speed, the distance running on: the same
+    run, timed through the lap (the result is the run's time, not the clock's since the lap)."""
+    drive, at_line = acr_clock_drive(0.0, 5530.0)
+    reset = drive[200][1].stage_time
+    for _, s, _ in drive[200:]:
+        s.stage_time -= reset
+    learner, reader, session = drive_runs(tmp_path, drive)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert len(runs) == 1 and runs[0]['finished'] == 1
+    assert abs(runs[0]['result_time'] - at_line) < 0.35
     learner.close()
 
 
@@ -933,10 +950,10 @@ def test_run_clock_frozen_at_the_first_packet_is_not_a_clock_that_stopped():
     c = RunClock(58.0)
     for _ in range(int(CLOCK_STOPPED / 0.1) + 5):
         c.tick(58.0, 0.1)
-    assert c.still == 0.0 and abs(c.t - (58.0 + 1.5)) < 1e-6          # on from where it stood, by the run's own time
+    assert c.still == 0.0 and abs(c.t - (58.0 + 1.4)) < 1e-6          # on from where it stood, by the run's own time
     c.tick(58.1, 0.1)                                                  # then it moves: the game's clock from here
     c.tick(58.2, 0.1)
-    assert abs(c.t - (58.0 + 1.5 + 0.2)) < 1e-6 and not c.exact
+    assert abs(c.t - (58.0 + 1.4 + 0.2)) < 1e-6 and not c.exact
 
 
 def test_the_clock_must_stand_still_for_a_quarter_second_to_be_stopped(tmp_path):

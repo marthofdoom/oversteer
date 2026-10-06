@@ -248,7 +248,7 @@ class RunClock:
     stopped (the last run's finish, not reset): t goes on by the run's own
     time until it does."""
 
-    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved', 'proven')
+    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved', 'proven', 'fresh')
 
     def __init__(self, stage_time):
         running = stage_time is not None and stage_time > 0.0
@@ -258,10 +258,12 @@ class RunClock:
         self.last = stage_time                       # the game's clock at the last packet
         self.still = 0.0                             # s of the run's own time the game's clock has stood still
         self.moved = running                         # it moved at the last packet
+        self.fresh = True                            # the first tick is the packet the clock was made from
         self.proven = False                          # it has been seen to move: until then a clock standing still is not 'stopped'
 
     def tick(self, stage_time, dt):
         last, self.last = self.last, stage_time
+        fresh, self.fresh = self.fresh, False
         self.moved = False
         if stage_time is None:
             self.t += dt
@@ -279,6 +281,8 @@ class RunClock:
                 self.t += dt
             return
         if last is not None and stage_time == last:
+            if fresh:
+                return
             if not self.proven:
                 self.t += dt                         # frozen from the first packet (a finish not yet reset): not a stop
                 return
@@ -479,9 +483,18 @@ class RunTracker:
         stage_time, last_time = sample.stage_time, self._last_stage_time
         if stage_time is not None and last_time is not None and stage_time < last_time - RESTART_DROP:
             laps, lap = sample.laps, sample.lap
-            if not (laps and laps > 1 and lap is not None and self._last_lap is not None and lap > self._last_lap):
+            if not (laps and laps > 1 and lap is not None and self._last_lap is not None and lap > self._last_lap) \
+                    and not self._acr_lap(sample, stage_time):
                 return 'restart'                     # the clock went back without a lap done
         return None
+
+    def _acr_lap(self, sample, stage_time):
+        """ACR's clock back to 0 as a looped stage's car crosses the line at speed, the distance along the spline
+        running on: a lap of the same run. A restart puts the car back at rest, or far back along the road."""
+        distance, last = sample.lap_distance, self._last_lap_distance
+        return (sample.game == 'acr' and stage_time < RESTART_DROP and (sample.speed or 0.0) > START_MOVING
+                and (self._last_speed or 0.0) > START_MOVING and distance is not None and last is not None
+                and abs(distance - last) < TELEPORT)
 
     def _start(self, now, sample, session, profile):
         learner = self.learner
@@ -735,10 +748,10 @@ class RunTracker:
             self._finish_at(now, d, self._duration, None)    # no clock from the game: the run's own
         elif clock.still >= CLOCK_SETTLE and speed > MOVING:
             self._finish_at(now, self._clock_moved_d if self._clock_moved_d is not None else d,
-                            sample.stage_time, 'game')
+                            sample.stage_time + clock.offset, 'game')
         elif sample.lap_distance > self._finish_line + FINISH_CLOCK_PAST:
             line_d, at = self._line_clock
-            self._finish_at(now, line_d, at if at is not None else sample.stage_time, 'game')
+            self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.offset, 'game')
 
     def _finish_at(self, now, d, result, clock):
         self._finished, self._result_time, self._result_clock = 1, result, clock
