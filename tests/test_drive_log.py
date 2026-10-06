@@ -525,6 +525,15 @@ def test_an_acr_run_that_began_mid_stage_is_not_finished_at_the_flying_finish(tm
     assert run['finished'] == 1
 
 
+def test_an_acr_stage_is_not_guessed_from_the_distance_driven(tmp_path):
+    """ACR names its stage (the track name): a track the table does not know stays unnamed, however far the
+    run drove against some other stage's published length."""
+    drive = acr_drive(0.0, 0.0, 5600.0, track='Nowhere Unknown')
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['stage'] is None
+
+
 def test_acr_stages_of_one_name_told_apart_by_the_start():
     from oversteer import stage_tables
     # "Alsace For_t" is Foret de Munster (first note 3811.6) or de Saverne

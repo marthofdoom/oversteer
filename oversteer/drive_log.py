@@ -686,7 +686,9 @@ class RunTracker:
         stage = store.run_stage(run)
         game = summary['game']
         location = None
-        if stage is None and game in stage_tables.tables() and (summary['finished'] == 1 or not summary['progress']):
+        # (ACR names its stage by its track: the road driven is no evidence, and its sent length is the spline's)
+        if stage is None and game != 'acr' and game in stage_tables.tables() \
+                and (summary['finished'] == 1 or not summary['progress']):
             # A game that names no stage and sends no length (WRC
             # Generations): the distance to the finish, against the
             # published lengths; the start tells apart two of one length
