@@ -1054,18 +1054,46 @@ limiter, and marth's 2→3 to 4→5 are within 200 rpm of them.
   the run's own (the packets' gaps capped at 0.2 s, pauses out); for a
   standing start t at the finish is the result. Segment times are on it
   too.
-- **ACR's finish with the game's clock** (bridge v4): past the table's
-  line (flying finish, else the last pace note) the run waits for the
-  game's clock to stop (0.1 s standing, the car moving) within 100 m and
-  takes that time and the place it last moved as the result and the
-  course; failing that, the clock interpolated at the table's line. The
-  run is marked in `run_clock` and `retime_finishes` never moves it. Old
-  ACR runs keep the run's own clock (from 3 m/s, so without the reaction
-  and the first metres the game's time has): their results cannot be put
-  on the game's clock afterwards (nothing recorded the game's time at
-  their start), so they read quicker than a new run of the same pace by
-  the game's time to 3 m/s: 0.26 to 2.8 s over 35 starts in marth's dump,
-  about 0.5 s typically.
+- **ACR's finish with the game's clock** (bridge v4): the finish is where
+  the game's clock stops. With the clock running, a run is finished when
+  it has stood still for 1 s with the car moving (0.25 s once past the
+  table's line), past 500 m, and the place it last moved is within 400 m
+  before the table's line (flying finish, else the last pace note: the
+  game stops its clock 194-320 m before the note on the 45 stages with no
+  flying finish in the table) or 100 m past it. The result is that time
+  and the course the place it last moved; the live card follows the stop,
+  and a car stopped at the stop control short of the note has finished. If
+  the clock does not stop within 100 m past the table's line, the clock
+  interpolated at the line is the result, marked by a `run_finish` row
+  with that line (no `run_clock` row), so a line that moves corrects it.
+  A run that ended on the clock's stop is marked in `run_clock`:
+  `retime_finishes` never moves it. A clock back to 0 with the car moving
+  and the distance running on is a lap of a looped stage, not a restart.
+- **Learnt finish lines.** The place the clock stopped (spline metres)
+  is the flying finish, exact: each such run keeps it (`run_stop`), the
+  stage's `finish_m` is the median of them (less any 25 m from it;
+  `Store.learn_finishes`, read at open and after each run) and beats the
+  shipped table's, which beats the last pace note (`stage_tables.entry`).
+  When it moves the line, `retime_finishes` times the runs that ended at
+  the stop control (or at the line it replaced) again, by the trace's time
+  between the two: a v3 run's time on those stages then lands within about
+  a third of a second of a clock run's less the start offset below.
+  `scripts/acr-finish.py` takes `finish_m` from a v4 capture's clock stop
+  (exact) where there is one, else from the brake onset.
+- **Start offset.** A run on the game's clock starts its time at the
+  game's go, 0.26 to 2.8 s (typically 0.5 s) before the car reaches
+  3 m/s, where an older run's own clock starts; nothing recorded the
+  game's time at an old run's start, so the two cannot be put on one scale
+  afterwards. A new run therefore reads slower than an old one of the
+  same pace by that offset (an old run on a stage with no flying finish
+  read 7-12 s slower still until it was moved to the learnt line, so the
+  two biases are opposite and the latter is the larger). Rule: once a
+  stage and a car have a run in `run_clock`, only the clock runs rank
+  there (the PB, the coach's reference and possible, the live reference,
+  the run view's PB: `stage_runs(ranked=True)`); the run list and the
+  other statistics still use every run. A run on the clock is compared
+  with nothing older than itself. The trace's `t` of a clock run starts at
+  the game's time (`trace[0].t`, the offset from 3 m/s).
 - **Start-cell stage key** for games that name no stage (Forza Horizon,
   BeamNG, AC practice): `cell:<game>:<x/50>:<z/50>:<heading/45°>` of the
   run's start, completed by the run length rounded to 100 m once it ends.
