@@ -431,7 +431,7 @@ function nameOf(c) { return c === "clean" || c === "learning" ? "clean" : c === 
 
 // -- formatting: m:ss.s for times, signed tenths for losses, two decimals live --
 const MINUS = "−";
-function clock(t, dp = 1) { if (t == null) return "–"; const u = Math.pow(10, dp), q = Math.round(t * u), m = Math.floor(q / (60 * u)), s = (q - m * 60 * u) / u; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(dp); }
+function clock(t, dp = 1) { if (t == null) return "–"; const u = Math.pow(10, dp), q = Math.round(t * u), h = Math.floor(q / (3600 * u)), m = Math.floor(q % (3600 * u) / (60 * u)), s = (q % (60 * u)) / u, ss = (s < 10 && (h || m) ? "0" : "") + s.toFixed(dp); return h ? h + ":" + (m < 10 ? "0" : "") + m + ":" + ss : m ? m + ":" + ss : ss; }
 function signed(x, dp = 1) { if (x == null) return "–"; const r = Math.abs(x) < 0.5 * Math.pow(10, -dp) ? 0 : x; return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp); }
 function km(d) { return (d / 1000).toFixed(2); }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
@@ -487,8 +487,8 @@ function splitsTable() {
   P.forEach((s, k) => {
     const mine = pTime(LAST, k), d = alone || mine == null || pTime(cmp, k) == null ? null : mine - pTime(cmp, k);
     const save = ST.multi && bestSec[k] != null && mine != null ? mine - bestSec[k] : null;
-    html += `<tr><td class="name">${U === "sectors" ? "" : s.n + ". "}${esc(s.name)}<small>${km(s.start)}–${km(s.end)} km</small></td><td>${mine == null ? "–" : mine.toFixed(1)}</td>` +
-      `<td style="color:${splitColour(k, LAST, cmp)}">${isGold(k, LAST) ? "★ " : ""}${signed(d)}</td><td>${bestSec[k] == null ? "–" : bestSec[k].toFixed(1)}</td>` +
+    html += `<tr><td class="name">${U === "sectors" ? "" : s.n + ". "}${esc(s.name)}<small>${km(s.start)}–${km(s.end)} km</small></td><td>${clock(mine)}</td>` +
+      `<td style="color:${splitColour(k, LAST, cmp)}">${isGold(k, LAST) ? "★ " : ""}${signed(d)}</td><td>${clock(bestSec[k])}</td>` +
       `<td style="color:var(--dim)">${save == null || save < 0.05 ? "–" : save.toFixed(1)}</td></tr>`;
   });
   html += `<tr><td class="name"><b>Stage</b></td><td><b>${clock(LAST.time)}</b></td><td style="color:var(--${!alone && LAST.time > cmp.time ? "slower" : "faster"})"><b>${alone ? "–" : signed(LAST.time - cmp.time)}</b></td><td><b>${clock(SOB)}</b></td><td style="color:var(--dim)">${SOB == null ? "–" : (LAST.time - SOB).toFixed(1)}</td></tr>`;
@@ -860,7 +860,7 @@ function cornerTable() {
     $("tw-h").textContent = "Sections";
     let html = "<tr><th>Split</th><th>Time</th><th>Min</th><th>Exit</th></tr>";
     S.forEach((s, k) => { const ab = ST.ab[k];
-      html += `<tr class="tap" data-k="${k}"><td class="name">${k + 1}. ${esc(s.name)}<small>${km(s.apex)} km</small></td><td>${LAST.sec[k] == null ? "–" : LAST.sec[k].toFixed(1)}</td><td>${ab ? ab[0] : "–"}</td><td>${ab ? ab[1] : "–"}</td></tr>`; });
+      html += `<tr class="tap" data-k="${k}"><td class="name">${k + 1}. ${esc(s.name)}<small>${km(s.apex)} km</small></td><td>${clock(LAST.sec[k])}</td><td>${ab ? ab[0] : "–"}</td><td>${ab ? ab[1] : "–"}</td></tr>`; });
     tb.innerHTML = html;
     $("corners-foot").textContent = "The only run of this car on this stage so far: nothing to compare it with. Min, exit: km/h.";
   } else {
