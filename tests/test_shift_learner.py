@@ -972,3 +972,23 @@ def test_drive_slip_uses_the_learnt_radius_where_the_game_sends_none():
     assert drive_slip(sample, 'rwd') is None
     slip, kind = drive_slip(sample, 'rwd', (0.33,) * 4)
     assert kind == 'raw' and abs(slip - (66.0 * 0.33 / 20.0 - 1.0)) < 1e-9
+
+
+def test_the_slope_is_read_in_the_games_axes():
+    """WRC Generations has z up: a climb on its axes is the same slope as on ACR's (y up), from the forward vector and
+    from the positions."""
+    import collections
+    from oversteer.telemetry_formats import plan_xyz
+    learner = ShiftLearner()
+    for n in range(8):
+        learner._speeds.append((n * 0.05, 20.0, None, 4000.0))
+    climb = 0.1
+    for game, up in (('acr', (0.0, climb, 0.995)), ('wrcg', (0.0, 0.995, climb))):
+        sample = Sample(rpm=4000.0)
+        sample.game, sample.forward = game, up
+        assert abs(learner._drive_acceleration(sample)[0] - 9.80665 * climb) < 1e-6, game
+        learner._positions = collections.deque()
+        for n in range(8):
+            raw = {'acr': (n * 3.0, n * 0.3, 0.0), 'wrcg': (n * 3.0, 0.0, n * 0.3)}[game]
+            learner._positions.append(plan_xyz(game, raw))
+        assert abs(learner._grade() - 0.3 / math.hypot(3.0, 0.3)) < 1e-6, game

@@ -39,6 +39,7 @@ import warnings
 import numpy as np
 
 from . import car_data, coach_context as cc, stage_tables
+from .telemetry_formats import plan_xy
 from .telemetry_store import TRACE_CHANNELS
 
 CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
@@ -117,7 +118,7 @@ def arrays(rows):
         return None
     d = np.maximum.accumulate(_fill(d))
     out = {name: a[:, CH[name]] for name in ('speed', 'rpm', 'gear', 'throttle', 'brake', 'steer', 'a_long', 'a_lat',
-                                              'yaw_rate', 'x', 'z')}
+                                              'yaw_rate', 'x', 'y', 'z')}
     out['d'] = d
     out['t'] = a[:, CH['t']] - a[0, CH['t']]
     keep = np.r_[True, np.diff(d) > 1e-6]            # the first row at each distance: when the car first got there
@@ -188,12 +189,14 @@ def has_positions(arr):
     return bool(good.mean() > 0.98)
 
 
-def curvature(arr, grid, plan=False):
-    """The path's curvature k (1/m, positive left) on the grid: from the positions where `plan` (ACR's plan view is
-    (x, -z)) and the run has them, else yaw rate over speed. NaN where the run was slower than V_MIN or not there."""
+def curvature(arr, grid, plan=None):
+    """The path's curvature k (1/m, positive left) on the grid: from the positions where `plan` (the game's name,
+    for its plan view: telemetry_formats.plan_xy; True: ACR) and the run has
+    them, else yaw rate over speed. NaN where the run was slower than V_MIN or not there."""
     speed = resample(arr, 'speed', grid)
     if plan and has_positions(arr):
-        x, y = resample(arr, 'x', grid), -resample(arr, 'z', grid)
+        x, y = plan_xy('acr' if plan is True else plan, (resample(arr, 'x', grid), resample(arr, 'y', grid),
+                                                         resample(arr, 'z', grid)))
         x, y = _smooth(_fill(x), 5), _smooth(_fill(y), 5)
         heading = np.unwrap(np.arctan2(np.gradient(y), np.gradient(x)))
         s = np.r_[0.0, np.cumsum(np.hypot(np.diff(x), np.diff(y)))]
@@ -758,7 +761,7 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
         runs.append({'id': r['id'], 'class': r['run_class'], 'finished': r['finished'] == 1, 'arr': a,
                      'mine': r['car'] == car_id, 'bad': _bad_ranges(store, r['id']) if r['car'] == car_id else []})
     env_cols = [envelope_rows(a) for a in (arr_of(r) for r in env_rows) if a is not None]
-    plan = stage_key.startswith('acr:')
+    plan = 'acr' if acr else None
     pot = stage(runs, data, surface, plan, env_cols, len(env_cols), sob, road, tail)
     if pot is None:
         return None

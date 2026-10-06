@@ -1078,3 +1078,41 @@ def test_a_stage_that_ends_by_its_clock_stopping_finishes_the_live_run(tmp_path,
     feed_course(learner, samples[:int(len(samples) * 0.97)])
     final = learner.live_run.read(0)['final']
     assert final is not None and final['time'] > 100.0
+
+
+# -- one plan per game: positions are read through telemetry_formats.plan_xy --
+
+def _circle_trace(game, turns=0.5, n=80, radius=60.0):
+    """Trace rows of a car driving a left-hand arc (counter-clockwise on the map) with no yaw rate sent, its world
+    positions in `game`'s axes: ACR (x, y up, -north), WRC Generations (x, north, z up)."""
+    import math as m
+    from oversteer.telemetry_store import TRACE_CHANNELS
+    rows = []
+    for i in range(n):
+        a = 2 * m.pi * turns * i / (n - 1)
+        east, north = radius * m.sin(a), radius * (1 - m.cos(a))
+        pos = {'acr': (east, 1.0, -north), 'wrcg': (east, north, 1.0)}[game]
+        row = dict.fromkeys(TRACE_CHANNELS, float('nan'))
+        row.update(t=i * 0.1, distance=10.0 * i, speed=20.0, x=pos[0], y=pos[1], z=pos[2])
+        rows.append(tuple(row[c] for c in TRACE_CHANNELS))
+    return rows
+
+
+def test_the_heading_rate_from_positions_is_the_same_turn_in_every_games_axes():
+    acr, wrcg = _circle_trace('acr'), _circle_trace('wrcg')
+    a, w = drive_log._yaw_rates(acr, 'acr'), drive_log._yaw_rates(wrcg, 'wrcg')
+    assert all(abs(x - y) < 1e-9 for x, y in zip(a[3:], w[3:])) and all(v > 0 for v in a[3:])     # left is positive
+    assert abs(sum(a[3:]) / len(a[3:]) - __import__('math').pi / 7.9) < 0.01                                          # half a turn in 7.9 s
+    assert abs(drive_log._yaw_rates(wrcg, 'acr')[10]) < 1e-9                                  # the wrong axes: no turn
+    assert len(drive_log.find_corners(wrcg, 'wrcg')) == len(drive_log.find_corners(acr, 'acr')) == 1
+
+
+def test_the_path_of_a_run_is_read_on_the_games_plan():
+    from oversteer import drive_detect
+    from oversteer.telemetry_store import TRACE_CHANNELS
+    c = {n: i for i, n in enumerate(TRACE_CHANNELS)}
+    a = drive_detect._path(_circle_trace('acr'), c['x'], c['y'], c['z'], 'acr')
+    w = drive_detect._path(_circle_trace('wrcg'), c['x'], c['y'], c['z'], 'wrcg')
+    assert len(a) == len(w) and all(abs(p[0] - q[0]) < 1e-9 and abs(p[1] - q[1]) < 1e-9 for p, q in zip(a, w))
+    wrong = drive_detect._path(_circle_trace('wrcg'), c['x'], c['y'], c['z'], 'acr')
+    assert all(p[1] == wrong[0][1] for p in wrong)       # the height as north: a path that never turns

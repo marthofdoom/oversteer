@@ -52,6 +52,7 @@ import threading
 import time
 
 from . import car_data
+from .telemetry_formats import plan_xyz
 
 POWER_BIN = 100                  # rpm per power band
 POWER_KEEP = 40                  # samples kept per band (most recent)
@@ -1625,14 +1626,15 @@ class ShiftLearner:
                 last['engage_rpm'] = rpm              # the revs the new gear brought, once the clutch bites
             if now - pending[0]['_t'] > DOUBLE_TAP_REVERT:
                 self._flush_shifts_locked(car, now)
-        self._speeds.append((now, speed, sample.pos[1] if sample.pos is not None else None, rpm))
+        pos = plan_xyz(sample.game, sample.pos)         # the map's axes: (east, height, north), whatever the game's
+        self._speeds.append((now, speed, pos[1] if pos is not None else None, rpm))
         while self._speeds and now - self._speeds[0][0] > ACCEL_WINDOW:
             self._speeds.popleft()
         positions = self._positions
         if sample.pos is None:
             positions.clear()
         else:
-            positions.append(sample.pos)
+            positions.append(pos)
             while len(positions) > len(self._speeds):
                 positions.popleft()
 
@@ -1883,7 +1885,7 @@ class ShiftLearner:
         """(what the drive accelerates the car by, slope-free): an
         accelerometer reading as it is (gravity is in it); otherwise the
         change of speed plus what the slope takes, from the car's forward
-        vector (world y up) or from how much its position climbed over the
+        vector (the plan's height: plan_xyz) or from how much its position climbed over the
         distance it travelled; otherwise the change of speed alone (False:
         a hill is in it; None: positions came, but the car went too short
         a way for its climb to be a slope)."""
@@ -1893,7 +1895,7 @@ class ShiftLearner:
         if accel is None:
             return None, False
         if sample.forward is not None:
-            return accel + G * sample.forward[1], True
+            return accel + G * plan_xyz(sample.game, sample.forward)[1], True
         grade = self._grade()
         if grade is not None:
             return accel + G * grade, True
@@ -1901,7 +1903,7 @@ class ShiftLearner:
 
     def _grade(self):
         """The sine of the road's slope over the recent window, from the
-        positions (y up): the climb over the path length. None without
+        positions (plan_xyz: height second): the climb over the path length. None without
         positions or when the car barely moved."""
         points = self._positions
         if len(points) < ACCEL_MIN_POINTS:

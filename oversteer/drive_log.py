@@ -19,6 +19,7 @@ import threading
 import time
 
 from . import car_data, coach, coach_context, drive_detect, live_buffer, stage_tables
+from .telemetry_formats import plan_xy
 from .shift_learner import DRIVEN, SURFACES, CarModel, drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
@@ -997,7 +998,7 @@ class RunTracker:
         stage = row['stage']
         course = summary.get('course')
         rows = coach_context.stage_rows(trace, course, row['finished'] == 1, row['result_time'])
-        corners = find_corners(rows)
+        corners = find_corners(rows, summary.get('game'))
         car = _car_model(learner, store, row['car'], summary.get('car'))
         surface = verdicts.get('surface')
         context = coach.car_context(car, surface)
@@ -1468,9 +1469,9 @@ RADIUS_SPEED = 5.0               # m/s: slower than this the speed over the yaw 
 RADIUS_YAW = 0.1                 # rad/s: slower turning than this has no radius worth the name
 
 
-def _yaw_rates(trace):
+def _yaw_rates(trace, game=None):
     """Yaw rate per trace row: the game's, or the heading's rate of change
-    from positions."""
+    from positions (on the map's axes: plan_xy of the game)."""
     yaw = [row[T['yaw_rate']] for row in trace]
     if all(not math.isnan(v) for v in yaw):
         return yaw
@@ -1481,18 +1482,20 @@ def _yaw_rates(trace):
         if i < 2 or dt <= 0:
             continue
         c = trace[i - 2]
-        h1 = math.atan2(-(a[T['z']] - c[T['z']]), a[T['x']] - c[T['x']])
-        h2 = math.atan2(-(b[T['z']] - a[T['z']]), b[T['x']] - a[T['x']])
+        pa, pb, pc = (plan_xy(game, (r[T['x']], r[T['y']], r[T['z']])) for r in (a, b, c))
+        h1 = math.atan2(pa[1] - pc[1], pa[0] - pc[0])
+        h2 = math.atan2(pb[1] - pa[1], pb[0] - pa[0])
         change = (h2 - h1 + math.pi) % (2 * math.pi) - math.pi
         out[i] = change / (b[T['t']] - a[T['t']] + (a[T['t']] - c[T['t']])) * 2
     return out
 
 
-def find_corners(trace):
-    """The run's corners from its trace: dicts for the corners table."""
+def find_corners(trace, game=None):
+    """The run's corners from its trace: dicts for the corners table. `game` says the world's axes where the
+    yaw rate is worked out from positions."""
     if len(trace) < 10:
         return []
-    raw = _yaw_rates(trace)
+    raw = _yaw_rates(trace, game)
     half = max(1, int(CORNER_SMOOTH / TRACE_EVERY / 2))
     smooth = []
     for i in range(len(raw)):
