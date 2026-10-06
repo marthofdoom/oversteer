@@ -1438,6 +1438,13 @@ class Store(Reader):
         return self._do("SELECT id, stage, result_time, course FROM runs WHERE finished = 1 AND stage LIKE ? "
                         "AND id NOT IN (SELECT run FROM run_finish) ORDER BY id", (game + ':%',)).fetchall()
 
+    def finished_timed(self, game='acr'):
+        """[(run, stage, result_time, course, finish_m)] of the finished runs of a game timed at a recorded
+        finish line (run_finish), oldest first."""
+        return self._do("SELECT r.id, r.stage, r.result_time, r.course, f.finish_m FROM runs r JOIN run_finish f "
+                        "ON f.run = r.id WHERE r.finished = 1 AND r.stage LIKE ? AND f.finish_m IS NOT NULL "
+                        "ORDER BY r.id", (game + ':%',)).fetchall()
+
     def set_run_finish(self, run, finish_m):
         """Record the finish line a run was timed at (None: it was not re-timed)."""
         self._do('INSERT OR REPLACE INTO run_finish (run, finish_m) VALUES (?, ?)', (run, finish_m))

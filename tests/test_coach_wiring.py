@@ -330,6 +330,24 @@ def test_an_acr_run_timed_to_the_old_line_is_timed_again_once_and_queued(tmp_pat
     learner.close()
 
 
+def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_path):
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    flying = stage_tables.entry(stage)['finish_m']
+    run = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
+    store.set_run_finish(run, flying + 50.0)               # timed at a line 50 m on from the table's now
+    assert retime_finishes(store) == 1
+    row = store.run(run)
+    assert abs(row['result_time'] - 195.0) < 0.01 and abs(row['course'] - 4950.0) < 1e-6   # 0.1 s a metre
+    assert row['run_class'] is None and retime_finishes(store) == 0       # once, and queued for the backfill
+    far = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
+    store.set_run_finish(far, flying - 100.0)              # the line is on from the trace's end: left as it was
+    assert retime_finishes(store) == 0 and store.run(far)['result_time'] == 200.0
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))

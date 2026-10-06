@@ -880,6 +880,7 @@ def _trace_speed_at(trace, value):
 # A run that ends this fast was already timed at the flying finish (marth's
 # Afon Bidno runs: 120-160 km/h there, 20-40 km/h at the stop control)
 AT_SPEED = 20.0                 # m/s
+FINISH_MOVED = 0.5              # m: a finish line that moved less than this since a run was timed leaves it as it is
 
 
 def retime_finishes(store):
@@ -921,6 +922,27 @@ def retime_finishes(store):
             done += 1
         except Exception:
             logging.exception("drive log: re-timing run %s", run)
+    # A finish line refined since (the table's finish_m moved): a run timed at the old one is shifted by the
+    # trace's time between the two lines. Out of the trace's range, it stays as it was
+    for run, stage, result, course, recorded in store.finished_timed('acr'):
+        flying = (stage_tables.entry(stage) or {}).get('finish_m')
+        if not flying or recorded is None or abs(flying - recorded) < FINISH_MOVED or result is None \
+                or course is None:
+            continue
+        try:
+            trace = store.trace(run)
+            new = course - (recorded - flying)
+            t_old = _trace_t_at(trace, course) if trace else None
+            t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
+            if t_new is None or result - (t_old - t_new) <= 0:
+                logging.warning("drive log: run %s cannot be moved from finish %.1f to %.1f (trace out of range)",
+                                run, recorded, flying)
+                continue
+            store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
+            store.set_run_finish(run, flying)
+            done += 1
+        except Exception:
+            logging.exception("drive log: moving the finish of run %s", run)
     return done
 
 
