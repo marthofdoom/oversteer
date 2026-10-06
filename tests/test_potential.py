@@ -184,7 +184,7 @@ def test_the_calls_are_in_the_coachs_words():
                                       'Get to full throttle sooner after the apex.')
     assert potential.call(row(1.4, 1, cause='entry', grip_used=0.79, grade='4', dir='left', apex_d=2100.0,
                               braked=True, brake_early=22.0)) == (
-        'The 4 left at 2.1 km: you use 79 % of the grip; about 1.4 s is there. Brake 22 m later.')
+        'The 4 left at 2.1 km: you use 79 % of the grip; about 1.4 s is there. Brake later and carry more speed to the turn-in: the grip layer starts braking 22 m after you.')
     # at a kink in a fast section the grip is not quoted, at the limit it is "all"
     assert 'of the grip' not in potential.call(row(0.8, 1, grip_used=0.08, exit_throttle=0.5))
     assert 'you use all of the grip' in potential.call(row(0.8, 1, grip_used=1.1, exit_throttle=0.5))

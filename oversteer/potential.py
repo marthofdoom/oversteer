@@ -578,6 +578,7 @@ PHASE = {'EARLY-BRAKE': ', mostly into the bend', 'OVER-SLOWED': ', mostly into 
          'OVERSHOT': ', mostly into the bend', 'COASTING': ', mostly into the bend',
          'LATE-THROTTLE': ', mostly on the exit', 'EXIT-BRAKE': ', mostly on the exit', 'GEAR': ', mostly on the exit',
          'EARLY-APEX': ', mostly on the exit', 'SLOW-ARRIVAL': ', mostly before the braking'}
+BRAKE_PRECISE = 40.0               # m: a braking this much before the grip layer's is said as a fact, not a distance to move
 GRIP_LEFT = 0.85                 # grip used at the apex under this: there was grip to spare (coach_diagnosis.GRIP_LEFT)
 
 
@@ -588,7 +589,10 @@ def _trace_fix(s):
     sooner. `side` is 'entry' or 'exit': where the fix is. Never the apex sentence alone."""
     early = s.get('brake_early')
     if early is not None and early >= BRAKE_SAME:
-        return 'Brake {:.0f} m later.'.format(early), 'entry'
+        if early > BRAKE_PRECISE:          # far from the layer's point, the number is a fact, not a target
+            return 'Brake later: you braked well before the grip needs (about {:.0f} m).'.format(early), 'entry'
+        return 'Brake later and carry more speed to the turn-in: the grip layer starts braking {:.0f} m after you.'.format(
+            early), 'entry'
     used = s.get('grip_used')
     if _slow_apex(s) and used is not None and used < GRIP_LEFT:
         return '{}: carry {:.0f} km/h more to the apex (the grip allows {:.0f}, you took {:.0f}).'.format(

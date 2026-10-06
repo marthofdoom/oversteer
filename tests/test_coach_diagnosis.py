@@ -398,7 +398,7 @@ def row(available, **extra):
 
 def test_the_calls_say_brake_later_only_where_the_run_braked_before_the_grip_layer_needed_to():
     entry = row(1.4, cause='entry', brake_early=25.0, braked=True)
-    assert potential.call(entry).endswith('about 1.4 s is there. Brake 25 m later.')
+    assert potential.call(entry).endswith('about 1.4 s is there. Brake later and carry more speed to the turn-in: the grip layer starts braking 25 m after you.')
     # braked later than the layer, the apex slower than the grip allows and grip to spare: brake less, by how much
     late = row(1.4, cause='entry', brake_early=-20.0, braked=True, apex_kmh=60.0, apex_kmh_pot=70.0)
     said = potential.call(late)
@@ -412,8 +412,10 @@ def test_the_calls_say_brake_later_only_where_the_run_braked_before_the_grip_lay
     assert potential.call(dict(late, grip_used=0.9)) is None
     # a bend says it in the same words, with the phase where the fix agrees with the potential's own cause
     bend = row(1.3, cause='entry', grade='6', radius_m=145.0, brake_early=25.0, braked=True)
-    assert potential.call(bend).endswith('about 1.3 s is there, mostly into the bend. Brake 25 m later.')
-    assert potential.call(dict(bend, cause='exit')).endswith('about 1.3 s is there. Brake 25 m later.')
+    assert potential.call(bend).endswith('about 1.3 s is there, mostly into the bend. Brake later and carry more speed to the turn-in: the grip layer starts braking 25 m after you.')
+    assert potential.call(dict(bend, cause='exit')).endswith('about 1.3 s is there. Brake later and carry more speed to the turn-in: the grip layer starts braking 25 m after you.')
+    far = potential.call(row(1.4, cause='entry', brake_early=90.0, braked=True))
+    assert far.endswith('Brake later: you braked well before the grip needs (about 90 m).') and 'after you' not in far
 
 
 def test_the_calls_say_full_throttle_sooner_only_where_it_was_not_already_full():
@@ -430,7 +432,7 @@ def test_a_diagnosis_with_a_fix_owns_the_cause_and_the_fix_in_one_sentence():
             'fix': 'Brake less there, or not at all, as your best run did: carry 24 km/h more through the slowest point.'}
     said = potential.call(row(1.8, cause='exit', brake_early=25.0, braked=True), None, diag)
     assert said == ('The 3 right at 0.1 km: about 1.8 s is there, mostly into the bend. ' + diag['fix'])
-    assert 'of the grip' not in said and 'Brake 25' not in said            # not the potential's own cause or fix
+    assert 'of the grip' not in said and 'Brake later' not in said            # not the potential's own cause or fix
     phases = {'EARLY-BRAKE': ', mostly into the bend', 'OVER-SLOWED': ', mostly into the bend',
               'OVERSHOT': ', mostly into the bend', 'COASTING': ', mostly into the bend',
               'LATE-THROTTLE': ', mostly on the exit', 'EXIT-BRAKE': ', mostly on the exit', 'GEAR': ', mostly on the exit',
