@@ -70,6 +70,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .splits .now { margin-left: auto; font-weight: 700; }
 .splits[aria-expanded="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
 .ribbon { display: flex; gap: 1.5px; height: 7px; margin-top: 3px; }
+.splits .pot { font-size: 11px; line-height: 14px; margin-top: 3px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.splits .pot b { font-weight: 600; color: var(--text); } .splits .pot i { font-style: normal; letter-spacing: .06em; text-transform: uppercase; font-size: 10px; margin-right: 3px; }
+.splits .pot span + span::before { content: "\00b7"; margin: 0 5px; color: var(--faint); }
 .ribbon i { flex: 1 1 0; border-radius: 1.5px; background: var(--ls-none); min-width: 0; }
 .ribbon s { flex: 0 0 5px; }
 .ribbon i.sec { flex: 0 0 16px; }
@@ -163,7 +166,7 @@ ul.tips li { padding: 10px 0; border-top: 1px solid var(--line); font-size: 15px
 ul.tips li:first-child { border-top: 0; padding-top: 2px; }
 .badge { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
   padding: 1px 6px; border-radius: 4px; margin-right: 8px; vertical-align: 1px; border: 1px solid currentColor; font-family: var(--mono); }
-.k-focus { color: var(--brk); } .k-tip { color: var(--accent); } .k-praise { color: var(--thr); }
+.k-focus { color: var(--brk); } .k-tip, .k-top3 { color: var(--accent); } .k-praise { color: var(--thr); }
 .k-still, .k-note, .k-driving { color: var(--dim); } .k-technique { color: var(--steer); } .k-setup { color: var(--rpm); }
 li.still { color: var(--dim); }
 details { margin-top: 2px; }
@@ -254,6 +257,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
   .splits .kv { font-size: 15px; }
   .splits .stg { font-size: 12px; }
   .ribbon { height: 10px; margin-top: 4px; }
+  .splits .pot { font-size: 13px; line-height: 16px; }
   .ribbon i.sec { flex-basis: 40px; }
   main { max-width: 1440px; margin: 0 auto; padding: 18px 24px 40px; }
   .cols { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 0 18px; align-items: start; }
@@ -384,6 +388,7 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
       <span class="kv num now" id="sp-now"></span>
     </div>
     <div class="ribbon" id="ribbon" aria-hidden="true"></div>
+    <div class="pot num" id="sp-pot" hidden></div>
   </button>
   <div class="sheet" id="splits-panel" hidden></div>
 </header>
@@ -540,7 +545,7 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
               <div class="pop rv-adv" id="loss-pop" role="status"></div>
             </div>
             <button type="button" class="chip" id="loss-all" hidden>Show all</button>
-            <p class="foot">Min, exit: km/h against the comparison. Brake: metres earlier (+) or later (−) than its strongest braking. Splits beside an off are not compared. The first split holds the launch, the last the finish.</p>
+            <p class="foot">Avail: seconds available in the split against the grip potential (what a lap simulation at the grip you reach 2 % of the time would take). Min, exit: km/h against the comparison. Brake: metres earlier (+) or later (−) than its strongest braking. Splits beside an off are not compared. The first split holds the launch, the last the finish.</p>
             <div class="sectorrow" id="sectors-run"></div>
           </div>
           <div class="panel">
@@ -851,7 +856,8 @@ function splitsTable(sp) {
   const box = el("div");
   const table = el("table");
   const head = el("tr");
-  for (const h of ["Split", "Last", "Δ PB", "Best", "Save"]) head.appendChild(el("th", h));
+  const avail = !!(sp.potential && sp.splits.some((r) => r.available != null));          // time available against the grip potential
+  for (const h of ["Split", "Last", "Δ PB", "Best", "Save"].concat(avail ? ["Avail"] : [])) head.appendChild(el("th", h));
   table.appendChild(head);
   sp.splits.forEach((r, i) => {
     const tr = el("tr", null, r.finish ? "fin" : "");
@@ -862,6 +868,7 @@ function splitsTable(sp) {
     tr.appendChild(el("td", splitDelta(r), "t-" + splitTone(r)));
     tr.appendChild(el("td", seconds(r.best)));
     tr.appendChild(el("td", r.delta != null && Math.round(r.delta * 10) > 0 ? r.delta.toFixed(1) : "–", "dim"));
+    if (avail) tr.appendChild(el("td", r.available != null && Math.round(r.available * 10) > 0 ? r.available.toFixed(1) : "–", "dim"));
     table.appendChild(tr);
   });
   const sum = el("tr", null, "sum");
@@ -871,6 +878,7 @@ function splitsTable(sp) {
   sum.appendChild(el("td", badge ? (sp.new_pb ? "★ " : "") + signed(sp.last - sp.best) : "–", badge ? badge.cls : "dim"));
   sum.appendChild(el("td", clock(sp.best)));
   sum.appendChild(el("td", badge && !sp.new_pb && Math.round((sp.last - sp.best) * 10) > 0 ? (sp.last - sp.best).toFixed(1) : "–", "dim"));
+  if (avail) sum.appendChild(el("td", sp.last != null && sp.potential.grip != null && Math.round((sp.last - sp.potential.grip) * 10) > 0 ? (sp.last - sp.potential.grip).toFixed(1) : "–", "dim"));
   table.appendChild(sum);
   const sob = el("tr");
   sob.appendChild(el("td", "Sum of best", "name"));
@@ -878,6 +886,7 @@ function splitsTable(sp) {
   sob.appendChild(el("td", sp.gain != null ? MINUS + sp.gain.toFixed(1) : "", "t-gold"));
   sob.appendChild(el("td", clock(sp.possible)));
   sob.appendChild(el("td", ""));
+  if (avail) sob.appendChild(el("td", ""));
   table.appendChild(sob);
   box.appendChild(table);
   if (sp.sectors && sp.sectors.length) {
@@ -893,11 +902,19 @@ function splitsTable(sp) {
     box.appendChild(grid);
     if (sp.sectors.some((r) => r.confidence === "low")) box.appendChild(el("p", "≈ Sector positions estimated from the game's sector lengths.", "foot"));
   }
+  if (sp.potential && sp.potential.grip != null) box.appendChild(el("p", "Avail: the time your last run had available in that split against the grip potential, a lap simulation at the grip you reach 2 % of the time. Potential, you: the sum of best; grip: the same stage at that grip; car: the best grip any run of the car reached with its engine.", "foot"));
   box.appendChild(el("p", "Gold ★: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what the split could still gain against its best. Sum of best: every split's best put together. "
     + (sp.finish_m != null ? finishNote(sp) : "The finish split includes the slow-down to the stop."), "foot"));
   return box;
 }
 
+// "Potential: you 3:03.1 · grip 2:51.4 · car 2:42.7" under the splits row: what the sum of best, the driver's own grip and the car allow
+function potentialLine(sp) {
+  const p = sp && sp.potential;
+  if (!p || p.grip == null) return null;
+  const parts = [["you", p.user], ["grip", p.grip], ["car", p.car]].filter((x) => x[1] != null);
+  return parts;
+}
 function showSplits(sp) {
   lastSplits = sp;
   splitsData = sp;
@@ -915,6 +932,13 @@ function showSplits(sp) {
     now.appendChild(el("i", "Last"));
     now.appendChild(document.createTextNode(clock(sp.last) + " "));
     now.appendChild(el("span", badge.text, badge.cls));
+  }
+  const pot = $("sp-pot"), parts = potentialLine(sp);
+  clear(pot);
+  pot.hidden = !parts;
+  if (parts) {
+    pot.appendChild(el("i", "Potential"));
+    for (const [name, t] of parts) { const s = el("span"); s.appendChild(document.createTextNode(name + " ")); s.appendChild(el("b", clock(t))); pot.appendChild(s); }
   }
   row.title = sp.name + ": PB " + clock(sp.best) + ", sum of best " + clock(sp.possible) + (finishNote(sp) ? " (" + finishNote(sp) + ")" : "");
   const ribbon = $("ribbon");
@@ -1020,8 +1044,8 @@ async function loadCar() {
   if (car) { shiftTable(car, table, note); tune(car); }
   else $("shifts-empty").textContent = "Could not read this car.";
   if (c) {
-    const names = {focus: "Focus", tip: "Call", praise: "Good", technique: "Technique", still: "", note: ""};
-    const order = {focus: 0, praise: 2, still: 3};
+    const names = {top3: "Top 3", focus: "Focus", tip: "Call", praise: "Good", technique: "Technique", still: "", note: ""};
+    const order = {top3: -1, focus: 0, praise: 2, still: 3};
     const tips = c.tips.slice().sort((a, b) => (order[a.kind] ?? 1) - (order[b.kind] ?? 1));
     for (const t of tips) coach.appendChild(tipItem(t, names[t.kind] ?? t.kind));
     const n = c.tips.filter((t) => t.kind !== "still").length;
@@ -1691,7 +1715,7 @@ function rvAdviceBySection(advice, sections) {
   }
   return out;
 }
-const RV_TAG = {focus: "FOCUS", tip: "CALL", praise: "GOOD", technique: "TECHNIQUE", note: "NOTE", still: "NOTE"};
+const RV_TAG = {top3: "TOP 3", focus: "FOCUS", tip: "CALL", praise: "GOOD", technique: "TECHNIQUE", note: "NOTE", still: "NOTE"};
 function rvCall(t, full) {
   const row = el("span", null, "call");
   const cost = t.cost ? (t.kind === "praise" ? MINUS : "+") + Math.abs(t.cost).toFixed(1) : "";
@@ -1951,10 +1975,16 @@ function rvLossTable() {
   const shown = RV.showAll ? rows : rows.slice(0, 8);
   const max = Math.max(0.1, ...rows.map((r) => r.off ? 0 : Math.abs(r.loss)));
   const head = el("tr");
-  for (const h of ["Split", "Loss", "Min", "Exit", "Brake"]) head.appendChild(el("th", h));
+  const pot = rows.some((r) => r.avail != null);                  // the stage's potential is known: a Time available column
+  for (const h of pot ? ["Split", "Loss", "Avail", "Min", "Exit", "Brake"] : ["Split", "Loss", "Min", "Exit", "Brake"]) {
+    const th = el("th", h);
+    if (h === "Avail") th.title = "Time available: this run's time through the split less the grip potential's (a lap simulation at the grip you reach 2 % of the time)";
+    head.appendChild(th);
+  }
   tb.appendChild(head);
+  const cols = pot ? 6 : 5;
   const num = (x, unit) => x == null || Math.abs(x) < 1 ? "–" : signed(x, 0);
-  if (!D.cmp) { const tr = el("tr"); const td = el("td", "No comparison yet: the table fills once this stage has another run.", "name"); td.colSpan = 5; tr.appendChild(td); tb.appendChild(tr); }
+  if (!D.cmp) { const tr = el("tr"); const td = el("td", "No comparison yet: the table fills once this stage has another run.", "name"); td.colSpan = cols; tr.appendChild(td); tb.appendChild(tr); }
   for (const r of shown) {
     const tr = el("tr", null, "tap" + (r.i === RV.sel ? " sel" : ""));
     tr.dataset.i = r.i;
@@ -1970,10 +2000,11 @@ function rvLossTable() {
       loss.appendChild(bar); loss.appendChild(document.createTextNode(signed(r.loss)));
     }
     tr.appendChild(loss);
+    if (pot) tr.appendChild(el("td", r.avail == null || r.off ? "–" : r.avail.toFixed(1), r.avail != null && !r.off && r.avail >= 0.5 ? "pos-slower" : "dim"));
     for (const v of [r.dmin, r.dexit, r.dbrake]) tr.appendChild(el("td", r.off ? "–" : num(v), "dim"));
     tb.appendChild(tr);
     if (r.i === RV.sel) {
-      const adv = el("tr", null, "adv"), td = el("td"); td.colSpan = 5; td.className = "rv-adv";
+      const adv = el("tr", null, "adv"), td = el("td"); td.colSpan = cols; td.className = "rv-adv";
       td.appendChild(rvAdviceFor(r.i, true)); adv.appendChild(td); tb.appendChild(adv);
     }
   }

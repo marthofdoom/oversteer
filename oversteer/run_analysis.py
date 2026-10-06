@@ -15,7 +15,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from . import coach, coach_context as cc, stage_tables
+from . import coach, coach_context as cc, potential, stage_tables
 
 SLACK = 5.0                      # m a run may stop short of the grid's end, or start past its start, and still be drawn there
 STEP = 2.0                       # m between the grid's points
@@ -168,7 +168,20 @@ def head(reader, run_id, tips=None, namespace=None):
             'stage_name': coach._stage_name(run['stage'], stage_row) if run['stage'] else None,
             'car': run['car'], 'car_name': (car or {}).get('name') or (car or {}).get('key'), 'wet': run['wet'],
             'limiter': ((car or {}).get('model') or {}).get('limiter'), 'game': (car or {}).get('game'),
-            'compare': compare, 'delta_pb': compare[0]['delta'], 'advice': advice}
+            'compare': compare, 'delta_pb': compare[0]['delta'], 'advice': advice,
+            'potential': stage_potential(reader, run)}
+
+
+def stage_potential(reader, run):
+    """The stage's potential for the run's car as the views show it: {user, grip, car (s, in that order), runs,
+    built, sections (potential.stage()'s: per section its distances, apex, grade, the three layers' seconds and the
+    PB's columns)}, or None where there is none."""
+    if not run.get('stage') or run.get('car') is None:
+        return None
+    pot = potential.stored(reader, run['stage'], run['car'])
+    if pot is None:
+        return None
+    return dict(potential.layers(pot), runs=pot['runs'], built=pot['built'], sections=pot['sections'])
 
 
 def car_tips(reader, profile, car_id, namespace=None):
@@ -315,10 +328,12 @@ def _sector_rows(stage, mine, other):
     return out if any(r['time'] is not None for r in out) else None
 
 
-def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run):
+def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot=None):
     """The coach's sections for the run: against `other` where there is one (its times, loss, min, exit and
     brake against it), on the grid of `grid_run` (the PB run's grid, the splits' sections) where there is one,
-    else the run's own sections."""
+    else the run's own sections. With the stage's stored potential `pot` (oversteer/potential.py) each section also
+    has `grip_s` (the seconds the grip layer takes through it), `car_s` and `avail` (the run's time less the grip
+    layer's: the time available), None where the run has no time there or an off touched it."""
     corners = reader.corners(run['id'])
     track = cc.along(rows)
     mine = cc.sections_of(corners)
@@ -358,6 +373,10 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run)
                'loss': None if time_ is None or ref_time is None else time_ - ref_time,
                'first': j == 0, 'last': j == last,
                'off': bool(s['off']) or j in offs or bool(item and item['ref_off'])}
+        if pot is not None:
+            grip_s, car_s = potential.span_times(pot, a, b)
+            row['grip_s'], row['car_s'] = grip_s, car_s
+            row['avail'] = None if time_ is None or row['off'] else time_ - grip_s
         if mine_section is not None:
             key = cc.key_corner(mine_section)
             ends = mine_section['corners'][-1]
@@ -379,13 +398,16 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
     {run, vs, ref ({id, n, time, label} or None), step, length, limiter (rpm), time, ref_time, channels, this, cmp, x, z, sections,
     sectors}: `this` and `cmp` (None without a comparison) map each of CHANNELS to its values on the grid (points `step` m apart from 0), `x`
     and `z` are this run's position (None where it has none), `sections` the coach's sections (_section_rows) and
-    `sectors` the game's. None for an unknown run or one without a trace. Cached per run and comparison."""
+    `sectors` the game's, and `potential` (the stage's three layers, user / grip / car seconds, or None). None for an
+    unknown run or one without a trace. Cached per run and comparison."""
     run = reader.run(run_id)
     if run is None or not run['stage']:
         return None
     kind, other = resolve(reader, run, vs)
     ns = namespace or _ns(reader)
-    key = (ns, 'trace', _signature(run), kind, _signature(other) if other else None, float(step))
+    pot = potential.stored(reader, run['stage'], run['car'])
+    key = (ns, 'trace', _signature(run), kind, _signature(other) if other else None, float(step),
+           pot['version'] if pot else None)
 
     def build():
         rows = stage_trace(reader, run)
@@ -414,7 +436,8 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
                 'time': run['result_time'] if run['finished'] == 1 else None,
                 'ref_time': other['result_time'] if other_rows else None, 'channels': list(CHANNELS),
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,
-                'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run),
+                'potential': potential.layers(pot) if pot else None,
+                'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot),
                 'sectors': _sector_rows(run['stage'], rows, other_rows)}
     return _remember(key, build)
 

@@ -1503,7 +1503,7 @@ class GtkUi:
         self.telemetry_sessions.show_all()
         self._show_coaching()
 
-    KIND_TAGS = {'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip',
+    KIND_TAGS = {'top3': 'telemetry-tip', 'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip',
                 'technique': 'telemetry-technique'}
 
     def _show_coaching(self):
@@ -1574,6 +1574,11 @@ class GtkUi:
         self.splits_ribbon.set_size_request(-1, 10)
         self.splits_ribbon.connect('draw', self._draw_ribbon)
         inner.pack_start(self.splits_ribbon, False, False, 0)
+        self.splits_potential = Gtk.Label(xalign=0)           # "Potential: you 3:03.1 · grip 2:51.4 · car 2:42.7"
+        self.splits_potential.set_ellipsize(3)
+        self.splits_potential.get_style_context().add_class('dim-label')
+        self.splits_potential.set_no_show_all(True)
+        inner.pack_start(self.splits_potential, False, False, 0)
         button.add(inner)
         button.set_tooltip_text(_("Show or hide the splits"))
         box.pack_start(button, False, False, 0)
@@ -1635,17 +1640,21 @@ class GtkUi:
                 _("Last"), clock(found['last']), telemetry_plot.TONES[tone],
                 _("PB") if found['new_pb'] else signed(found['delta']))
         self.splits_label.set_markup(summary)
+        self.splits_potential.set_visible(bool(found.get('potential_line')))
+        self.splits_potential.set_text(found.get('potential_line') or '')
+        self.splits_potential.set_tooltip_text(_("What the layers mean: you, the sum of your best splits; grip, a lap simulation at the grip you reach 2 % of the time; car, at the best grip any run of the car reached, with its engine."))
         self.splits_label.set_tooltip_text(
             _("Times run to the estimated flying finish of the stage.") if found.get('finish_m') else None)
         grid = Gtk.Grid(column_spacing=16, row_spacing=4)
-        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 PB"), _("Best"), _("Save"))):
+        has_avail = bool(found.get('potential_line'))                 # the stage's potential is known: a time available column
+        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 PB"), _("Best"), _("Save")) + ((_("Avail"),) if has_avail else ())):
             label = Gtk.Label(xalign=0 if col == 0 else 1)
             label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(head)))
             label.get_style_context().add_class('telemetry-header')
             grid.attach(label, col, 0, 1, 1)
         for n, row in enumerate(found['rows'], 1):
             tone = row[4]
-            for col, value in enumerate((row[0], row[1], row[2], row[3], row[5])):
+            for col, value in enumerate((row[0], row[1], row[2], row[3], row[5]) + ((found['avail'][n - 1],) if has_avail else ())):
                 label = Gtk.Label(xalign=0 if col == 0 else 1)
                 markup = GLib.markup_escape_text(value)
                 if col:

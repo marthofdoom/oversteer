@@ -368,6 +368,13 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             tips = coach.Coach(reader).tips(profile, car['id'] if car else None)
             return 200, {'tips': [t.to_dict() for t in tips],
                          'splits': self._splits(reader, profile, car['id']) if car else None}
+        if parts == ['potential']:
+            # The stage view of the potential time: `potential?stage=<key>&car=<id>` (oversteer/potential.py)
+            car = self._car(reader, profile, query.get('car')) if query.get('car') else None
+            if car is None or not query.get('stage'):
+                return 404, {'error': 'a stage and a car are needed'}
+            found = run_analysis.stage_potential(reader, {'stage': query.get('stage'), 'car': car['id']})
+            return (200, found) if found else (404, {'error': 'no potential for that stage and car yet'})
         if parts[0] == 'runs':
             return self._runs(reader, profile, parts, query)
         return 404, {'error': 'not found'}

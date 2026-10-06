@@ -336,7 +336,7 @@ def test_a_spin_or_a_near_stop_is_a_corner_fault_and_an_off_is_named(tmp_path):
     assert spin.cost > stall.cost
     off, = h.by_id('corner.off')
     assert off.kind == 'note' and off.text == ('On Test Stage, off at 2.1 km: the corners within 100 m of it are left '
-                                               'out of the comparisons.')
+                                               'out of the comparisons. It was in the 3 right.')
     # a game whose attitude signals are unchecked has neither a spin nor a stall, and still has the off
     h = Stage(tmp_path / 'u.db', game='wrcg')
     h.drive(corners_with(), events=[event('spin', 580.0, 620.0, value=230.0), event('off', 2100.0, 2130.0, 'long')])
@@ -566,8 +566,8 @@ def seen_state(times=3, value=1.0, last=0.0):
 
 
 def test_two_praise_lines_a_view_and_one_when_two_tips_show():
-    out = select([], [praise('a', 3.0), praise('b', 2.0), praise('c', 1.0)], [], {}, 100.0)
-    assert [t.id for t in out] == ['a', 'b']
+    out = select([], [praise('a', 3.0), praise('b', 2.0), praise('c', 1.0), praise('d', 0.5)], [], {}, 100.0)
+    assert [t.id for t in out] == ['a', 'b', 'c']
     # the praise already shown twice is quiet... until two tips show, when the best one is said again
     stale = {'a': seen_state(), 'b': seen_state()}
     out = select([candidate('t1'), candidate('t2', cost=0.9)], [praise('a', 3.0), praise('b', 2.0)], [], stale, 100.0)

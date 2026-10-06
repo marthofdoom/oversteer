@@ -12,7 +12,7 @@ from . import run_analysis, telemetry_plot as plot
 from .telemetry_view import clock, signed
 
 SCALE = 1.3                             # the strips are taller than on a phone, as on the desktop page
-KINDS = {'focus': _("FOCUS"), 'tip': _("CALL"), 'praise': _("GOOD"), 'technique': _("TECHNIQUE"), 'note': _("NOTE"),
+KINDS = {'top3': _("TOP 3"), 'focus': _("FOCUS"), 'tip': _("CALL"), 'praise': _("GOOD"), 'technique': _("TECHNIQUE"), 'note': _("NOTE"),
          'still': _("NOTE")}
 
 
@@ -138,11 +138,11 @@ class RunView(Gtk.Box):
         self._map_note.set_line_wrap(True)
         right.pack_start(self._map_note, False, False, 0)
         right.pack_start(self._heading(_("Where the time went"), _("select a row for the coach's advice")), False, False, 0)
-        # i, name, loss text, loss, min, exit, brake, colour, apex
-        self._store = Gtk.ListStore(int, str, str, float, str, str, str, str, float)
+        # i, name, loss text, loss, min, exit, brake, colour, apex, time available (against the grip potential)
+        self._store = Gtk.ListStore(int, str, str, float, str, str, str, str, float, str)
         self._table = Gtk.TreeView(model=self._store)
         self._table.set_headers_clickable(True)
-        for n, (title, col) in enumerate(((_("Split"), 1), (_("Loss"), 2), (_("Min"), 4), (_("Exit"), 5), (_("Brake"), 6))):
+        for n, (title, col) in enumerate(((_("Split"), 1), (_("Loss"), 2), (_("Avail"), 9), (_("Min"), 4), (_("Exit"), 5), (_("Brake"), 6))):
             renderer = Gtk.CellRendererText()
             if n == 0:
                 renderer.set_property('ellipsize', 3)
@@ -337,7 +337,8 @@ class RunView(Gtk.Box):
                                 _("off") if s['off'] else signed(s['loss']), -1e9 if s['off'] else s['loss'],
                                 num(s.get('dmin')), num(s.get('dexit')), num(s.get('dbrake')),
                                 plot.FAINT if s['off'] else plot.SLOWER if s['loss'] > 0.05 else plot.FASTER
-                                if s['loss'] < -0.05 else plot.DIM, s['apex']])
+                                if s['loss'] < -0.05 else plot.DIM, s['apex'],
+                                '–' if s.get('avail') is None or s['off'] else '{:.1f}'.format(s['avail'])])
         self._sectors.set_markup('   '.join('<b>{}</b> <tt>{}</tt> <span foreground="{}"><tt>{}</tt></span>'.format(
             s['name'], '–' if s['time'] is None else ('≈' if s.get('confidence') == 'low' else '') + '{:.1f}'.format(s['time']),
             plot.DIM if s['delta'] is None else plot.SLOWER if round(s['delta'], 1) > 0 else plot.FASTER,

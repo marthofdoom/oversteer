@@ -15,7 +15,7 @@ import math
 import statistics
 import time
 
-from . import coach_context, stage_tables
+from . import car_data, coach_context, potential, stage_tables
 from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SURFACES, _listed
 
 # -- metrics of one run (section 9.1) --
@@ -508,7 +508,7 @@ SESSIONS_READ = 40               # the most recent sessions the coach reads
 GROWTH_EVENTS = 20               # counted events each side of a before/after comparison
 HABIT_SESSIONS = 5               # sessions in a slice before anything is a habit...
 HABIT_SHARE = 0.7                # ...and the share of them past the threshold
-TIPS = 3                         # tips per view
+TIPS = 4                         # tips per view (the owner asked for a coach that speaks more readily)
 STILL = 3                        # quiet "still:" lines per view
 QUIET_AFTER = 2                  # showings without change before a tip goes quiet
 SHOWING = 6 * 3600.0             # s: views of a tip within this of its last counted showing are the same one
@@ -536,7 +536,7 @@ LAUNCHES = 3                     # launches before the launch is coached
 DRAG_PER_KM = 0.5                # s/km on both pedals on the straights (tarmac, circuit)
 CORNER_LOSS = 1.5                # s in the three worst sections against the best run of the stage
 BUDGET = 0.1                     # a tip is shown when it costs this share of the costliest one
-PRAISE = 2                       # praise lines per view (and one is forced in when two tips show)
+PRAISE = 3                       # praise lines per view (and one is forced in when two tips show)
 TECHNIQUE_SHIFT = 0.2            # a technique line comes back when its share moved this far (20 points)
 STAGES_COACHED = 3               # the stages (newest runs) whose sections are read for tips
 SECTION_TIPS = 3                 # the costliest sections named per stage
@@ -589,20 +589,28 @@ class Tip:
     with, kept quiet), 'note' (what the coach is waiting for). `value` is the
     metric behind it, kept in coach_state to tell when it got worse."""
 
-    __slots__ = ('id', 'kind', 'text', 'evidence', 'value', 'cost', 'count', 'ref', 'rough', 'place')
+    __slots__ = ('id', 'kind', 'text', 'evidence', 'value', 'cost', 'count', 'ref', 'rough', 'place', 'rank',
+                 'delta_prev')
 
     def __init__(self, id, kind, text, evidence=None, value=None, cost=0.0, count=0, ref=False, rough=False,
-                 place=None):
+                 place=None, rank=None, delta_prev=None):
         self.id, self.kind, self.text = id, kind, text
+        self.rank = rank                 # 'top3': 1 to 3, the place's order by the time available
+        self.delta_prev = delta_prev     # s the place's gap to the potential closed since the run before (None: not said)
         self.place = place               # where on the stage it is about (place()), None for a habit
         self.evidence, self.value, self.cost, self.count = list(evidence or []), value, cost, count
         self.ref = ref                   # `cost` is seconds a stage worked out from a run (not a rough constant)
         self.rough = rough               # `cost` is a rough constant: shown only where no tip has a reference
 
     def to_dict(self):
-        return {'id': self.id, 'kind': self.kind, 'text': self.text, 'evidence': list(self.evidence),
-                'value': self.value, 'cost': self.cost,
-                'place': dict(self.place) if self.place else None}
+        out = {'id': self.id, 'kind': self.kind, 'text': self.text, 'evidence': list(self.evidence),
+               'value': self.value, 'cost': self.cost,
+               'place': dict(self.place) if self.place else None}
+        if self.rank is not None:
+            out['rank'] = self.rank
+        if self.delta_prev is not None:
+            out['delta_prev'] = self.delta_prev
+        return out
 
     def __repr__(self):
         return 'Tip({!r}, {!r}, {!r})'.format(self.id, self.kind, self.text)
@@ -823,6 +831,7 @@ class Coach:
         self.now = now
         self._games = {}
         self._stages = {}
+        self._lead = []                  # the potential's top 3 and what improved, said before everything else
 
     def _game(self, car):
         """The game a car (cars.id) is from, None where it is not known."""
@@ -853,6 +862,7 @@ class Coach:
                 except (ValueError, KeyError, TypeError, AttributeError):
                     model = None
         candidates, praise, notes, techniques = [], [], [], []
+        self._lead = []
         slices = {}
         for r in rows:
             slices.setdefault((r['name'], r['gear'], r['method'], r['discipline'], r['surface']), []).append(r)
@@ -865,7 +875,8 @@ class Coach:
         if model is not None:
             self._model_notes(model, now, candidates)
         state = self.reader.coach_state(profile, car_id)
-        return select(candidates, praise, notes, state, now, limit, show_all, techniques)
+        # After every finished run: the three places with time available and what improved, whatever else is said
+        return self._lead + select(candidates, praise, notes, state, now, limit, show_all, techniques)
 
     # -- the families of tips --
 
@@ -1233,6 +1244,8 @@ class Coach:
             corners = reader.corners(run['id'])
             if not corners:
                 continue
+            if not placed:
+                self._potential_lead(stage, self._stage_label(stage), run, corners)      # the newest run's
             referenced = self._stage_place(stage, run, corners, model, candidates, praise, notes, techniques)
             placed.add(stage)
             if referenced:
@@ -1416,9 +1429,12 @@ class Coach:
             if e['kind'] not in ('spin', 'stall', 'off') or e['d0'] is None:
                 continue
             if e['kind'] == 'off':
-                notes.append(Tip('corner.off:{}:{:.0f}'.format(stage, e['d0'] // coach_context.INCIDENT_REACH), 'note',
+                facts = self._off_facts(stage, run, e, corners)
+                notes.append(Tip('corner.off:{}:{:.0f}:{}'.format(stage, e['d0'] // coach_context.INCIDENT_REACH,
+                                                                   run['id']), 'note',
                                  'On {}, off at {:.1f} km: the corners within {:.0f} m of it are left out of the '
-                                 'comparisons.'.format(name, e['d0'] / 1000.0, coach_context.INCIDENT_REACH),
+                                 'comparisons.{}'.format(name, e['d0'] / 1000.0, coach_context.INCIDENT_REACH,
+                                                         ' ' + facts if facts else ''),
                                  place=place(stage, run, e['d0'], e['d0'], e['d1'])))
                 continue
             reach = coach_context.SECTION_REACH
@@ -1624,6 +1640,144 @@ class Coach:
                                      coach_context.section_name(best['grid'][j]), gains[j]) if j is not None else ''),
                              [], found['gain'], cost=0.0, count=len(loaded) + 1))
 
+    # -- the potential time: the top 3 places after every finished run (docs/telemetry-extrapolation.md 6.2) --
+
+    def _potential_lead(self, stage, name, run, corners):
+        """After the newest finished run of a stage: the TOP places with the most time available against the grip
+        layer of the stored potential (oversteer/potential.py), one fix each, then the place that closed on the
+        potential the most since the run before. Said every run, outside the budget and the quiet rules of
+        select(): they are about this run. Nothing without a potential (fewer than ENV_MIN_RUNS runs of the car
+        on the surface, or none finished on the stage) or a finished run with a trace."""
+        reader = self.reader
+        if run['finished'] != 1 or run['car'] is None or run['run_class'] in (None, 'restart', 'unclassified') \
+                or run['discipline'] == 'drift':
+            return
+        pot = potential.stored(reader, stage, run['car'])
+        if pot is None:
+            return
+        rows = self._potential_rows(pot, run, corners)
+        if rows is None:
+            return
+        car = reader.car_by_id(run['car']) or {}
+        data = car_data.entry(car.get('key'))
+        band = potential.power_band(data) if data else None
+        top = potential.top3(rows)
+        layers = potential.layers(pot)
+        for rank, row in enumerate(top, 1):
+            terms = potential.critique(row, row.get('best_gear'), band)
+            said = potential.call(row, terms[0][1] if terms else None)
+            text = 'On {}, {}{}'.format(name, said[0].lower(), said[1:])
+            evidence = ['{:.1f} s through it: the grip layer {:.1f} s{}.'.format(
+                row['time'], row['grip_s'], ', the car {:.1f} s'.format(row['car_s']) if row.get('car_s') else '')]
+            if row.get('apex_kmh') and row.get('apex_kmh_pot'):
+                evidence.append('Slowest point {:.0f} km/h; the grip allows {:.0f}.'.format(
+                    row['apex_kmh'], row['apex_kmh_pot']))
+            if rank == 1 and layers['grip'] is not None:
+                evidence.append('Potential on this stage: you {}, grip {}{}.'.format(
+                    _clock(layers['user']), _clock(layers['grip']),
+                    ', car {}'.format(_clock(layers['car'])) if layers['car'] is not None else ''))
+            self._lead.append(Tip('potential.top3:{}:{}'.format(stage, rank), 'top3', text, evidence, row['available'],
+                                  cost=row['available'], count=1, rank=rank,
+                                  place=place(stage, run, row['apex_d'], row['d0'], row['d1'])))
+        before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=20, car=run['car'])
+                  if r['started'] <= run['started'] and r['finished'] == 1 and r['result_time']
+                  and r['run_class'] in ('clean', 'learning', 'off')]
+        if not before:
+            return
+        previous = self._potential_rows(pot, dict(before[0], stage=stage, car=run['car']), None)
+        found = potential.improved(rows, previous) if previous else None
+        if found is not None:
+            row, gain = found
+            self._lead.append(Tip('potential.improved:{}:{}'.format(stage, run['id']), 'praise',
+                                  'On {}, {}: {:.1f} s closer to the potential than last time.'.format(
+                                      name, potential.where(row), gain), [], gain, cost=gain, count=1, delta_prev=gain,
+                                  place=place(stage, run, row['apex_d'], row['d0'], row['d1'])))
+
+    def _potential_rows(self, pot, run, corners):
+        """potential.analyse_run() of a run (stage_runs row or run row), its off ranges left out and the seconds it
+        steered against the yaw in each section set; None without a trace."""
+        reader = self.reader
+        trace = reader.trace(run['id'])
+        if not trace:
+            return None
+        arr = potential.arrays(coach_context.stage_rows(trace, run.get('course'), run['finished'] == 1,
+                                                        run.get('result_time')))
+        if arr is None:
+            return None
+        bad = [(e['d0'], e['d1'] if e['d1'] is not None else e['d0']) for e in reader.events(run['id'])
+               if e['kind'] in ('off', 'spin', 'stall', 'hit') and e['d0'] is not None]
+        rows = potential.analyse_run(pot, arr, bad)
+        corners = corners if corners is not None else reader.corners(run['id'])
+        for row in rows:
+            row['counter_steer_s'] = sum((k.get('counter_steer') or 0.0) * (k.get('duration') or 0.0) for k in corners
+                                         if k.get('d') is not None and row['d0'] <= k['d'] < row['d1'])
+        return rows
+
+    OFF_NEAR = 150.0                 # m: offs this close are one place
+    OFF_RUNS = 20                    # earlier runs the count of offs at a place is over
+    OFF_CLEAN = 5                    # earlier clean runs the speed, braking and rotation are compared with
+    OFF_LEAD = 30.0                  # m before the off at which the speed is read
+    OFF_BRAKE = 10.0                 # m: a braking point further than this from the clean runs' is earlier or later
+
+    def _off_facts(self, stage, run, e, corners):
+        """What an off was, as facts and no cause (the classifier does not generalise yet, docs/telemetry-
+        extrapolation.md 5.3): where it was, how often there, the speed against the clean runs there, the braking
+        point and the rotation. '' where there is nothing to compare."""
+        reader = self.reader
+        d = e['d0']
+        before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=self.OFF_RUNS, car=run['car'])
+                  if r['started'] <= run['started']]
+        facts = []
+        near = [k for k in corners if k.get('d') is not None and abs(k['d'] - d) <= self.OFF_NEAR]
+        corner = min(near, key=lambda k: abs(k['d'] - d)) if near else None
+        if corner is not None:
+            facts.append('It was in {}.'.format(coach_context.corner_name(corner).rsplit(' at ', 1)[0]))
+        trace = reader.trace(run['id'])
+        clean = [r for r in before if r['run_class'] == 'clean' and r['finished'] == 1][:self.OFF_CLEAN]
+        sheets = [(r, reader.trace(r['id'])) for r in clean]
+        sheets = [(r, t) for r, t in sheets if t]
+        if trace and sheets:
+            at = d - self.OFF_LEAD
+            mine = _speed_at(trace, at)
+            theirs = [v for v in (_speed_at(t, at) for _r, t in sheets) if v is not None]
+            if mine is not None and theirs:
+                best = statistics.median(theirs)
+                facts.append('You were at {:.0f} km/h {:.0f} m before it, {} your {} clean runs there ({:.0f}).'.format(
+                    mine * 3.6, self.OFF_LEAD,
+                    'level with' if abs(mine - best) < coach_context.SPEED_DELTA else
+                    '{:.0f} km/h {}'.format(abs(mine - best) * 3.6, 'over' if mine > best else 'under'),
+                    len(theirs), best * 3.6))
+            peak = _peak_yaw(trace, d - 60.0, d)
+            others = [v for v in (_peak_yaw(t, d - 60.0, d) for _r, t in sheets) if v is not None]
+            if peak is not None and others:
+                facts.append('The car was turning at up to {:.0f} deg/s in the 60 m before it, against {:.0f} deg/s '
+                             'in your clean runs.'.format(math.degrees(peak), math.degrees(statistics.median(others))))
+        if corner is not None and corner.get('brake_d') is not None:
+            theirs = []
+            for r in sheets or [(r, None) for r in clean]:
+                found = reader.corners(r[0]['id'])
+                match = min((k for k in found if k.get('d') is not None and k.get('brake_d') is not None
+                             and abs(k['d'] - corner['d']) <= 3 * coach_context.MATCH_CORNER),
+                            key=lambda k: abs(k['d'] - corner['d']), default=None)
+                if match is not None:
+                    theirs.append(match['brake_d'])
+            if theirs:
+                gap = corner['brake_d'] - statistics.median(theirs)
+                facts.append('Braking began {} than in your clean runs.'.format(
+                    'at the same place' if abs(gap) < self.OFF_BRAKE else '{:.0f} m {}'.format(
+                        abs(gap), 'earlier' if gap > 0 else 'later')))
+            steered = (corner.get('counter_steer') or 0.0) * (corner.get('duration') or 0.0)
+            if steered >= 0.3:
+                facts.append('The steering went against the yaw for {:.1f} s.'.format(steered))
+        count = 1
+        for r in before:
+            if any(o['d0'] is not None and abs(o['d0'] - d) <= self.OFF_NEAR for o in reader.events(r['id'], 'off')):
+                count += 1
+        if count > 1:
+            facts.append('The {} off within {:.0f} m of here in your last {} runs on it.'.format(
+                _ordinal(count), self.OFF_NEAR, len(before) + 1))
+        return ' '.join(facts)
+
     def _model_notes(self, model, now, candidates):
         """What the car's model says it is still learning."""
         from .shift_learner import POWER_BIN
@@ -1641,6 +1795,33 @@ class Coach:
             candidates.append(Tip('learning', 'tip', 'Still learning the engine ({} of about {} rev bands known): '
                                   'full-throttle pulls from low revs, out of slow corners, fill it in fastest.'.format(
                                       bands, needed), value=0.0, cost=0.0))
+
+
+def _clock(seconds):
+    """3:03.1 from seconds (the splits row's way of writing a time)."""
+    if seconds is None:
+        return '–'
+    m, rest = divmod(seconds, 60.0)
+    return '{:d}:{:04.1f}'.format(int(m), rest) if m else '{:.1f}'.format(rest)
+
+
+def _speed_at(trace, d):
+    """The speed (m/s) of the first row of the trace at or past distance `d`, or None."""
+    track = coach_context.along(trace)
+    i = bisect.bisect_left(track, d)
+    if i >= len(trace):
+        return None
+    v = trace[i][coach_context.CH['speed']]
+    return v if v == v else None
+
+
+def _peak_yaw(trace, d0, d1):
+    """The highest |yaw rate| (rad/s) of the trace's rows between distances d0 and d1, or None."""
+    track = coach_context.along(trace)
+    lo, hi = bisect.bisect_left(track, d0), bisect.bisect_right(track, d1)
+    values = [abs(trace[i][coach_context.CH['yaw_rate']]) for i in range(lo, hi)
+              if trace[i][coach_context.CH['yaw_rate']] == trace[i][coach_context.CH['yaw_rate']]]
+    return max(values) if values else None
 
 
 def _began_mid_stage(reader, run_id, stage):
@@ -1714,7 +1895,9 @@ def splits(reader, profile, car_id):
     LiveSplit colours are against), `margin` (a gold split: how much it beat the previous best by), `cum` (the last run's elapsed time at the split's end less the PB's: ahead
     when negative), `d0` and `d1` (m, the split's bounds on the stage) and `finish` (the last section holds
     the slow-down to the stop where the finish is not a line). `ref_run` is the reference (PB) run's id. Every grid section has a row: `last`, `best` and `pb` are None where a run did not time it (an off touched it, grid_times).
-    `sectors` is the game's own sectors of the stage (stage_tables.sector_bounds; S1.., `last`, `best`,
+    `potential` is the stage's three layers ({user: the sum of best, grip, car: seconds or None, built}, oversteer/
+    potential.py; None without one), with each split's `grip_s`, `car_s` and `available` (the last run's time less
+    the grip layer's through the split; only where there is a potential). `sectors` is the game's own sectors of the stage (stage_tables.sector_bounds; S1.., `last`, `best`,
     `gold`, `delta` as above, `confidence`), None where the stage's cannot be placed. The best is over the
     clean and learning runs read; a sector a run did not drive from end to end is not timed."""
     rows = reader.metrics(profile, car_id, SESSIONS_READ)
@@ -1745,6 +1928,7 @@ def splits(reader, profile, car_id):
     last_times = best['per_run'].get(run['id'], {})
     best_time = found['pb']['result_time'] if found['pb'] is not None else None
     last = len(best['grid']) - 1
+    pot = potential.stored(reader, stage, run['car'])
     out = []
     for j in range(len(best['grid'])):                   # every section: '–' where the PB run did not time it
         t = last_times.get(j)
@@ -1757,6 +1941,11 @@ def splits(reader, profile, car_id):
                     'delta': None if t is None or j not in best['best'] else t - best['best'][j], 'finish': j == last,
                     'pb': best['base'].get(j), 'cum': None if mine_at is None or ref_at is None else mine_at - ref_at,
                     'd0': best['bounds'][j][0], 'd1': d1})
+        if pot is not None:
+            # the potential through the split's own distances: the grip layer's and the car's seconds, and the time
+            # the last run has available against the grip layer (docs/telemetry-extrapolation.md 6.1)
+            grip_s, car_s = potential.span_times(pot, best['bounds'][j][0], d1)
+            out[-1].update(grip_s=grip_s, car_s=car_s, available=None if t is None else t - grip_s)
     if not out:
         return None
     entry = stage_tables.entry(stage) or {}
@@ -1767,6 +1956,7 @@ def splits(reader, profile, car_id):
                            and found['pb']['id'] == run['id']),
             'finish_m': entry.get('finish_m'), 'finish_confidence': entry.get('finish_confidence'),
             'best': best_time, 'possible': found['possible'],
+            'potential': None if pot is None else dict(potential.layers(pot, found['possible']), built=pot['built']),
             'gain': None if best_time is None else best_time - found['possible'], 'runs': len(loaded) + 1,
             'splits': out,
             'sectors': _sectors(stage, run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},

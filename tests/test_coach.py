@@ -425,7 +425,7 @@ def test_growth_needs_twenty_events_a_side(tmp_path):
 
 def test_tips_go_quiet_and_come_back(tmp_path):
     """Shown twice without change, a tip becomes a quiet "still:" line; it
-    comes back when it gets 20 % worse or after two weeks. At most three
+    comes back when it gets 20 % worse or after two weeks. At most four
     tips at a time, the costliest first."""
     h = History(tmp_path / 't.db')
     rates = [{'name': 'hpattern.missed', 'value': 10.0, 'count': 40, 'method': 'h-pattern'},
@@ -434,18 +434,18 @@ def test_tips_go_quiet_and_come_back(tmp_path):
              {'name': 'limiter.held', 'value': 2.0, 'count': 10}]
     h.session(rates)
     tips = h.tips()
-    assert [t.kind for t in tips] == ['tip', 'tip', 'tip']
-    assert [t.id for t in tips] == ['limiter.held', 'hpattern.missed:h-pattern', 'hpattern.skip:h-pattern']
+    assert [t.kind for t in tips] == ['tip', 'tip', 'tip', 'tip']
+    assert [t.id for t in tips] == ['limiter.held', 'hpattern.missed:h-pattern', 'hpattern.skip:h-pattern',
+                                    'downshift.over_rev:h-pattern']
     h.show(tips)
     h.show(h.tips())                                                # the tab visited again, the same evening
     h.show(h.tips(days=0.2), days=0.2)
-    assert [t.kind for t in h.tips(days=0.2)] == ['tip', 'tip', 'tip']   # one sitting is one showing
+    assert [t.kind for t in h.tips(days=0.2)] == ['tip', 'tip', 'tip', 'tip']   # one sitting is one showing
     h.show(h.tips(days=1), days=1)
     tips = h.tips(days=1)
-    assert [t.id for t in tips] == ['downshift.over_rev:h-pattern', 'limiter.held', 'hpattern.missed:h-pattern',
-                                    'hpattern.skip:h-pattern']
-    assert [t.kind for t in tips] == ['tip', 'still', 'still', 'still']
-    assert tips[1].text.startswith('Still: You held a gear on the limiter on straights')
+    assert [t.id for t in tips] == ['limiter.held', 'hpattern.missed:h-pattern', 'hpattern.skip:h-pattern']
+    assert [t.kind for t in tips] == ['still', 'still', 'still']        # all four shown twice: quiet, three kept
+    assert tips[0].text.startswith('Still: You held a gear on the limiter on straights')
     h.session([dict(rates[3], value=2.5)])                          # worse: back as a tip
     assert [t.id for t in h.tips(days=1) if t.kind == 'tip'][0] == 'limiter.held'
     assert 'limiter.held' in [t.id for t in h.tips(days=15) if t.kind == 'tip']

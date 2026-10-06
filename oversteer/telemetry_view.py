@@ -16,7 +16,7 @@ SURFACES = {'tarmac': _("tarmac"), 'gravel': _("gravel"), 'snow': _("snow"), 'ic
             'loose-low': _("snow or wet gravel")}
 METHODS = {'h-pattern': _("H-pattern"), 'sequential': _("sequential"), 'paddles': _("paddles"),
            'auto': _("automatic"), 'mixed': _("mixed shifting")}
-KINDS = {'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': '', 'technique': _("Technique")}
+KINDS = {'top3': _("Top 3"), 'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': '', 'technique': _("Technique")}
 CHANGES = {'first': _("first seen"), 'final-drive': _("final drive changed"), 'user': _("set by you")}
 
 
@@ -239,6 +239,15 @@ def _split_cells(r):
     return text, '–' if save is None else '{:.1f}'.format(save), tone
 
 
+def potential_line(potential):
+    """'Potential: you 3:03.1 · grip 2:51.4 · car 2:42.7' (oversteer/potential.py: the sum of best, the lap
+    simulation at the driver's own grip, at the car's), the layers it has; None without a grip layer."""
+    if not potential or potential.get('grip') is None:
+        return None
+    parts = [(_("you"), potential.get('user')), (_("grip"), potential['grip']), (_("car"), potential.get('car'))]
+    return _("Potential") + ': ' + ' \u00b7 '.join('{} {}'.format(name, clock(t)) for name, t in parts if t is not None)
+
+
 def splits_row(found):
     """coach.splits() for the splits row of the Coaching and Telemetry views, or None without splits: a dict
     with `stage` (short name), `name`, `pb`, `sob`, `gain`, `last`, `delta` (last less PB, None unless the last
@@ -247,7 +256,8 @@ def splits_row(found):
     `bounds` ((d0, d1) per split, for cells as long as the splits), `rows` ((name, last, Δ PB, best, tone, save)
     per split, the stage total and the sum of best at the end), `sectors` ((name, last, delta, tone) per game
     sector, the last time marked with a leading '≈' where the position is estimated; [] without) and
-    `estimated`."""
+    `estimated`, `potential` (the three layers, user / grip / car seconds) with `potential_line` (its words) and
+    `avail` (the time available against the grip layer per row of `rows`, as text; '' where there is none)."""
     if not found:
         return None
     pb, last = found.get('best'), found.get('last')
@@ -268,6 +278,14 @@ def splits_row(found):
     gain = found.get('gain')
     rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')),
                  'gold', ''))
+    pot = found.get('potential')
+    avail = []
+    for r in found['splits']:
+        a = r.get('available')
+        avail.append('\u2013' if a is None or round(a, 1) <= 0 else '{:.1f}'.format(a))
+    grip = (pot or {}).get('grip')
+    avail.append('\u2013' if last is None or grip is None or round(last - grip, 1) <= 0 else '{:.1f}'.format(last - grip))
+    avail.append('')
     sectors, estimated = [], False
     for r in found.get('sectors') or []:
         low = r.get('confidence') == 'low'
@@ -280,7 +298,8 @@ def splits_row(found):
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
             'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
             'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
-            'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs')}
+            'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs'), 'potential': pot,
+            'potential_line': potential_line(pot), 'avail': avail}
 
 
 def _splits(reader, profile, car_id):

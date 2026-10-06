@@ -753,6 +753,17 @@ places, and never `wall`.
    Coaching gets the target card: "PB 187.7 → target 173.0: 14.7 s, 90 %
    of what is available".
 
+**Implemented (2026-10-05, `oversteer/potential.py`).** Pure numpy over the 10 Hz traces; the road from
+the positions (ACR, plan view (x, -z)) or yaw/speed, smoothed over 20 m; the envelope from single 10 Hz rows
+(no smoothing: 3 rows lands 4-5 s over the 60 Hz result). Tables `envelopes` and `stage_potential`
+(`telemetry_store.POTENTIAL_DDL`), recomputed on the drive-log thread from `coach.stage_metrics` (the post-run
+path outside drive_log) when the runs they come from change. The user layer is the splits' sum of best
+(`coach.stitch`). Afon Bidno, i20N, replayed from marth's captures: PB 187.7, user 184.0 (183.1 on the
+research's own sections), grip 169.3, car 162.0 s (research 171.4 and 162.7; Sommet grip 145.3 against 148.3).
+The coach says the top 3 places after every finished run (`kind: top3`), plus what closed on the potential
+since the last run; offs state place, how often and measured facts, no cause. Not built: `stage_targets` and the
+leaderboard target mode.
+
 ### 6.2 After every finished run: top 3 (phase 4)
 
 After the run is closed and classed (`run_class` clean or off), pick the 3
