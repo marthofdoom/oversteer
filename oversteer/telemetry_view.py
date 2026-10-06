@@ -84,7 +84,18 @@ def shift_table(snapshot):
                 best, share = _("learning…"), ''
             else:
                 best = '{:.0f} rpm'.format(row['best'])
-                if row.get('grip_limited'):
+                shown = row['best']
+                lit_low, lit_high = row.get('lights_low'), row.get('lights_high')
+                if lit_low is not None and lit_high is not None:
+                    # The band the coach judges the change up against: the game's lights, inside the limiter's margin
+                    best = '{:.0f}–{:.0f} rpm'.format(lit_low, lit_high) if lit_high - lit_low >= 1.0 \
+                        else '{:.0f} rpm'.format(lit_low)
+                    best += ' ' + _("(lights)")
+                    shown = lit_low
+                    engine = row.get('engine_best')
+                    if engine and limiter and engine < limiter - 1.0 and abs(engine - lit_low) >= 1.0:
+                        best += '  ' + _("engine {:.0f}").format(engine)
+                elif row.get('grip_limited'):
                     # Anywhere up to the engine's best gives the same drive
                     if (row.get('engine_best') or 0) > row['best']:
                         best = '{:.0f}–{:.0f} rpm'.format(row['best'], row['engine_best'])
@@ -94,7 +105,7 @@ def shift_table(snapshot):
                 low, high = row.get('best_low'), row.get('best_high')
                 if low is not None and high is not None and high - low >= 1.0:
                     band = '{:.0f}–{:.0f}'.format(low, high)
-                share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
+                share = '{:.0f} %'.format(shown / limiter * 100) if limiter else ''
         mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
         per_method = []
         for method, _name in used:

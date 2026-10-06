@@ -734,18 +734,28 @@ class CarModel:
         """A plain dict for the GUI, its best changes up for `surface`
         (None: whatever the surface); `bands` from best_bands() give each
         learnt best change up its range (best_low, best_high)."""
+        from . import coach_context as cc
         gears = self.gears()
         top = self.top_gear()
         bands = bands or {}
         gear_set, miss = self.gear_set()
         data = self.game_data()
+        lights = (self.shipped or {}).get('shift_lights_rpm')
+        context = {'limiter': self.known_limiter() or None, 'lights': lights, 'surface': surface,
+                   'best_for': lambda gear: self.best_for(gear, surface if surface in SURFACES else None),
+                   'pulls': lambda gear: len({v[3] for v in self.drive.get(
+                       (surface if surface in SURFACES else None, gear), ())})}
         rows = []
         for gear in (gears if data is None else sorted(set(gears) | set(range(1, top + 1)))):
             last = gear + 1 not in gears if data is None else gear >= top
             best = self.best_for(gear, surface) if not last else None
             average = self.average_upshift(gear)
             band = bands.get(gear) if best and best['source'] == 'learnt' and not best['grip_limited'] else None
+            # The game's lights band the coach judges the change up against (shift_band), where the game ships lights
+            lit = cc.shift_band(context, gear) if best and lights and lights.get('shift') else None
             rows.append({
+                'lights_low': lit[0] if lit else None,
+                'lights_high': lit[1] if lit else None,
                 'gear': gear,
                 'ratio': self.ratio(gear),
                 'ratio_samples': len(self.ratios.get(gear, [])),

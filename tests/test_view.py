@@ -134,6 +134,19 @@ def test_shift_table():
                                            "checked for grip on gravel")
 
 
+def test_shift_table_lights_band():
+    """A Rally2's best change up is the coach's lights band, not the limiter the engine data ends at."""
+    row = {'gear': 1, 'ratio': 360.0, 'ratio_samples': 80, 'best': 7500.0, 'engine_best': 7500.0, 'source': 'game',
+           'grip_limited': False, 'best_low': None, 'best_high': None, 'lights_low': 6900.0, 'lights_high': 7100.0,
+           'average_shift': None, 'shifts': 0, 'last': False}
+    snapshot = {'limiter': 7500.0, 'gears': [row, dict(row, gear=2, engine_best=6600.0, lights_high=6900.0),
+                                             dict(row, gear=3, last=True)], 'power_bands': 30,
+                'power_source': 'game data', 'methods': {}, 'surface': 'gravel'}
+    rows = view.shift_table(snapshot)[1]
+    assert rows[0][1] == '6900–7100 rpm (lights)' and rows[0][3] == '92 %'
+    assert rows[1][1] == '6900 rpm (lights)  engine 6600'
+
+
 def test_capture_status():
     text = view.capture_status(False, False, '/data/captures', (0, 0, 0), 1)
     assert text.startswith('Off.') and '/data/captures (no captures yet)' in text

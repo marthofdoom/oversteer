@@ -456,7 +456,7 @@ function shiftTable(car, table, note) {
     const tr = el("tr");
     tr.dataset.gear = String(g.gear);
     tr.appendChild(el("td", g.last ? g.gear + " (top)" : g.gear + "→" + (g.gear + 1)));
-    const best = el("td", g.last ? "" : g.best == null ? "learning…" : rpm(g.best) + (g.grip_limited ? (g.engine_best > g.best ? "–" + rpm(g.engine_best) : "") + " (grip)" : g.source === "game" ? " (game)" : ""), "best");
+    const best = el("td", g.last ? "" : g.best == null ? "learning…" : (g.lights_low != null && g.lights_high != null ? rpm(g.lights_low) + (g.lights_high - g.lights_low >= 1 ? "–" + rpm(g.lights_high) : "") + " (lights)" + (g.engine_best && car.limiter && g.engine_best < car.limiter - 1 && Math.abs(g.engine_best - g.lights_low) >= 1 ? " · engine " + rpm(g.engine_best) : "") : rpm(g.best) + (g.grip_limited ? (g.engine_best > g.best ? "–" + rpm(g.engine_best) : "") + " (grip)" : g.source === "game" ? " (game)" : "")), "best");
     if (!g.last && g.best_low != null && g.best_high != null && g.best_high - g.best_low >= 1) best.appendChild(el("span", rpm(g.best_low) + "–" + rpm(g.best_high), "band"));
     tr.appendChild(best);
     tr.appendChild(el("td", g.shifts ? rpm(g.average_shift) : "–", "dim"));
