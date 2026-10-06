@@ -290,13 +290,13 @@ def test_best_run_yet_needs_to_beat_every_earlier_clean_run_not_just_the_referen
         corners = corners_with(second={'loss': loss} if loss else None)
         corners[0]['section_t'] = first
         return corners
-    # the reference is ranked by the time after the start: run 1 (212 - 10) is ahead of run 2 (208.3 - 4)
+    # the reference is the PB by stage time: run 2 (208.3), not run 1 (212, but 202 after its long start)
     h.drive(timed(10.0), result_time=212.0)
     h.drive(timed(4.0), result_time=208.3)
     h.drive(timed(4.0, loss=(0.4, 0.5)), result_time=210.5)
     assert not h.by_id('corner.best:')
     texts = ' '.join(t.text for t in h.tips(show_all=True))
-    assert 'your quickest run after the start' in texts and 'your best clean run yet' not in texts
+    assert 'your best clean run' in texts and 'Test car, 3:28.3' in texts and 'your best clean run yet' not in texts
     # quicker than all of them is still praised, against the quickest run
     h.drive(timed(4.0), result_time=207.0)
     [praise] = h.by_id('corner.best:')

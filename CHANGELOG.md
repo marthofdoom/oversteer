@@ -15,6 +15,8 @@
   the stage map's START label sits away from the route.
 - Absolute times are written one way everywhere (coach sentences, split and sector tables,
   GTK and web): m:ss.s, 28.7 under a minute; differences stay signed seconds.
+- The coach compares with your PB (the quickest run by stage time), not with the run that was quickest after the
+  start: a slower run with a long standing start is no longer the reference.
 
 ## 0.15.1 — 2026-10-06
 
