@@ -915,3 +915,8 @@ each view. It is CSS grid over the same components, not a separate page.
 8. **GTK priority.** Is the GTK Telemetry view worth phase 5 at all for
    personal use, given the desktop web page does the same in a browser on the
    rig?
+
+## Owner additions (2026-10-05)
+
+- **Where the time went → coach advice.** Tapping a row in the "where the time went" table (and, with a mouse, hovering it) shows the coach's advice for that section next to the row: the place-tied tips (`corner.section:*`, `corner.entry:*`, `corner.best*`), praise and technique notes whose place falls in the section, in the debrief style (time · place · fix). The same on the stage map and on the strips: the section under the cursor shows its advice in the readout. Needs the structured tip fields from phase 4 (`place` with section/distance, `cost`, `call`) brought forward into phase 2, so the UI matches tips to sections without parsing tip ids. GTK: the same on row selection and pointer motion over the table/strips.
+- Decisions: compare against PB by default; S1–S3 sectors shown alongside the corner sections; big ±0.00 live delta plus bar; GTK built together with web in every phase.
