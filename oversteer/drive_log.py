@@ -184,6 +184,13 @@ SENT_LENGTH_TOLERANCE = 0.5      # m: a length the game sends against its own in
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
+# The game keeps sending after the finish (the results screen, the car rolling
+# out or parked), so a finished run is ended by what follows rather than by
+# the game: the car at rest, or this long / this far past the line
+FINISH_STILL = 2.0               # s the car stands (under MOVING) after the finish: the run is over
+FINISH_GRACE = 15.0              # s after the finish at most
+FINISH_ROLLOUT = 300.0           # m driven past the finish at most
+FINISH_GRACE_PROGRESS = 60.0     # s: where the finish is progress >= FINISHED, the last of the stage is still to drive
 
 # One row per packet of the segment being driven, for its features
 SEGMENT_CHANNELS = ('t', 'speed', 'a_long', 'a_lat', 'yaw_rate', 'throttle', 'gear', 'slip', 'susp_fl', 'susp_fr',
@@ -235,6 +242,7 @@ class RunTracker:
         self._clutch = None              # the most the clutch was pressed while standing (the pedal, as the game has it)
         self._rolling = None             # when the car began to move, before the run started
         self._after_end = False
+        self._guard = None               # after a run's finish: where the stage was, until a new one begins
 
     # -- the listener side --
 
@@ -249,6 +257,12 @@ class RunTracker:
         dt = min(0.2, max(0.0, now - self._last_t)) if self._last_t is not None else 0.0
         speed = sample.speed or 0.0
         if self.run is None:
+            if self._guard is not None and self._guard_released(now, sample, session):
+                self._guard = None
+            if self._guard is not None:
+                self._guard_note(sample)
+                self._remember(now, sample)
+                return                               # still driving on past the finish of the run just ended
             if self._after_end and sample.packet != 'start':
                 self._remember(now, sample)
                 return                               # EA sent the end of the stage: wait for the next start
@@ -271,9 +285,53 @@ class RunTracker:
             self._start(now, sample, session, profile)
         self._track(now, sample, throttle, dt, speed)
         self._remember(now, sample)
+        if self.run is not None and self._finished == 1 and self._post_over(now):
+            self.end(now, 'finish')
+            return
         if sample.packet == 'end':
             self.end(now, 'end')
             self._after_end = True
+
+    def _post_over(self, now):
+        """Whether a finished run has gone on long enough past the line to
+        be ended: the car has stood, or the grace (time or road) is used up."""
+        if self._finish_t is None:
+            self._finish_t = now
+            return False
+        if self._finish_counts:
+            return self._still >= FINISH_STILL or now - self._finish_t >= FINISH_GRACE_PROGRESS
+        return (self._post_still >= FINISH_STILL or now - self._finish_t >= FINISH_GRACE
+                or self._post_d >= FINISH_ROLLOUT)
+
+    def _guard_note(self, sample):
+        guard = self._guard
+        if sample.lap_distance is not None:
+            guard['ld'] = max(guard['ld'], sample.lap_distance) if guard['ld'] is not None else sample.lap_distance
+        if sample.stage_time is not None:
+            guard['st'] = max(guard['st'], sample.stage_time) if guard['st'] is not None else sample.stage_time
+
+    def _guard_released(self, now, sample, session):
+        """A finished run ended while the game went on sending the same
+        stage's results screen and roll-out: a new run may begin once the
+        game shows something new (the stage restarted, another stage, a
+        teleport, a silence, a new session or an EA start packet)."""
+        guard = self._guard
+        if session != guard['session'] or sample.packet == 'start':
+            return True
+        if self._last_t is not None and now - self._last_t > NO_POSITION_GAP:
+            return True
+        if sample.track and guard['track'] and sample.track != guard['track']:
+            return True
+        if sample.lap_distance is not None and guard['ld'] is not None \
+                and sample.lap_distance < guard['ld'] - DISTANCE_BACK:
+            return True
+        if sample.stage_time is not None and guard['st'] is not None and sample.stage_time < guard['st'] - RESTART_DROP:
+            return True
+        if sample.pos is not None and self._last_pos is not None:
+            jump = math.sqrt(sum((a - b) ** 2 for a, b in zip(sample.pos, self._last_pos)))
+            if jump > TELEPORT + max(sample.speed or 0.0, self._last_speed or 0.0) * max(0.0, now - (self._last_t or now)):
+                return True
+        return False
 
     def _remember(self, now, sample):
         self._last_t = now
@@ -357,6 +415,10 @@ class RunTracker:
         self._finished = None
         self._result_time = None
         self._finish_d = None                        # where the run crossed the finish, as far as it can tell
+        self._finish_counts = False                  # progress said finished (before the line): the rest is driven in the run
+        self._finish_t = None                        # when the run's end was first seen to be due (after the finish)
+        self._post_still = 0.0                       # s the car has stood since the finish
+        self._post_d = 0.0                           # m driven since the finish
         self._clock_d = None                         # d at the last packet the stage clock moved
         self._clock_still = 0.0                      # s moving since it last did
         self._puddles = self._samples = 0
@@ -420,6 +482,15 @@ class RunTracker:
         # DiRT Rally repeats its last packet while paused: only the clock of
         # the game moves, the stage clock and the car do not
         frozen = (sample.stage_time is not None and sample.stage_time == self._last_stage_time and speed < 0.1)
+        if self._finish_t is not None and not self._finish_counts:
+            # Past the finish: only watch for the car at rest. Nothing driven
+            # here counts toward the run (its rows, distance, time)
+            if speed < MOVING:
+                self._post_still += dt
+            else:
+                self._post_still = 0.0
+                self._post_d += speed * dt
+            return
         if not self._paused and not frozen:
             self._duration += dt
             self._distance += speed * dt
@@ -452,6 +523,7 @@ class RunTracker:
             if self._finished is None and sample.progress >= FINISHED and (self._progress or 0.0) < FINISHED:
                 self._finished, self._result_time = 1, sample.stage_time
                 self._finish_d = d
+                self._finish_counts = True
             self._progress = sample.progress
         self._clock(sample, d, dt, speed)
         if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
@@ -536,8 +608,13 @@ class RunTracker:
                        progress=self._progress,
                        course=self._finish_d if self._finish_d is not None else last_d)
         self.learner.log.post(self._write_end, self.run, self.learner.wall(self._last_t or now), summary, self._trace)
+        guard = None
+        if reason == 'finish':
+            guard = {'session': self._session, 'track': self._last_track, 'ld': self._last_lap_distance,
+                     'st': self._last_stage_time}
         self._reset()
         self._waiting()
+        self._guard = guard
 
     # -- the drive-log thread --
 
@@ -625,6 +702,7 @@ class RunTracker:
         store.end_run(run, **fields)
         store.add_trace(run, trace)
         self._work_over(run, summary, trace, fields)
+        self.learner.history_changed += 1                # the coach's tips for this run are there to read
         return True
 
     def _work_over(self, run, summary, trace, verdicts, started=None, backfill=False):

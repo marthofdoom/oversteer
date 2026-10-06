@@ -540,3 +540,52 @@ def test_a_run_knows_its_surface_from_the_stage(tmp_path):
     other = ShiftLearner(str(tmp_path / 'other.db'))
     feed_course(other, course_samples(Course(STAGE)))
     assert other.surface is None
+
+
+def acr_after_finish(t0, d, track='Wales Afon Bidno', seconds=60.0, speed=0.0, car='acr/Skoda Fabia RS Rally2'):
+    """What ACR keeps sending after the finish: the results screen, the car
+    at `speed` on the spot (lap distance stays where it was)."""
+    from oversteer.telemetry import Sample
+    samples, t = [], t0
+    while t < t0 + seconds:
+        s = Sample(1500.0, 7500.0, gear=1, speed=speed, car=car, game='acr', throttle=0.0)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        samples.append((t, s, 0.0))
+        t += 0.1
+        d += speed * 0.1
+    return samples
+
+
+def test_acr_run_ends_when_the_car_rests_after_the_finish(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive = acr_drive(0.0, 238.0, 5530.0)
+    feed_course(learner, drive)
+    assert learner.runs.run is not None                    # not over yet: nothing past the line
+    before = learner.history_changed
+    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=5.0)
+    feed_course(learner, after[:10])
+    assert learner.runs.run is not None                    # a second of standing is not enough
+    feed_course(learner, after[10:])
+    learner.log.sync()
+    assert learner.runs.run is None                        # over seconds after the line, not at the next stage
+    assert learner.history_changed > before
+    reader = learner._reader()
+    session = reader.session(reader.history('_no_profile', drive[0][1].car)[0]['id'])
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and 230 < run['result_time'] < 250
+    assert run['distance'] < 5400                          # the standing seconds are not in it
+
+
+def test_acr_post_finish_packets_do_not_start_a_run_and_a_restart_does(tmp_path):
+    first = acr_drive(0.0, 238.0, 5530.0)
+    t = first[-1][0] + 0.1
+    after = acr_after_finish(t, 5530.0, seconds=20.0, speed=5.0)       # rolling out, then on past the grace
+    t = after[-1][0] + 0.1
+    after += acr_after_finish(t, after[-1][1].lap_distance, seconds=30.0, speed=22.0)
+    second = acr_drive(after[-1][0] + 0.1, 238.0, 1500.0)              # the stage restarted
+    learner, reader, session = drive_runs(tmp_path, first + after + second)
+    runs = [r for r in session['runs'] if r['distance'] > 100]
+    assert [r['finished'] for r in runs] == [1, None]       # the restarted run is still open at the session's end
+    assert 230 < runs[0]['result_time'] < 250
+    assert 5200 < runs[0]['distance'] < 5400               # driven to the line, not the roll-out
+    assert runs[0]['ended'] < runs[1]['ended']

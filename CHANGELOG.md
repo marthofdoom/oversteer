@@ -37,6 +37,10 @@
   greyed out.
   The udev rules make the new attributes writable.
 
+### Fixed
+- Coach: a stage's tips appear as soon as it is finished, not at the start of
+  the next one.
+
 ## 0.14.2 — 2026-09-28
 
 ### Added
