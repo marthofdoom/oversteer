@@ -1592,6 +1592,17 @@ class Store(Reader):
                         "AND r.stage LIKE ? AND r.course IS NOT NULL AND r.id NOT IN (SELECT run FROM run_stop) "
                         "ORDER BY r.id", (game + ':%',)).fetchall()
 
+    def forget_unknown_finishes_without_course(self):
+        """A run marked as not re-timable (a run_finish row with no finish) for want of a course (NULL in a database
+        migrated from version 2) is no failure: the mark goes and its class is cleared for the backfill. Returns
+        the number of runs."""
+        runs = [r[0] for r in self._do('SELECT f.run FROM run_finish f JOIN runs r ON r.id = f.run '
+                                       'WHERE f.finish_m IS NULL AND r.course IS NULL').fetchall()]
+        for run in runs:
+            self._do('DELETE FROM run_finish WHERE run = ?', (run,))
+            self._do('UPDATE runs SET run_class = NULL WHERE id = ?', (run,))
+        return len(runs)
+
     def queue_stage_runs(self, stage):
         """Queue the finished runs of a stage for the backfill (run_class cleared)."""
         self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))

@@ -550,3 +550,49 @@ def test_game_clock_runs_with_no_recorded_stop_teach_the_finish_and_are_re_class
     assert all(store.run(r)['run_class'] is None for r in runs + [far])          # queued for the backfill
     learner.close()
     stage_tables.set_learnt({})
+
+
+# -- a v2 database: the course is NULL after the migration --
+
+def test_a_run_with_no_course_is_re_timed_from_the_traces_last_distance(tmp_path):
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    gap = entry['pacenote_last_m'] - entry['finish_m']
+    run = _timed_run(store, stage)
+    store.update_run(run, course=None, run_class=None)
+    assert retime_finishes(store) == 1
+    row = store.run(run)
+    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and row['run_class'] is None
+    assert not store.finish_unknown(run)
+    learner.close()
+
+
+def test_a_run_that_cannot_be_re_timed_keeps_a_class_that_is_still_to_be_worked_out(tmp_path):
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    run = _timed_run(store, 'acr:wales:afon-bidno-severn', course=100.0)
+    store.update_run(run, run_class=None)
+    assert retime_finishes(store) == 0
+    assert store.finish_unknown(run) and store.run(run)['run_class'] is None        # _work_over says 'partial'
+    learner.close()
+
+
+def test_runs_a_v2_database_marked_unknown_for_want_of_a_course_are_re_timed(tmp_path):
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    run = _timed_run(store, stage)
+    store.update_run(run, course=None, run_class='partial')
+    store.set_run_finish(run, None)                                  # what the old retime_finishes wrote
+    other = _timed_run(store, stage, course=100.0)                   # a real failure: course known
+    store.set_run_finish(other, None)
+    store.update_run(other, run_class='partial')
+    repair_shipped(store)
+    assert store.run(run)['result_time'] < 230.0 and store.run(run)['run_class'] is None
+    assert store.finish_unknown(other) and store.run(other)['run_class'] == 'partial'
+    learner.close()

@@ -1193,6 +1193,7 @@ def retime_finishes(store):
     (run_clock) is never re-timed: the game stopped it at its own line,
     wherever the tables put theirs. Returns the number re-timed."""
     done = 0
+    store.forget_unknown_finishes_without_course()       # an older build marked every run of a v2 database
     for run, stage, result, course in store.finished_untimed('acr'):
         entry = stage_tables.entry(stage) or {}
         flying, old = entry.get('finish_m'), entry.get('pacenote_last_m')
@@ -1200,6 +1201,8 @@ def retime_finishes(store):
             continue                                     # no flying finish known: the run stays as timed
         try:
             trace = store.trace(run)
+            if course is None and trace:
+                course = trace[-1][T['distance']]        # a database migrated from version 2 has no course
             end_speed = _trace_speed_at(trace, course) if trace and course is not None else None
             if end_speed is not None and end_speed > AT_SPEED:
                 store.set_run_finish(run, flying)        # it ends at speed: timed at the flying finish already
@@ -1217,7 +1220,8 @@ def retime_finishes(store):
                 store.set_run_finish(run, None)
                 # Its time holds the slow-down to the stop control, next to flying-finish times: not for
                 # ranking (best, reference, sum of best) on a stage with a flying finish. Kept, not deleted
-                store.update_run(run, run_class='partial')
+                if store.run(run)['run_class'] is not None:      # one still to be worked out is said by _work_over
+                    store.update_run(run, run_class='partial')
                 continue
             store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
             store.set_run_finish(run, flying)
