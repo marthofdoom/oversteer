@@ -1540,17 +1540,23 @@ class Coach:
         and its surroundings are left out of every comparison. A game whose attitude signals are not
         checked (ATTITUDE_OUT) has no spin or stall; a learning run's are described, not coached."""
         attitude = self._game(run['car']) not in ATTITUDE_OUT
+        offs = []                                  # [first off, how many] where offs lie within INCIDENT_REACH of each other
+        for e in sorted((e for e in events if e['kind'] == 'off' and e['d0'] is not None), key=lambda e: e['d0']):
+            if offs and e['d0'] - offs[-1][0]['d0'] <= coach_context.INCIDENT_REACH:
+                offs[-1][1] += 1
+            else:
+                offs.append([e, 1])
+        for e, count in offs:
+            facts = self._off_facts(stage, run, e, corners)
+            notes.append(Tip('corner.off:{}:{:.0f}:{}'.format(stage, e['d0'] // coach_context.INCIDENT_REACH,
+                                                               run['id']), 'note',
+                             'On {}, off{} at {:.1f} km: the corners within {:.0f} m of it are left out of the '
+                             'comparisons.{}'.format(name, ' {} times'.format(count) if count > 1 else '',
+                                                     e['d0'] / 1000.0, coach_context.INCIDENT_REACH,
+                                                     ' ' + facts if facts else ''),
+                             place=place(stage, run, e['d0'], e['d0'], e['d1'])))
         for e in events:
-            if e['kind'] not in ('spin', 'stall', 'off') or e['d0'] is None:
-                continue
-            if e['kind'] == 'off':
-                facts = self._off_facts(stage, run, e, corners)
-                notes.append(Tip('corner.off:{}:{:.0f}:{}'.format(stage, e['d0'] // coach_context.INCIDENT_REACH,
-                                                                   run['id']), 'note',
-                                 'On {}, off at {:.1f} km: the corners within {:.0f} m of it are left out of the '
-                                 'comparisons.{}'.format(name, e['d0'] / 1000.0, coach_context.INCIDENT_REACH,
-                                                         ' ' + facts if facts else ''),
-                                 place=place(stage, run, e['d0'], e['d0'], e['d1'])))
+            if e['kind'] not in ('spin', 'stall') or e['d0'] is None:
                 continue
             reach = coach_context.SECTION_REACH
             if not attitude or (e['kind'] == 'stall' and any(

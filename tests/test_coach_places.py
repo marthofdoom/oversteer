@@ -406,6 +406,15 @@ def test_a_spin_or_stall_names_the_speed_the_quickest_pass_came_in_at_and_the_ha
     assert spin.text.endswith('A shorter handbrake pull: on for {:.1f} s.'.format(held))
 
 
+def test_offs_at_one_place_are_one_note_with_a_count(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    h.drive(corners_with(), events=[event('off', 2100.0, 2130.0, 'long', 4.0), event('off', 2150.0, 2160.0, 'hit', 3.5),
+                                    event('off', 2190.0, 2200.0, 'hit', 3.5), event('off', 900.0, 920.0, 'long', 4.0)])
+    notes = h.by_id('corner.off')
+    assert len(notes) == 2 and sorted(t.text.split(' at ')[0] for t in notes) == [
+        'On Test Stage, off', 'On Test Stage, off 3 times']
+
+
 def spread_event(apex, sd_kmh, median_kmh, runs=6):
     return event('spread', apex - 20.0, apex + 20.0, value=sd_kmh * KMH, detail={
         'median': median_kmh * KMH, 'min': (median_kmh - sd_kmh) * KMH, 'max': (median_kmh + sd_kmh) * KMH,
