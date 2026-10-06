@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.2 — 2026-10-06
 
 ### Coaching and telemetry pages
 - The splits row, its table, the ribbon and the live view's split are the game's
