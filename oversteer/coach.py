@@ -15,7 +15,7 @@ import math
 import statistics
 import time
 
-from . import coach_context
+from . import coach_context, stage_tables
 from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SURFACES, _listed
 
 # -- metrics of one run (section 9.1) --
@@ -1633,7 +1633,10 @@ def splits(reader, profile, car_id):
     clean run's), `possible` (the best sections put together, never over `best`), `gain` (best less
     possible), `runs`, and `splits`: per section of the reference's grid, `name`, `last`, `best`, `gold` (the
     latest run set the best), `delta` (last less best) and `finish` (the last section holds the slow-down
-    to the stop where the finish is not a line). Sections an off touched are left out (grid_times)."""
+    to the stop where the finish is not a line). Sections an off touched are left out (grid_times).
+    `sectors` is the game's own sectors of the stage (stage_tables.sector_bounds; S1.., `last`, `best`,
+    `gold`, `delta` as above, `confidence`), None where the stage's cannot be placed. The best is over the
+    clean and learning runs read; a sector a run did not drive from end to end is not timed."""
     rows = reader.metrics(profile, car_id, SESSIONS_READ)
     started = {}
     for r in rows:
@@ -1687,7 +1690,52 @@ def splits(reader, profile, car_id):
         return None
     return {'stage': stage, 'name': _stage_name(stage, reader.stage(stage)),
             'last': run['result_time'] if run['finished'] == 1 else None, 'best': best_time, 'possible': possible,
-            'gain': None if best_time is None else best_time - possible, 'runs': len(loaded) + 1, 'splits': out}
+            'gain': None if best_time is None else best_time - possible, 'runs': len(loaded) + 1, 'splits': out,
+            'sectors': _sectors(stage, run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]})}
+
+
+def _sectors(stage, run, ref_rows, loaded, classes):
+    """The game's sectors of `stage` timed from the traces (`ref_rows` and `loaded`, as splits reads them), or None.
+    Each sector's bounds are on the road spline; a trace's distance is driven from the run's start, which
+    is the start line, so a bound is taken less it. A run is timed through a sector it covered end to end
+    (it may stop END_SLACK m short of the finish); the first sector starts with the trace."""
+    placed = stage_tables.sector_bounds(stage_tables.entry(stage))
+    if placed is None:
+        return None
+    bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
+
+    def times(trace):
+        track = coach_context.along(trace)
+        if not track:
+            return {}
+        out = {}
+        for i, (a, b) in enumerate(bounds):
+            if b > track[-1] + coach_context.END_SLACK:
+                continue
+            start = trace[0][coach_context.CH['t']] if i == 0 and a <= track[0] + coach_context.END_SLACK \
+                else coach_context.time_at(trace, track, a)
+            end = coach_context.time_at(trace, track, min(b, track[-1]))
+            if start is not None and end is not None and end > start:
+                out[i] = end - start
+        return out
+
+    mine = next((x for x in loaded if x['run'] == run['id']), None)
+    last = times(mine['trace']) if mine else {}
+    best, who = {}, {}
+    for x in [{'run': ref_rows['run'], 'trace': ref_rows['trace']}] + loaded:
+        if classes.get(x['run']) not in ('clean', 'learning'):
+            continue
+        for i, t in times(x['trace']).items():
+            if i not in best or t < best[i]:
+                best[i], who[i] = t, x['run']
+    out = []
+    for i in range(len(bounds)):
+        t = last.get(i)
+        out.append({'name': 'S{}'.format(i + 1), 'last': t, 'best': best.get(i),
+                    'gold': t is not None and who.get(i) == run['id'] and best.get(i) == t,
+                    'delta': None if t is None or i not in best else t - best[i],
+                    'confidence': placed['confidence']})
+    return out if any(v['last'] is not None or v['best'] is not None for v in out) else None
 
 
 def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, techniques=()):

@@ -15,7 +15,7 @@ and, from the game, `elevation_start_m`, `sectors_km` and
 `pacenote_first_m`/`pacenote_last_m` (along the road spline; the last note is the
 stop control), `finish_m` (the flying finish, from marth's runs where several agree:
 scripts/acr-finish.py, with `finish_runs`, `finish_spread_m`, `finish_confidence`,
-`finish_source`), and `discipline`
+`finish_source`), `start_m` (the start line along the spline, where measured) and `discipline`
 where it is not a rally stage ('circuit' for Livigno).
 WRC Generations' come from the game's files (scripts/stage-tables.py):
 `code` and `level` (its route), `length_m` (the float it sends),
@@ -167,6 +167,58 @@ def acr_stage(track, start=None, length=None):
                                                                  e.get('pacenote_last_m') or 0.0)))
         return found[0]
     return found[0] if len(found) == 1 else None
+
+
+# The game's official sectors (`sectors_km`) along the road spline. The bridge
+# sends no sector index or time (the graphics page's currentSectorIndex is not
+# read), so they are placed by length. Against marth's captures of Wales Afon Bidno:
+# the line is at 238.2 m on every run, the flying finish at 5287 m, so 5049 m
+# are driven against sectors that add up to 5100 (the published 4800 is not the
+# road): the sectors are taken as the road from the start line to the finish,
+# scaled to it. 24 of 46 rows' sectors do not add up to their length: those are left out.
+START_BEFORE_FIRST_NOTE = 35.0   # m the start line is before the first pace note (25 on Afon Bidno and Elatia, 38-47 elsewhere)
+SECTOR_SCALE = (0.9, 1.1)        # the sectors' sum against the road from the start line to the finish
+SECTOR_SUM_TOLERANCE = 0.03      # the sectors' sum against the stage's length where there is no finish line
+
+
+def sector_bounds(entry):
+    """The official sectors of a stage entry along the road spline, or None where they cannot be
+    placed: {'start_m' (the start line), 'bounds': [(start_m, end_m)] per sector, 'confidence', 'source'}.
+    With `finish_m` the sectors are scaled to the road from the start line (`start_m` where measured,
+    else the first pace note less START_BEFORE_FIRST_NOTE) to the finish ('medium' with a measured
+    start line and a medium finish, else 'low'); without it they are laid end to end from the start line
+    where they add up to the stage's length ('low')."""
+    sectors = (entry or {}).get('sectors_km')
+    if not sectors or len(sectors) < 2 or not all(isinstance(v, (int, float)) and v > 0 for v in sectors):
+        return None
+    total = sum(sectors) * 1000.0
+    measured = entry.get('start_m')
+    start = measured
+    if start is None:
+        first = entry.get('pacenote_first_m')
+        if first is None:
+            return None
+        start = max(0.0, first - START_BEFORE_FIRST_NOTE)
+    finish = entry.get('finish_m')
+    if finish is not None and finish > start:
+        scale = (finish - start) / total
+        if not SECTOR_SCALE[0] <= scale <= SECTOR_SCALE[1]:
+            return None
+        source = 'scaled to the finish line'
+        confidence = 'medium' if measured is not None and entry.get('finish_confidence') == 'medium' else 'low'
+    else:
+        length = entry.get('length_m')
+        if not length or abs(total - length) > SECTOR_SUM_TOLERANCE * length:
+            return None
+        last = entry.get('pacenote_last_m')
+        if last is not None and start + total > last:
+            return None
+        scale, source, confidence = 1.0, 'laid end to end from the start line', 'low'
+    bounds, at = [], start
+    for v in sectors:
+        bounds.append((at, at + v * 1000.0 * scale))
+        at = bounds[-1][1]
+    return {'start_m': start, 'bounds': bounds, 'confidence': confidence, 'source': source}
 
 
 def entry(key):

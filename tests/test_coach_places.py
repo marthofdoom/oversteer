@@ -763,3 +763,45 @@ def test_the_splits_of_the_latest_run_against_the_best_of_each_section(tmp_path)
     assert not third['gold'] and third['delta'] > 0 and third['last'] == third['best'] + third['delta']
     # the first section holds the launch and is no split
     assert all(not r['name'].endswith('at 0.5 km') for r in rows)
+
+
+def test_the_games_sectors_beside_the_splits(tmp_path):
+    from oversteer import stage_tables
+    stage_tables.set_tables({'acr': {STAGE_KEY: {'sectors_km': [0.8, 0.8, 0.7], 'start_m': 100.0, 'finish_m': 2400.0,
+                                                 'finish_confidence': 'medium', 'length_m': 2300}}})
+    try:
+        h = Stage(tmp_path / 't.db')
+        a = drive_traced(h, v2=14.0, v3=10.0)
+        drive_traced(h, v2=10.0, v3=13.0, reference=a)
+        drive_traced(h, v2=16.0, v3=11.0, reference=a)
+        found = coach.splits(h.store, h.profile, h.car)
+        sectors = found['sectors']
+        assert [s['name'] for s in sectors] == ['S1', 'S2', 'S3'] and {s['confidence'] for s in sectors} == {'medium'}
+        assert all(s['last'] and s['best'] and s['best'] <= s['last'] for s in sectors)
+        assert sectors[1]['gold'] and sectors[1]['delta'] == 0.0           # its second corner is the best yet
+        assert not sectors[2]['gold'] and sectors[2]['delta'] > 0
+        assert abs(sum(s['last'] for s in sectors) - found['last']) < 0.5  # the sectors are the stage
+        assert {'name', 'last', 'best', 'gold', 'delta', 'finish'} <= set(found['splits'][0])
+    finally:
+        stage_tables.set_tables(None)
+    h = Stage(tmp_path / 'u.db')                                           # a stage without sectors
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=13.0, reference=a)
+    assert coach.splits(h.store, h.profile, h.car)['sectors'] is None
+
+
+def test_the_sector_bounds_of_a_stage_entry():
+    from oversteer import stage_tables
+    bidno = stage_tables.entry('acr:wales:afon-bidno-severn')
+    placed = stage_tables.sector_bounds(bidno)
+    assert placed['start_m'] == 238.2 and placed['confidence'] == 'medium'
+    bounds = placed['bounds']
+    assert bounds[0][0] == 238.2 and abs(bounds[-1][1] - 5287.4) < 1e-6 and bounds[0][1] == bounds[1][0]
+    assert abs((bounds[0][1] - bounds[0][0]) / (bounds[1][1] - bounds[1][0]) - 1.8 / 1.7) < 1e-9
+    # without a finish line: end to end from the start, where they add up to the length; else none
+    laid = stage_tables.sector_bounds({'sectors_km': [1.0, 2.0], 'length_m': 3000, 'pacenote_first_m': 100.0,
+                                       'pacenote_last_m': 3500.0})
+    assert laid['confidence'] == 'low' and laid['bounds'] == [(65.0, 1065.0), (1065.0, 3065.0)]
+    assert stage_tables.sector_bounds({'sectors_km': [1.0, 2.0], 'length_m': 4800, 'pacenote_first_m': 100.0}) is None
+    assert stage_tables.sector_bounds(stage_tables.entry('acr:wales:severn-afon-bidno')) is None   # 5100 against 4800
+    assert stage_tables.sector_bounds({'sectors_km': [1.0, 2.0]}) is None and stage_tables.sector_bounds(None) is None
