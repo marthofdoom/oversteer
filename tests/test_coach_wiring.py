@@ -321,12 +321,37 @@ def test_an_acr_run_timed_to_the_old_line_is_timed_again_once_and_queued(tmp_pat
     repair_shipped(store)
     row = store.run(run)
     # the trace takes 0.1 s a metre
-    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and abs(row['course'] - (5278.0 - gap)) < 1e-6
+    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and abs(row['course'] - (entry['finish_m'] - stage_tables.start_line(entry))) < 1e-6
     assert row['run_class'] is None and run in store.runs_to_backfill(10)
     assert store.run(other)['result_time'] == 230.0 and store.run(other)['run_class'] == 'clean'
     store.update_run(run, run_class='clean')
     assert retime_finishes(store) == 0                   # once
     assert store.run(run)['result_time'] == row['result_time'] and store.run(run)['run_class'] == 'clean'
+    learner.close()
+
+
+def test_a_run_that_crept_past_the_stop_control_is_timed_from_the_line_not_from_where_it_stopped(tmp_path):
+    """The course is where the car finally stopped, seconds after the stop control: the shift is anchored on the
+    old line's driven distance (its road position less where the run began), not on the course."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    start = stage_tables.start_line(entry)
+    d_old, d_new = entry['pacenote_last_m'] - start, entry['finish_m'] - start
+    run = _timed_run(store, stage, result=230.0, course=5278.0)
+    store.update_run(run, course=5600.0)
+    rows = [tuple(i / 10.0 if name == 't' else float(i) if name == 'distance' else 0.0 for name in TRACE_CHANNELS)
+            for i in range(0, 5273)]
+    rows += [tuple(527.2 + (i - 5272) if name == 't' else float(i) if name == 'distance' else 0.0
+                   for name in TRACE_CHANNELS) for i in range(5273, 5601)]
+    store.db.execute('DELETE FROM traces WHERE run = ?', (run,))
+    store.add_trace(run, rows)
+    assert retime_finishes(store) == 1
+    row = store.run(run)
+    assert abs(row['result_time'] - (230.0 - (d_old - d_new) / 10.0)) < 0.1
+    assert abs(row['course'] - d_new) < 1e-6
     learner.close()
 
 
@@ -336,11 +361,11 @@ def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_p
     store = learner.log.store
     stage = 'acr:wales:afon-bidno-severn'
     flying = stage_tables.entry(stage)['finish_m']
-    run = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
+    run = _timed_run(store, stage, result=200.0, course=5200.0, end_speed=40.0)
     store.set_run_finish(run, flying + 50.0)               # timed at a line 50 m on from the table's now
     assert retime_finishes(store) == 1
     row = store.run(run)
-    assert abs(row['result_time'] - 195.0) < 0.01 and abs(row['course'] - 4950.0) < 1e-6   # 0.1 s a metre
+    assert abs(row['result_time'] - 195.0) < 0.01 and abs(row['course'] - (flying - stage_tables.start_line(stage_tables.entry(stage)))) < 1e-6   # 0.1 s a metre
     assert row['run_class'] is None and retime_finishes(store) == 0       # once, and queued for the backfill
     far = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
     store.set_run_finish(far, flying - 100.0)              # the line is on from the trace's end: left as it was

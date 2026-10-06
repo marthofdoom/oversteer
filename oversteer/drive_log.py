@@ -1059,6 +1059,13 @@ AT_SPEED = 20.0                 # m/s
 FINISH_MOVED = 0.5              # m: a finish line that moved less than this since a run was timed leaves it as it is
 
 
+def _run_start_m(store, run, entry):
+    """Where along the road a run's trace distance began: where the run was recorded to start, else the stage's
+    start line, else None."""
+    start = store.run_start(run)
+    return start if start is not None else stage_tables.start_line(entry)
+
+
 def retime_finishes(store):
     """A finished ACR run timed to the old line (the last pace note, the stop
     control: its time holds the slow-down) on a stage that now has a flying
@@ -1084,8 +1091,12 @@ def retime_finishes(store):
             if end_speed is not None and end_speed > AT_SPEED:
                 store.set_run_finish(run, flying)        # it ends at speed: timed at the flying finish already
                 continue
-            new = course - (old - flying) if course is not None else None
-            t_old = _trace_t_at(trace, course) if trace and new is not None else None
+            # The trace's distance is measured from where the run began; the course is where the car finally
+            # stopped, seconds after the stop control: the lines are anchored on the road, not on the course
+            start = _run_start_m(store, run, entry)
+            d_old = min(course, old - start) if start is not None and course is not None else None
+            new = flying - start if d_old is not None else None
+            t_old = _trace_t_at(trace, d_old) if trace and new is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
             if t_new is None or result is None or t_old - t_new >= result:
                 logging.warning("drive log: run %s cannot be re-timed to the flying finish (no trace or out of range)",
@@ -1109,8 +1120,10 @@ def retime_finishes(store):
             continue
         try:
             trace = store.trace(run)
-            new = course - (recorded - flying)
-            t_old = _trace_t_at(trace, course) if trace else None
+            start = _run_start_m(store, run, stage_tables.entry(stage) or {})
+            d_old = min(course, recorded - start) if start is not None else None
+            new = flying - start if d_old is not None else None
+            t_old = _trace_t_at(trace, d_old) if trace and d_old is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
             if t_new is None or result - (t_old - t_new) <= 0:
                 logging.warning("drive log: run %s cannot be moved from finish %.1f to %.1f (trace out of range)",
