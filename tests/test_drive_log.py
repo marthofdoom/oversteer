@@ -885,6 +885,18 @@ def test_a_game_clock_that_does_not_stop_near_the_line_is_read_at_it(tmp_path):
     [run] = [r for r in session['runs'] if r['distance'] > 300]
     assert run['finished'] == 1
     assert abs(run['result_time'] - (0.5 + (finish - 238.0) / 22.0)) < 0.11
+    # read at the table's line, not the game's own stop: no 'game' mark (a moved line corrects it), the line it was timed at
+    assert store_clock(learner, run['id']) is None
+    row = learner.log.store.db.execute('SELECT finish_m FROM run_finish WHERE run = ?', (run['id'],)).fetchall()
+    assert row and abs(row[0][0] - finish) < 1e-6
+    learner.close()
+    # the same on a stage with no flying finish: the last pace note is the line it was timed at
+    last = stage_tables.acr_stage('Alsace Petit Ballon')['pacenote_last_m']
+    drive, _ = acr_clock_drive(0.0, 6200.0, track='Alsace Petit Ballon', start=195.0, game_line=9999.0)
+    learner, reader, session = drive_runs(tmp_path, drive, name='note.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    row = learner.log.store.db.execute('SELECT finish_m FROM run_finish WHERE run = ?', (run['id'],)).fetchall()
+    assert run['finished'] == 1 and store_clock(learner, run['id']) is None and row and abs(row[0][0] - last) < 1e-6
     learner.close()
 
 

@@ -531,7 +531,7 @@ class RunTracker:
         self._progress = sample.progress
         self._finished = None
         self._result_time = None
-        self._result_clock = None                    # 'game' where the result is the game's own clock
+        self._result_clock = None                    # 'game': the game's own clock stopped at its line; 'line': read at ours
         self._finish_d = None                        # where the run crossed the finish, as far as it can tell
         self._finish_counts = False                  # progress said finished (before the line): the rest is driven in the run
         self._finish_t = None                        # when the run's end was first seen to be due (after the finish)
@@ -766,7 +766,7 @@ class RunTracker:
                             sample.stage_time + clock.offset, 'game')
         elif sample.lap_distance > self._finish_line + FINISH_CLOCK_PAST:
             line_d, at = self._line_clock
-            self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.offset, 'game')
+            self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.offset, 'line')
 
     def _clock_finish(self, now, sample, speed):
         """ACR with the game's clock, before the table's line (but within FINISH_CLOCK_BEFORE of it): the clock
@@ -812,7 +812,7 @@ class RunTracker:
             finished = 0
         summary.update(distance=self._distance, duration=self._duration, moving_time=self._moving,
                        stops=self._stops, finished=finished, result_time=self._result_time, laps_done=self._laps_done,
-                       clock=self._result_clock,
+                       clock=self._result_clock, finish_line=self._finish_line or None,
                        packets=sorted(self._packets), end=reason,
                        puddles=self._puddles / self._samples if self._samples else None,
                        progress=self._progress,
@@ -950,6 +950,8 @@ class RunTracker:
             store.set_run_finish(run, flying)            # timed at the flying finish: never re-timed
         if summary['finished'] == 1 and summary.get('clock') == 'game':
             store.set_run_clock(run, 'game')             # the game's own time: no finish line of ours moves it
+        elif summary['finished'] == 1 and summary.get('clock') == 'line' and summary.get('finish_line'):
+            store.set_run_finish(run, summary['finish_line'])    # the game's clock read at our line: moves with it
         store.add_trace(run, trace)
         self._work_over(run, summary, trace, fields)
         # The coach's tips for this run are there to read: said once they are committed, as a reader that
