@@ -1644,7 +1644,8 @@ class GtkUi:
         self.splits_potential.set_text(found.get('potential_line') or '')
         self.splits_potential.set_tooltip_text(_("What the layers mean: you, the sum of your best sectors (corner sections on a stage without the game's sector lines); grip, a lap simulation at the grip you reach 2 % of the time; car, at the best grip any run of the car reached, with its engine."))
         self.splits_label.set_tooltip_text(
-            _("Times run to the estimated flying finish of the stage.") if found.get('finish_m') else None)
+            (_("Times run to the stage's finish line.") if found.get('finish_real')
+             else _("Times run to the estimated flying finish of the stage.")) if found.get('finish_m') else None)
         grid = Gtk.Grid(column_spacing=16, row_spacing=4)
         has_avail = bool(found.get('potential_line'))                 # the stage's potential is known: a time available column
         for col, head in enumerate((_("Sector") if found['unit'] == 'sectors' else _("Section"), _("Last"), _("\u0394 PB"), _("Best"), _("Save")) + ((_("Avail"),) if has_avail else ())):

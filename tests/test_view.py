@@ -336,3 +336,14 @@ def test_the_web_page_labels_its_splits_by_what_they_are():
     assert 'bySector(sp) ? "Sector" : "Section"' in page and 'return bySector(sp) ? r.name' in page
     assert 'liveUnit(b).split' in page and '"S" + at' in page                       # the live split is the sector: "S2 ±0.42"
     assert 'if (!bySector(sp) && sp.sectors' in page                               # sectors that are the splits are not drawn twice
+
+
+def test_a_sum_of_best_that_is_the_pb_reads_plus_minus_zero_never_minus_zero():
+    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 197.74, 'gain': 0.0, 'last': 197.74, 'runs': 3,
+             'new_pb': True, 'finish_m': 5287.0, 'finish_real': True, 'splits': [
+        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': False, 'delta': 0.0, 'finish': False,
+         'pb': 6.76, 'cum': 0.0, 'd0': 0.0, 'd1': 300.0}]}
+    for gain in (0.0, -0.0, 0.04, 1e-9):
+        row = view.splits_row(dict(found, gain=gain))
+        assert row['rows'][-1][2] == '\u00b10.0' and row['finish_real'] is True
+    assert view.splits_row(dict(found, gain=3.23))['rows'][-1][2] == '\u22123.2'

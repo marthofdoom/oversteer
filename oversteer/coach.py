@@ -2223,6 +2223,7 @@ def splits(reader, profile, car_id):
             'new_pb': bool(finished and run['run_class'] == 'clean' and found['pb'] is not None
                            and found['pb']['id'] == run['id']),
             'finish_m': entry.get('finish_m'), 'finish_confidence': entry.get('finish_confidence'),
+            'finish_real': bool(stage_tables.sector_lines(entry)),
             'best': best_time, 'possible': possible,
             'potential': None if pot is None else dict(potential.layers(pot, possible), built=pot['built']),
             'gain': None if best_time is None else best_time - possible, 'runs': len(loaded) + 1,

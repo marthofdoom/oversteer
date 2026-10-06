@@ -272,7 +272,7 @@ def splits_row(found):
                  'none' if delta is None else 'gold' if new_pb else 'ahead-gain' if round(delta, 1) <= 0 else 'behind-lose',
                  '–' if delta is None or round(delta, 1) <= 0 else '{:.1f}'.format(delta)))
     gain = found.get('gain')
-    rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')),
+    rows.append((_("Sum of best"), '', '' if gain is None else signed(-gain), clock(found.get('possible')),
                  'gold', ''))
     pot = found.get('potential')
     avail = []
@@ -293,7 +293,8 @@ def splits_row(found):
                         else _("best {}").format(mark + clock(r['best'])), tone))
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
             'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
-            'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
+            'finish_confidence': found.get('finish_confidence'),
+            'finish_real': bool(found.get('finish_real')), 'tones': tones, 'bounds': bounds, 'rows': rows,
             'unit': unit, 'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs'), 'potential': pot,
             'potential_line': potential_line(pot), 'avail': avail}
 

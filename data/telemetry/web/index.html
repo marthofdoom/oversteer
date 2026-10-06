@@ -844,7 +844,7 @@ function lastBadge(sp) {
   return {text: signed(d), cls: Math.round(d * 10) <= 0 ? "t-ahead-gain" : "pos-slower"};
 }
 // The times end at the stage's flying finish where the stage table has one
-function finishNote(sp) { return sp.finish_m != null ? "Times run to the estimated flying finish of the stage." : ""; }
+function finishNote(sp) { return sp.finish_m == null ? "" : sp.finish_real ? "Times run to the stage's finish line." : "Times run to the estimated flying finish of the stage."; }
 
 let splitsOpen = false;
 try { splitsOpen = localStorage.getItem("splitsOpen") === "1"; } catch (e) {}
@@ -888,7 +888,7 @@ function splitsTable(sp) {
   const sob = el("tr");
   sob.appendChild(el("td", "Sum of best", "name"));
   sob.appendChild(el("td", ""));
-  sob.appendChild(el("td", sp.gain != null ? MINUS + sp.gain.toFixed(1) : "", "t-gold"));
+  sob.appendChild(el("td", sp.gain != null ? signed(-sp.gain) : "", "t-gold"));
   sob.appendChild(el("td", clock(sp.possible)));
   sob.appendChild(el("td", ""));
   if (avail) sob.appendChild(el("td", ""));
@@ -993,7 +993,7 @@ function lastRun(sp, sessionList) {
   $("lr-d").title = finishNote(sp);
   $("lr-pb").textContent = clock(sp.best);
   $("lr-sob").textContent = clock(sp.possible);
-  $("lr-gain").textContent = sp.gain == null ? "–" : MINUS + sp.gain.toFixed(1);
+  $("lr-gain").textContent = sp.gain == null ? "–" : signed(-sp.gain);
   stats.hidden = false;
   // The times of the finished runs on this stage, from the sessions already read: the last twelve, oldest left
   const times = [];
@@ -2120,8 +2120,11 @@ function rvHead() {
   for (const b of document.querySelectorAll("[data-cmp]")) {
     const c = H.compare.find((x) => x.id === b.dataset.cmp);
     b.disabled = !c || c.run == null;
-    b.setAttribute("aria-pressed", String(b.dataset.cmp === D.vs));
-    b.textContent = (b.dataset.cmp === "pb" ? "vs " + (RV_ROLE[c && c.role] || RV_ROLE.pb)[0] : "vs previous") + (c && c.n != null ? " · Run " + c.n : "");
+    const pc = H.compare.find((x) => x.id === "pb"), vc = H.compare.find((x) => x.id === "prev");
+    const same = pc && vc && pc.run != null && pc.run === vc.run;        // one run is both: one chip says so
+    b.hidden = same && b.dataset.cmp === "prev";
+    b.setAttribute("aria-pressed", String(b.dataset.cmp === D.vs || (same && b.dataset.cmp === "pb" && D.vs === "prev")));
+    b.textContent = (b.dataset.cmp === "pb" ? "vs " + (RV_ROLE[c && c.role] || RV_ROLE.pb)[0] + (same ? " · previous" : "") : "vs previous") + (c && c.n != null ? " · Run " + c.n : "");
   }
   $("map-key").hidden = !D.cmp;
 }

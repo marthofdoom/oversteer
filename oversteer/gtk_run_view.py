@@ -284,10 +284,13 @@ class RunView(Gtk.Box):
         self._advice = run_analysis.advice_by_section(head['advice'], data['sections'])
         self._quiet = True
         self._combo.set_active_id(str(run_id))
-        self._pb.set_active(vs == 'pb')
-        self._prev.set_active(vs == 'prev')
         pb = head['compare'][0]
+        same = pb['run'] is not None and pb['run'] == head['compare'][1]['run']     # one run is both: one chip says so
+        self._pb.set_active(vs == 'pb' or (same and vs == 'prev'))
+        self._prev.set_active(vs == 'prev' and not same)
+        self._prev.set_visible(not same)
         self._pb.set_label(_("vs {}").format(_(run_analysis.ROLE_NAMES.get(pb['role'], 'PB'))) +
+                           (' · ' + _("previous") if same else '') +
                            ('' if pb['n'] is None else ' · ' + _("Run {}").format(pb['n'])))
         self._pb.set_sensitive(pb['run'] is not None)
         self._prev.set_sensitive(head['compare'][1]['run'] is not None)
