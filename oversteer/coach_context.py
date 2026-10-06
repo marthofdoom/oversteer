@@ -121,6 +121,7 @@ SKIP_BRAKE = 0.1                 # a change down with the brake past this is a b
 
 SPREAD_RUNS = 6                  # most recent runs the spread of a section's minimum speed is taken over
 SPREAD_MIN = 4
+APPROACH = 120.0                 # m before a section's start the braking for it is looked for (the run may brake earlier)
 
 
 def _fin(x):
@@ -841,6 +842,29 @@ def exit_end(trace, track, grid_section):
     return reach
 
 
+def spans(reference):
+    """[(g, a, b, lo, floor)] for each section `g` of the reference run's grid: the bounds section_loss times it
+    by and the diagnosis measures it over. `a` and `b` are section_bounds' with `b` clipped to where the exit
+    ends (exit_end), `lo` is where the braking for it is looked for from (APPROACH m before `a`, never before
+    the previous section's slowest point or the first row) and `floor` the previous section's slowest point + 5 m
+    (`lo` for the first), before which a braking is never looked for. `reference` is {'trace', 'corners',
+    'course'}. [] without a grid."""
+    grid = sections_of(reference['corners'])
+    if not grid:
+        return []
+    ref_trace = reference['trace']
+    ref_track = along(ref_trace)
+    first = ref_track[0] if ref_track else 0.0
+    bounds = section_bounds(grid, first, reference.get('course') or (ref_track[-1] if ref_track else 0.0))
+    out = []
+    for j, (g, (a, b)) in enumerate(zip(grid, bounds)):
+        b = min(b, exit_end(ref_trace, ref_track, g))
+        prev = grid[j - 1]['apex'] + 5.0 if j else None
+        lo = max(a - APPROACH, prev if prev is not None else first, first)
+        out.append((g, a, b, lo, lo if prev is None else prev))
+    return out
+
+
 def section_loss(trace, sections, reference, unfinished=False):
     """Time lost against the reference run on its grid: sets
     `loss_entry` and `loss_exit` on the lead corner of each section of this
@@ -860,9 +884,9 @@ def section_loss(trace, sections, reference, unfinished=False):
     # Both runs cover the stage from where they start to the line, give or take a few metres: the
     # first section is measured from where the later of them starts, the last to where the shorter stops
     limit, first = min(ref_track[-1], track[-1]), max(ref_track[0], track[0])
-    bounds = section_bounds(grid, ref_track[0] if ref_track else 0.0, reference.get('course') or ref_track[-1])
-    reach = [b for _, b in bounds]
-    bounds = [(min(max(a, first), limit), min(max(b, first), limit)) for a, b in bounds]
+    reach = [b for _, b in section_bounds(grid, ref_track[0] if ref_track else 0.0,
+                                          reference.get('course') or ref_track[-1])]
+    bounds = [(min(max(a, first), limit), min(max(b, first), limit)) for _, a, b, _, _ in spans(reference)]
     matches = match_sections(sections, grid)
     total = 0.0
     found = False
@@ -874,8 +898,6 @@ def section_loss(trace, sections, reference, unfinished=False):
         if unfinished and reach[j] > track[-1] + END_SLACK:
             continue
         apex = min(max(s['apex'], a), b)
-        b = min(b, exit_end(ref_trace, ref_track, g))
-        apex = min(apex, b)
         mine = [time_at(trace, track, x) for x in (a, apex, b)]
         theirs = [time_at(ref_trace, ref_track, x) for x in (a, apex, b)]
         if None in mine or None in theirs:
@@ -973,10 +995,19 @@ def _diff(a, b):
     return None if a is None or b is None else a - b
 
 
+def _onset_diff(lead, ref_lead):
+    """Metres the lead corner's braking began before the reference's, on the road (positive: earlier): the
+    onsets compared, not each one's distance to its own slowest point, so a slowest point that moved is no
+    difference in the braking."""
+    if None in (lead.get('brake_d'), ref_lead.get('brake_d'), lead.get('d'), ref_lead.get('d')):
+        return None
+    return (ref_lead['d'] - ref_lead['brake_d']) - (lead['d'] - lead['brake_d'])
+
+
 def compare_section(section, grid_section):
     """This run's section against the reference's, as differences (this less
-    the reference's; None where either is missing): `brake` (m before the
-    slowest point of the lead corner's strongest braking: positive is
+    the reference's; None where either is missing): `brake` (m the
+    lead corner's strongest braking began before the reference's, on the road: positive is
     earlier), `speed` (the minimum, m/s), `exit` (speed leaving the last
     corner), `entry` (speed entering the first), `throttle` (s from the
     slowest point to the throttle past 0.2), `counter` (share steered against
@@ -985,7 +1016,7 @@ def compare_section(section, grid_section):
     a, b = key_corner(section), key_corner(grid_section)
     lead, ref_lead = section['corners'][0], grid_section['corners'][0]
     last, ref_last = section['corners'][-1], grid_section['corners'][-1]
-    return {'brake': _diff(lead.get('brake_d'), ref_lead.get('brake_d')),
+    return {'brake': _onset_diff(lead, ref_lead),
             'speed': _diff(a.get('min_speed'), b.get('min_speed')),
             'exit': _diff(last.get('exit_speed'), ref_last.get('exit_speed')),
             'entry': _diff(lead.get('entry_speed'), ref_lead.get('entry_speed')),
@@ -1001,7 +1032,7 @@ def section_pattern(c, loss):
     - `over-rotated`: a lower minimum with more steering against the yaw;
     - `over-slowing`: braked earlier, a lower minimum;
     - `under-committed`: the same braking point, a lower minimum and a slower exit;
-    - `overdriven`: braked later or entered faster, a slower exit;
+    - `overdriven`: braked later or entered faster, a slower exit, the minimum not lower (with a lower one it is `slower`);
     - `late-throttle`: the same minimum, the throttle later;
     - `slower`: a lower minimum, none of the above;
     - `unclear`: none of them.
@@ -1024,7 +1055,7 @@ def section_pattern(c, loss):
         return 'over-slowing'
     if same and low and slow:
         return 'under-committed'
-    if (later or (c['entry'] is not None and c['entry'] >= SPEED_DELTA)) and slow:
+    if (later or (c['entry'] is not None and c['entry'] >= SPEED_DELTA)) and slow and not low:
         return 'overdriven'
     if not low and c['throttle'] is not None and c['throttle'] >= THROTTLE_DELTA:
         return 'late-throttle'
@@ -1521,3 +1552,36 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     return {'corners': corners, 'sections': sections, 'events': all_events, 'run_class': klass,
             'episodes': episodes, 'launch': launch, 'slip': slip, 'shifts': out_shifts, 'loss': loss,
             'spreads': spreads}
+
+
+def sector_times(trace, bounds, shift=0.0, game_clock=False, result_time=None):
+    """{sector index: seconds} of the sectors `bounds` ([(d0, d1)] m driven from the stage's start line) a run
+    covered end to end (it may stop END_SLACK m short of the last bound), from where its distance crosses each
+    line (time_at). `shift`: how much further along the road the run's trace began than the start line (its
+    distance 0 is the line's `shift` m on). The first sector starts at the clock's start (0), not at the trace's first
+    row, and the last, where the trace stops short of its line (END_SLACK m at most: a 10 Hz row is up to a row's
+    distance short), ends at the run's `result_time` where given, else where the last row's speed would have taken it
+    there, so the sectors add up to the run's time on either clock (`game_clock`: the trace's t is the game's own
+    stage clock, which starts at the first sector's start too)."""
+    track = along(trace)
+    if not track:
+        return {}
+    out = {}
+    for i, (a, b) in enumerate(bounds):
+        a, b = a - shift, b - shift
+        if b > track[-1] + END_SLACK or a < track[0] - END_SLACK:
+            continue
+        if i == 0 and a <= track[0] + END_SLACK:
+            start = 0.0
+        else:
+            start = time_at(trace, track, a)
+        end = time_at(trace, track, min(b, track[-1]))
+        if i == len(bounds) - 1 and b > track[-1] and end is not None:
+            speed = trace[-1][CH['speed']]
+            if result_time is not None and result_time >= end:
+                end = result_time
+            elif _fin(speed) and speed > 1.0:
+                end += (b - track[-1]) / speed
+        if start is not None and end is not None and end > start:
+            out[i] = end - start
+    return out

@@ -4,6 +4,10 @@ the same corner from run to run, the limiter held on a straight against the refe
 select() does with praise and technique lines. Runs here are written as the store holds them (corners, events,
 metrics, a trace where the rule reads one)."""
 
+import re
+
+import pytest
+
 from oversteer import coach, coach_context as cc
 from oversteer.coach import Coach, DAY, Tip, select
 from oversteer.telemetry_store import TRACE_CHANNELS
@@ -97,7 +101,10 @@ def test_each_cause_has_its_own_action(tmp_path):
         ({'throttle_on_t': 1.1, 'exit_speed': 20.0 - 4 * KMH},
          'Throttle sooner, as soon as the nose points out: your best run was 0.6 s earlier.'),
         ({'min_speed': 10.0 - 6 * KMH, 'counter_steer': 0.3, 'exit_speed': 20.0 - 1 * KMH},
-         'Rotate the car less on the way in'),
+         'Keep the car straighter through it, as your best run did.'),
+        # braked later with a lower minimum is not "overdriven": it is a lower minimum (and says no "brake earlier")
+        ({'brake_d': 30.0, 'min_speed': 10.0 - 5 * KMH, 'exit_speed': 20.0 - 6 * KMH},
+         'Carry more speed through it: your best run was 5 km/h quicker at the slowest point.'),
         ({'brake_d': None, 'min_speed': 10.0 - 9 * KMH, 'exit_speed': 20.0 - 8 * KMH},
          'Carry more speed through it: your best run was 9 km/h quicker at the slowest point.'),
     ]
@@ -113,13 +120,18 @@ def test_a_section_with_no_difference_in_the_numbers_says_where_the_time_went(tm
     two_runs(h, second={'loss': (0.1, 0.6)})
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert 'were within a few km/h and metres of it' in tip.text
-    assert tip.text.endswith('The time went after the slowest point: look at how early you were back on the throttle '
-                             'and the line you took out of it.')
+    assert tip.text.endswith('The time went after the slowest point: look at how early you were back on the throttle.')
     h = Stage(tmp_path / 'u.db')
     two_runs(h, second={'loss': (0.7, 0.1)})
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
-    assert tip.text.endswith('The time went before the slowest point: look at where you braked and the line you '
-                             'took in.')
+    assert tip.text.endswith('The time went before the slowest point: look at where you braked.')
+    # no fix to give is no tip: a note, said once
+    h = Stage(tmp_path / 'v.db')
+    two_runs(h, second={'loss': (0.3, 0.3)})
+    assert not [t for t in h.tips() if t.id.startswith('corner.section')]
+    [note] = [t for t in h.tips() if t.id.startswith('corner.note')]
+    assert note.kind == 'note' and note.text.endswith('The time went across the whole section.')
+    assert 'line' not in note.text.split('): ', 1)[1]
 
 
 def test_the_start_is_not_a_corner(tmp_path):
@@ -265,7 +277,7 @@ def test_a_gain_beside_an_off_or_at_the_finish_is_not_praised_and_slower_numbers
     # the last of the four sections is not named even for a loss
     h = Stage(tmp_path / 'v.db')
     h.drive(reference_corners(), result_time=200.0)
-    mine = corners_with(second={'loss': (0.4, 0.4)})
+    mine = corners_with(second={'loss': (0.4, 0.4), 'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'exit_speed': 20.0 - 5 * KMH})
     mine[3]['loss_entry'], mine[3]['loss_exit'] = 3.0, 3.0
     h.drive(mine, result_time=203.0)
     assert [t.id.split(':')[-1] for t in h.by_id('corner.section')] == ['600']
@@ -328,12 +340,15 @@ def test_a_spin_or_a_near_stop_is_a_corner_fault_and_an_off_is_named(tmp_path):
     h.drive(corners_with(), events=[event('spin', 580.0, 620.0, value=230.0), event('stall', 1190.0, 1215.0),
                                     event('off', 2100.0, 2130.0, 'reverse', 4.0)])
     spin, = h.by_id('corner.spin')
-    assert spin.text == ('On Test Stage, you spun in the 3 right at 0.6 km. Rotate the car less on the way in (a smaller '
-                         'flick, a shorter handbrake pull) and get the throttle on sooner.')
+    assert spin.kind == 'tip' and spin.text == (
+        'On Test Stage, you spun in the 3 right at 0.6 km: the car turned 230 degrees and you came in at 90 km/h and '
+        'were down to 36 km/h at the slowest point. Catch it with opposite lock as soon as the rear steps out (you '
+        'steered against it for 0 % of it).')
+    # a near stop with no rotation and nothing against the quickest pass is said, not coached
     stall, = h.by_id('corner.stall')
-    assert stall.text == ('On Test Stage, the car nearly stopped in the 3 left at 1.2 km. Look at what slowed it there, '
-                          'the braking point, the line or the gear, and get the throttle on sooner.')
-    assert spin.cost > stall.cost
+    assert stall.kind == 'note' and stall.text == (
+        'On Test Stage, the car nearly stopped in the 3 left at 1.2 km: it was nearly stopped for 1.0 s and you came '
+        'in at 90 km/h and were down to 36 km/h at the slowest point.')
     off, = h.by_id('corner.off')
     assert off.kind == 'note' and off.text == ('On Test Stage, off at 2.1 km: the corners within 100 m of it are left '
                                                'out of the comparisons. It was in the 3 right.')
@@ -341,12 +356,63 @@ def test_a_spin_or_a_near_stop_is_a_corner_fault_and_an_off_is_named(tmp_path):
     h = Stage(tmp_path / 'u.db', game='wrcg')
     h.drive(corners_with(), events=[event('spin', 580.0, 620.0, value=230.0), event('off', 2100.0, 2130.0, 'long')])
     assert not h.by_id('corner.spin') and len(h.by_id('corner.off')) == 1
-    # with steering against the yaw in that corner it is the rotation
+    # with steering against the yaw in that corner it is the rotation: and the steering was there, so nothing is
+    # said about it that was not measured
     h = Stage(tmp_path / 'r.db')
     h.drive([start(), stored(600.0, complex_=1, direction=-1), stored(1200.0, complex_=2, direction=1, counter_steer=0.4)],
             events=[event('stall', 1190.0, 1215.0)])
-    assert h.by_id('corner.stall')[0].text.endswith('Rotate the car less on the way in (a smaller flick, a shorter '
-                                                    'handbrake pull) and get the throttle on sooner.')
+    [stall] = h.by_id('corner.stall')
+    assert stall.kind == 'note' and not re.search(r'flick|handbrake|\bline\b', stall.text)
+
+
+def test_a_spin_or_stall_names_the_speed_the_quickest_pass_came_in_at_and_the_handbrake_only_when_measured(tmp_path):
+    spun = [event('spin', 580.0, 620.0, value=230.0)]
+    # the quickest pass came in slower: arrive at its speed
+    h = Stage(tmp_path / 't.db')
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=22.0), stored(1200.0, complex_=2)],
+            result_time=200.0)
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=26.0, counter_steer=0.5),
+             stored(1200.0, complex_=2)], events=spun, result_time=203.0)
+    [spin] = h.by_id('corner.spin')
+    assert spin.kind == 'tip' and spin.text.endswith('Arrive at 79 km/h, as your quickest pass did (you came in at 94).')
+    assert not re.search(r'flick|handbrake|\bline\b', spin.text)
+    # not faster than the quickest pass and steering against it less than COUNTER_DELTA of the corner
+    h = Stage(tmp_path / 'u.db')
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=26.0), stored(1200.0, complex_=2)],
+            result_time=200.0)
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=26.0, counter_steer=0.05),
+             stored(1200.0, complex_=2)], events=spun, result_time=203.0)
+    [spin] = h.by_id('corner.spin')
+    assert spin.text.endswith('Catch it with opposite lock as soon as the rear steps out (you steered against it '
+                              'for 5 % of it).')
+    # steered against it for a good part of it: nothing the numbers point at (a note), but with the handbrake
+    # measured on the trace, the pull is named
+    from tests.test_coach_context import stage
+    held = 0.0
+    trace = []
+    for r in stage([(0.0, 20.0), (2100.0, 20.0)]):
+        down = 580.0 <= r[C['distance']] <= 620.0
+        trace.append(r[:C['handbrake']] + (1.0 if down else 0.0,) + r[C['handbrake'] + 1:])
+        held += 0.1 if down else 0.0
+    corner = dict(stored(600.0, complex_=1, direction=-1, entry_speed=26.0, counter_steer=0.4), handbrake=1)
+    h = Stage(tmp_path / 'v.db')
+    h.drive([start(), dict(corner, handbrake=0), stored(1200.0, complex_=2)], events=spun)
+    [spin] = h.by_id('corner.spin')
+    assert spin.kind == 'note' and not re.search(r'flick|handbrake|\bline\b', spin.text)
+    h = Stage(tmp_path / 'w.db')
+    h.drive([start(), corner, stored(1200.0, complex_=2)], events=spun, trace=trace, course=2100.0)
+    [spin] = h.by_id('corner.spin')
+    assert spin.kind == 'tip' and 'the handbrake was on for {:.1f} s'.format(held) in spin.text
+    assert spin.text.endswith('A shorter handbrake pull: on for {:.1f} s.'.format(held))
+
+
+def test_offs_at_one_place_are_one_note_with_a_count(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    h.drive(corners_with(), events=[event('off', 2100.0, 2130.0, 'long', 4.0), event('off', 2150.0, 2160.0, 'hit', 3.5),
+                                    event('off', 2190.0, 2200.0, 'hit', 3.5), event('off', 900.0, 920.0, 'long', 4.0)])
+    notes = h.by_id('corner.off')
+    assert len(notes) == 2 and sorted(t.text.split(' at ')[0] for t in notes) == [
+        'On Test Stage, off', 'On Test Stage, off 3 times']
 
 
 def spread_event(apex, sd_kmh, median_kmh, runs=6):
@@ -646,14 +712,47 @@ def test_the_best_sections_put_together_and_the_section_where_this_run_was_best(
     assert not h.by_id('corner.possible')
 
 
+def test_a_section_with_both_traces_is_diagnosed_on_the_same_metres(tmp_path):
+    """The reference's and the run's traces say what happened in the corner, not the stored numbers: the same braking
+    point and more speed taken off is over-slowing, said as that, with the one fix."""
+    h = Stage(tmp_path / 't.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=10.0, reference=a)
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    ref = 'Test car, {:.1f} s on {}'.format(a[0][-1][C['t']], coach._date(h.t - DAY))
+    assert tip.text == ('On Test Stage, the 2 right at 1.1 km, 1.3 s behind your best clean run here ({}): you braked at the '
+                        'same place, took 64 km/h off on the brake where your best run took 50 km/h and were 14 km/h slower '
+                        'at the slowest point (36 against 51). Keep that braking point and brake less: carry 14 km/h '
+                        'more through the slowest point.'.format(ref))
+    assert tip.evidence[0] == '0.7 s of it before the slowest point and 0.5 s after.'
+    assert tip.evidence[1].startswith('Measured on the same metres as your best run: ')
+    assert not re.search(r'\bline\b|flick|handbrake', tip.text)
+
+
+def test_a_section_whose_reference_trace_is_gone_falls_back_to_the_stored_numbers(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    tr, corners = three_corner_run(14.0, 10.0)
+    sections = cc.build_sections(tr, corners)
+    cc.describe_corners(tr, corners, sections)
+    cc.mark_off(corners, [])
+    h.drive(corners, result_time=tr[-1][C['t']], course=tr[-1][C['distance']])                 # no trace: evicted
+    drive_traced(h, v2=10.0, v3=10.0, reference=(tr, corners))
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    assert tip.text.endswith('you were 14 km/h slower at the slowest point and left 16 km/h slower. Brake at the same '
+                             'place and carry more speed in: your best run was 14 km/h quicker through the middle.')
+    assert 'Measured on the same metres' not in ' '.join(tip.evidence)
+    assert not re.search(r'\bline\b|flick|handbrake', tip.text)
+
+
 def test_a_run_through_the_real_path_is_coached_section_by_section(tmp_path):
     """A slower second run through the sim's stage: written by the drive log, read back by the coach."""
     from tests.test_coach import drive_stages
     learner, reader = drive_stages(tmp_path, (30.0, 26.0))
     car = reader.car_list('_no_profile')[0]['id']
     tips = Coach(reader, now=2e9).tips('_no_profile', car, show_all=True)
-    sections = [t for t in tips if t.id.startswith('corner.section')]
-    assert sections and all(t.ref for t in sections)
+    # the sim's section lost 0.1 s with nothing to change that the numbers point at: a note, not a tip
+    sections = [t for t in tips if t.id.startswith(('corner.section', 'corner.note'))]
+    assert sections and all(t.ref or t.kind == 'note' for t in sections)
     assert sections[0].text.startswith('On stage eawrc:4:12, the ') and 's behind your best clean run here (' in sections[0].text
     assert not [t for t in tips if t.id.startswith('corner.loss')]     # the section tips replace the total
     learner.close()
@@ -709,7 +808,7 @@ def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):
 def test_the_last_section_of_a_run_that_did_not_finish_is_never_named(tmp_path):
     h = Stage(tmp_path / 't.db')
     h.drive(reference_corners(), result_time=200.0)
-    h.drive(corners_with(second={'loss': (0.4, 0.4)}, third={'loss': (7.0, 7.0)})[:3], finished=0, run_class='partial',
+    h.drive(corners_with(second={'loss': (0.4, 0.4), 'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'exit_speed': 20.0 - 5 * KMH}, third={'loss': (7.0, 7.0)})[:3], finished=0, run_class='partial',
             course=1500.0)
     named = [t.id for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert named == ['corner.section:{}:600'.format(STAGE_KEY)]
@@ -838,6 +937,7 @@ def test_a_run_that_began_mid_stage_is_not_timed_through_the_first_section_on_th
         stage_tables.set_tables(None)
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_the_sector_bounds_of_a_stage_entry():
     from oversteer import stage_tables
     bidno = stage_tables.entry('acr:wales:afon-bidno-severn')

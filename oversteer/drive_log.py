@@ -1105,6 +1105,7 @@ def repair_shipped(store):
             store.set_car_drivetrain(car, shipped)         # the game's files beat a learnt vote
             changed += 1
     changed += learn_missing_stops(store)
+    changed += requeue_moved_stages(store)       # before the re-timing: it forgets the marks of stages that moved
     changed += retime_finishes(store)
     if changed:
         store.commit()
@@ -1131,6 +1132,33 @@ def _trace_t_at(trace, value, tail=0.0):
     return None
 
 
+def _trace_d_at(trace, t):
+    """The trace's driven distance at time `t` (linear between rows), or None when the trace does not span it."""
+    previous = None
+    for row in trace:
+        if previous is not None and previous[T['t']] <= t <= row[T['t']]:
+            t0, d0 = previous[T['t']], previous[T['distance']]
+            return d0 if row[T['t']] <= t0 else d0 + (row[T['distance']] - d0) * (t - t0) / (row[T['t']] - t0)
+        previous = row
+    return None
+
+
+def _own_origin(trace, result, line, entry):
+    """Where along the road a run began, read from its own trace: the run was timed at `line` (the road position
+    of the finish its `result` was taken at), so it began that far before it as the trace had driven when the
+    result's time was up. Accepted within START_LINE_PAST of the stage's start line (the car stands a few metres
+    short of it, or has rolled a little past), else None: a trace that says otherwise is not about this stage's
+    start."""
+    start = stage_tables.start_line(entry)
+    if not trace or result is None or start is None or not line:
+        return None
+    d = _trace_d_at(trace, trace[0][T['t']] + result)
+    if d is None:
+        return None
+    origin = line - d
+    return origin if abs(origin - start) <= stage_tables.START_LINE_PAST else None
+
+
 def _trace_speed_at(trace, value):
     """The speed of the last trace row at or before driven distance `value`."""
     speed = None
@@ -1144,14 +1172,15 @@ def _trace_speed_at(trace, value):
 # A run that ends this fast was already timed at the flying finish (marth's
 # Afon Bidno runs: 120-160 km/h there, 20-40 km/h at the stop control)
 AT_SPEED = 20.0                 # m/s
+TIMED_AT_TOLERANCE = 15.0          # m: a run that ends at speed within this of the table's finish was timed at it (a row's distance, TRACE_TAIL)
 FINISH_MOVED = 0.5              # m: a finish line that moved less than this since a run was timed leaves it as it is
 
 
 def _run_start_m(store, run, entry):
-    """Where along the road a run's trace distance began: where the run was recorded to start, else the stage's
-    start line, else None."""
+    """Where along the road a run's trace distance began: where the run was recorded to start, else where the
+    stage's runs are measured to (stage_tables.run_origin), else None."""
     start = store.run_start(run)
-    return start if start is not None else stage_tables.start_line(entry)
+    return start if start is not None else stage_tables.run_origin(entry)
 
 
 def learn_missing_stops(store):
@@ -1180,6 +1209,37 @@ def learn_missing_stops(store):
     return added
 
 
+def _lines_fingerprint(entry):
+    """The lines of an ACR stage's table entry that the runs' sectors, course and corners are measured on, as one
+    string: the start line, the finish (flying, else the last pace note) and the road length. None without an entry."""
+    if not entry:
+        return None
+    start, finish, length = stage_tables.start_line(entry), entry.get('finish_m'), stage_tables.road_length(entry)
+    return '|'.join('-' if v is None else '{:.1f}'.format(v) for v in (start, finish, length))
+
+
+def requeue_moved_stages(store):
+    """A stage whose start line, finish or road length is not what the last start saw (the shipped table or a learnt
+    line moved: STAGE_LINES) has all its finished runs, the game-clock ones too, queued for the backfill (run_class
+    cleared), their classes, sectors and potentials worked out on the new lines, its stored potentials dropped to
+    be built again, and the runs marked as not re-timable (retime_finishes) marked no more, to be tried once more. A
+    stage not seen before counts as moved (a database from before the fingerprints). Returns the number of stages
+    queued."""
+    moved = 0
+    for stage in store.stage_keys():
+        if not stage.startswith('acr:'):
+            continue
+        now = _lines_fingerprint(stage_tables.entry(stage))
+        if now is None or store.stage_fingerprint(stage) == now:
+            continue
+        store.queue_stage_runs(stage)
+        store.forget_unknown_finishes(stage)
+        store.drop_stage_potentials(stage)
+        store.set_stage_fingerprint(stage, now)
+        moved += 1
+    return moved
+
+
 def retime_finishes(store):
     """A finished ACR run timed to the old line (the last pace note, the stop
     control: its time holds the slow-down) on a stage that now has a flying
@@ -1206,15 +1266,34 @@ def retime_finishes(store):
                 course = trace[-1][T['distance']]        # a database migrated from version 2 has no course
             end_speed = _trace_speed_at(trace, course) if trace and course is not None else None
             if end_speed is not None and end_speed > AT_SPEED:
-                store.set_run_finish(run, flying)        # it ends at speed: timed at the flying finish already
+                # It ends at speed: timed at a flying finish already, the one of its day. That is the table's where
+                # the trace's end is within a row or two of it, else the line it was timed at (where its course
+                # ends), and the loop below moves it from there to the table's
+                began = store.run_start(run)
+                if began is None:
+                    began = stage_tables.run_origin(entry)
+                timed_at = began + course if began is not None and course is not None else None
+                store.set_run_finish(run, timed_at if timed_at is not None and abs(timed_at - flying) > TIMED_AT_TOLERANCE
+                                     else flying)
                 continue
             # The trace's distance is measured from where the run began; the course is where the car finally
             # stopped, seconds after the stop control: the lines are anchored on the road, not on the course
-            start = _run_start_m(store, run, entry)
+            # A run with no recorded start is anchored on its own trace (_own_origin), not on where the stage's
+            # runs mostly begin: a few metres there are seconds at 30 m/s over the flying finish
+            start, own = store.run_start(run), False
+            if start is None:
+                start = _own_origin(trace, result, old, entry)
+                own = start is not None
+            if start is None:
+                start = _run_start_m(store, run, entry)
             d_old = min(course, old - start) if start is not None and course is not None else None
             new = flying - start if d_old is not None else None
             t_old = _trace_t_at(trace, d_old, TRACE_TAIL) if trace and new is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
+            if own and t_new is not None:
+                result_new = t_new - trace[0][T['t']]            # the trace's own time at the flying finish
+            else:
+                result_new = None if t_new is None or result is None else result - (t_old - t_new)
             if t_new is None or result is None or t_old - t_new >= result:
                 logging.warning("drive log: run %s cannot be re-timed to the flying finish (no trace or out of range)",
                                 run)
@@ -1224,7 +1303,9 @@ def retime_finishes(store):
                 if store.run(run)['run_class'] is not None:      # one still to be worked out is said by _work_over
                     store.update_run(run, run_class='partial')
                 continue
-            store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
+            if own:
+                store.set_run_start(run, start)
+            store.update_run(run, result_time=result_new, course=new, run_class=None)
             store.set_run_finish(run, flying)
             done += 1
         except Exception:
@@ -1238,7 +1319,13 @@ def retime_finishes(store):
             continue
         try:
             trace = store.trace(run)
-            start = _run_start_m(store, run, stage_tables.entry(stage) or {})
+            entry = stage_tables.entry(stage) or {}
+            start, own = store.run_start(run), False
+            if start is None:
+                start = _own_origin(trace, result, recorded, entry)
+                own = start is not None
+            if start is None:
+                start = _run_start_m(store, run, entry)
             d_old = min(course, recorded - start) if start is not None else None
             new = flying - start if d_old is not None else None
             t_old = _trace_t_at(trace, d_old, TRACE_TAIL) if trace and d_old is not None else None
@@ -1247,7 +1334,10 @@ def retime_finishes(store):
                 logging.warning("drive log: run %s cannot be moved from finish %.1f to %.1f (trace out of range)",
                                 run, recorded, flying)
                 continue
-            store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
+            if own:
+                store.set_run_start(run, start)
+            store.update_run(run, result_time=t_new - trace[0][T['t']] if own else result - (t_old - t_new),
+                             course=new, run_class=None)
             store.set_run_finish(run, flying)
             done += 1
         except Exception:

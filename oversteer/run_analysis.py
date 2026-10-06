@@ -15,7 +15,9 @@ import threading
 import time
 from collections import OrderedDict
 
-from . import coach, coach_context as cc, potential, stage_tables
+import numpy as np
+
+from . import coach, coach_context as cc, coach_diagnosis, potential, stage_tables
 from .telemetry_formats import plan_xy
 
 SLACK = 5.0                      # m a run may stop short of the grid's end, or start past its start, and still be drawn there
@@ -318,25 +320,62 @@ def _positions(rows, grid, game=None):
     return xs, zs
 
 
-def _sector_rows(stage, mine, other):
-    """The game's sectors timed on both runs, [{name, d0, d1, time, ref_time, delta}], or None."""
-    placed = stage_tables.sector_bounds(stage_tables.entry(stage)) if stage else None
+def _sector_rows(stage, mine, other, reader=None, runs=(None, None)):
+    """The game's sectors timed on both runs, [{name, d0, d1, time, ref_time, delta}], or None. Each run (`runs`:
+    this one's and the other's rows from the store) is placed from where it began and, on the game's own clock,
+    timed by it where its distance crosses each line (coach_context.sector_times)."""
+    entry = stage_tables.entry(stage) if stage else None
+    placed = stage_tables.sector_bounds(entry) if stage else None
     if placed is None:
         return None
-    tracks = [cc.along(rows) if rows else None for rows in (mine, other)]
+    bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
+    found = []
+    for rows, run in zip((mine, other), runs):
+        if not rows:
+            found.append({})
+            continue
+        origin = reader.run_start(run['id']) if reader is not None and run else None
+        if origin is None:
+            origin = stage_tables.run_origin(entry)
+        found.append(cc.sector_times(rows, bounds, 0.0 if origin is None else origin - placed['start_m'],
+                                     reader is not None and run is not None and reader.run_clock(run['id']) == 'game',
+                                     run.get('result_time') if run is not None and run.get('finished') == 1 else None))
     out = []
-    for i, (a, b) in enumerate((a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']):
-        times = []
-        for rows, track in zip((mine, other), tracks):
-            if not rows:
-                times.append(None)
-                continue
-            end = cc.elapsed_at(rows, b, track)
-            begin = 0.0 if i == 0 else cc.elapsed_at(rows, a, track)
-            times.append(end - begin if end is not None and begin is not None and end > begin else None)
+    for i, (a, b) in enumerate(bounds):
+        times = [f.get(i) for f in found]
         out.append({'name': 'S{}'.format(i + 1), 'd0': a, 'd1': b, 'time': times[0], 'ref_time': times[1],
                     'delta': None if None in times else times[0] - times[1], 'confidence': placed['confidence']})
     return out if any(r['time'] is not None for r in out) else None
+
+
+def _brake_deltas(reader, run, rows, other, other_rows, other_corners, report, pot):
+    """{section index of `run` (its stored sections): metres its braking began earlier than the comparison's
+    (negative: later)} on the road, as the coach's diagnosis measures it (coach._diagnose): this run against the
+    comparison over the comparison's own spans, the first corner of the section that either braked for. Left out
+    where either run did not brake there or a trace is too short."""
+    if not report or not other or not other_rows:
+        return {}
+    mine, theirs = potential.arrays(rows), potential.arrays(other_rows)
+    if mine is None or theirs is None:
+        return {}
+    spans = {g['id']: (g, a, b, lo, floor) for g, a, b, lo, floor in cc.spans(
+        {'trace': other_rows, 'corners': other_corners, 'course': other.get('course')})}
+    prof = pot['profile'] if pot else None
+    env = {'bins': np.asarray(prof['env_bins'], dtype=float), 'lat': np.asarray(prof['env_lat'], dtype=float)} \
+        if prof and prof.get('env_bins') and prof.get('env_lat') else None
+    car = reader.car_by_id(run['car']) if run['car'] is not None else None
+    out = {}
+    for i, item in enumerate(report):
+        span = spans.get((item['ref'] or {}).get('id'))
+        if span is None:
+            continue
+        g, a, b, lo, floor = span
+        parts = coach_diagnosis.measures_section(mine, theirs, {
+            'a': a, 'b': b, 'lo': lo, 'floor': floor, 'corners': g['corners'], 'game': (car or {}).get('game')}, env)
+        found = [m['onset_dd'] for _, m in parts if m['onset_dd'] is not None]
+        if found:
+            out[i] = -found[0]
+    return out
 
 
 def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot=None):
@@ -360,9 +399,10 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
         return []
     matches = cc.match_sections(mine, grid) if mine else {}
     report = cc.section_report(corners, other_corners) if other_corners and mine else None
+    braked = _brake_deltas(reader, run, rows, other, other_rows, other_corners, report, pot)
     by_grid = {}
     for i, j in matches.items():
-        by_grid[j] = (mine[i], report[i] if report else None)
+        by_grid[j] = (mine[i], report[i] if report else None, braked.get(i))
     other_track = cc.along(other_rows) if other_rows else None
     offs = set()
     for i, s in enumerate(mine):
@@ -378,7 +418,7 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
         if other_rows:
             oa, ob = cc.elapsed_at(other_rows, a, other_track), cc.elapsed_at(other_rows, b, other_track)
             ref_time = ob - oa if oa is not None and ob is not None else None
-        mine_section, item = by_grid.get(j, (None, None))
+        mine_section, item, dbrake = by_grid.get(j, (None, None, None))
         row = {'i': j, 'name': cc.section_name(s), 'short': _short(s), 'd0': a, 'd1': b, 'apex': s['apex'],
                'time': time_, 'ref_time': ref_time,
                'loss': None if time_ is None or ref_time is None else time_ - ref_time,
@@ -393,12 +433,11 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
             ends = mine_section['corners'][-1]
             row['min'] = None if key.get('min_speed') is None else key['min_speed'] * 3.6
             row['exit'] = None if ends.get('exit_speed') is None else ends['exit_speed'] * 3.6
-            row['brake'] = mine_section['corners'][0].get('brake_d')
         if item is not None and item['compare'] is not None:
             c = item['compare']
             row['dmin'] = None if c['speed'] is None else c['speed'] * 3.6
             row['dexit'] = None if c['exit'] is None else c['exit'] * 3.6
-            row['dbrake'] = c['brake']
+            row['dbrake'] = dbrake
             row['pattern'] = item['pattern']
         out.append(row)
     return out
@@ -449,7 +488,7 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,
                 'potential': potential.layers(pot, _sum_of_best(reader, run['stage'], run['car'], pot)) if pot else None,
                 'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot),
-                'sectors': _sector_rows(run['stage'], rows, other_rows)}
+                'sectors': _sector_rows(run['stage'], rows, other_rows, reader, (run, other))}
     return _remember(key, build)
 
 

@@ -258,6 +258,15 @@ CREATE TABLE IF NOT EXISTS run_stop (
     stop_m REAL NOT NULL
 )"""
 
+# The lines of an ACR stage as the last start saw them (drive_log.repair_shipped): a fingerprint of its start line,
+# finish and road length, so a start whose shipped table moved any of them works that stage's runs over again. A table
+# of its own for the reason run_finish is one.
+STAGE_LINES_DDL = """
+CREATE TABLE IF NOT EXISTS stage_lines (
+    stage TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL
+)"""
+
 # -- potential time (oversteer/potential.py, docs/telemetry-extrapolation.md section 6.1) --
 # Two tables made when a file is opened, for the reason run_finish is one. `envelopes`: the driver's g-g envelope per
 # car and surface (the P98 and the car's P99.5 bins of lateral, braking and drive acceleration by speed, as JSON),
@@ -651,6 +660,7 @@ def open_store(path):
     db.execute(RUN_START_DDL)
     db.execute(RUN_CLOCK_DDL)
     db.execute(RUN_STOP_DDL)
+    db.execute(STAGE_LINES_DDL)
     for ddl in POTENTIAL_DDL:
         db.execute(ddl)
     store = Store(db, path)
@@ -715,6 +725,14 @@ class Reader:
         """Where along the road spline a run began (metres), or None where it was not recorded."""
         try:
             rows = self._rows('SELECT start_m FROM run_start WHERE run = ?', (run_id,))
+        except sqlite3.OperationalError:
+            return None                              # a file the writer has not opened since this table
+        return rows[0][0] if rows else None
+
+    def run_clock(self, run_id):
+        """The clock a run's times are on: 'game' for the game's own stage clock (run_clock), else None."""
+        try:
+            rows = self._rows('SELECT clock FROM run_clock WHERE run = ?', (run_id,))
         except sqlite3.OperationalError:
             return None                              # a file the writer has not opened since this table
         return rows[0][0] if rows else None
@@ -1612,9 +1630,30 @@ class Store(Reader):
             self._do('UPDATE runs SET run_class = NULL WHERE id = ?', (run,))
         return len(runs)
 
+    def forget_unknown_finishes(self, stage):
+        """A run of `stage` marked as not re-timable (a run_finish row with no finish) is marked no more, so
+        drive_log.retime_finishes tries it again (its class is left to the backfill). Returns the number of runs."""
+        runs = [r[0] for r in self._do('SELECT f.run FROM run_finish f JOIN runs r ON r.id = f.run '
+                                       'WHERE f.finish_m IS NULL AND r.stage = ?', (stage,)).fetchall()]
+        for run in runs:
+            self._do('DELETE FROM run_finish WHERE run = ?', (run,))
+        return len(runs)
+
     def queue_stage_runs(self, stage):
         """Queue the finished runs of a stage for the backfill (run_class cleared)."""
         self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))
+
+    def stage_fingerprint(self, stage):
+        """The lines of `stage` as the last start saw them (see STAGE_LINES_DDL), None where none were stored."""
+        rows = self._do('SELECT fingerprint FROM stage_lines WHERE stage = ?', (stage,)).fetchall()
+        return rows[0][0] if rows else None
+
+    def set_stage_fingerprint(self, stage, fingerprint):
+        self._do('INSERT OR REPLACE INTO stage_lines (stage, fingerprint) VALUES (?, ?)', (stage, fingerprint))
+
+    def drop_stage_potentials(self, stage):
+        """Forget every car's stored potential of a stage: potentials_missing() offers them for building again."""
+        self._do('DELETE FROM stage_potential WHERE stage = ?', (stage,))
 
     def set_run_clock(self, run, clock):
         """Record that a run's result_time is on `clock` ('game': the game's own; see RUN_CLOCK_DDL)."""

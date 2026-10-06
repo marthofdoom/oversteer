@@ -15,7 +15,9 @@ import math
 import statistics
 import time
 
-from . import car_data, coach_context, potential, stage_tables
+import numpy as np
+
+from . import car_data, coach_context, coach_diagnosis, potential, stage_tables
 from .shift_learner import LIMITER_BAND, FULL_THROTTLE, SURFACES, _listed
 
 # -- metrics of one run (section 9.1) --
@@ -777,7 +779,8 @@ def _km_h(x):
 def _how(c, late_throttle=False):
     """What the run did differently from the reference through a section,
     from compare_section(): ['braked 25 m earlier', 'was 7 km/h slower at the
-    slowest point', 'left 4 km/h slower'] (those that differ)."""
+    slowest point', 'left 4 km/h slower'] (those that differ). Only for a section whose traces are gone: the
+    diagnosis (coach_diagnosis) states its own facts, on the same metres."""
     ctx = coach_context
     parts = []
     b, v, x = c['brake'], c['speed'], c['exit']
@@ -795,7 +798,8 @@ def _how(c, late_throttle=False):
 
 
 def _section_action(pattern, c, it):
-    """The one thing to do, from the pattern, what the reference did and where the section's time went."""
+    """The one thing to do, from the pattern, what the reference did and where the section's time went. Only for a
+    section whose traces are gone (the diagnosis, coach_diagnosis, reads them): what the stored numbers say."""
     if pattern == 'over-slowing':
         return 'Brake about {:.0f} m later, as your best run did.'.format(abs(c['brake']))
     if pattern == 'under-committed':
@@ -809,17 +813,54 @@ def _section_action(pattern, c, it):
         return 'Throttle sooner, as soon as the nose points out: your best run was {:.1f} s earlier.'.format(
             c['throttle'])
     if pattern == 'over-rotated':
-        return ('Rotate the car less on the way in (a smaller flick, a shorter handbrake pull) and get the '
-                'throttle on sooner.')
+        return 'Keep the car straighter through it, as your best run did.'
     if pattern == 'slower':
         return 'Carry more speed through it: your best run was {:.0f} km/h quicker at the slowest point.'.format(
             _km_h(c['speed']))
     if it['exit'] >= 0.7 * it['loss']:
-        return ('The time went after the slowest point: look at how early you were back on the throttle and the '
-                'line you took out of it.')
+        return 'The time went after the slowest point: look at how early you were back on the throttle.'
     if it['entry'] >= 0.7 * it['loss']:
-        return 'The time went before the slowest point: look at where you braked and the line you took in.'
-    return 'The time went across the whole section: look at the line you took against your best run.'
+        return 'The time went before the slowest point: look at where you braked.'
+    return None                 # no fix to give: the section is a note
+
+
+def _name_the_pass(diag, name):
+    """The diagnosis's words (facts and fix) with the run it compares against called `name` ('your best run' in
+    coach_diagnosis: the PB; a top-3 place is read against the quickest pass through it)."""
+    diag['facts'] = [f.replace('your best run', name) for f in diag['facts']]
+    if diag['fix']:
+        diag['fix'] = diag['fix'].replace('your best run', name)
+
+
+def _facts_say(facts):
+    """The facts of a diagnosis as 'a, b and c' (a run within a few km/h and metres of the reference has none)."""
+    return _say(facts) if facts else 'were within a few km/h and metres of it'
+
+
+def _diagnosed_where(it):
+    """The section's name, and the corner the diagnosis is about where the section has several:
+    'the left-left-right at 2.2 km (the 4 right at 2.13 km)'."""
+    d = it['diag']
+    if len(it['section']['corners']) <= 1:
+        return it['name']
+    return '{} ({} at {:.2f} km)'.format(it['name'], coach_context.corner_name(d['corner']).split(' at ')[0],
+                                         d['corner']['d'] / 1000.0)
+
+
+def _worth_saying(lost):
+    """The sections that lost time (biggest first) that are worth a tip of their own: a slow arrival is the corner
+    before's time, said there when that one lost too; a diagnosis with no fix (unclear, lost speed, at the limit) is
+    no tip (_unexplained): a tip always has a fix."""
+    lost_ns = {it['n'] for it in lost}
+    said = [it for it in lost if not (it.get('diag') is not None and it['diag']['code'] == 'SLOW-ARRIVAL'
+                                      and it['n'] - 1 in lost_ns)]
+    return [it for it in said if it.get('diag') is None or it['diag']['fix']]
+
+
+def _unexplained(lost):
+    """The sections that lost time that the diagnosis could not give a fix for (unclear, lost speed, at the limit
+    with no positions): said as notes, not tips (_worth_saying has the ones with a fix)."""
+    return [it for it in lost if it.get('diag') is not None and not it['diag']['fix']]
 
 
 class Coach:
@@ -832,6 +873,8 @@ class Coach:
         self._games = {}
         self._stages = {}
         self._lead = []                  # the potential's top 3 and what improved, said before everything else
+        self._claimed = []               # (stage, run, d0, d1) of the top 3's places: the section tips inside them are theirs
+        self._loaded = {}                # run id: {'rows', 'arr'} of the traces read for this view (_arrays)
 
     def _game(self, car):
         """The game a car (cars.id) is from, None where it is not known."""
@@ -839,6 +882,48 @@ class Coach:
             row = self.reader.car_by_id(car) if car is not None else None
             self._games[car] = (row or {}).get('game')
         return self._games[car]
+
+    def _arrays(self, run):
+        """{'rows' (the run's stage rows), 'arr' (potential.arrays of them)} of a run (a stage_runs or run row), read
+        once per view; None where its trace is gone (TRACES_CAP) or too short."""
+        if run['id'] not in self._loaded:
+            trace = self.reader.trace(run['id'])
+            rows = coach_context.stage_rows(trace, run.get('course'), run.get('finished') == 1,
+                                            run.get('result_time')) if trace else None
+            arr = potential.arrays(rows) if rows else None
+            self._loaded[run['id']] = None if arr is None else {'rows': rows, 'arr': arr}
+        return self._loaded[run['id']]
+
+    def _envelope(self, stage, car):
+        """The stored potential's grip envelope ({'bins', 'lat'}) of the stage and car, None without a potential."""
+        pot = potential.stored(self.reader, stage, car) if car is not None else None
+        prof = pot['profile'] if pot else None
+        if not prof or not prof.get('env_bins') or not prof.get('env_lat'):
+            return None
+        return {'bins': np.asarray(prof['env_bins'], dtype=float), 'lat': np.asarray(prof['env_lat'], dtype=float)}
+
+    def _diagnose(self, stage, run, ref, ref_corners, items):
+        """Set `diag` (coach_diagnosis.diagnose_section) on each section_report item matched to a section of the
+        reference's grid, both runs' traces read once. Nothing set where either trace is gone: the section's
+        numbers (section_pattern) are then all there is."""
+        mine, theirs = self._arrays(run), self._arrays(ref)
+        if mine is None or theirs is None:
+            return
+        found = coach_context.spans({'trace': theirs['rows'], 'corners': ref_corners, 'course': ref.get('course')})
+        spans = {g['id']: (g, a, b, lo, floor, found[n - 1][0] if n else None)
+                 for n, (g, a, b, lo, floor) in enumerate(found)}
+        env, game = self._envelope(stage, run['car']), self._game(run['car'])
+        for it in items:
+            span = spans.get((it['ref'] or {}).get('id'))
+            if span is None or it['loss'] is None:
+                continue
+            g, a, b, lo, floor, behind = span
+            parts = coach_diagnosis.measures_section(mine['arr'], theirs['arr'], {
+                'a': a, 'b': b, 'lo': lo, 'floor': floor, 'corners': g['corners'], 'game': game}, env)
+            d = coach_diagnosis.diagnose_section(parts, it['loss'],
+                                                 None if behind is None else coach_context.section_name(behind))
+            if d is not None:
+                it['diag'] = d
 
     def _stage_label(self, stage):
         """The stage as the stage table names it ('Afon Bidno - Severn'), else its key."""
@@ -863,6 +948,7 @@ class Coach:
                     model = None
         candidates, praise, notes, techniques = [], [], [], []
         self._lead = []
+        self._loaded = {}
         slices = {}
         for r in rows:
             slices.setdefault((r['name'], r['gear'], r['method'], r['discipline'], r['surface']), []).append(r)
@@ -1295,11 +1381,12 @@ class Coach:
                 net = it['loss'] + prev['loss']
                 it = dict(it, loss=net, gained_before=-prev['loss'], pattern=(
                     coach_context.section_pattern(it['compare'], net) if net >= coach_context.SECTION_MIN else None))
-            named.append(it)
+            named.append(dict(it, n=n))
+        self._diagnose(stage, run, ref, ref_corners, named)
         lost = sorted((it for it in named if it['loss'] >= coach_context.SECTION_MIN), key=lambda it: -it['loss'])
         claimed = self._patterns(stage, name, run, named, ref_name, ref_text, candidates, model)
         total = sum(it['loss'] for it in lost)
-        top = lost[:SECTION_TIPS]
+        top = _worth_saying(lost)[:SECTION_TIPS]
         if total > 0 and len(lost) >= 2:
             two = sum(it['loss'] for it in lost[:2]) >= TWO_PLACES * total
             spread = ('Most of it in {}.'.format('two places' if len(lost) > 2 else 'these two') if two else
@@ -1307,21 +1394,42 @@ class Coach:
         else:
             spread = None
         shown = 0
-        for it in top:
-            if it['pattern'] in claimed.get(it['d'], ()):
+        mine = [(d0, d1) for stg, rid, d0, d1 in self._claimed if stg == stage and rid == run['id']]
+        for it in top + _unexplained(lost)[:SECTION_TIPS]:
+            d = it.get('diag')
+            if it['pattern'] in claimed.get(it['d'], ()) or (d is not None and d['code'] in claimed.get(it['d'], ())):
                 continue
+            if any(d0 <= it['d'] < d1 for d0, d1 in mine):
+                continue                    # inside one of the top 3 places, which has its own fix for it
+            if d is not None and d['code'] == 'SLOW-ARRIVAL' and it['n'] \
+                    and any(d0 <= report[it['n'] - 1]['d'] < d1 for d0, d1 in mine):
+                continue                    # the corner before it is one, with a fix of its own
             c = it['compare']
             pattern = it['pattern']
-            how = _how(c, late_throttle=pattern == 'late-throttle')
-            if not how:
-                how = ['were within a few km/h and metres of it']
-            text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}. {}'.format(
-                name, it['name'], it['loss'], ref_name, ref_text, _say(how), _section_action(pattern, c, it))
             evidence = ['{:.1f} s of it before the slowest point and {:.1f} s after.'.format(it['entry'], it['exit'])]
+            if d is not None:
+                text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}.{}'.format(
+                    name, _diagnosed_where(it), it['loss'], ref_name, ref_text, _facts_say(d['facts']),
+                    ' ' + d['fix'] if d['fix'] else ' The numbers do not point to one thing to change.')
+                if d['evidence']:
+                    evidence.append('Measured on the same metres as your best run: {}.'.format(', '.join(d['evidence'])))
+            else:                           # no trace of the run or the reference (evicted): the section's numbers
+                how = _how(c, late_throttle=pattern == 'late-throttle')
+                if not how:
+                    how = ['were within a few km/h and metres of it']
+                action = _section_action(pattern, c, it)
+                text = 'On {}, {}, {:.1f} s behind {} here ({}): you {}.{}'.format(
+                    name, it['name'], it['loss'], ref_name, ref_text, _say(how),
+                    ' ' + action if action else ' The time went across the whole section.')
+                d = {'fix': action}
             if it.get('gained_before'):
                 evidence.append('Net of the {:.1f} s the section before it gained.'.format(it['gained_before']))
             if spread:
                 evidence.append('{:.1f} s behind {} over {} sections. {}'.format(total, ref_name, len(lost), spread))
+            if d is not None and not d['fix']:           # nothing to do that the numbers point at: a note, not a tip
+                notes.append(Tip('corner.note:{}:{:.0f}'.format(stage, it['d']), 'note', text, evidence, it['loss'],
+                                 cost=0.0, count=1, place=_section_place(stage, run, it)))
+                continue
             candidates.append(Tip('corner.section:{}:{:.0f}'.format(stage, it['d']), 'tip', text, evidence,
                                   it['loss'], cost=it['loss'], count=1, ref=True,
                                   place=_section_place(stage, run, it)))
@@ -1331,9 +1439,11 @@ class Coach:
         wins = [it for it in gained if it['pattern'] == 'right-entry'] if loose_ else []
         for it in wins[:1]:
             c = it['compare']
+            how = it['diag']['facts'] if it.get('diag') is not None else _how(c)
             praise.append(Tip('corner.entry:{}:{:.0f}'.format(stage, it['d']), 'praise',
-                              'On {}, {}, {:.1f} s up on {} here ({}): you {}.'.format(
-                                  name, it['name'], -it['loss'], ref_name, ref_text, _say(_how(c))),
+                              'On {}, {}, {:.1f} s up on {} here ({}){}.'.format(
+                                  name, it['name'], -it['loss'], ref_name, ref_text,
+                                  ': you ' + _say(how) if how else ''),
                               [], -it['loss'], cost=-it['loss'], count=1, place=_section_place(stage, run, it)))
         self._best_of(stage, name, run, ref, ref_corners, before, report, gained, ref_text, car, praise, notes)
         self._held_straight(stage, name, run, ref, events, candidates)
@@ -1352,8 +1462,9 @@ class Coach:
         claimed = {}
         icy = surface in ('snow', 'ice')
         tarmac_like = surface == 'tarmac' or (discipline == 'circuit' and not icy)
-        late = [it for it in named if it['compare']['throttle'] is not None
-                and it['compare']['throttle'] >= LATE_THROTTLE and (it['exit'] or 0.0) > coach_context.SECTION_MIN]
+        late = [it for it in named if it['compare']['throttle'] is not None and (it['exit'] or 0.0) > coach_context.SECTION_MIN
+                and (it['diag']['code'] == 'LATE-THROTTLE' if it.get('diag') is not None
+                     else it['compare']['throttle'] >= LATE_THROTTLE)]
         if len(late) >= LATE_CORNERS and not icy:
             late.sort(key=lambda it: -it['exit'])
             lost = sum(it['exit'] for it in late)
@@ -1367,7 +1478,7 @@ class Coach:
                                   mean, cost=lost, count=len(late), ref=True,
                                   place=place(stage, run, late[0]['d'], ds=[it['d'] for it in late])))
             for it in late:
-                claimed.setdefault(it['d'], set()).add('late-throttle')
+                claimed.setdefault(it['d'], set()).update(('late-throttle', 'LATE-THROTTLE'))
         both = [it for it in named if (it['compare']['overlap_exit'] or 0.0) >= OVERLAP_EXIT
                 and (it['exit'] or 0.0) > coach_context.SECTION_MIN]
         turbo = model is not None and car_context(model, surface).get('turbo')
@@ -1383,19 +1494,23 @@ class Coach:
                                       len(both), OVERLAP_EXIT)],
                                   held, cost=lost, count=len(both), ref=True,
                                   place=place(stage, run, both[0]['d'], ds=[it['d'] for it in both])))
-        coast = [it for it in named if (it['compare']['coast_entry'] or 0.0) >= COAST_LONGER
+        coast = [it for it in named if (it['diag']['code'] == 'COASTING' if it.get('diag') is not None
+                                        else (it['compare']['coast_entry'] or 0.0) >= COAST_LONGER)
                  and (it['entry'] or 0.0) > coach_context.SECTION_MIN
                  and coach_context.key_corner(it['section']).get('tightness') != 'hairpin']
         if tarmac_like and coast:
             coast.sort(key=lambda it: -it['entry'])
             lost = sum(it['entry'] for it in coast)
-            longer = sum(it['compare']['coast_entry'] for it in coast)
+            longer = sum(it['diag']['m']['coast_ds'] if it.get('diag') is not None else it['compare']['coast_entry']
+                         for it in coast)
             candidates.append(Tip('coast.entry:' + stage, 'tip',
                                   'On {}, you coasted {:.1f} s longer than in {} here ({}) going into {}, '
                                   'which lost {:.1f} s before the slowest point. Go from the brake to the throttle '
                                   'without a gap.'.format(name, longer, ref_name, ref_text, _names(coast), lost),
                                   [], longer, cost=lost, count=len(coast), ref=True,
                                   place=place(stage, run, coast[0]['d'], ds=[it['d'] for it in coast])))
+            for it in coast:
+                claimed.setdefault(it['d'], set()).add('COASTING')
         return claimed
 
     def _left_foot(self, run, corners, model, techniques):
@@ -1425,17 +1540,23 @@ class Coach:
         and its surroundings are left out of every comparison. A game whose attitude signals are not
         checked (ATTITUDE_OUT) has no spin or stall; a learning run's are described, not coached."""
         attitude = self._game(run['car']) not in ATTITUDE_OUT
+        offs = []                                  # [first off, how many] where offs lie within INCIDENT_REACH of each other
+        for e in sorted((e for e in events if e['kind'] == 'off' and e['d0'] is not None), key=lambda e: e['d0']):
+            if offs and e['d0'] - offs[-1][0]['d0'] <= coach_context.INCIDENT_REACH:
+                offs[-1][1] += 1
+            else:
+                offs.append([e, 1])
+        for e, count in offs:
+            facts = self._off_facts(stage, run, e, corners)
+            notes.append(Tip('corner.off:{}:{:.0f}:{}'.format(stage, e['d0'] // coach_context.INCIDENT_REACH,
+                                                               run['id']), 'note',
+                             'On {}, off{} at {:.1f} km: the corners within {:.0f} m of it are left out of the '
+                             'comparisons.{}'.format(name, ' {} times'.format(count) if count > 1 else '',
+                                                     e['d0'] / 1000.0, coach_context.INCIDENT_REACH,
+                                                     ' ' + facts if facts else ''),
+                             place=place(stage, run, e['d0'], e['d0'], e['d1'])))
         for e in events:
-            if e['kind'] not in ('spin', 'stall', 'off') or e['d0'] is None:
-                continue
-            if e['kind'] == 'off':
-                facts = self._off_facts(stage, run, e, corners)
-                notes.append(Tip('corner.off:{}:{:.0f}:{}'.format(stage, e['d0'] // coach_context.INCIDENT_REACH,
-                                                                   run['id']), 'note',
-                                 'On {}, off at {:.1f} km: the corners within {:.0f} m of it are left out of the '
-                                 'comparisons.{}'.format(name, e['d0'] / 1000.0, coach_context.INCIDENT_REACH,
-                                                         ' ' + facts if facts else ''),
-                                 place=place(stage, run, e['d0'], e['d0'], e['d1'])))
+            if e['kind'] not in ('spin', 'stall') or e['d0'] is None:
                 continue
             reach = coach_context.SECTION_REACH
             if not attitude or (e['kind'] == 'stall' and any(
@@ -1454,18 +1575,82 @@ class Coach:
                 notes.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'note',
                                  'On {}, {}.'.format(name, what), place=place(stage, run, e['d0'], e['d0'], e['d1'])))
                 continue
-            # "Rotate less" only where the corner shows rotation: a spin, steering against the yaw, the handbrake.
-            # A stop with none of them is told neutrally (it may be a wall, a rock or a line that ran wide)
-            rotated = e['kind'] == 'spin' or (corner is not None and (
-                (corner.get('counter_steer') or 0.0) >= coach_context.COUNTER_DELTA or corner.get('handbrake')))
-            action = ('Rotate the car less on the way in (a smaller flick, a shorter handbrake pull) and get the '
-                      'throttle on sooner.' if rotated else
-                      'Look at what slowed it there, the braking point, the line or the gear, and get the '
-                      'throttle on sooner.')
-            candidates.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'tip',
-                                  'On {}, {}. {}'.format(name, what, action),
+            facts, fix = self._incident_says(stage, run, e, corner)
+            text = 'On {}, {}{}.{}'.format(name, what, ': ' + facts if facts else '', ' ' + fix if fix else '')
+            if not fix:                     # nothing the run shows to change: said, not coached
+                notes.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'note', text,
+                                 place=place(stage, run, e['d0'], e['d0'], e['d1'])))
+                continue
+            candidates.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'tip', text,
                                   [], 1.0, cost=COST_SPIN if e['kind'] == 'spin' else COST_STALL, count=1, rough=True,
                                   place=place(stage, run, e['d0'], e['d0'], e['d1'])))
+
+    def _incident_says(self, stage, run, e, corner):
+        """(what was measured, the one thing to do or None) for a spin or a near stop in `corner` (None: no
+        corner of the run near it). Measured: the heading change (a spin), how long the car was nearly stopped (a
+        stall), the speed it came in at and slowed to, the handbrake only where the corner says it was used.
+        The fix, in order: arrive at the speed of the quickest pass's corner where that was slower; catch it with
+        opposite lock where the run steered against the slide less than COUNTER_DELTA of it; a shorter handbrake
+        pull where it was measured; a near stop with no rotation: the diagnosis's fix against the quickest pass.
+        Nothing is said about the line, a flick or the handbrake that was not measured."""
+        facts = []
+        entry = corner.get('entry_speed') if corner is not None else None
+        low = corner.get('min_speed') if corner is not None else None
+        if e['kind'] == 'spin' and e.get('value'):
+            facts.append('the car turned {:.0f} degrees'.format(e['value']))
+        elif e['kind'] == 'stall' and e.get('value'):
+            facts.append('it was nearly stopped for {:.1f} s'.format(e['value']))
+        if entry is not None and low is not None:
+            facts.append('you came in at {:.0f} km/h and were down to {:.0f} km/h at the slowest point'.format(
+                entry * 3.6, low * 3.6))
+        hold = self._handbrake_s(run, corner) if corner is not None and corner.get('handbrake') else None
+        if hold:
+            facts.append('the handbrake was on for {:.1f} s'.format(hold))
+        said = ' and '.join(facts) if len(facts) < 3 else ', '.join(facts[:-1]) + ' and ' + facts[-1]
+        counter = corner.get('counter_steer') if corner is not None else None
+        rotated = e['kind'] == 'spin' or (corner is not None and (
+            (counter or 0.0) >= coach_context.COUNTER_DELTA or corner.get('handbrake')))
+        quick = self._quick_corner(stage, run, corner) if corner is not None else None
+        if entry is not None and quick is not None and quick.get('entry_speed') is not None \
+                and entry - quick['entry_speed'] >= coach_context.SPEED_DELTA:
+            return said, 'Arrive at {:.0f} km/h, as your quickest pass did (you came in at {:.0f}).'.format(
+                quick['entry_speed'] * 3.6, entry * 3.6)
+        if rotated and counter is not None and counter < coach_context.COUNTER_DELTA:
+            return said, ('Catch it with opposite lock as soon as the rear steps out (you steered against it for '
+                          '{:.0f} % of it).'.format(100.0 * counter))
+        if rotated and hold:
+            return said, 'A shorter handbrake pull: on for {:.1f} s.'.format(hold)
+        if not rotated and e['kind'] == 'stall' and corner is not None:
+            diag = self._diagnose_place(stage, run, {'d0': corner['d0'], 'd1': corner['d1'], 'split': None}, None)
+            if diag is not None and diag['fix']:
+                return said, diag['fix']
+        return said, None
+
+    def _handbrake_s(self, run, corner):
+        """Seconds the handbrake was on (past half) through a corner's yaw window, from the run's trace; None where it
+        was not on or there is no trace."""
+        loaded = self._arrays(run)
+        if loaded is None or corner.get('d0') is None:
+            return None
+        rows = loaded['rows']
+        track = coach_context.along(rows)
+        hb, t = coach_context.CH['handbrake'], coach_context.CH['t']
+        held = sum(rows[i][t] - rows[i - 1][t] for i in range(1, len(rows))
+                   if corner['d0'] <= track[i] <= corner['d1'] and rows[i][hb] is not None and rows[i][hb] > 0.5)
+        return held if held > 0.0 else None
+
+    def _quick_corner(self, stage, run, corner):
+        """The stored corner of the car's quickest pass of the stage (the coach's reference run before `run`) that is
+        the same bend as `corner` (the nearest within SECTION_REACH m), or None."""
+        reader = self.reader
+        before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
+                  if r['started'] <= run['started'] and r['run_class'] in ('clean', 'learning')]
+        ref = coach_context.reference_run(before, wet=run['wet'])
+        if ref is None:
+            return None
+        near = [k for k in reader.corners(ref['id']) if k.get('d') is not None
+                and abs(k['d'] - corner['d']) <= coach_context.SECTION_REACH]
+        return min(near, key=lambda k: abs(k['d'] - corner['d'])) if near else None
 
     def _spread(self, stage, name, run, events, sections, report, candidates, praise):
         """R7: the speed through the same section from run to run (corner.spread events). A section that
@@ -1601,7 +1786,10 @@ class Coach:
                 c = it['compare']
                 lower = coach_context.SPEED_DELTA
                 # a gain with both the slowest point and the exit slower was not made there
-                how = [] if (c['speed'] or 0.0) <= -lower and (c['exit'] or 0.0) <= -lower else _how(c)
+                if it.get('diag') is not None:
+                    how = it['diag']['facts']
+                else:
+                    how = [] if (c['speed'] or 0.0) <= -lower and (c['exit'] or 0.0) <= -lower else _how(c)
                 sentence += ' {:.1f} s of it in {}{}.'.format(-it['loss'], it['name'],
                                                               ', where you ' + _say(how) if how else '')
             praise.append(Tip('corner.best:' + stage, 'praise', sentence, [], gain, cost=gain + 1.0, count=1,
@@ -1662,11 +1850,16 @@ class Coach:
         car = reader.car_by_id(run['car']) or {}
         data = car_data.entry(car.get('key'))
         band = potential.power_band(data) if data else None
-        top = potential.top3(rows)
         layers = potential.layers(pot, None if found is None else found['possible'])
-        for rank, row in enumerate(top, 1):
-            terms = potential.critique(row, row.get('best_gear'), band)
-            said = potential.call(row, terms[0][1] if terms else None)
+        rank = 0
+        for row in potential.places(rows):
+            diag = self._diagnose_place(stage, run, row, found)
+            terms = potential.critique(row, row.get('best_gear'), band, measures=diag['m'] if diag else None)
+            said = potential.call(row, terms[0][1] if terms else None, diag)
+            if said is None:
+                continue                    # nothing to do that the run shows: the next place is the third
+            rank += 1
+            self._claimed.append((stage, run['id'], row['d0'], row['d1']))
             text = 'On {}, {}{}'.format(name, said[0].lower(), said[1:])
             evidence = ['{:.1f} s through it: the grip layer {:.1f} s{}.'.format(
                 row['time'], row['grip_s'], ', the car {:.1f} s'.format(row['car_s']) if row.get('car_s') else '')]
@@ -1680,6 +1873,8 @@ class Coach:
             self._lead.append(Tip('potential.top3:{}:{}'.format(stage, rank), 'top3', text, evidence, row['available'],
                                   cost=row['available'], count=1, rank=rank,
                                   place=place(stage, run, row['apex_d'], row['d0'], row['d1'])))
+            if rank == potential.TOP:
+                break
         before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=20, car=run['car'])
                   if r['started'] <= run['started'] and r['finished'] == 1 and r['result_time']
                   and r['run_class'] in ('clean', 'learning', 'off')]
@@ -1694,18 +1889,60 @@ class Coach:
                                       name, potential.where(row), gain), [], gain, cost=gain, count=1, delta_prev=gain,
                                   place=place(stage, run, row['apex_d'], row['d0'], row['d1'])))
 
+    def _quickest_pass(self, stage, run, split, found):
+        """The run row of the quickest pass through a split of the stage, `run` itself excluded (None where it is the
+        quickest, or there is none to compare with): the one the splits' stitch names for the split, else the car's
+        quickest finished clean run."""
+        reader = self.reader
+        who = found['best']['who'].get(split) if found is not None and split is not None else None
+        if who is None:
+            if found is not None:
+                pb = found['pb']
+            else:
+                done = [r for r in reader.stage_runs(stage, limit=60, car=run['car'], ranked=True)
+                        if r['started'] <= run['started'] and r['run_class'] == 'clean' and r['finished'] == 1
+                        and r['result_time']]
+                pb = min(done, key=lambda r: r['result_time']) if done else None
+            who = pb['id'] if pb is not None else None
+        if who is None or who == run['id']:
+            return None
+        return reader.run(who)
+
+    def _diagnose_place(self, stage, run, row, found):
+        """coach_diagnosis.diagnose_section of `run` through a top-3 place (its `d0`..`d1`) against the quickest pass
+        through it, one stretch per stored corner of that pass inside it; None where the run is the quickest, either
+        trace is gone or the pass has no corner there."""
+        quick = self._quickest_pass(stage, run, row.get('split'), found)
+        mine = self._arrays(run)
+        theirs = self._arrays(quick) if quick is not None else None
+        if mine is None or theirs is None:
+            return None
+        d0, d1 = row['d0'], row['d1']
+        stored = [k for k in self.reader.corners(quick['id']) if k.get('d') is not None]
+        corners = sorted((k for k in stored if k.get('d0') is not None and d0 <= k['d'] < d1), key=lambda k: k['d'])
+        if not corners:
+            return None
+        first = float(theirs['arr']['d'][0])
+        prev = max((k['d'] + 5.0 for k in stored if k['d'] < corners[0]['d']), default=None)     # never back into the corner before
+        lo = max(d0 - coach_context.APPROACH, first if prev is None else prev, first)
+        parts = coach_diagnosis.measures_section(mine['arr'], theirs['arr'], {
+            'a': d0, 'b': d1, 'lo': lo, 'floor': lo if prev is None else prev, 'corners': corners,
+            'game': self._game(run['car'])}, self._envelope(stage, run['car']))
+        before = max((k for k in stored if k['d'] < corners[0]['d']), key=lambda k: k['d'], default=None)
+        d = coach_diagnosis.diagnose_section(parts, None, None if before is None else coach_context.corner_name(before))
+        if d is not None and found is not None and found['best']['who'].get(row.get('split')) is not None:
+            _name_the_pass(d, 'your quickest pass')          # the comparison is the split's quickest pass, not the PB
+        return d
+
     def _potential_rows(self, pot, run, corners, found=None):
         """potential.analyse_run() of a run (stage_runs row or run row), its off ranges left out and the seconds it
         steered against the yaw in each section set; None without a trace. With `found` (the splits' stitch) the
         rows are put on the splits' sections (potential.on_splits): the names, bounds and times the splits sheet has."""
         reader = self.reader
-        trace = reader.trace(run['id'])
-        if not trace:
+        loaded = self._arrays(run)
+        if loaded is None:
             return None
-        arr = potential.arrays(coach_context.stage_rows(trace, run.get('course'), run['finished'] == 1,
-                                                        run.get('result_time')))
-        if arr is None:
-            return None
+        arr = loaded['arr']
         bad = [(e['d0'], e['d1'] if e['d1'] is not None else e['d0']) for e in reader.events(run['id'])
                if e['kind'] in ('off', 'spin', 'stall', 'hit') and e['d0'] is not None]
         rows = potential.analyse_run(pot, arr, bad)
@@ -1964,37 +2201,33 @@ def splits(reader, profile, car_id):
             'gain': None if best_time is None else best_time - found['possible'], 'runs': len(loaded) + 1,
             'splits': out,
             'sectors': _sectors(stage, run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
-                                {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded})}
+                                {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
+                                {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded},
+                                {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded})}
 
 
-def _sectors(stage, run, ref_rows, loaded, classes, starts=None):
+def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None):
     """The game's sectors of `stage` timed from the traces (`ref_rows` and `loaded`, as splits reads them), or None.
     Each sector's bounds are on the road spline; a trace's distance is driven from the run's start, which
     is the start line, so a bound is taken less it. A run is timed through a sector it covered end to end
-    (it may stop END_SLACK m short of the finish); the first sector starts with the trace. A run that did
-    not begin at the start line (`starts`: run id to where along the spline it began) is placed from where it did."""
-    placed = stage_tables.sector_bounds(stage_tables.entry(stage))
+    (it may stop END_SLACK m short of the finish: its last sector then ends at its result); the first sector
+    starts at the clock's start. A run that did
+    not begin at the start line (`starts`: run id to where along the spline it began) is placed from where it did.
+    A run on the game's own clock (`clocks`: run id to 'game') is timed by it where its distance crosses each line
+    (coach_context.sector_times), so its sectors add up to the stage time."""
+    entry = stage_tables.entry(stage)
+    placed = stage_tables.sector_bounds(entry)
     if placed is None:
         return None
     bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
 
     def times(trace, run_id=None):
         origin = (starts or {}).get(run_id)
+        if origin is None:
+            origin = stage_tables.run_origin(entry)
         shift = 0.0 if origin is None else origin - placed['start_m']
-        track = coach_context.along(trace)
-        if not track:
-            return {}
-        out = {}
-        for i, (a, b) in enumerate(bounds):
-            a, b = a - shift, b - shift
-            if b > track[-1] + coach_context.END_SLACK or a < track[0] - coach_context.END_SLACK:
-                continue
-            start = trace[0][coach_context.CH['t']] if i == 0 and a <= track[0] + coach_context.END_SLACK \
-                else coach_context.time_at(trace, track, a)
-            end = coach_context.time_at(trace, track, min(b, track[-1]))
-            if start is not None and end is not None and end > start:
-                out[i] = end - start
-        return out
+        return coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
+                                          (results or {}).get(run_id))
 
     mine = next((x for x in loaded if x['run'] == run['id']), None)
     last = times(mine['trace'], run['id']) if mine else {}
@@ -2005,7 +2238,7 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None):
         for i, t in times(x['trace'], x['run']).items():
             if i not in best or t < best[i]:
                 best[i], who[i] = t, x['run']
-    pbs = times(ref_rows['trace'])
+    pbs = times(ref_rows['trace'], ref_rows['run'])
     out = []
     for i in range(len(bounds)):
         t = last.get(i)

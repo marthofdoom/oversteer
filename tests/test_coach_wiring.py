@@ -1,6 +1,8 @@
 """The context layer wired into the drive log, the model and the detectors
 (docs/coach-techniques.md, build step 1): what a run writes, the backfill of
 runs from before, the limiter figure, the drivetrain, the ACR discipline."""
+import pytest
+
 from oversteer import coach, coach_context, drive_detect, stage_tables, telemetry_store
 from oversteer.shift_learner import CarModel, ShiftLearner
 from oversteer.telemetry import Sample
@@ -321,7 +323,7 @@ def test_an_acr_run_timed_to_the_old_line_is_timed_again_once_and_queued(tmp_pat
     repair_shipped(store)
     row = store.run(run)
     # the trace takes 0.1 s a metre
-    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and abs(row['course'] - (entry['finish_m'] - stage_tables.start_line(entry))) < 1e-6
+    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and abs(row['course'] - (entry['finish_m'] - stage_tables.run_origin(entry))) < 1e-6
     assert row['run_class'] is None and run in store.runs_to_backfill(10)
     assert store.run(other)['result_time'] == 230.0 and store.run(other)['run_class'] == 'clean'
     store.update_run(run, run_class='clean')
@@ -338,7 +340,7 @@ def test_a_run_that_crept_past_the_stop_control_is_timed_from_the_line_not_from_
     store = learner.log.store
     stage = 'acr:wales:afon-bidno-severn'
     entry = stage_tables.entry(stage)
-    start = stage_tables.start_line(entry)
+    start = stage_tables.run_origin(entry)
     d_old, d_new = entry['pacenote_last_m'] - start, entry['finish_m'] - start
     run = _timed_run(store, stage, result=230.0, course=5278.0)
     store.update_run(run, course=5600.0)
@@ -355,6 +357,46 @@ def test_a_run_that_crept_past_the_stop_control_is_timed_from_the_line_not_from_
     learner.close()
 
 
+def _consistent_run(store, stage, began, timed_at, end_speed=0.0, extra=200.0):
+    """A finished run that began `began` m along the road, timed at the line `timed_at` (its result is the trace's
+    time there): 10 m/s to 150 m short of the line, 30 m/s from there, a trace `extra` m past the line."""
+    t, rows, d = 0.0, [], 0
+    for d in range(0, int(timed_at - began + extra) + 1):
+        rows.append(tuple(t if name == 't' else float(d) if name == 'distance' else end_speed if name == 'speed' else 0.0
+                          for name in TRACE_CHANNELS))
+        t += 1.0 / (10.0 if d < timed_at - began - 150.0 else 30.0)
+    result = rows[int(timed_at - began)][TRACE_CHANNELS.index('t')]
+    run = _timed_run(store, stage, result=result, course=timed_at - began + extra, end_speed=end_speed)
+    store.db.execute('DELETE FROM traces WHERE run = ?', (run,))
+    store.add_trace(run, rows)
+    return run, result, rows
+
+
+def test_a_run_with_no_recorded_start_is_anchored_on_its_own_trace(tmp_path):
+    """Steigenbach run 16: nothing says where it began, so the time it was given at the old line tells (the trace's
+    distance then), and the flying finish is that run's own, not the measured origin's."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:alsace:steigenbach'
+    entry = stage_tables.entry(stage)
+    began = stage_tables.run_origin(entry) + 12.0                      # 12 m further along than the table's origin
+    run, result, rows = _consistent_run(store, stage, began, entry['pacenote_last_m'])
+    assert store.run_start(run) is None
+    assert retime_finishes(store) == 1
+    row = store.run(run)
+    new = rows[int(entry['finish_m'] - began)][TRACE_CHANNELS.index('t')] + (entry['finish_m'] - began) % 1.0 / 30.0
+    assert abs(row['result_time'] - new) < 0.02                                      # not the origin's 0.4 s off
+    assert abs(row['course'] - (entry['finish_m'] - began)) < 0.3
+    assert abs(store.run_start(run) - began) < 0.2                                    # recorded for the sectors
+    # a trace that says the run began far from the line is not believed: the stage's origin is used
+    odd, _, _ = _consistent_run(store, stage, began + 300.0, entry['pacenote_last_m'], extra=600.0)
+    assert retime_finishes(store) == 1
+    assert store.run_start(odd) is None
+    assert abs(store.run(odd)['course'] - (entry['finish_m'] - stage_tables.run_origin(entry))) < 1e-6
+    learner.close()
+
+
 def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_path):
     from oversteer.drive_log import retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))
@@ -365,7 +407,7 @@ def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_p
     store.set_run_finish(run, flying + 50.0)               # timed at a line 50 m on from the table's now
     assert retime_finishes(store) == 1
     row = store.run(run)
-    assert abs(row['result_time'] - 195.0) < 0.01 and abs(row['course'] - (flying - stage_tables.start_line(stage_tables.entry(stage)))) < 1e-6   # 0.1 s a metre
+    assert abs(row['result_time'] - 195.0) < 0.01 and abs(row['course'] - (flying - stage_tables.run_origin(stage_tables.entry(stage)))) < 1e-6   # 0.1 s a metre
     assert row['run_class'] is None and retime_finishes(store) == 0       # once, and queued for the backfill
     far = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
     store.set_run_finish(far, flying - 100.0)              # the line is on from the trace's end: left as it was
@@ -403,6 +445,7 @@ def _clock_run(store, stage, stop_m, result=200.0, course=5500.0):
     return run
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_finish_is_learnt_from_where_the_games_clock_stopped(tmp_path):
     learner = ShiftLearner(str(tmp_path / 't.db'))
     store = learner.log.store
@@ -423,6 +466,7 @@ def test_a_finish_is_learnt_from_where_the_games_clock_stopped(tmp_path):
     again.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_learnt_finish_beats_the_shipped_one_and_the_shipped_one_the_last_note(tmp_path):
     afon = 'acr:wales:afon-bidno-severn'
     shipped = stage_tables.entry(afon)['finish_m']
@@ -436,6 +480,7 @@ def test_a_learnt_finish_beats_the_shipped_one_and_the_shipped_one_the_last_note
     assert stage_tables.entry(afon)['finish_m'] == shipped
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_runs_timed_to_the_stop_control_move_to_the_learnt_finish(tmp_path):
     from oversteer.drive_log import retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))
@@ -453,6 +498,7 @@ def test_runs_timed_to_the_stop_control_move_to_the_learnt_finish(tmp_path):
     learner.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_trace_that_ends_a_row_short_of_the_old_line_is_still_re_timed(tmp_path):
     """A 10 Hz trace stops a row before the run's finish (ACR's old line: 3 m at 30 m/s): the time at the old line is
     taken a little past the last row, not 'out of range'."""
@@ -500,6 +546,93 @@ def test_once_a_stage_and_car_have_a_clock_run_only_clock_runs_rank(tmp_path):
     learner.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
+def test_a_stage_whose_lines_changed_since_the_last_start_is_worked_over_again(tmp_path):
+    """The start line, the finish and the road length of a stage are fingerprinted per stage; where they differ from
+    what the last start saw (a shipped table with other lines), every finished run of the stage (the game-clock
+    ones too) is queued for the backfill and the stage's potentials are dropped to be built again."""
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    other = 'acr:alsace:steigenbach'
+    run = _timed_run(store, stage, result=196.0, course=5056.0, end_speed=40.0)
+    clock = _timed_run(store, stage, result=195.0, course=5056.0, end_speed=40.0)
+    store.set_run_clock(clock, 'game')
+    elsewhere = _timed_run(store, other, result=196.0, course=5056.0, end_speed=40.0)
+    car = store.run(run)['car']
+    pot = {'runs': 4, 'ds': 2.0, 'pb_s': 100.0, 'user_s': 99.0, 'grip_s': 90.0, 'car_s': 85.0, 'sections': [],
+           'profile': {}}
+    for key in (stage, other):
+        store.save_potential(key, car, 'v1', 12.0, pot)
+    repair_shipped(store)                                    # nothing was fingerprinted yet: every stage is new
+    assert all(store.run(r)['run_class'] is None for r in (run, clock, elsewhere))
+    assert store.potential(stage, car) is None and store.potential(other, car) is None
+    for r in (run, clock, elsewhere):
+        store.update_run(r, run_class='clean')
+    store.save_potential(stage, car, 'v1', 12.0, pot)
+    repair_shipped(store)                                    # the same lines: left alone
+    assert all(store.run(r)['run_class'] == 'clean' for r in (run, clock, elsewhere))
+    assert store.potential(stage, car) is not None
+    stage_tables.set_learnt({stage: {'finish_m': stage_tables.entry(stage)['finish_m'] + 6.7, 'finish_runs': 3,
+                                     'finish_spread_m': 0.5}})
+    try:
+        repair_shipped(store)                                # the finish moved on one stage only
+        assert store.run(run)['run_class'] is None and store.run(clock)['run_class'] is None
+        assert store.run(elsewhere)['run_class'] == 'clean'
+        assert store.potential(stage, car) is None
+    finally:
+        stage_tables.set_learnt({})
+    learner.close()
+
+
+@pytest.mark.usefixtures('without_real_lines')
+def test_a_run_marked_as_not_re_timable_is_tried_again_when_its_stages_lines_change(tmp_path):
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    run = _timed_run(store, stage, course=100.0)                  # too short to re-time: marked, kept as it was
+    repair_shipped(store)
+    assert store.finish_unknown(run)
+    rows = [tuple(i / 10.0 if name == 't' else float(i) if name == 'distance' else 0.0 for name in TRACE_CHANNELS)
+            for i in range(0, 5400)]                              # the trace turns out to span the lines (a later import)
+    store.db.execute('DELETE FROM traces WHERE run = ?', (run,))
+    store.add_trace(run, rows)
+    store.update_run(run, course=5278.0)
+    repair_shipped(store)                                         # the same lines: not tried again
+    assert store.finish_unknown(run)
+    stage_tables.set_learnt({stage: {'finish_m': entry['finish_m'] - 30.0, 'finish_runs': 3, 'finish_spread_m': 0.5}})
+    try:
+        repair_shipped(store)                                     # the lines changed: tried once more
+    finally:
+        stage_tables.set_learnt({})
+    assert not store.finish_unknown(run) and store.run(run)['course'] < 5278.0 - 100.0
+    learner.close()
+
+
+def test_a_run_that_ends_at_speed_is_not_given_a_newer_finish_than_the_line_it_was_timed_at(tmp_path):
+    """It ends at speed, so it was timed at the flying finish of its day: that line, where the table's is well away
+    from the trace's end, is the line recorded (the old code recorded the table's), and the run is moved to the table's
+    finish from it."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    origin = stage_tables.run_origin(entry)
+    flying = entry['finish_m']
+    on_time = _timed_run(store, stage, result=196.0, course=flying - origin, end_speed=40.0)
+    older = _timed_run(store, stage, result=202.0, course=flying - origin + 60.0, end_speed=40.0)     # timed 60 m on
+    assert retime_finishes(store) == 1
+    assert dict(store.db.execute('SELECT run, finish_m FROM run_finish').fetchall()) == {on_time: flying, older: flying}
+    row = store.run(older)
+    assert abs(row['course'] - (flying - origin)) < 1e-6 and abs(row['result_time'] - 196.0) < 0.1       # moved to the finish
+    assert store.run(on_time)['result_time'] == 196.0 and store.run(on_time)['run_class'] == 'clean'
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))
@@ -527,6 +660,7 @@ def test_a_run_that_ends_at_speed_was_timed_at_the_flying_finish_already(tmp_pat
 
 # -- DBs recorded between the game-clock commit and the run_stop commit: a clock run with no recorded stop --
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_game_clock_runs_with_no_recorded_stop_teach_the_finish_and_are_re_classed(tmp_path):
     from oversteer.drive_log import repair_shipped
     learner = ShiftLearner(str(tmp_path / 't.db'))
@@ -582,6 +716,7 @@ def test_a_run_that_cannot_be_re_timed_keeps_a_class_that_is_still_to_be_worked_
 
 
 def test_runs_a_v2_database_marked_unknown_for_want_of_a_course_are_re_timed(tmp_path):
+    from oversteer import drive_log
     from oversteer.drive_log import repair_shipped
     learner = ShiftLearner(str(tmp_path / 't.db'))
     store = learner.log.store
@@ -592,6 +727,7 @@ def test_runs_a_v2_database_marked_unknown_for_want_of_a_course_are_re_timed(tmp
     other = _timed_run(store, stage, course=100.0)                   # a real failure: course known
     store.set_run_finish(other, None)
     store.update_run(other, run_class='partial')
+    store.set_stage_fingerprint(stage, drive_log._lines_fingerprint(stage_tables.entry(stage)))      # the lines are as seen
     repair_shipped(store)
     assert store.run(run)['result_time'] < 230.0 and store.run(run)['run_class'] is None
     assert store.finish_unknown(other) and store.run(other)['run_class'] == 'partial'

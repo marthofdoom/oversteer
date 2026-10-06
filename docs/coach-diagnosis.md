@@ -1,6 +1,7 @@
 # Corner diagnosis: from "what differed" to "what to do"
 
-Status: design, validated on marth's runs; not implemented in the app. The prototype is `research/diagnosis/`.
+Status: implemented (`oversteer/coach_diagnosis.py`, wired in `coach._stage_place` and `coach._potential_lead`); validated on marth's runs.
+The prototype is `research/diagnosis/`; its validation on the app's module gives the same distribution as section 6.
 Branch point: master at v0.15.0 (a48ff6f).
 
 ## 1. The bug, and what it shows
@@ -110,7 +111,7 @@ section's loss is said; the stretch's decides). Thresholds in section 5.
 | 0 | SAME | \|loss\| < 0.1 s | none | - |
 | 0 | GAIN | loss ≤ -0.1 s | praise, the measures that were better: carried N more, braked N later (with no lower minimum), left N faster, throttle N sooner | high if any |
 | 1 | SLOW-ARRIVAL | `pre_dv` ≤ -5 and ≥ 60 % of the loss before the slowest point | "The time here was lost before the braking: look at the exit of the corner before." | medium |
-| 2 | OVERSHOT | in faster (`turnin_dv` ≥ +3, or braked ≥ 10 m later and `arrive_dv` ≥ +3) and (lower minimum, lower exit or apex ≥ 15 m later) and (grip ≥ 0.92, or counter-steer +0.15, or apex ≥ 15 m later) | braked later: "Brake N m earlier, where your best run did, and turn in at its speed." else "Get the speed off before the turn-in: arrive N km/h slower, as your best run did." | high with ≥ 3 conditions and loss ≥ 0.2 s; medium 2; low 1 |
+| 2 | OVERSHOT | in faster (`turnin_dv` ≥ +3, or braked ≥ 10 m later and `arrive_dv` ≥ +3) and (lower minimum, lower exit or apex ≥ 15 m later) and (grip ≥ 0.92, or counter-steer +0.15, or apex ≥ 15 m later with grip < 0.85 not left over, i.e. grip ≥ 0.85) | braked later: "Brake N m earlier, where your best run did, and turn in at its speed." else "Get the speed off before the turn-in: arrive N km/h slower, as your best run did." | high with ≥ 3 conditions and loss ≥ 0.2 s; medium 2; low 1 |
 | 3 | SLIDE | counter-steer +0.15 over R and (lower minimum or lower exit) | "Keep the car straighter through it, as your best run did." (fact: the shares) | medium (low under 0.2 s) |
 | 4 | LOST-SPEED | lower minimum, no braking, grip < 0.30 at the slowest point | none (a lift, a bump, a moment or a hit: the trace cannot tell them apart) | low |
 | 5 | **OVER-SLOWED** | lower minimum (≤ -3), braking point not earlier (> -10 m), grip < 0.85 (or no envelope and more taken off), and more speed taken off (`shed_dv` ≥ +3 or `drop` ≥ +3) or no braking at all | how: no brake → "Lift less"; R did not brake → "Brake less there, or not at all, as your best run did"; released ≥ 10 m later → "Keep that braking point and come off the brake N m sooner"; peak ≥ 10 points harder → "…and brake less hard (X % pedal, your best run Y %)"; else "…and brake less". Then ": carry N km/h more through the slowest point. About P % of the grip was left there." (P only when grip ≥ 0.30) | as OVERSHOT |
@@ -134,7 +135,7 @@ The sentence states only the facts that support the diagnosis, in the order a dr
 | Code | Facts (keys of `_facts`) |
 |---|---|
 | OVER-SLOWED | braking point, speed taken off on the brake (against R's), slowest-point speed, grip used |
-| OVERSHOT | braking point, turn-in speed, slowest-point speed, apex shift, counter-steer |
+| OVERSHOT | braking point, turn-in speed, slowest-point speed, apex shift, counter-steer (only where the run steered against the slide more than the reference) |
 | EARLY-BRAKE | braking point, turn-in speed, speed taken off, slowest-point speed |
 | SLOW-ARRIVAL | speed before the braking, slowest-point speed |
 | SLIDE | counter-steer share against R's, slowest-point speed, exit speed |

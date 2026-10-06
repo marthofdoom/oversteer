@@ -179,31 +179,43 @@ def test_what_improved_is_the_place_that_closed_most_on_the_potential():
 
 
 def test_the_calls_are_in_the_coachs_words():
-    corner = row(1.5, 13, apex_d=1300.0, grip_used=0.49)
+    corner = row(1.5, 13, apex_d=1300.0, grip_used=0.49, braked=True, apex_kmh=70.0, exit_throttle=0.6)
     assert potential.call(corner) == ('The 3 right at 1.3 km: you use 49 % of the grip; about 1.5 s is there. '
                                       'Get to full throttle sooner after the apex.')
-    assert potential.call(row(1.4, 1, cause='entry', grip_used=0.79, grade='4', dir='left', apex_d=2100.0)) == (
-        'The 4 left at 2.1 km: you use 79 % of the grip; about 1.4 s is there. '
-        'Brake later and carry the speed to the turn-in.')
+    assert potential.call(row(1.4, 1, cause='entry', grip_used=0.79, grade='4', dir='left', apex_d=2100.0,
+                              braked=True, brake_early=22.0)) == (
+        'The 4 left at 2.1 km: you use 79 % of the grip; about 1.4 s is there. Brake later and carry more speed to the turn-in: the grip layer starts braking 22 m after you.')
     # at a kink in a fast section the grip is not quoted, at the limit it is "all"
-    assert 'of the grip' not in potential.call(row(0.8, 1, grip_used=0.08))
-    assert 'you use all of the grip' in potential.call(row(0.8, 1, grip_used=1.1))
+    assert 'of the grip' not in potential.call(row(0.8, 1, grip_used=0.08, exit_throttle=0.5))
+    assert 'you use all of the grip' in potential.call(row(0.8, 1, grip_used=1.1, exit_throttle=0.5))
     # a long bend is a bend: where the time is, no grip figure
-    bend = row(1.3, 1, grade='6', radius_m=145.0, apex_d=4200.0, dir='left')
-    assert potential.call(bend) == 'The 6 left at 4.2 km: about 1.3 s is there, mostly on the exit: full throttle sooner and longer.'
-    assert potential.call(dict(bend, cause='entry')).endswith('mostly into the bend: brake later.')
-    apex = potential.call(row(0.9, 1, cause='apex', apex_kmh=75.0, apex_kmh_pot=96.0))
-    assert 'The grip allows about 96 km/h at the apex, you took 75.' in apex
+    bend = row(1.3, 1, grade='6', radius_m=145.0, apex_d=4200.0, dir='left', apex_kmh=70.0, exit_throttle=0.5)
+    assert potential.call(bend) == ('The 6 left at 4.2 km: about 1.3 s is there, mostly on the exit. '
+                                    'Get to full throttle sooner after the apex.')
+    # the apex alone is no fix: a place with nothing the trace shows is not a call
+    assert potential.call(row(0.9, 1, cause='apex', apex_kmh=75.0, apex_kmh_pot=96.0, grip_used=0.95, exit_throttle=1.0)) is None
+    apex = potential.call(row(0.9, 1, cause='apex', apex_kmh=75.0, apex_kmh_pot=96.0, braked=False))
+    assert apex.endswith('Lift less: carry 21 km/h more to the apex (the grip allows 96, you took 75).')
+
+
+def test_places_are_every_candidate_biggest_first_and_top3_the_first_three():
+    rows = [row(2.0, 0), row(0.4, 1), row(1.5, 2), row(1.1, 3), row(0.9, 4), row(0.1, 5)]
+    assert [r['available'] for r in potential.places(rows)] == [1.5, 1.1, 0.9, 0.4]
+    assert potential.top3(rows) == potential.places(rows)[:3]
 
 
 def test_the_corner_critique_names_only_what_the_pass_shows_and_costs_enough():
     s = row(1.0, 1, gear=[2, 3], exit_rpm=6000.0, exit_throttle=1.0)
-    terms = potential.critique(s, 3, None)
-    assert len(terms) == 1 and terms[0][0] == pytest.approx(0.17)
+    # the gear term needs the pass measured against the quickest one: the time lost after the slowest point, another gear out
+    lost = {'t_exit': 0.3, 'gear_exit_x': 2, 'gear_exit_r': 3}
+    terms = potential.critique(s, 3, None, measures=lost)
+    assert len(terms) == 1 and terms[0][0] == pytest.approx(0.3)
     assert 'in 2nd at the apex where your fastest pass was in 3rd' in terms[0][1]
-    # the same gear, or a longer one (0.11 s: under the bar): nothing
-    assert potential.critique(row(1.0, 1, gear=[3, 3]), 3, None) == []
-    assert potential.critique(row(1.0, 1, gear=[4, 4]), 3, None) == []
+    assert potential.critique(s, 3, None) == []                       # not measured: the car's average cost is not this pass's
+    assert potential.critique(s, 3, None, measures=dict(lost, t_exit=0.1)) == []
+    # the same gear, or a longer one: nothing
+    assert potential.critique(row(1.0, 1, gear=[3, 3]), 3, None, measures=lost) == []
+    assert potential.critique(row(1.0, 1, gear=[4, 4]), 3, None, measures=lost) == []
     # revs under the band on the exit with the throttle down
     low = row(1.0, 1, gear=[3, 3], exit_rpm=3000.0, exit_throttle=0.95)
     assert 'under the power band on the exit (3000 rpm, it starts at 4000)' in potential.critique(low, 3, (4000, 6500))[0][1]
@@ -286,6 +298,16 @@ def test_a_real_acr_run_through_the_whole_path(tmp_path):
         assert name in by_name and by_name[name]['available'] is not None
         assert float(t.text.split('about ')[1].split(' s')[0]) == pytest.approx(by_name[name]['available'], abs=0.06)
     assert coach._clock(found['possible']) in top[0].evidence[-1]
+    # every place has one thing to do (never the apex sentence alone), the quickest pass is called that, and the
+    # section tips inside a top-3 place are the place's: one fix, said once
+    assert all('The grip allows' not in t.text.split(' is there')[1] for t in top)
+    assert not any('your best run' in t.text for t in top)
+    every = coach.Coach(reader).tips(profile, car, show_all=True)
+    inside = [(t.place['d0'], t.place['d1']) for t in top]
+    assert not [t for t in every if t.id.startswith('corner.section') and any(a <= t.place['d'] < b for a, b in inside)]
+    # and nothing is said about the line, a flick or the handbrake: none of it is measured in this run
+    import re
+    assert not [t.text for t in every if re.search(r'\bline\b|flick|handbrake', t.text)]
     latest = reader.run(max(r['id'] for r in reader.stage_runs('acr:greece:elatia', car=car)))
     assert run_analysis.stage_potential(reader, latest)['user'] == pytest.approx(found['possible'])
     # recomputing with the same runs changes nothing (the version holds), and a forced one gives the same numbers
