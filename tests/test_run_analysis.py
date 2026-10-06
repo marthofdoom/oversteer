@@ -79,7 +79,7 @@ def test_the_sections_agree_with_the_splits(runs):
     # the slow corner is where the time went
     worst = ra.loss_rows(found['sections'])[0]
     assert worst['loss'] > 0.5 and worst['d0'] < 600.0 < worst['d1'] and ra.biggest_loss(found['sections']) == worst['i']
-    assert worst['dmin'] is not None and worst['dbrake'] is not None
+    assert worst['dmin'] is not None and worst['dbrake'] is None            # the PB did not brake there: no column
 
 
 def test_a_first_run_has_no_comparison_and_its_own_sections(tmp_path):
@@ -288,3 +288,25 @@ def test_the_start_label_stays_on_the_map_when_the_road_starts_at_its_right_edge
     said.clear()
     surface_of(lambda cr: plot.stage_map(cr, 300, 200, data, 0.0), 300, 200)
     assert next(c for c in said if c[0] == 'START')[2:] == (True, 'left')
+
+
+def test_the_brake_column_is_where_the_pedal_went_down_against_the_comparison(tmp_path):
+    """dbrake is measured on the road by the diagnosis (coach_diagnosis.measures_section over the comparison's
+    spans): positive earlier, negative later, None where either run did not brake there. The stored corners'
+    apex-relative brake distance (which moves with the slowest point) is not it."""
+    h = Stage(tmp_path / 'telemetry.db')
+    tail = [(700.0, 25.0), (LENGTH, 25.0)]
+    h.drive(reference_corners(), trace=stage([(0.0, 25.0), (470.0, 25.0), (600.0, 12.0)] + tail),
+            result_time=90.0, course=LENGTH)
+    # braked 30 m later, harder, to the same slowest point; the stored corner says it braked 75 m before it
+    later = h.drive(corners_with(second={'brake_d': 75.0}),
+                    trace=stage([(0.0, 25.0), (500.0, 25.0), (600.0, 12.0)] + tail), result_time=90.0, course=LENGTH)
+    found = ra.analysis(h.store, later, 'pb')
+    row = [s for s in found['sections'] if s['d0'] < 600.0 < s['d1']][0]
+    assert row['dbrake'] == pytest.approx(-30.0, abs=3.0)
+    assert all(s.get('dbrake') is None for s in found['sections'] if not s['d0'] < 600.0 < s['d1'])
+    assert 'brake' not in row                                         # the apex-relative number is gone
+    # a run that did not brake there has no brake column against one that did
+    coast = h.drive(corners_with(), trace=stage([(0.0, 25.0), (600.0, 20.0)] + tail), result_time=90.0, course=LENGTH)
+    row = [s for s in ra.analysis(h.store, coast, 'pb')['sections'] if s['d0'] < 600.0 < s['d1']][0]
+    assert row.get('dbrake') is None

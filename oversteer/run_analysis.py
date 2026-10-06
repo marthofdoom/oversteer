@@ -15,7 +15,9 @@ import threading
 import time
 from collections import OrderedDict
 
-from . import coach, coach_context as cc, potential, stage_tables
+import numpy as np
+
+from . import coach, coach_context as cc, coach_diagnosis, potential, stage_tables
 from .telemetry_formats import plan_xy
 
 SLACK = 5.0                      # m a run may stop short of the grid's end, or start past its start, and still be drawn there
@@ -345,6 +347,36 @@ def _sector_rows(stage, mine, other, reader=None, runs=(None, None)):
     return out if any(r['time'] is not None for r in out) else None
 
 
+def _brake_deltas(reader, run, rows, other, other_rows, other_corners, report, pot):
+    """{section index of `run` (its stored sections): metres its braking began earlier than the comparison's
+    (negative: later)} on the road, as the coach's diagnosis measures it (coach._diagnose): this run against the
+    comparison over the comparison's own spans, the first corner of the section that either braked for. Left out
+    where either run did not brake there or a trace is too short."""
+    if not report or not other or not other_rows:
+        return {}
+    mine, theirs = potential.arrays(rows), potential.arrays(other_rows)
+    if mine is None or theirs is None:
+        return {}
+    spans = {g['id']: (g, a, b, lo, floor) for g, a, b, lo, floor in cc.spans(
+        {'trace': other_rows, 'corners': other_corners, 'course': other.get('course')})}
+    prof = pot['profile'] if pot else None
+    env = {'bins': np.asarray(prof['env_bins'], dtype=float), 'lat': np.asarray(prof['env_lat'], dtype=float)} \
+        if prof and prof.get('env_bins') and prof.get('env_lat') else None
+    car = reader.car_by_id(run['car']) if run['car'] is not None else None
+    out = {}
+    for i, item in enumerate(report):
+        span = spans.get((item['ref'] or {}).get('id'))
+        if span is None:
+            continue
+        g, a, b, lo, floor = span
+        parts = coach_diagnosis.measures_section(mine, theirs, {
+            'a': a, 'b': b, 'lo': lo, 'floor': floor, 'corners': g['corners'], 'game': (car or {}).get('game')}, env)
+        found = [m['onset_dd'] for _, m in parts if m['onset_dd'] is not None]
+        if found:
+            out[i] = -found[0]
+    return out
+
+
 def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot=None):
     """The coach's sections for the run: against `other` where there is one (its times, loss, min, exit and
     brake against it), on the grid of `grid_run` (the PB run's grid, the splits' sections) where there is one,
@@ -366,9 +398,10 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
         return []
     matches = cc.match_sections(mine, grid) if mine else {}
     report = cc.section_report(corners, other_corners) if other_corners and mine else None
+    braked = _brake_deltas(reader, run, rows, other, other_rows, other_corners, report, pot)
     by_grid = {}
     for i, j in matches.items():
-        by_grid[j] = (mine[i], report[i] if report else None)
+        by_grid[j] = (mine[i], report[i] if report else None, braked.get(i))
     other_track = cc.along(other_rows) if other_rows else None
     offs = set()
     for i, s in enumerate(mine):
@@ -384,7 +417,7 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
         if other_rows:
             oa, ob = cc.elapsed_at(other_rows, a, other_track), cc.elapsed_at(other_rows, b, other_track)
             ref_time = ob - oa if oa is not None and ob is not None else None
-        mine_section, item = by_grid.get(j, (None, None))
+        mine_section, item, dbrake = by_grid.get(j, (None, None, None))
         row = {'i': j, 'name': cc.section_name(s), 'short': _short(s), 'd0': a, 'd1': b, 'apex': s['apex'],
                'time': time_, 'ref_time': ref_time,
                'loss': None if time_ is None or ref_time is None else time_ - ref_time,
@@ -399,12 +432,11 @@ def _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run,
             ends = mine_section['corners'][-1]
             row['min'] = None if key.get('min_speed') is None else key['min_speed'] * 3.6
             row['exit'] = None if ends.get('exit_speed') is None else ends['exit_speed'] * 3.6
-            row['brake'] = mine_section['corners'][0].get('brake_d')
         if item is not None and item['compare'] is not None:
             c = item['compare']
             row['dmin'] = None if c['speed'] is None else c['speed'] * 3.6
             row['dexit'] = None if c['exit'] is None else c['exit'] * 3.6
-            row['dbrake'] = c['brake']
+            row['dbrake'] = dbrake
             row['pattern'] = item['pattern']
         out.append(row)
     return out
