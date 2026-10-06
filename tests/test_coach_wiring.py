@@ -357,6 +357,46 @@ def test_a_run_that_crept_past_the_stop_control_is_timed_from_the_line_not_from_
     learner.close()
 
 
+def _consistent_run(store, stage, began, timed_at, end_speed=0.0, extra=200.0):
+    """A finished run that began `began` m along the road, timed at the line `timed_at` (its result is the trace's
+    time there): 10 m/s to 150 m short of the line, 30 m/s from there, a trace `extra` m past the line."""
+    t, rows, d = 0.0, [], 0
+    for d in range(0, int(timed_at - began + extra) + 1):
+        rows.append(tuple(t if name == 't' else float(d) if name == 'distance' else end_speed if name == 'speed' else 0.0
+                          for name in TRACE_CHANNELS))
+        t += 1.0 / (10.0 if d < timed_at - began - 150.0 else 30.0)
+    result = rows[int(timed_at - began)][TRACE_CHANNELS.index('t')]
+    run = _timed_run(store, stage, result=result, course=timed_at - began + extra, end_speed=end_speed)
+    store.db.execute('DELETE FROM traces WHERE run = ?', (run,))
+    store.add_trace(run, rows)
+    return run, result, rows
+
+
+def test_a_run_with_no_recorded_start_is_anchored_on_its_own_trace(tmp_path):
+    """Steigenbach run 16: nothing says where it began, so the time it was given at the old line tells (the trace's
+    distance then), and the flying finish is that run's own, not the measured origin's."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:alsace:steigenbach'
+    entry = stage_tables.entry(stage)
+    began = stage_tables.run_origin(entry) + 12.0                      # 12 m further along than the table's origin
+    run, result, rows = _consistent_run(store, stage, began, entry['pacenote_last_m'])
+    assert store.run_start(run) is None
+    assert retime_finishes(store) == 1
+    row = store.run(run)
+    new = rows[int(entry['finish_m'] - began)][TRACE_CHANNELS.index('t')] + (entry['finish_m'] - began) % 1.0 / 30.0
+    assert abs(row['result_time'] - new) < 0.02                                      # not the origin's 0.4 s off
+    assert abs(row['course'] - (entry['finish_m'] - began)) < 0.3
+    assert abs(store.run_start(run) - began) < 0.2                                    # recorded for the sectors
+    # a trace that says the run began far from the line is not believed: the stage's origin is used
+    odd, _, _ = _consistent_run(store, stage, began + 300.0, entry['pacenote_last_m'], extra=600.0)
+    assert retime_finishes(store) == 1
+    assert store.run_start(odd) is None
+    assert abs(store.run(odd)['course'] - (entry['finish_m'] - stage_tables.run_origin(entry))) < 1e-6
+    learner.close()
+
+
 def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_path):
     from oversteer.drive_log import retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))

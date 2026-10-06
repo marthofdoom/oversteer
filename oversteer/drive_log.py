@@ -1131,6 +1131,33 @@ def _trace_t_at(trace, value, tail=0.0):
     return None
 
 
+def _trace_d_at(trace, t):
+    """The trace's driven distance at time `t` (linear between rows), or None when the trace does not span it."""
+    previous = None
+    for row in trace:
+        if previous is not None and previous[T['t']] <= t <= row[T['t']]:
+            t0, d0 = previous[T['t']], previous[T['distance']]
+            return d0 if row[T['t']] <= t0 else d0 + (row[T['distance']] - d0) * (t - t0) / (row[T['t']] - t0)
+        previous = row
+    return None
+
+
+def _own_origin(trace, result, line, entry):
+    """Where along the road a run began, read from its own trace: the run was timed at `line` (the road position
+    of the finish its `result` was taken at), so it began that far before it as the trace had driven when the
+    result's time was up. Accepted within START_LINE_PAST of the stage's start line (the car stands a few metres
+    short of it, or has rolled a little past), else None: a trace that says otherwise is not about this stage's
+    start."""
+    start = stage_tables.start_line(entry)
+    if not trace or result is None or start is None or not line:
+        return None
+    d = _trace_d_at(trace, trace[0][T['t']] + result)
+    if d is None:
+        return None
+    origin = line - d
+    return origin if abs(origin - start) <= stage_tables.START_LINE_PAST else None
+
+
 def _trace_speed_at(trace, value):
     """The speed of the last trace row at or before driven distance `value`."""
     speed = None
@@ -1210,11 +1237,22 @@ def retime_finishes(store):
                 continue
             # The trace's distance is measured from where the run began; the course is where the car finally
             # stopped, seconds after the stop control: the lines are anchored on the road, not on the course
-            start = _run_start_m(store, run, entry)
+            # A run with no recorded start is anchored on its own trace (_own_origin), not on where the stage's
+            # runs mostly begin: a few metres there are seconds at 30 m/s over the flying finish
+            start, own = store.run_start(run), False
+            if start is None:
+                start = _own_origin(trace, result, old, entry)
+                own = start is not None
+            if start is None:
+                start = _run_start_m(store, run, entry)
             d_old = min(course, old - start) if start is not None and course is not None else None
             new = flying - start if d_old is not None else None
             t_old = _trace_t_at(trace, d_old, TRACE_TAIL) if trace and new is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
+            if own and t_new is not None:
+                result_new = t_new - trace[0][T['t']]            # the trace's own time at the flying finish
+            else:
+                result_new = None if t_new is None or result is None else result - (t_old - t_new)
             if t_new is None or result is None or t_old - t_new >= result:
                 logging.warning("drive log: run %s cannot be re-timed to the flying finish (no trace or out of range)",
                                 run)
@@ -1224,7 +1262,9 @@ def retime_finishes(store):
                 if store.run(run)['run_class'] is not None:      # one still to be worked out is said by _work_over
                     store.update_run(run, run_class='partial')
                 continue
-            store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
+            if own:
+                store.set_run_start(run, start)
+            store.update_run(run, result_time=result_new, course=new, run_class=None)
             store.set_run_finish(run, flying)
             done += 1
         except Exception:
@@ -1238,7 +1278,13 @@ def retime_finishes(store):
             continue
         try:
             trace = store.trace(run)
-            start = _run_start_m(store, run, stage_tables.entry(stage) or {})
+            entry = stage_tables.entry(stage) or {}
+            start, own = store.run_start(run), False
+            if start is None:
+                start = _own_origin(trace, result, recorded, entry)
+                own = start is not None
+            if start is None:
+                start = _run_start_m(store, run, entry)
             d_old = min(course, recorded - start) if start is not None else None
             new = flying - start if d_old is not None else None
             t_old = _trace_t_at(trace, d_old, TRACE_TAIL) if trace and d_old is not None else None
@@ -1247,7 +1293,10 @@ def retime_finishes(store):
                 logging.warning("drive log: run %s cannot be moved from finish %.1f to %.1f (trace out of range)",
                                 run, recorded, flying)
                 continue
-            store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
+            if own:
+                store.set_run_start(run, start)
+            store.update_run(run, result_time=t_new - trace[0][T['t']] if own else result - (t_old - t_new),
+                             course=new, run_class=None)
             store.set_run_finish(run, flying)
             done += 1
         except Exception:
