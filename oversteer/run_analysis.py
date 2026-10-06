@@ -112,9 +112,10 @@ def pb_run(reader, run, before=None):
 
 
 def previous_run(reader, run, before=None):
-    """The run before `run` on the stage that finished, or None."""
+    """The run before `run` on the stage that finished (not a partial one: its time holds the slow-down to the
+    stop control), or None."""
     before = _before(reader, run) if before is None else before
-    return next((r for r in before if r['finished'] == 1 and r['result_time']), None)
+    return next((r for r in before if r['finished'] == 1 and r['result_time'] and r['run_class'] != 'partial'), None)
 
 
 def candidates(reader, run):

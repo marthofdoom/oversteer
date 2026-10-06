@@ -103,6 +103,13 @@ def test_previous_is_the_run_before_and_any_run_can_be_picked(runs):
     assert [r['pb'] for r in ra.recent_runs(h.store, h.car)] == [False, False, True]
 
 
+def test_a_partial_run_is_not_the_previous_run(runs):
+    """A partial run's time holds the slow-down to the stop control: not a time to compare with."""
+    h, first, second, third = runs
+    h.store.update_run(second, run_class='partial')
+    assert ra.previous_run(h.store, h.store.run(third))['id'] == first
+
+
 def test_the_position_comes_through_when_the_run_has_one(tmp_path):
     h = Stage(tmp_path / 't.db')
     drive(h, positions=True)
