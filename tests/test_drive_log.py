@@ -719,3 +719,25 @@ def test_a_lap_of_a_multi_lap_race_is_not_the_runs_end_whatever_the_game(tmp_pat
     assert run is not None
     feed_course(learner, samples[420:])                       # 80 s past the first lap's end
     assert learner.runs.run == run
+
+
+def test_history_changed_is_said_after_the_commit_not_before(tmp_path):
+    """A reader that sees the stamp move must find the run in the file."""
+    for threaded in (False, True):
+        learner = ShiftLearner(str(tmp_path / 'telemetry{}.db'.format(threaded)), threaded=threaded)
+        log, seen = learner.log, []
+        learner.history_changed = 0
+        def work():
+            log.after_commit(lambda: seen.append(log.store.db.in_transaction))
+            return True
+        log.post(work)
+        assert log.sync() and seen == [False]
+        learner.close()
+    # and a run's end bumps the stamp only once the run is written
+    learner = ShiftLearner(str(tmp_path / 'run.db'))
+    states = []
+    bump = learner.runs._history_changed
+    learner.runs._history_changed = lambda: (states.append(learner.log.store.db.in_transaction), bump())
+    feed_course(learner, course_samples(Course(STAGE)))
+    learner.save()
+    assert states and not any(states) and learner.history_changed >= 1

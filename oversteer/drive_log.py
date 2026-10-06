@@ -46,6 +46,7 @@ class DriveLog:
         self.ticks = []
         self.batch = 0
         self.on_rollback = []
+        self._after_commit = []                          # callbacks for after the next commit (the thread's own)
         self._queue = queue.Queue(maxsize=QUEUE_SIZE)
         self._thread = None
         self._commit_at = time.monotonic()
@@ -60,6 +61,7 @@ class DriveLog:
         if self._thread is None:
             self._handle(fn, args)
             self.store.commit()
+            self._run_after_commit()
             return True
         try:
             self._queue.put_nowait((fn, args))
@@ -75,6 +77,7 @@ class DriveLog:
         if self._thread is None:
             result = fn(*args)
             self.store.commit()
+            self._run_after_commit()
             return result
         done = threading.Event()
         box = []
@@ -96,6 +99,7 @@ class DriveLog:
         """Wait until everything posted so far is written and committed."""
         if self._thread is None:
             self.store.commit()
+            self._run_after_commit()
             return True
         return self.call(lambda: True, timeout=timeout) is True
 
@@ -114,6 +118,20 @@ class DriveLog:
                 logging.warning("drive log: still writing at exit")
                 return
         self.store.commit()
+        self._run_after_commit()
+
+    def _run_after_commit(self):
+        done, self._after_commit = self._after_commit, []
+        for fn in done:
+            try:
+                fn()
+            except Exception:
+                logging.exception("drive log after commit")
+
+    def after_commit(self, fn):
+        """Call `fn` once the writes so far are committed (from the drive-log thread: what a reader of the
+        file is told about must be in it already). Dropped if the commit fails."""
+        self._after_commit.append(fn)
 
     def _handle(self, fn, args):
         self.store.begin()
@@ -148,7 +166,9 @@ class DriveLog:
     def _commit(self):
         try:
             self.store.commit()
+            self._run_after_commit()
         except Exception as e:
+            self._after_commit = []
             logging.warning("drive log: can't write the telemetry database: %s", e)
             try:
                 self.store.rollback()
@@ -728,8 +748,13 @@ class RunTracker:
             store.set_run_finish(run, flying)            # timed at the flying finish: never re-timed
         store.add_trace(run, trace)
         self._work_over(run, summary, trace, fields)
-        self.learner.history_changed += 1                # the coach's tips for this run are there to read
+        # The coach's tips for this run are there to read: said once they are committed, as a reader that
+        # looks at the stamp reads the file
+        self.learner.log.after_commit(self._history_changed)
         return True
+
+    def _history_changed(self):
+        self.learner.history_changed += 1
 
     def _work_over(self, run, summary, trace, verdicts, started=None, backfill=False):
         """What the run says about the driver (coach_context, coach.py): its
