@@ -512,6 +512,19 @@ def test_a_run_stores_where_along_the_spline_it_began(tmp_path):
     assert reader.run_start(run['id']) == mid[0][1].lap_distance
 
 
+def test_an_acr_run_that_began_mid_stage_is_not_finished_at_the_flying_finish(tmp_path):
+    """A restart after a silence (or the second half of a run split by one) starts anywhere on the stage:
+    crossing the finish from there is not the stage's time."""
+    mid = acr_drive(0.0, 3000.0, 5530.0)
+    learner, reader, session = drive_runs(tmp_path, mid)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] != 1 and run['result_time'] is None
+    # a run that began at the line still is
+    learner, reader, session = drive_runs(tmp_path, acr_drive(0.0, 238.0, 5530.0), name='line.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+
+
 def test_acr_stages_of_one_name_told_apart_by_the_start():
     from oversteer import stage_tables
     # "Alsace For_t" is Foret de Munster (first note 3811.6) or de Saverne

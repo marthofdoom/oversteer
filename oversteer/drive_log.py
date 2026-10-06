@@ -190,6 +190,7 @@ FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the f
 FINISH_STILL = 2.0               # s the car stands (under MOVING) after the finish: the run is over
 FINISH_GRACE = 15.0              # s after the finish at most
 FINISH_ROLLOUT = 400.0           # m driven past the finish at most (ACR: the stop control is ~230 m on)
+START_LINE_PAST = 30.0           # m: an ACR run that began further along the road than this past the stage's start line did not start the stage
 FINISH_GRACE_PROGRESS = 60.0     # s: where the finish is progress >= FINISHED, the last of the stage is still to drive
 # Their progress is the position around the lap, near 1 at the end of every
 # lap: a circuit session is not ended there
@@ -226,6 +227,7 @@ class RunTracker:
 
     def _reset(self):
         self.run = None
+        self._from_line = True                       # ACR: the run began at the stage's start line, not mid-stage
         self._finish_line = None                     # ACR: the flying finish (else the last pace note) along the spline
         self._start_d = self._acr_start = None
         self._last_t = None
@@ -445,6 +447,7 @@ class RunTracker:
         # The start tells two stages of one name apart only from standing:
         # a run split mid-stage starts anywhere.
         self._finish_line = None
+        self._from_line = True
         self._start_d = sample.lap_distance
         self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
@@ -534,12 +537,16 @@ class RunTracker:
             stage = stage_tables.acr_stage(sample.track, self._acr_start, sample.stage_length)
             # The flying finish where known, else the last pace note (the stop control, past it)
             self._finish_line = (stage or {}).get('finish_m') or (stage or {}).get('pacenote_last_m') or False
+            line = stage_tables.start_line(stage)
+            # A run that began mid-stage (a restart after a silence, the second half of a run split by one) that
+            # crosses the finish did not run the stage: its time is not the stage's
+            self._from_line = line is None or self._start_d is None or self._start_d <= line + START_LINE_PAST
             surface = stage_tables.surface_of(stage)[0] if stage else None
             if surface is not None and self.learner.run_surface.get(self.run) is None:
                 self.learner.run_surface[self.run] = surface       # the learner's best points are per surface
         if self._finish_line and self._finished is None and sample.lap_distance is not None \
                 and sample.lap_distance >= self._finish_line \
-                and (self._start_d is None or self._start_d < self._finish_line):
+                and self._from_line and (self._start_d is None or self._start_d < self._finish_line):
             # The run's own clock: ACR's stage clock isn't in what the bridge reads
             self._finished, self._result_time = 1, self._duration
             self._finish_d = d
@@ -761,10 +768,15 @@ class RunTracker:
                                                                limit=coach_context.LAUNCH_HISTORY + 1)
                        if m['run'] != run][:coach_context.LAUNCH_HISTORY]
         stage_row = store.stage(stage) if stage else None
+        stage_length, road = (stage_row or {}).get('length'), None
+        if stage and stage.startswith('acr:'):
+            # ACR sends the length of its spline, which is longer than the road a run drives
+            road = stage_tables.road_length(stage_tables.entry(stage))
+            stage_length = road or (stage_tables.entry(stage) or {}).get('length_m')
         analysis = coach_context.analyse(summary, rows, corners, shifts, context, started=started,
                                          reference=reference, history=history or (), others=others,
                                          last_started=last_started,
-                                         stage_length=(stage_row or {}).get('length'))
+                                         stage_length=stage_length, road=bool(road))
         if not backfill:
             with learner.lock:
                 learner.session_held_time += coach_context.held_seconds(analysis['episodes'])

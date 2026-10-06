@@ -176,6 +176,7 @@ def acr_stage(track, start=None, length=None):
 # are driven against sectors that add up to 5100 (the published 4800 is not the
 # road): the sectors are taken as the road from the start line to the finish,
 # scaled to it. 24 of 46 rows' sectors do not add up to their length: those are left out.
+ROAD_BEFORE_NOTE = 25.0          # m the start line is before the first pace note, as far as the road length goes (start_line)
 START_BEFORE_FIRST_NOTE = 35.0   # m the start line is before the first pace note (25 on Afon Bidno and Elatia, 38-47 elsewhere)
 SECTOR_SCALE = (0.9, 1.1)        # the sectors' sum against the road from the start line to the finish
 SECTOR_SUM_TOLERANCE = 0.03      # the sectors' sum against the stage's length where there is no finish line
@@ -219,6 +220,29 @@ def sector_bounds(entry):
         bounds.append((at, at + v * 1000.0 * scale))
         at = bounds[-1][1]
     return {'start_m': start, 'bounds': bounds, 'confidence': confidence, 'source': source}
+
+
+def start_line(entry):
+    """Where an ACR stage's start line is along the road spline: measured (`start_m`), else the first pace
+    note less ROAD_BEFORE_NOTE, else None."""
+    if not entry:
+        return None
+    if entry.get('start_m') is not None:
+        return entry['start_m']
+    if entry.get('pacenote_first_m') is not None:
+        return entry['pacenote_first_m'] - ROAD_BEFORE_NOTE
+    return None
+
+
+def road_length(entry):
+    """The road a run drives on an ACR stage, from the start line to the finish (the flying finish, else the
+    last pace note), or None where either end is not known. The `length` the game sends is the length of its
+    spline, which is longer than the road."""
+    if not entry:
+        return None
+    start = start_line(entry)
+    end = entry.get('finish_m') or entry.get('pacenote_last_m')
+    return end - start if start is not None and end is not None and end > start else None
 
 
 def entry(key):

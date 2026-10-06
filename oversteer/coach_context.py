@@ -350,7 +350,7 @@ def mark_off(corners, events):
             k['off'] = 1
 
 
-def run_class(finished, course, stage_length, events, started=None, last_started=None):
+def run_class(finished, course, stage_length, events, started=None, last_started=None, road=False):
     """The class of a run (runs.run_class):
     - `restart`: not finished (or ended with no finish known, short of
       FINISH_SHARE of a known stage), and under half the stage;
@@ -360,7 +360,9 @@ def run_class(finished, course, stage_length, events, started=None, last_started
       None) or the first after AWAY;
     - `clean`: everything else.
     Without a stage length an unfinished run shorter than NO_LENGTH_RESTART
-    m is a restart."""
+    m is a restart. With `road` (the stage length is the road a run drives, ACR's
+    from the start line to the finish) a run that finished short of FINISH_SHARE
+    of it did not run the stage (it began mid-stage): `partial`, never clean."""
     if finished is None and stage_length and (course or 0.0) < FINISH_SHARE * stage_length:
         finished = 0                    # ended in silence well short of the line
     if finished == 0:
@@ -384,6 +386,8 @@ def _grid_time(r):
 
 
 def reference_run(candidates, result_time=None, wet=None):
+    if finished == 1 and road and stage_length and (course or 0.0) < FINISH_SHARE * stage_length:
+        return 'partial'
     """The fastest finished run among `candidates` (Store.stage_runs rows
     of the same car and stage, class clean or learning; by stage time less the
     first section's, _grid_time) with the same
@@ -1365,7 +1369,7 @@ def _episode_for(episodes, gear, t):
 
 
 def analyse(summary, rows, corners, shifts, context, started=None, reference=None, history=(), others=(),
-            last_started=None, stage_length=None):
+            last_started=None, stage_length=None, road=False):
     """Everything the context layer says about a run, for the metrics and
     for the database: the caller (drive_log._write_end, the backfill) has
     cut `rows` to the stage (stage_rows) and found `corners`
@@ -1396,11 +1400,12 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
              and s['t'] is not None]
     describe_corners(rows, corners, sections, downs)
     length = stage_length or summary.get('stage_length')
-    unfinished = summary.get('finished') == 0 or (
-        summary.get('finished') is None and bool(length) and (course or 0.0) < FINISH_SHARE * length)
+    short = bool(length) and (course or 0.0) < FINISH_SHARE * length
+    unfinished = summary.get('finished') == 0 or (summary.get('finished') is None and short) or (
+        summary.get('finished') == 1 and road and short)
     events = incidents(rows, corners, course, unfinished, summary.get('game'))
     mark_off(corners, events)
-    klass = run_class(summary.get('finished'), course, length, events, started, last_started)
+    klass = run_class(summary.get('finished'), course, length, events, started, last_started, road)
     top = summary.get('gears') or context.get('shipped_top') or context.get('top_gear')
     episodes = limiter_episodes(rows, context.get('limiter'), top, corners, slip)
     launch = launch_outcome(summary, rows, slip, history, context.get('limiter'), context.get('surface'))

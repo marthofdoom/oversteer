@@ -157,6 +157,11 @@ def test_run_class():
     assert cc.run_class(1, 5000.0, 5000.0, [], started=1000.0 + 8 * 86400, last_started=1000.0) == 'learning'
     assert cc.run_class(1, 5000.0, 5000.0, [], started=1000.0 + 86400, last_started=1000.0) == 'clean'
     assert cc.run_class(None, 5000.0, None, []) == 'clean'                      # no stage: nothing to compare with
+    # a finished run short of the road (ACR: it began mid-stage) did not run the stage
+    assert cc.run_class(1, 2300.0, 5049.0, [], started=1000.0, last_started=900.0, road=True) == 'partial'
+    assert cc.run_class(1, 2300.0, 5049.0, [], started=1000.0, last_started=None, road=True) == 'partial'
+    assert cc.run_class(1, 5030.0, 5049.0, [], started=1000.0, last_started=900.0, road=True) == 'clean'
+    assert cc.run_class(1, 2300.0, 5049.0, [], started=1000.0, last_started=900.0) == 'clean'   # no road known
 
 
 def test_the_reference_is_the_fastest_finished_run_in_the_same_conditions():
