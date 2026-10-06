@@ -157,7 +157,19 @@ class Sample:
       compression positive), susp_vel, susp_norm (0..1 of travel).
     - Surface hints: puddle, rumble (per wheel), surface_rumble.
     - Structure: lap, laps, lap_distance, distance (m), progress (0..1),
-      stage_time (s), race_position."""
+      stage_time (s), race_position.
+    - What an engineer reads, each None where the game does not send it
+      (per wheel FL, FR, RL, RR): tyre_load (N), tyre_fx and tyre_fy (N, car
+      frame: forward, left), wheel_slip (the game's own unit), combined_slip,
+      tyre_radius (m), tyre_temp (C), tyre_wear (0..1 worn), tyre_pressure
+      (kPa), brake_temp (C), susp_max (m of travel), hub_pos and hub_vel
+      (EA WRC, per wheel), ride_height (front, rear; m), ang_vel (roll,
+      pitch, yaw rad/s in the car frame: yaw confirmed on ACR, the others
+      follow the axes and wait for a capture), attitude (yaw, pitch, roll),
+      surface_grip, brake_bias (front share), session (the game's session
+      type), fuel, torque (Nm), transmission_speed, engine_temp, oil_temp,
+      oil_pressure, lap_time, best_lap, last_lap (s), driving_line and
+      ai_brake_diff (Forza, -1..1), cylinders."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -165,7 +177,12 @@ class Sample:
                  'handbrake', 'steer', 'pos', 'vel', 'accel', 'accel_kind', 'yaw_rate', 'forward', 'up',
                  'wheel_speed', 'wheel_rot', 'slip_ratio', 'slip_kind', 'slip_angle', 'susp', 'susp_vel',
                  'susp_norm', 'puddle', 'rumble', 'surface_rumble', 'lap', 'laps', 'lap_distance', 'distance',
-                 'progress', 'stage_time', 'race_position', 'game_shift_rpm', 'boost')
+                 'progress', 'stage_time', 'race_position', 'game_shift_rpm', 'boost',
+                 'tyre_load', 'tyre_fx', 'tyre_fy', 'wheel_slip', 'combined_slip', 'tyre_radius', 'tyre_temp', 'tyre_wear',
+                 'tyre_pressure', 'brake_temp', 'susp_max', 'hub_pos', 'hub_vel', 'ride_height', 'ang_vel', 'attitude',
+                 'surface_grip', 'brake_bias', 'session', 'fuel', 'torque', 'transmission_speed', 'engine_temp',
+                 'oil_temp', 'oil_pressure', 'lap_time', 'best_lap', 'last_lap', 'driving_line', 'ai_brake_diff',
+                 'cylinders')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -181,6 +198,13 @@ class Sample:
         self.susp = self.susp_vel = self.susp_norm = self.puddle = self.rumble = self.surface_rumble = None
         self.lap = self.laps = self.lap_distance = self.distance = self.progress = None
         self.stage_time = self.race_position = self.game_shift_rpm = self.boost = None
+        self.tyre_load = self.tyre_fx = self.tyre_fy = self.wheel_slip = self.combined_slip = None
+        self.tyre_radius = self.tyre_temp = self.tyre_wear = self.tyre_pressure = self.brake_temp = None
+        self.susp_max = self.hub_pos = self.hub_vel = self.ride_height = self.ang_vel = self.attitude = None
+        self.surface_grip = self.brake_bias = self.session = self.fuel = self.torque = None
+        self.transmission_speed = self.engine_temp = self.oil_temp = self.oil_pressure = None
+        self.lap_time = self.best_lap = self.last_lap = self.driving_line = self.ai_brake_diff = None
+        self.cylinders = None
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -251,6 +275,35 @@ def _to_car(world, forward, left, up):
     if world is None or forward is None or left is None or up is None:
         return None
     return (_dot(world, forward), _dot(world, left), _dot(world, up))
+
+
+def plan_xyz(game, pos):
+    """A world position as (east, height, north) for the maps: the one place
+    that knows each game's axes, so every map (the run view, the live
+    minimap, the coach's) is drawn the same way. ACR's world is left-handed
+    with y up: the plan is (x, -z), or the map comes out mirrored (on marth's
+    v4 captures the heading rate of (x, -z) correlates +0.63 with the yaw
+    rate, left positive; (x, z) -0.63). WRC Generations has z up: (x, y).
+    Other games: (x, z) with y up, as before (unchecked). None for no position."""
+    if pos is None:
+        return None
+    x, y, z = pos
+    if game == 'acr':
+        return (x, y, -z)
+    if game == 'wrcg':
+        return (x, z, y)
+    return (x, y, z)
+
+
+def plan_xy(game, pos):
+    """(east, north) of a world position on the map, or None (plan_xyz)."""
+    p = plan_xyz(game, pos)
+    return None if p is None else (p[0], p[2])
+
+
+def _positive(values):
+    """A tuple of floats when every one is finite and above 0 (a field the game leaves empty reads 0), else None."""
+    return tuple(values) if all(math.isfinite(v) and v > 0 for v in values) else None
 
 
 def _ascii(raw):
@@ -328,10 +381,13 @@ def _ovst3(sample, v):
             sample.accel_kind = 'kinematic'
         sample.vel = _vector((local_vel[2], local_vel[0], local_vel[1]))
         sample.yaw_rate = _finite(ang[1])
+        sample.ang_vel = _vector((ang[2], ang[0], ang[1]))      # roll, pitch, yaw: only yaw's sign is confirmed
     at = 3 + 2 + 9                                   # past game, flags2, reserved, clutch/steer, three vectors
     slip, rot, travel = v[at:at + 4], v[at + 4:at + 8], v[at + 8:at + 12]
+    load = v[at + 12:at + 16]
     at += 16                                         # and the wheel loads
-    radius, travel_max = v[at + 2:at + 6], v[at + 6:at + 10]
+    ride, radius, travel_max = v[at:at + 2], v[at + 2:at + 6], v[at + 6:at + 10]
+    fx, fy = v[at + 10:at + 14], v[at + 14:at + 18]
     at += 10 + 8                                     # past ride height, radius, max travel, fx, fy
     current_max_rpm, track_length, spline_pos, distance, grip, bias, laps, session = v[at:at + 8]
     world = v[at + 8:at + 11]
@@ -357,6 +413,18 @@ def _ovst3(sample, v):
         sample.lap_distance = sample.progress * sample.stage_length
     sample.laps = laps if laps >= 0 else None
     sample.pos = _vector(world)
+    # In the packet, all of them: the wheels' slip (the game's unit), the
+    # loads (N) and tyre forces (N; car frame, fx forward and fy left:
+    # their sums are m x a, r 0.97 to 0.99), and what ACR leaves empty
+    sample.wheel_slip = _vector(slip)
+    sample.tyre_load, sample.tyre_fx, sample.tyre_fy = _vector(load), _vector(fx), _vector(fy)
+    sample.ride_height = _positive(ride)
+    sample.tyre_radius = _positive(radius)
+    sample.susp_max = _positive(travel_max)
+    sample.surface_grip = grip if math.isfinite(grip) and grip > 0 else None
+    sample.brake_bias = bias if math.isfinite(bias) and 0 < bias < 1 else None
+    if game in ('ac', 'acc'):
+        sample.session = session                     # ACR leaves it 0
 
 
 FORZA_DRIVETRAINS = {0: 'fwd', 1: 'rwd', 2: 'awd'}
@@ -377,9 +445,11 @@ def _forza(data, n):
         sample.running = False
         return sample
     ordinal, car_class, pi, drivetrain = struct.unpack_from('<iiii', data, 212)
+    cylinders = struct.unpack_from('<i', data, 228)[0]
     sample = Sample(max(0.0, rpm), max_rpm, car='{}/{}'.format(game, ordinal),
                     car_name='Forza car {}'.format(ordinal), game=game)
     sample.running = True
+    sample.cylinders = cylinders if 0 < cylinders < 32 else None
     sample.game_time = timestamp / 1000.0
     sample.idle_rpm = _finite(idle_rpm)
     sample.drivetrain = FORZA_DRIVETRAINS.get(drivetrain)
@@ -390,6 +460,9 @@ def _forza(data, n):
     sample.vel = _vector((vz, -vx, vy))
     # Left-handed axes: a positive turn about y is to the right (verify: a left turn must give yaw_rate > 0)
     sample.yaw_rate = _finite(-wy)
+    sample.ang_vel = _vector((-wz, wx, -wy))               # roll, pitch, yaw: the same turn of axes (verify the signs)
+    sample.attitude = _vector(struct.unpack_from('<3f', data, 56))      # yaw, pitch, roll
+    sample.combined_slip = _vector(struct.unpack_from('<4f', data, 180))
     sample.susp_norm = _vector(struct.unpack_from('<4f', data, 68))
     sample.slip_ratio = _vector(struct.unpack_from('<4f', data, 84))
     sample.slip_kind = 'normalised'
@@ -414,6 +487,13 @@ def _forza(data, n):
     race_time, lap, position = struct.unpack_from('<fHB', data, base + 64)
     accel, brake, clutch, handbrake, gear, steer = struct.unpack_from('<BBBBBb', data, base + 71)
     sample.speed, sample.power = _finite(speed), _finite(power)
+    sample.torque = _finite(struct.unpack_from('<f', data, base + 20)[0])
+    temps = struct.unpack_from('<4f', data, base + 24)
+    sample.tyre_temp = _vector(tuple((t - 32.0) / 1.8 for t in temps))    # sent in Fahrenheit (verify)
+    sample.fuel = _finite(struct.unpack_from('<f', data, base + 44)[0])
+    sample.best_lap, sample.last_lap, sample.lap_time = (_finite(t) for t in struct.unpack_from('<3f', data, base + 52))
+    line, ai = struct.unpack_from('<2b', data, base + 77)
+    sample.driving_line, sample.ai_brake_diff = line / 127.0, ai / 127.0
     sample.pos = _vector((px, py, pz))
     sample.boost, sample.distance, sample.stage_time = _finite(boost), _finite(distance), _finite(race_time)
     sample.lap, sample.race_position = lap, position
@@ -423,6 +503,7 @@ def _forza(data, n):
     # 0 is reverse and 11 neutral (an H-pattern box shows it between gears)
     sample.gear = gear if 1 <= gear <= 10 else {0: -1, 11: 0}.get(gear)
     if n == 331:
+        sample.tyre_wear = _vector(struct.unpack_from('<4f', data, base + 79))
         sample.stage = 'fm:{}'.format(struct.unpack_from('<i', data, 327)[0])
     return sample
 
@@ -449,6 +530,9 @@ def _outgauge(data, n):
                     game='beamng' if beamng else 'lfs')
     sample.game_time = struct.unpack_from('<I', data, 0)[0] / 1000.0
     sample.boost = _finite(boost)
+    eng_temp, fuel, oil_pressure, oil_temp = struct.unpack_from('<4f', data, 24)
+    sample.engine_temp, sample.fuel = _finite(eng_temp), _finite(fuel)           # C; fuel 0..1
+    sample.oil_pressure, sample.oil_temp = _finite(oil_pressure), _finite(oil_temp)   # bar, C
     return sample
 
 
@@ -520,6 +604,16 @@ def _codemasters(data, n):
         sample.susp_vel = _vector((fl / 1000.0, fr / 1000.0, rl / 1000.0, rr / 1000.0))
     rl, rr, fl, fr = floats[25:29]
     sample.wheel_speed = _vector((fl, fr, rl, rr))                         # m/s (verify sign in reverse)
+    if len(floats) > 54:
+        # Brake temperatures, rear first, C (51 to 54: 20 to 668 on marth's WRCG captures)
+        rl, rr, fl, fr = floats[51:55]
+        sample.brake_temp = _vector((fl, fr, rl, rr))
+    if game == 'dirt' and len(floats) > 58:
+        # As the DiRT Rally 2.0 documentation has them (WRCG sends 1.0 and 0 there: unused)
+        rl, rr, fl, fr = floats[55:59]
+        sample.tyre_pressure = _vector((fl * 6.894757, fr * 6.894757, rl * 6.894757, rr * 6.894757))   # psi
+        fuel, capacity = floats[45], floats[46]
+        sample.fuel = fuel / capacity if math.isfinite(fuel) and math.isfinite(capacity) and capacity > 0 else None
     # DiRT's is negative left (verify). WRCG's is positive left: it
     # correlates with the heading rate (left positive) at r 0.2 to 0.5
     sample.steer = _finite(floats[30] if game == 'wrcg' else -floats[30])
@@ -608,6 +702,14 @@ def _eawrc(data, n):
     sample.accel_kind = 'kinematic'                                  # verify on a capture
     bl, br, fl, fr = (values['vehicle_cp_forward_speed_' + w] for w in EAWRC_WHEELS)
     sample.wheel_speed = _vector((fl, fr, bl, br))
+
+    def wheels(name):
+        bl, br, fl, fr = (values['vehicle_{}_{}'.format(name, w)] for w in EAWRC_WHEELS)
+        return _vector((fl, fr, bl, br))
+
+    sample.brake_temp = wheels('brake_temperature')
+    sample.hub_pos, sample.hub_vel = wheels('hub_position'), wheels('hub_velocity')
+    sample.transmission_speed = _finite(values['vehicle_transmission_speed'])
     if 'vehicle_id' in values:
         sample.car = 'eawrc/{}'.format(values['vehicle_id'])
         sample.car_name = 'EA WRC car {}'.format(values['vehicle_id'])
