@@ -369,10 +369,10 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
             player = 0;
         if (player >= 0)
             rd_floats(graph, graph_size, GRAPH_ACC_COORDS + 12 * player, pkt->world_pos, 3);
+        else
+            rd_floats(NULL, 0, 0, pkt->world_pos, 3);
         /* An entry left at the origin (loading, a reset) is no position */
         if (pkt->world_pos[0] == 0.0f && pkt->world_pos[1] == 0.0f && pkt->world_pos[2] == 0.0f)
-            rd_floats(NULL, 0, 0, pkt->world_pos, 3);
-        else
             rd_floats(NULL, 0, 0, pkt->world_pos, 3);
         rd_floats(graph, graph_size, GRAPH_ACC_GRIP, &pkt->surface_grip, 1);
     }
