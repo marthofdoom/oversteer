@@ -7,32 +7,52 @@
   together, measured on the same metres of road as your best run, and says one
   thing to do. Over-slowing is now called as such ("Brake less there, or not at
   all, as your best run did: carry 24 km/h more through the slowest point. About
-  26 % of the grip was left there."), and so are a slow run-up (the time was
-  lost before the braking: look at the corner before), a slide, a braking point
-  that was too early, a braking after the slowest point, a late throttle,
-  coasting and a gear. A corner it cannot explain says what it measured and
-  leaves it there.
+  26 % of the grip was left there."), and so are a slow run-up ("Leave the 4 left
+  at 1.7 km 15 km/h faster: you were 15 km/h slower before braking here"), a
+  slide, a braking point that was too early, a braking after the slowest point, a
+  late throttle, coasting and a gear. A later slowest point with grip to spare is
+  not an overshoot.
+- Every tip has one thing to do. A corner or a section the numbers cannot give a
+  fix for says what it measured and leaves it there, as a note, not a tip. The
+  top 3 places say the cause and the fix in one sentence ("the 2 right at 4.1 km:
+  about 2.1 s is there, mostly into the bend. Brake 45 m later, where your quickest
+  pass did"); a place with nothing to do that the run shows is skipped for the next,
+  and a section tip inside a top 3 place is left to it, so the same fix is not said
+  twice.
 - The old braking advice is gone. "Brake 41 m earlier" came from measuring
   each run's braking back from its own slowest point, so a slowest point that
   moved read as a braking point that moved; the braking point is now where the
-  brake went down on the road. The top 3 places say "brake later" or "full
-  throttle sooner" only where your own braking or throttle there agrees, and a
-  gear shorter than your fastest pass is quoted only when it cost time on the
-  exit of that place. Nothing is said about the line, a flick or the handbrake
-  unless it was measured.
+  brake went down on the road, and the Brake column of the Run view is measured
+  the same way. The top 3 places say "brake N m later", "brake or lift less to
+  carry N km/h more to the apex" or "full throttle sooner" only where your own
+  braking, speed or throttle there agrees, and a gear shorter than your fastest
+  pass is quoted only when it cost time on the exit of that place.
+- A spin or a near stop says what was measured (the heading, the speeds in and at
+  the slowest point) and one fix the numbers point at: arrive at the speed your
+  quickest pass came in at, catch it with opposite lock sooner (where you steered
+  against it for little of it), or a shorter handbrake pull (where the handbrake
+  was measured). Nothing is said about the line, a flick or the handbrake unless it
+  was measured.
 
 ### Assetto Corsa Rally
 - **The stages' real start, split and finish lines**, read from the game's
   level data, for all 46 stages (`sector_lines_m` in the stage table). The
-  sector times (S1..) are now exact where the run is on the game's stage clock:
-  the clock interpolated where the car's distance along the road crosses each
-  line, so the sectors add up to the stage time. They no longer show the
-  approximate mark. Runs without the game's clock are timed by their own trace
-  at the same lines. The live view's sector delta uses the lines too.
+  sector times (S1..) now add up to the stage time on every clock: the first
+  starts at the clock's start and the last ends at the result, with the time
+  taken where the car's distance along the road crosses each line (on the game's
+  clock, to within a few hundredths of a second). They no longer show the
+  approximate mark. The live view's sector delta uses the lines too, placed from
+  where the reference run began.
 - Three cut stages (Hafren Forest, Zeli Reverse, Aghii Theodori Reverse) had
   their start line placed 51 to 274 m too early; it is now the game's.
 - Afon Bidno's finish line is corrected (5294.1 m, was an estimate of 5287.4);
   runs timed at the old line are moved to it.
+- A run that did not record where it began is timed to the flying finish from its
+  own trace, not from where the stage's runs mostly begin (Steigenbach: 299.435 s,
+  not 299.717 s). The first start of this version works every stage's finished
+  runs over again on the new lines (a background job, as after an update), and
+  tries once more the runs that could not be re-timed before; a stage is worked
+  over again whenever its start line, finish or road length changes.
 
 ## 0.15.0 — 2026-10-06
 
