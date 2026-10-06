@@ -469,9 +469,11 @@ class RunTracker:
     def _d(self, sample):
         """Where along the run the car is: the game's stage distance where
         it sends one (the same stretch of road gets the same d in every
-        run), else the distance driven."""
+        run), else the distance driven (a circuit's lap distance wraps at
+        the line)."""
         game = sample.distance if sample.distance is not None else (
-            sample.lap_distance if not (sample.laps and sample.laps > 1) else None)
+            sample.lap_distance if not (sample.laps and sample.laps > 1) and sample.game not in LAP_SPLINE_GAMES
+            else None)
         if game is None:
             return self._distance
         if self._d0_game is None:
@@ -527,7 +529,9 @@ class RunTracker:
         if lap is not None:
             self._last_lap = lap
         if sample.progress is not None:
-            if self._finished is None and sample.progress >= FINISHED and (self._progress or 0.0) < FINISHED:
+            # (a circuit's progress is the lap's: near 1 at the end of every lap, not the end of the run)
+            if self._finished is None and sample.progress >= FINISHED and (self._progress or 0.0) < FINISHED \
+                    and sample.game not in LAP_SPLINE_GAMES:
                 self._finished, self._result_time = 1, sample.stage_time
                 self._finish_d = d
                 self._finish_counts = True

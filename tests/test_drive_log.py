@@ -656,3 +656,29 @@ def test_a_circuit_lap_in_acc_does_not_end_the_run(tmp_path):
     assert run is not None
     feed_course(learner, samples[420:])
     assert learner.runs.run == run                       # 80 s on, the later laps are the same run
+
+
+def test_a_circuit_lap_is_not_a_finish_and_its_wrapping_distance_is_not_the_runs(tmp_path):
+    """AC and ACC send the position around the lap: progress near 1 and the lap distance back to 0 at the line,
+    every lap. The first lap's end is not the finish of the run, and the trace's distance goes on."""
+    from oversteer.telemetry import Sample
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples, t = [], 0.0
+    for lap in range(3):
+        for i in range(400):
+            s = Sample(6000.0, 7500.0, gear=3, speed=40.0, car='acc/test', game='acc', throttle=0.8)
+            s.track, s.stage_length = 'monza', 1600.0
+            s.progress = i / 399.0
+            s.lap_distance = s.progress * 1600.0
+            samples.append((t, s, 0.8))
+            t += 0.1
+    feed_course(learner, samples[:420])                  # past the end of the first lap
+    assert learner.runs.run is not None and learner.runs._finished is None
+    feed_course(learner, samples[420:])
+    learner.save()
+    reader = learner._reader()
+    history = reader.history('_no_profile', 'acc/test')
+    [run] = [r for r in reader.session(history[0]['id'])['runs'] if r['distance'] > 300]
+    assert run['finished'] != 1
+    distance = [row[1] for row in reader.trace(run['id'])]
+    assert all(b >= a for a, b in zip(distance, distance[1:])) and distance[-1] > 4000.0
