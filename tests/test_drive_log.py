@@ -924,3 +924,17 @@ def test_run_clock():
     own.tick(None, 0.1)
     own.tick(None, 0.2)
     assert abs(own.t - 0.3) < 1e-9
+
+
+def test_a_stage_that_ends_by_its_clock_stopping_finishes_the_live_run(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    from tests.test_store import _tables
+    length = Course(STAGE).length
+    monkeypatch.setattr(stage_tables, '_tables', _tables('wrcg', {'location': 'Rally Sweden', 'stage': 'Vargasen',
+                                                                  'length_m': length + 20.0, 'surface': 'snow'}))
+    course = Course(STAGE + [('straight', 300)])
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    samples = wrcg_samples(course, length)
+    feed_course(learner, samples[:int(len(samples) * 0.97)])
+    final = learner.live_run.read(0)['final']
+    assert final is not None and final['time'] > 100.0

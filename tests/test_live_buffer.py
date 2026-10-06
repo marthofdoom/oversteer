@@ -130,7 +130,72 @@ def test_a_reference_arriving_part_way_does_not_time_that_split():
     body = buffer.read(0, now=end)
     assert body['delta'] == pytest.approx(0.0, abs=1e-6)
     assert body['split']['index'] == 2 and body['split']['delta'] == pytest.approx(0.0, abs=1e-6)
-    assert body['split']['prev'] is None                   # B was joined part way
+    assert body['split']['prev']['index'] == 1             # B is timed: the rows before the reference came are replayed
+    assert body['split']['prev']['delta'] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_a_reference_arriving_after_the_ring_wrapped_does_not_time_the_split_it_joins():
+    buffer = LiveBuffer()
+    buffer.start_run(1, 1000.0)
+    drive(buffer, 1, 20.0, 1100.0)                         # 55 s: the rows of A are gone from the ring
+    buffer.offer_reference(1, reference())
+    end = drive(buffer, 1, 20.0, 1200.0, t0=55.1)
+    body = buffer.read(0, now=end)
+    assert body['split']['index'] == 2 and body['split']['prev'] is None or body['split']['prev']['index'] == 1
+
+
+def test_a_late_reference_gives_split_zero_its_true_entry():
+    """Offered inside split A, a run 2 s behind the reference from the start has lost 2 s in A: not the delta at
+    the moment the reference came, which is all of it."""
+    buffer = LiveBuffer()
+    buffer.start_run(1, 0.0)
+    t = 0.0
+    while 20.0 * (t - 2.0) <= 700.0:                       # the reference's pace, 2 s late at every metre
+        buffer.push(1, t, row(t, 20.0 * max(0.0, t - 2.0)))
+        t = round(t + 0.1, 6)
+        if abs(t - 10.0) < 1e-9:
+            buffer.offer_reference(1, reference())
+    body = buffer.read(0, now=t)
+    assert body['split']['index'] == 1 and body['split']['prev']['index'] == 0
+    assert body['split']['prev']['delta'] == pytest.approx(2.0, abs=0.15)      # the 2 s it was behind, not the delta at the moment the reference came (-8)
+
+
+def test_a_run_that_began_mid_stage_has_no_delta():
+    buffer = LiveBuffer()
+    buffer.start_run(1, 0.0)
+    buffer.offer_reference(1, reference())
+    buffer.push(1, 0.1, row(5.0, 1500.0))                  # the first row is 1.5 km on
+    buffer.push(1, 0.2, row(5.1, 1502.0))
+    body = buffer.read(0, now=0.2)
+    assert body['ref_status'] == 'mid_stage' and body['delta'] is None and body['predicted'] is None
+    assert body['split'] is None and body['sector'] is None and body['ref']['run'] == 41
+    assert all(col(x, 'delta') is None for x in body['samples'])
+    # ACR says so itself (its distance is driven from the run's start)
+    buffer = LiveBuffer()
+    buffer.start_run(1, 0.0)
+    buffer.offer_reference(1, reference())
+    buffer.push(1, 0.1, row(0.1, 2.0))
+    assert buffer.read(0, now=0.1)['ref_status'] == 'ready'
+    buffer.mark_mid_stage(1)
+    buffer.push(1, 0.2, row(0.2, 4.0))
+    body = buffer.read(0, now=0.2)
+    assert body['ref_status'] == 'mid_stage' and body['delta'] is None
+
+
+def test_the_finish_completes_the_last_split():
+    buffer = LiveBuffer()
+    buffer.start_run(1, 0.0)
+    buffer.offer_reference(1, reference())
+    end = drive(buffer, 1, 20.0, 1990.0, start=0.0)
+    buffer.finish(1, end, 100.5, 2000.0)                   # half a second slower on the clock
+    body = buffer.read(0, now=end)
+    assert body['split']['prev']['index'] == 2 and body['split']['prev']['delta'] == pytest.approx(0.5, abs=0.06)
+    assert body['final']['delta'] == pytest.approx(0.5)
+
+
+def test_the_response_names_the_process_epoch():
+    first, second = LiveBuffer().read(0), LiveBuffer().read(0)
+    assert first['epoch'] == second['epoch'] == live_buffer.EPOCH and live_buffer.EPOCH
 
 
 def test_restart_finish_and_stale():
@@ -295,3 +360,20 @@ def test_load_reference_without_runs(tmp_path):
     store = open_store(str(tmp_path / 'telemetry.db'))
     assert live_buffer.load_reference(store, 'acr:greece:elatia', 1) is None
     assert live_buffer.load_reference(store, None, 1) is None
+
+
+def test_sector_bounds_are_placed_from_where_the_run_began():
+    """As coach._sectors: a bound is less where along the spline the run began, past the line or not."""
+    def sectors_of(start_d):
+        buffer = LiveBuffer()
+        buffer.start_run(1, 0.0, 'acr', None, 'x', 5000.0, start_d)
+        ref = reference()
+        ref = Reference(41, 'acr:test', 100.0, 2000.0, ref.trace, splits=ref.splits,
+                        sectors=(('S1', 0.0, 1000.0), ('S2', 1000.0, 2000.0)), sector_start=100.0)
+        buffer.offer_reference(1, ref)
+        buffer.push(1, 0.1, row(0.1, 2.0))
+        return buffer.read(0, now=0.1)['ref']['sectors'], buffer._run['sectors'].bounds
+    _, from_line = sectors_of(100.0)
+    _, later = sectors_of(600.0)
+    assert [(a, b) for _, a, b in from_line] == [(0.0, 1000.0), (1000.0, 2000.0)]
+    assert [(a, b) for _, a, b in later] == [(-500.0, 500.0), (500.0, 1500.0)]

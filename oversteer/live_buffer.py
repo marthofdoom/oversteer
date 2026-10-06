@@ -4,9 +4,9 @@ the coach's reference run (docs/telemetry-ui-design.md, section 9.1 and
 
 Threads (tier A):
 
-- The **listener thread** is the only writer of a LiveBuffer: RunTracker,
-  under the learner's lock, calls start_run(), push() (once per 10 Hz trace
-  row), finish() and end_run(). Each call is constant time but for a bisect
+- Every write to a LiveBuffer is under the learner's lock (learner.lock):
+  RunTracker calls start_run(), push() (once per 10 Hz trace row), finish(),
+  mark_mid_stage() and end_run() from the listener thread. Each call is constant time but for a bisect
   into the reference (O(log n)); nothing here reads the database or blocks.
 - The **drive-log thread** loads the reference (load_reference(), over the
   writer's connection) and hands it over with offer_reference(): one
@@ -36,6 +36,8 @@ from .telemetry_store import TRACE_CHANNELS
 RATE = 10.0                      # rows per second (drive_log.TRACE_EVERY)
 CAPACITY = 300                   # rows kept: 30 s
 STALE = 2.0                      # s without a row while a run is on: 'stale' (a pause, a loading screen, a lost link)
+MID_STAGE_SLACK = 50.0           # m: a run whose first row is further than this past the reference's start began mid-stage
+EPOCH = '{:x}'.format(int(time.time() * 1000))     # per process: a page that saw another one starts over
 ROUND = 3                        # decimals of a row's values on the wire
 
 # The channels of a row, in order: the trace's (telemetry_store.TRACE_CHANNELS)
@@ -74,9 +76,9 @@ class Reference:
     """The run the live run is measured against, read once (load_reference)
     and never changed after: shared by the drive-log and listener threads."""
 
-    __slots__ = ('run', 'stage', 'result_time', 'course', 'trace', 'track', 'splits', 'sectors', 'view')
+    __slots__ = ('run', 'stage', 'result_time', 'course', 'trace', 'track', 'splits', 'sectors', 'sector_start', 'view')
 
-    def __init__(self, run, stage, result_time, course, trace, splits=(), sectors=()):
+    def __init__(self, run, stage, result_time, course, trace, splits=(), sectors=(), sector_start=None):
         self.run = run                              # runs.id
         self.stage = stage
         self.result_time = result_time              # s, the run's own clock to the finish
@@ -85,6 +87,7 @@ class Reference:
         self.track = tuple(coach_context.along(self.trace))
         self.splits = tuple(splits)                 # ((name, d0, d1), ...): the coach's grid
         self.sectors = tuple(sectors)               # ((name, d0, d1), ...): the game's sectors
+        self.sector_start = sector_start            # m along the road spline where the sectors' d is 0 (the start line)
         self.view = {'run': self.run, 'time': self.result_time, 'course': self.course,       # never changed
                      'splits': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.splits],
                      'sectors': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.sectors]}
@@ -124,12 +127,15 @@ def load_reference(store, stage, car, exclude=None):
     if corners:
         grid, bounds = coach_context.grid_of({'trace': rows, 'corners': corners, 'course': ref['course']})
         splits = tuple((coach_context.section_name(s), a, b) for s, (a, b) in zip(grid, bounds))
-    sectors = ()
+    sectors, sector_start = (), None
     placed = stage_tables.sector_bounds(stage_tables.entry(stage))
     if placed is not None:
-        start = placed['start_m']
+        start = sector_start = placed['start_m']
         sectors = tuple(('S{}'.format(i + 1), a - start, b - start) for i, (a, b) in enumerate(placed['bounds']))
-    return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors)
+    return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors, sector_start)
+
+
+JOIN_SLACK = 30.0                # m: a first row this far into split 0 or less is the run leaving the line
 
 
 class _Splits:
@@ -162,13 +168,20 @@ class _Splits:
             if at is not None and self.entry is not None:
                 self.prev = (self.index, at - self.entry)
             self.entry = at if i is not None else None
-        elif i == 0:
+        elif i == 0 and self.index is None and d - self.starts[0] <= JOIN_SLACK:
             self.entry = delta_at(self.starts[0])
         else:
             # Joined part way (the reference arrived late, a reset up or down
             # the road): this split is not timed
             self.entry = None
         self.index = i
+
+    def complete(self, at):
+        """The run finished with the delta `at` while in the last split: it is timed."""
+        if self.bounds and self.index == len(self.bounds) - 1:
+            if at is not None and self.entry is not None:
+                self.prev = (self.index, at - self.entry)
+            self.index, self.entry = None, None
 
     def view(self, delta):
         if not self.bounds:
@@ -206,12 +219,14 @@ class LiveBuffer:
     # -- the listener thread --
 
     @_guarded
-    def start_run(self, number, now, game=None, stage=None, track=None, stage_length=None):
+    def start_run(self, number, now, game=None, stage=None, track=None, stage_length=None, start_d=None):
         """Run `number` (RunTracker's) has begun: the rows before it are no
-        longer shown, and its delta waits for its reference."""
+        longer shown, and its delta waits for its reference. `start_d`: where
+        along the game's road the run began (ACR's spline)."""
         self._run = {'n': number, 'id': None, 'game': game, 'first': self._seq + 1, 'at': now,
                      'stage': {'key': stage, 'name': track, 'length': stage_length} if (stage or track) else None,
-                     'ref': None, 'ref_status': 'pending', 'adopted': False, 'last': None, 'delta': None,
+                     'ref': None, 'ref_status': 'pending', 'adopted': False, 'last': None, 'delta': None, 'd0': None,
+                     'mid': False, 'spline': start_d,
                      'splits': _Splits(()), 'sectors': _Splits(()), 'final': None}
         self._adopt()
         self._publish(now)
@@ -225,25 +240,16 @@ class LiveBuffer:
             return
         self._adopt()
         t, d = row[_T], row[_D]
+        if run['d0'] is None and _fin(d):
+            run['d0'] = d
+            self._check_mid(run)
         ref = run['ref']
         delta = None
-        if ref is not None and _fin(t) and _fin(d):
+        if ref is not None and not run['mid'] and _fin(t) and _fin(d):
             t_ref = ref.t_at(d)
             if t_ref is not None:
                 delta = t - t_ref
-            last = run['last']
-
-            def delta_at(x):
-                # The run's own time at x m (between the last row and this
-                # one), less the reference's there
-                t_ref_x = ref.t_at(x)
-                if t_ref_x is None:
-                    return None
-                if last is not None and last[1] < x < d:
-                    return last[0] + (t - last[0]) * (x - last[1]) / (d - last[1]) - t_ref_x
-                return t - t_ref_x
-            run['splits'].feed(d, delta_at)
-            run['sectors'].feed(d, delta_at)
+            self._feed(run, ref, t, d)
         if _fin(t) and _fin(d):
             run['last'] = (t, d)
         run['delta'] = delta
@@ -252,17 +258,56 @@ class LiveBuffer:
         self._slots[self._seq % self.capacity] = (self._seq, values)
         self._publish(now)
 
+    def _feed(self, run, ref, t, d):
+        """Move the split trackers to (t, d), the run's time and distance, from the run's last row."""
+        last = run['last']
+
+        def delta_at(x):
+            # The run's own time at x m (between the last row and this
+            # one), less the reference's there
+            t_ref_x = ref.t_at(x)
+            if t_ref_x is None:
+                return None
+            if last is not None and last[1] < x < d:
+                return last[0] + (t - last[0]) * (x - last[1]) / (d - last[1]) - t_ref_x
+            return t - t_ref_x
+        run['splits'].feed(d, delta_at)
+        run['sectors'].feed(d, delta_at)
+
+    def _check_mid(self, run):
+        """A run whose first row is far past the reference's start began mid-stage (for ACR RunTracker says so)."""
+        ref = run['ref']
+        if ref is not None and ref.track and run['d0'] is not None and run['d0'] > ref.track[0] + MID_STAGE_SLACK:
+            run['mid'] = True
+            run['ref_status'] = 'mid_stage'
+
     @_guarded
-    def finish(self, number, now, result_time):
+    def mark_mid_stage(self, number):
+        """RunTracker knows run `number` did not begin at the start line: no delta against the reference."""
+        run = self._run
+        if run is None or run['n'] != number:
+            return
+        run['mid'] = True
+        if run['ref'] is not None:
+            run['ref_status'] = 'mid_stage'
+            run['delta'] = None
+
+    @_guarded
+    def finish(self, number, now, result_time, distance=None):
         """Run `number` crossed the finish with `result_time` s on its own
         clock (None where the game gives none)."""
         run = self._run
         if run is None or run['n'] != number or run['final'] is not None:
             return
         self._adopt()
-        ref = run['ref']
+        ref = run['ref'] if not run['mid'] else None
+        if ref is not None and _fin(result_time) and _fin(distance) and (run['last'] is None or distance > run['last'][1]):
+            self._feed(run, ref, result_time, distance)         # the last split is completed on the finish's clock
         delta = result_time - ref.result_time if ref is not None and result_time is not None \
             and ref.result_time is not None else None
+        if ref is not None:
+            run['splits'].complete(delta)
+            run['sectors'].complete(delta)
         run['final'] = {'time': result_time, 'delta': delta}
         run['delta'] = delta if delta is not None else run['delta']
         self._publish(now)
@@ -291,14 +336,33 @@ class LiveBuffer:
         run['adopted'] = True
         _, ref, stage, run_id = offer
         run['ref'] = ref
-        run['ref_status'] = 'ready' if ref is not None else 'none'
+        run['ref_status'] = ('mid_stage' if run['mid'] else 'ready') if ref is not None else 'none'
         if stage is not None:
             run['stage'] = stage
         if run_id is not None:
             run['id'] = run_id
         if ref is not None:
+            self._check_mid(run)
             run['splits'] = _Splits(ref.splits)
-            run['sectors'] = _Splits(ref.sectors)
+            shift = run['spline'] - ref.sector_start if _fin(run['spline']) and ref.sector_start is not None else 0.0
+            run['sectors'] = _Splits(tuple((n, a - shift, b - shift) for n, a, b in ref.sectors))
+            if not run['mid']:
+                self._replay(run, ref)
+
+    def _replay(self, run, ref):
+        """The reference came late: the run's rows still in the ring go through the split trackers, so the
+        split the run is in has its true entry, not the delta at the moment of arrival."""
+        last = None
+        for seq in range(max(run['first'], self._seq - self.capacity + 1), self._seq + 1):
+            slot = self._slots[seq % self.capacity]
+            if slot is None or slot[0] != seq:
+                continue
+            t, d = slot[1][0], slot[1][1]
+            if _fin(t) and _fin(d):
+                saved, run['last'] = run['last'], last
+                self._feed(run, ref, t, d)
+                run['last'] = saved
+                last = (t, d)
 
     def _publish_idle(self):
         return {'seq': self._seq, 'first': self._seq + 1, 'run': None, 'game': None, 'stage': None, 'ref': None,
@@ -310,11 +374,13 @@ class LiveBuffer:
         ref, delta = run['ref'], run['delta']
         last = run['last']
         final = run['final']
+        mid = run['mid'] and run['ref'] is not None
+        delta = None if mid else delta
         self.state = {
             'seq': self._seq, 'first': run['first'], 'run': {'n': run['n'], 'id': run['id']}, 'game': run['game'],
             'stage': run['stage'], 'ref': ref.view if ref is not None else None,
             'ref_status': run['ref_status'], 'delta': delta,
-            'split': run['splits'].view(delta), 'sector': run['sectors'].view(delta),
+            'split': None if mid else run['splits'].view(delta), 'sector': None if mid else run['sectors'].view(delta),
             'predicted': ref.result_time + delta if ref is not None and delta is not None
             and ref.result_time is not None else None,
             'final': dict(final) if final is not None else None,
@@ -360,7 +426,7 @@ class LiveBuffer:
             phase = 'stale'
         else:
             phase = 'live'
-        return {'seq': seq, 'first': state['first'], 'reset': reset, 'state': phase, 'run': state['run'],
+        return {'epoch': EPOCH, 'seq': seq, 'first': state['first'], 'reset': reset, 'state': phase, 'run': state['run'],
                 'game': state['game'], 'stage': state['stage'], 't': state['t'], 'distance': state['distance'],
                 'delta': state['delta'], 'split': state['split'], 'sector': state['sector'],
                 'predicted': state['predicted'], 'final': state['final'], 'ref': state['ref'],

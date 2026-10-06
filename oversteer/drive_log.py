@@ -538,7 +538,8 @@ class RunTracker:
         self._from_line = True
         self._start_d = sample.lap_distance
         self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
-        learner.live_run.start_run(self.run, now, sample.game, sample.stage, sample.track, sample.stage_length)
+        learner.live_run.start_run(self.run, now, sample.game, sample.stage, sample.track, sample.stage_length,
+                                   sample.lap_distance)
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
                          sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track,
                          self._acr_start, sample.lap_distance)
@@ -547,7 +548,7 @@ class RunTracker:
         learner.log.post(self._live_reference, self.run, session, sample.game, sample.track, sample.stage_length,
                          self._acr_start)
 
-    def _clock(self, sample, d, dt, speed):
+    def _clock(self, now, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
         stage clock stops at the line while the car rolls on."""
         if self._finish_d is not None or sample.stage_time is None:
@@ -558,6 +559,7 @@ class RunTracker:
             self._clock_still += dt
             if self._clock_still >= CLOCK_STOPPED and self._clock_d >= FINISH_AFTER:
                 self._finish_d = self._clock_d
+                self.learner.live_run.finish(self.run, now, sample.stage_time, self._clock_d)
 
     def _d(self, sample):
         """Where along the run the car is: the game's stage distance where
@@ -637,9 +639,9 @@ class RunTracker:
                 self._finished, self._result_time = 1, sample.stage_time
                 self._finish_d = d
                 self._finish_counts = True
-                self.learner.live_run.finish(self.run, now, self._result_time)
+                self.learner.live_run.finish(self.run, now, self._result_time, d)
             self._progress = sample.progress
-        self._clock(sample, d, dt, speed)
+        self._clock(now, sample, d, dt, speed)
         if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
             stage = stage_tables.acr_stage(sample.track, self._acr_start, sample.stage_length)
             # The flying finish where known, else the last pace note (the stop control, past it)
@@ -648,6 +650,8 @@ class RunTracker:
             # A run that began mid-stage (a restart after a silence, the second half of a run split by one) that
             # crosses the finish did not run the stage: its time is not the stage's
             self._from_line = line is None or self._start_d is None or self._start_d <= line + stage_tables.START_LINE_PAST
+            if not self._from_line:
+                self.learner.live_run.mark_mid_stage(self.run)       # no live delta against a run from the line
             # The track's name came after the run's first packet: the live
             # reference may have had no stage to look up (a no-op once it had)
             self.learner.log.post(self._live_reference, self.run, self._session, sample.game, sample.track,
@@ -730,7 +734,7 @@ class RunTracker:
     def _finish_at(self, now, d, result, clock):
         self._finished, self._result_time, self._result_clock = 1, result, clock
         self._finish_d = d
-        self.learner.live_run.finish(self.run, now, self._result_time)
+        self.learner.live_run.finish(self.run, now, self._result_time, d)
 
     def _close_segment(self, d):
         rows, self._rows = self._rows, []

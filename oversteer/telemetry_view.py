@@ -533,6 +533,7 @@ class LiveTrack:
     def __init__(self):
         self.since = 0
         self.n = None
+        self.epoch = None                    # the Oversteer process the held rows came from
         self.rows = []
         self.path = []
         self.last_t = -1.0
@@ -548,8 +549,10 @@ class LiveTrack:
         self.since = 0
 
     def ingest(self, body):
-        if body.get('reset') or (body['run']['n'] if body.get('run') else None) != self.n:
+        epoch = body.get('epoch')
+        if body.get('reset') or (epoch and self.epoch and epoch != self.epoch) or (body['run']['n'] if body.get('run') else None) != self.n:
             self.clear()
+        self.epoch = epoch
         self.n = body['run']['n'] if body.get('run') else None
         self.since = body['seq']
         self.body = body

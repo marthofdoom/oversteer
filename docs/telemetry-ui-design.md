@@ -956,7 +956,7 @@ nothing else; it never reads the database for the live view.
              "prev": {"index": 1, "name": "the 4 right at 0.0 km", "delta": 0.31}},
   "sector": {"index": 0, "n": 3, "name": "S1", "delta": 0.4, "prev": null},
   "final": null,
-  "ref_status": "ready",
+  "epoch": "19a3f2c0b1e", "ref_status": "ready",
   "ref": {"run": 4123, "time": 243.22, "course": 6498.6,
           "splits": [{"name": "the 4 right at 0.0 km", "d0": 0.35, "d1": 102.2}, ...],
           "sectors": [{"name": "S1", "d0": 0.0, "d1": 1650.0}, ...]},
@@ -970,6 +970,7 @@ Field by field:
 
 | Field | Meaning |
 |---|---|
+| `epoch` | A token fixed per Oversteer process. When it differs from the one a page holds, Oversteer restarted: drop what is held (a restart can leave `seq` above the page's `since`, which `reset` does not catch). |
 | `seq` | The last row's sequence number. Counts from 1 for the life of the Oversteer process, across runs; never goes back. Poll with `since=<the seq you last got>`. |
 | `first` | The first seq of the run shown. Rows before it belong to an earlier run and are never returned. |
 | `reset` | `true` when `since` was greater than `seq` (Oversteer restarted under an open page): the client must drop what it holds; the response carries the rows from the start of the run. |
@@ -980,10 +981,10 @@ Field by field:
 | `age` | s since the last row (the stale timer); `null` when idle. |
 | `delta` | s behind (+) or ahead (−) of the reference at the car's distance: `t_now − t_ref(d)`, `t_ref` interpolated on the reference's trace exactly as the coach times sections (`coach_context.time_at`). `null` with no reference, before the reference's first row, or past its finish. At `finished` it is the final delta. |
 | `predicted` | `ref.time + delta`; `null` when `delta` is. |
-| `split` | Where the car is among the reference's grid sections (the bounds `coach.splits()` times: `grid_of(reference)`; §9.2's `d0`/`d1` are the same numbers), or `null` with no reference or no corners on it. `index` is in **grid order** (0 = the launch section). Note `coach.splits()['splits']` leaves out the launch and off sections, so match the ribbon by distance (`ref.splits[i].d0/d1`) or by name, not by list position. `delta` is what this split has lost so far (s, + = slower); `null` for a split the car joined part way (the reference arrived late, a reset along the road). `prev` is the split last completed, with its loss: flash it on change. `index` is `null` before the first split and past the last. |
+| `split` | Where the car is among the reference's grid sections (the bounds `coach.splits()` times: `grid_of(reference)`; §9.2's `d0`/`d1` are the same numbers), or `null` with no reference or no corners on it. `index` is in **grid order** (0 = the launch section). Note `coach.splits()['splits']` leaves out the launch and off sections, so match the ribbon by distance (`ref.splits[i].d0/d1`) or by name, not by list position. `delta` is what this split has lost so far (s, + = slower); `null` for a split the car joined part way (the ring had already dropped its start when the reference arrived late, a reset along the road); a reference that arrives late is replayed over the run's rows still in the ring, so the split in progress has its true entry. At the finish the last split is completed into `prev`. `prev` is the split last completed, with its loss: flash it on change. `index` is `null` before the first split and past the last. |
 | `sector` | The same over the game's sectors (S1…), from `stage_tables.sector_bounds` (from the start line); `null` where the stage has none placed (e.g. Greece Elatia today). |
 | `final` | `{time, delta}` once the run crossed the finish: the run's own clock to the line (ACR: the flying finish `finish_m`, else the last pace note; other games: progress ≥ 0.99 with the game's stage clock) and that less `ref.time`. `delta` is `null` with no reference. |
-| `ref_status` | `pending` (looking it up, or ACR's track name not here yet), `ready`, `none` (no clean or learning finished run of this car on this stage, no trace, or no stage known). **Hide the delta unless `ready`.** |
+| `ref_status` | `pending` (looking it up, or ACR's track name not here yet), `ready`, `mid_stage` (the run did not begin at the start line: ACR's run started past the line, or another game's first row far past the reference's start; the reference is given but `delta`, `predicted`, `split` and `sector` are `null`), `none` (no clean or learning finished run of this car on this stage, no trace, or no stage known). **Hide the delta unless `ready`.** |
 | `ref` | `{run, time, course, splits, sectors}` of the reference (`runs.id`, its result time, where it finished along its trace, and the bounds). Constant for the run: cache it by `ref.run`. |
 | `channels`, `samples` | Rows after `since` (at most `limit`, default and max 300 = the 30 s ring; the newest are kept), oldest first, of the current run only. One row per 10 Hz trace row RunTracker keeps (so none while the game is paused and the tracker drops rows). Values are rounded to 3 decimals; unknown is `null` (ACR: `handbrake`, and `x/y/z` before the bridge fix). The last column is that row's `delta` (the delta strip). |
 | `dash` | `live_dict()` as the endpoint without `since` returns it (or `null`): the gear, rpm, shift point and lights for the dash at packet rate. |
@@ -999,8 +1000,8 @@ Field by field:
 
 ### Threads and guarantees (tier A)
 
-- **One writer.** Only RunTracker writes the buffer, from the listener
-  thread, under the learner's lock (the same lock that already serialises
+- **Writes under the lock.** Every write is under `learner.lock`: RunTracker
+  writes the buffer, from the listener thread, under the learner's lock (the same lock that already serialises
   RunTracker). Each write is constant time plus a bisect into the reference
   trace (O(log n) at 10 Hz). Writers are guarded: a fault in the live view is
   logged once a minute and never breaks run tracking.

@@ -1169,7 +1169,8 @@ function lvRuns(xy) {
 function liveClear() { lr.rows = []; lr.path = []; lr.lastT = -1; lr.tones = {}; lr.loaded = null; }
 
 function liveIngest(b) {
-  if (b.reset || (b.run ? b.run.n !== lr.n : lr.n !== null)) liveClear();
+  if (b.reset || (b.epoch && lr.epoch && b.epoch !== lr.epoch) || (b.run ? b.run.n !== lr.n : lr.n !== null)) liveClear();
+  lr.epoch = b.epoch;
   lr.n = b.run ? b.run.n : null;
   lr.since = b.seq;
   const key = b.channels.join();
