@@ -416,6 +416,41 @@ def test_ovst_v3_stage_and_wheels():
     assert decode_sample(packet[:-4]) is None
 
 
+def _ovst4(clock, game=3, extra=b''):
+    """A version 4 packet: version 3's fields, then the graphics page's clock."""
+    import struct as st
+    v3 = bytearray(_ovst3(game=game))
+    v3[4] = 4
+    return bytes(v3) + st.pack('<f', clock) + extra
+
+
+def test_ovst_v4_the_games_clock():
+    from oversteer.telemetry_formats import decode_sample, OVST4_SIZE
+    packet = _ovst4(58.094)
+    assert len(packet) == OVST4_SIZE == 328
+    sample = decode_sample(packet)
+    assert sample.game == 'acr' and abs(sample.stage_time - 58.094) < 1e-4
+    assert sample.lap_distance == 2030.0 and sample.stage_length == 8123.0   # version 3's fields as they were
+    assert decode_sample(_ovst4(0.0)).stage_time == 0.0                     # before the start, after a restart
+    assert decode_sample(_ovst4(float('nan'))).stage_time is None           # empty or unreadable
+    assert decode_sample(_ovst4(-1.0)).stage_time is None
+    # AC and ACC: their clock is the lap's, not the stage's
+    assert decode_sample(_ovst4(58.0, game=1)).stage_time is None
+    assert decode_sample(_ovst4(58.0, game=2)).stage_time is None
+    assert decode_sample(_ovst4(58.0, game=0)).stage_time is None
+    # A later version only appends: a longer packet is read as far as known
+    longer = bytearray(_ovst4(12.5, extra=b'\0' * 12))
+    longer[4] = 5
+    assert abs(decode_sample(bytes(longer)).stage_time - 12.5) < 1e-6
+    # The old bridge's packets still decode, with no clock
+    v3 = decode_sample(_ovst3())
+    assert v3.game == 'acr' and v3.stage_time is None
+    # A version that does not fit its length is not decoded (nor taken for another format)
+    assert decode_sample(packet[:-4]) is None                               # version 4 cut to version 3's length
+    long3 = bytearray(_ovst3()) + b'\0' * 4
+    assert decode_sample(bytes(long3)) is None                              # version 3 is 324 bytes exactly
+
+
 def test_ovst_v3_from_an_unnamed_game_stays_acpmf():
     from oversteer.telemetry_formats import decode_sample
     sample = decode_sample(_ovst3(game=0))

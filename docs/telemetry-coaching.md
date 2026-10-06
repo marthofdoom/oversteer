@@ -404,6 +404,32 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
 - `decode_sample` accepts `OVST3_SIZE` next to `OVST_SIZE` and
   `OVST2_SIZE` in its length check (it matches on the size set today), and
   checks the version byte against the length as it does for v2.
+
+**OVST (bridge) v4.** v3's 324 bytes unchanged, then one float (328 bytes):
+
+```c
+float stage_clock;   /* graphics currentTime (wchar_t[15] at 12, shared by AC/ACC/ACR) in s; NaN if empty/unreadable */
+```
+
+The bridge parses `[[h:]m:]s[.fff]` (ACR writes `"00:58.094"`) and
+`m:ss:mmm`; only the leading field may pass 59 (`parse_clock`, between the
+`clock-parse` markers; `tests/test_shm_bridge.py` compiles it natively
+and checks it against a Python mirror and marth's dump). ACR leaves
+`iCurrentTime` (graphics 140) and the sector fields (164, 168) at 0 but
+fills this string with the stage's clock: 0 until the start, frozen while
+paused, stopped at its flying finish, 0 again on a restart (marth's raw
+dump, 27 216 pages: the parse agrees on every one). The decoder sets
+`stage_time` from it for ACR only: in AC and ACC it is the lap's time,
+which starts again every lap and, with no lap counter in the packet, would
+read as a restart.
+
+From v4 on a version only appends: the decoder takes any packet of version
+≥ 4 and length ≥ `OVST4_SIZE` and reads the fields it knows (v1 to v3 stay
+one exact length each). Compatibility: an old bridge (v3) with this app
+decodes as before, with no clock (the run's own clock, as before); this
+bridge with an app from before v4 is not decoded at all (that app takes
+v3 only at exactly 324 bytes), so the bridge and the app go together (the
+bridge is started from the app's tree when the game launches).
 - **Build.** Neither `x86_64-w64-mingw32-gcc` nor `zig` is installed here.
   `scripts/build-shm-bridge.sh` is run with `zig` from `pip install ziglang`
   in a scratch venv (a build tool, never an app dependency). If that fails,

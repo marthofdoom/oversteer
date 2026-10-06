@@ -6,7 +6,8 @@
  * shared memory (Local\acpmf_physics, Local\acpmf_static). Under Proton
  * that lives inside the game's Wine prefix, so this small Windows program
  * runs there alongside the game (see oversteer-run) and sends what the rev
- * lights need to Oversteer on the host as a 24-byte "OVST" datagram.
+ * lights (and the coach) need to Oversteer on the host as an "OVST"
+ * datagram (struct ovst_packet: 328 bytes in version 4).
  *
  * All three games share the same prefix of the physics and static structs
  * (packetId, gas, brake, fuel, gear, rpms / ... sectorCount, maxTorque,
@@ -74,6 +75,8 @@ static const size_t static_sizes[] = { 820, 684, 524, 416, 0 };
  * from the published structs and wait on an ACR capture (--verbose
  * logs them once a second) before Oversteer relies on them. */
 #define GRAPH_SESSION    8     /* int */
+#define GRAPH_CURRENT_TIME 12  /* wchar_t[15], "00:58.094"; shared by AC, ACC and ACR */
+#define CLOCK_CHARS      15
 #define GRAPH_DISTANCE   156   /* float, m */
 #define GRAPH_IN_PIT     160   /* int */
 #define GRAPH_LAPS       172   /* int, numberOfLaps */
@@ -87,7 +90,7 @@ static const size_t static_sizes[] = { 820, 684, 524, 416, 0 };
 #define GRAPH_ACC_GRIP   1240  /* float */
 static const size_t graph_sizes[] = { 1588, 1316, 300, 0 };
 
-#define OVST_VERSION 3
+#define OVST_VERSION 4
 #define GAME_AC  1
 #define GAME_ACC 2
 #define GAME_ACR 3
@@ -130,8 +133,17 @@ struct ovst_packet {
     float surface_grip, brake_bias;
     int32_t laps, session_type;
     float world_pos[3];
+    /* version 4 (324 bytes before it; later versions only append): the
+     * graphics page's currentTime (wchar_t[15] at 12) in seconds, NaN when
+     * empty or not a time (parse_clock). In ACR it is the stage's clock:
+     * 0 until the start, frozen while the game is paused, stopped at the
+     * flying finish, back to 0 on a restart. In AC and ACC it is the
+     * current lap's time. */
+    float stage_clock;
 };
 #pragma pack(pop)
+/* The size Oversteer's decoder takes for version 4 (OVST4_SIZE) */
+typedef char ovst_packet_is_328_bytes[sizeof(struct ovst_packet) == 328 ? 1 : -1];
 
 static int verbose = 0;
 static int exit_when_gone = 0;
@@ -289,6 +301,70 @@ static float nan_f(void)
 
 static float rd_f32(const void *base, size_t off);
 
+/* clock-parse: begin (tests/test_shm_bridge.py compiles this part natively) */
+/* A clock as the graphics page spells it, wchar_t[n] (NUL-terminated or
+ * full), in seconds: [[h:]m:]s[.fff] ("00:58.094" in ACR, "1:02:03.456"
+ * past the hour), or m:ss:mmm with the milliseconds after a colon. The
+ * leading field may run past 59, the others may not. NaN for an empty
+ * string or anything else (a placeholder such as "-:--:---"). */
+static double parse_clock(const uint16_t *w, int n)
+{
+    long field[3], frac = 0, scale = 1, cur = 0;
+    int width[3], nf = 0, digits = 0, frac_digits = -1, i;
+    const union { uint64_t u; double d; } nan_u = { 0x7ff8000000000000ull };
+    const double nan_d = nan_u.d;
+
+    for (i = 0; i < n && w[i]; i++) {
+        uint16_t c = w[i];
+        if (c >= '0' && c <= '9') {
+            if (frac_digits >= 0) {
+                if (frac_digits < 6) {
+                    frac = frac * 10 + (c - '0');
+                    scale *= 10;
+                }
+                frac_digits++;
+            } else {
+                if (digits >= 6)
+                    return nan_d;
+                cur = cur * 10 + (c - '0');
+                digits++;
+            }
+        } else if (c == ':') {
+            if (!digits || frac_digits >= 0 || nf >= 2)
+                return nan_d;
+            field[nf] = cur;
+            width[nf++] = digits;
+            cur = 0;
+            digits = 0;
+        } else if (c == '.') {
+            if (!digits || frac_digits >= 0)
+                return nan_d;
+            frac_digits = 0;
+        } else {
+            return nan_d;
+        }
+    }
+    if (!digits || frac_digits == 0)
+        return nan_d;
+    field[nf] = cur;
+    width[nf++] = digits;
+    if (frac_digits < 0 && nf == 3 && width[2] == 3) {
+        /* m:ss:mmm */
+        if (field[1] > 59)
+            return nan_d;
+        return field[0] * 60.0 + field[1] + field[2] / 1000.0;
+    }
+    for (i = 1; i < nf; i++)
+        if (field[i] > 59)
+            return nan_d;
+    if (nf == 3)
+        return (field[0] * 60.0 + field[1]) * 60.0 + field[2] + (double)frac / scale;
+    if (nf == 2)
+        return field[0] * 60.0 + field[1] + (double)frac / scale;
+    return field[0] + (double)frac / scale;
+}
+/* clock-parse: end */
+
 /* Floats from a page, NaN past the part that is mapped. */
 static void rd_floats(const void *base, size_t size, size_t off, float *out, int n)
 {
@@ -342,6 +418,14 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
     rd_floats(graph, graph_size, GRAPH_DISTANCE, &pkt->distance, 1);
     pkt->laps = graph && graph_size >= GRAPH_LAPS + 4 ? rd_i32(graph, GRAPH_LAPS) : -1;
     pkt->session_type = graph && graph_size >= GRAPH_SESSION + 4 ? rd_i32(graph, GRAPH_SESSION) : -1;
+    /* The start of the graphics page is the same in every AC game */
+    if (graph && graph_size >= GRAPH_CURRENT_TIME + 2 * CLOCK_CHARS) {
+        uint16_t clock[CLOCK_CHARS];
+        memcpy(clock, (const char *)graph + GRAPH_CURRENT_TIME, sizeof(clock));
+        pkt->stage_clock = (float)parse_clock(clock, CLOCK_CHARS);
+    } else {
+        pkt->stage_clock = nan_f();
+    }
     if (game == GAME_AC) {
         rd_floats(graph, graph_size, GRAPH_AC_COORDS, pkt->world_pos, 3);
         rd_floats(graph, graph_size, GRAPH_AC_GRIP, &pkt->surface_grip, 1);
@@ -519,10 +603,10 @@ int main(int argc, char **argv)
             if (verbose && now - last_detail >= 1000) {
                 /* For confirming the offsets and signs on a real capture */
                 last_detail = now;
-                logmsg("v3 len %.1f pos %.4f dist %.1f grip %.3f laps %d session %d xyz %.1f %.1f %.1f | "
+                logmsg("v4 clock %.3f len %.1f pos %.4f dist %.1f grip %.3f laps %d session %d xyz %.1f %.1f %.1f | "
                        "steer %.3f clutch %.2f accg %.2f %.2f %.2f vel %.2f %.2f %.2f angvel %.2f %.2f %.2f | "
                        "susp %.3f %.3f %.3f %.3f of %.3f | ride %.3f %.3f | bias %.3f",
-                       pkt.track_length, pkt.spline_pos, pkt.distance, pkt.surface_grip, pkt.laps,
+                       pkt.stage_clock, pkt.track_length, pkt.spline_pos, pkt.distance, pkt.surface_grip, pkt.laps,
                        pkt.session_type, pkt.world_pos[0], pkt.world_pos[1], pkt.world_pos[2],
                        pkt.steer, pkt.clutch, pkt.accg[0], pkt.accg[1], pkt.accg[2],
                        pkt.local_vel[0], pkt.local_vel[1], pkt.local_vel[2],

@@ -21,10 +21,14 @@ None. The formats:
 - EA SPORTS WRC's own UDP output: the game's default "wrc" structure
   (237 bytes, no header) or Oversteer's structure (eawrc_structure(),
   252 bytes, a 4CC per packet and the car and stage ids).
-- Oversteer's own "OVST" datagram (24 bytes) from oversteer-shm-bridge, the
-  helper that runs inside a Proton prefix and forwards shared-memory
-  telemetry (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa
-  Rally): rpm, max rpm (0 = unknown), gear, speed.
+- Oversteer's own "OVST" datagram from oversteer-shm-bridge, the helper
+  that runs inside a Proton prefix and forwards shared-memory telemetry
+  (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa Rally): rpm,
+  max rpm (0 = unknown), gear, speed (v1, 24 bytes); pedals and names (v2,
+  96); wheels, suspension and the stage (v3, 324); the game's clock (v4,
+  328). Versions 1 to 3 have one length each; from version 4 on a version
+  only appends, so a longer packet of version 4 or later is read as far as
+  this decoder knows it.
 """
 
 import json
@@ -44,6 +48,7 @@ OVST2_SIZE = 96                                      # + throttle, brake, car an
 OVST3_FORMAT = '<BBH' + 'f' * 2 + 'f' * 9 + 'f' * 16 + 'f' * 2 + 'f' * 16 + 'f' * 2 + 'f' * 4 + 'ii' + 'fff'
 OVST3_SIZE = OVST2_SIZE + struct.calcsize(OVST3_FORMAT)   # + wheels, suspension, the stage (324)
 OVST3_GAMES = {1: 'ac', 2: 'acc', 3: 'acr'}
+OVST4_SIZE = OVST3_SIZE + 4                          # + the graphics page's clock, in seconds (328)
 
 # EA SPORTS WRC: the game sends whatever a packet structure file (JSON, in
 # its Documents/My Games/WRC/telemetry/udp folder) lists, channel by
@@ -255,7 +260,8 @@ def _ascii(raw):
 def _ovst(data, n):
     """Oversteer's own datagram from oversteer-shm-bridge (AC, ACC, ACR)."""
     version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
-    if version not in (1, 2, 3) or {1: OVST_SIZE, 2: OVST2_SIZE, 3: OVST3_SIZE}[version] != n:
+    exact = {1: OVST_SIZE, 2: OVST2_SIZE, 3: OVST3_SIZE}
+    if not (exact.get(version) == n or (version >= 4 and n >= OVST4_SIZE)):
         return None
     if not (_plausible(rpm) and _plausible(max_rpm)):
         return None
@@ -269,8 +275,17 @@ def _ovst(data, n):
         if name:
             sample.car, sample.car_name = 'acpmf/' + name, name
         sample.track = _ascii(data[64:96])
-    if version == 3:
+    if version >= 3:
         _ovst3(sample, struct.unpack_from(OVST3_FORMAT, data, OVST2_SIZE))
+    if version >= 4 and sample.game == 'acr':
+        # The graphics page's currentTime, which ACR fills with the stage's
+        # clock (marth's dump: 0 until the start, frozen while paused,
+        # stopped at the flying finish, 0 again on a restart). AC and ACC
+        # fill it with the current lap's time, which starts again at every
+        # lap: with no lap counter in the packet that would read as a
+        # restart, so it is not their stage_time.
+        clock = struct.unpack_from('<f', data, OVST3_SIZE)[0]
+        sample.stage_time = clock if math.isfinite(clock) and clock >= 0.0 else None
     return sample
 
 
@@ -589,7 +604,7 @@ def decode_sample(data):
     if data[:4] == OVST_MAGIC:
         # Ours whatever its length: a cut-short one must not pass for a
         # Codemasters packet, whose sizes it falls among
-        return _ovst(data, n) if n in (OVST_SIZE, OVST2_SIZE, OVST3_SIZE) else None
+        return _ovst(data, n) if n in (OVST_SIZE, OVST2_SIZE, OVST3_SIZE) or n >= OVST4_SIZE else None
     if n in FORZA_SIZES:
         return _forza(data, n)
     if n in (92, 96):
