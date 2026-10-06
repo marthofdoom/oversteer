@@ -135,6 +135,31 @@ def tables():
     return _tables
 
 
+# The finish lines learnt from the game's own clock (Store.learn_finishes): {stage key: {'finish_m',
+# 'finish_runs', 'finish_spread_m'}}, set by the store that has them. A learnt line beats the shipped one, which
+# beats the last pace note (the stop control): entry() and acr_stage() hand out the entry with it applied.
+_learnt = {}
+
+
+def set_learnt(found):
+    """Replace the learnt finish lines (the store's; {} forgets them)."""
+    global _learnt
+    _learnt = dict(found or {})
+
+
+def _learnt_entry(key, found):
+    """`found` (a shipped entry) with the stage's learnt finish line applied, or as it is without one."""
+    learnt = _learnt.get(key)
+    if not learnt or found is None:
+        return found
+    merged = dict(found)
+    runs = learnt.get('finish_runs') or 1
+    merged.update(finish_m=learnt['finish_m'], finish_runs=runs, finish_spread_m=learnt.get('finish_spread_m'),
+                  finish_confidence='high' if runs >= 2 else 'medium',
+                  finish_source="the game's own stage clock stopping, over {} of marth's runs".format(runs))
+    return merged
+
+
 def set_tables(value):
     """Replace the loaded tables (tests; None loads them again)."""
     global _tables
@@ -154,7 +179,7 @@ def acr_stage(track, start=None, length=None):
     sent, against each one's published length and last pace note."""
     if not track:
         return None
-    found = [e for e in tables().get('acr', {}).values()
+    found = [_learnt_entry(k, e) for k, e in tables().get('acr', {}).items()
              if e.get('track') and bridge_track(e['track']) == track]
     if len(found) > 1 and start is not None:
         low, high = START_BEFORE_NOTE
@@ -206,7 +231,7 @@ def sector_bounds(entry):
         if not SECTOR_SCALE[0] <= scale <= SECTOR_SCALE[1]:
             return None
         source = 'scaled to the finish line'
-        confidence = 'medium' if measured is not None and entry.get('finish_confidence') == 'medium' else 'low'
+        confidence = 'medium' if measured is not None and entry.get('finish_confidence') in ('medium', 'high') else 'low'
     else:
         length = entry.get('length_m')
         if not length or abs(total - length) > SECTOR_SUM_TOLERANCE * length:
@@ -252,7 +277,7 @@ def entry(key):
     """The shipped entry of a stage key, or None."""
     if not key:
         return None
-    return tables().get(key.split(':', 1)[0], {}).get(key)
+    return _learnt_entry(key, tables().get(key.split(':', 1)[0], {}).get(key))
 
 
 def candidates_surface(candidates):

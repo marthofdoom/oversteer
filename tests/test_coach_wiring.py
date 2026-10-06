@@ -391,6 +391,68 @@ def test_a_run_on_the_games_clock_is_never_re_timed(tmp_path):
     learner.close()
 
 
+# -- finish lines learnt from the game's own clock --
+
+PETIT_BALLON = 'acr:alsace:col-du-petit-ballon'          # no flying finish in the shipped table: the stop control at 5984.6
+
+
+def _clock_run(store, stage, stop_m, result=200.0, course=5500.0):
+    run = _timed_run(store, stage, result=result, course=course, end_speed=40.0)
+    store.set_run_clock(run, 'game')
+    store.set_run_stop(run, stop_m)
+    return run
+
+
+def test_a_finish_is_learnt_from_where_the_games_clock_stopped(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    assert 'finish_m' not in stage_tables.entry(PETIT_BALLON)
+    for stop in (5739.0, 5741.0, 5740.0, 5900.0):          # one far from the others: an outlier
+        _clock_run(store, PETIT_BALLON, stop)
+    learnt = store.learn_finishes()
+    found = learnt[PETIT_BALLON]
+    assert abs(found['finish_m'] - 5740.0) < 1e-6 and found['finish_runs'] == 3 and found['finish_spread_m'] <= 2.0
+    entry = stage_tables.entry(PETIT_BALLON)
+    assert abs(entry['finish_m'] - 5740.0) < 1e-6 and entry['finish_runs'] == 3
+    assert stage_tables.road_length(entry) == 5740.0 - stage_tables.start_line(entry)
+    learner.close()
+    again = ShiftLearner(str(tmp_path / 't.db'))                  # learnt in the file: known on the next start
+    stage_tables.set_learnt({})
+    again.log.store.learn_finishes()
+    assert abs(stage_tables.entry(PETIT_BALLON)['finish_m'] - 5740.0) < 1e-6
+    again.close()
+
+
+def test_a_learnt_finish_beats_the_shipped_one_and_the_shipped_one_the_last_note(tmp_path):
+    afon = 'acr:wales:afon-bidno-severn'
+    shipped = stage_tables.entry(afon)['finish_m']
+    assert stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['finish_m'] == shipped
+    stage_tables.set_learnt({afon: {'finish_m': shipped + 12.0, 'finish_runs': 2, 'finish_spread_m': 1.0}})
+    assert stage_tables.entry(afon)['finish_m'] == shipped + 12.0
+    assert stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['finish_m'] == shipped + 12.0
+    assert stage_tables.entry(PETIT_BALLON).get('finish_m') is None
+    assert stage_tables.entry(PETIT_BALLON)['pacenote_last_m'] == 5984.6
+    stage_tables.set_learnt({})
+    assert stage_tables.entry(afon)['finish_m'] == shipped
+
+
+def test_runs_timed_to_the_stop_control_move_to_the_learnt_finish(tmp_path):
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    old = _timed_run(store, PETIT_BALLON, result=230.0, course=5800.0, end_speed=0.0)   # ran to the stop control
+    assert retime_finishes(store) == 0 and store.run(old)['result_time'] == 230.0       # no finish known
+    _clock_run(store, PETIT_BALLON, 5740.0)
+    store.learn_finishes()
+    note = stage_tables.entry(PETIT_BALLON)['pacenote_last_m']
+    start = stage_tables.start_line(stage_tables.entry(PETIT_BALLON))
+    assert retime_finishes(store) == 1
+    row = store.run(old)
+    assert abs(row['result_time'] - (230.0 - ((note - start) - (5740.0 - start)) / 10.0)) < 0.5   # 0.1 s a metre
+    assert abs(row['course'] - (5740.0 - start)) < 1e-6
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))

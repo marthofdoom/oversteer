@@ -17,6 +17,7 @@ import math
 import os
 import re
 import sqlite3
+import statistics
 import threading
 import time
 import urllib.parse
@@ -246,6 +247,43 @@ CREATE TABLE IF NOT EXISTS run_clock (
     run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
     clock TEXT NOT NULL
 )"""
+
+# Where along the road spline (metres) the game's own stage clock stopped, for
+# each ACR run that ended on it: the flying finish, exactly. The stage's finish
+# line is learnt from these (Store.learn_finishes: their median per stage) and
+# beats the shipped table's. A table of its own for the reason run_finish is one.
+RUN_STOP_DDL = """
+CREATE TABLE IF NOT EXISTS run_stop (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    stop_m REAL NOT NULL
+)"""
+
+# -- potential time (oversteer/potential.py, docs/telemetry-extrapolation.md section 6.1) --
+# Two tables made when a file is opened, for the reason run_finish is one. `envelopes`: the driver's g-g envelope per
+# car and surface (the P98 and the car's P99.5 bins of lateral, braking and drive acceleration by speed, as JSON),
+# `data_version` the runs it was built from. `stage_potential`: per stage and car the three layers' totals and, as
+# JSON, the sections (potential per layer, the PB's columns) and the speed profiles; `data_version` the runs and the
+# algorithm it came from, so it is recomputed only when they change.
+POTENTIAL_DDL = ("""
+CREATE TABLE IF NOT EXISTS envelopes (
+    car INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+    surface TEXT NOT NULL,
+    game TEXT,
+    data_version TEXT NOT NULL,
+    runs INTEGER, built REAL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (car, surface)
+)""", """
+CREATE TABLE IF NOT EXISTS stage_potential (
+    stage TEXT NOT NULL,
+    car INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+    data_version TEXT NOT NULL,
+    built REAL,
+    runs INTEGER, ds REAL, pb_s REAL, user_s REAL, grip_s REAL, car_s REAL,
+    sections TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    PRIMARY KEY (stage, car)
+)""")
 
 # The first schema, as development builds after Oversteer 0.13.1 created it
 # (no release had a database): kept to migrate from, and for the tests that
@@ -612,7 +650,12 @@ def open_store(path):
     db.execute(RUN_FINISH_DDL)
     db.execute(RUN_START_DDL)
     db.execute(RUN_CLOCK_DDL)
-    return Store(db, path)
+    db.execute(RUN_STOP_DDL)
+    for ddl in POTENTIAL_DDL:
+        db.execute(ddl)
+    store = Store(db, path)
+    store.learn_finishes()
+    return store
 
 
 def open_reader(path):
@@ -987,6 +1030,45 @@ class Reader:
         its priors."""
         return self._rows('SELECT discipline, discipline_conf, surface, surface_conf FROM runs WHERE stage = ? '
                           'AND id IS NOT ? AND ended IS NOT NULL ORDER BY started DESC LIMIT ?', (key, exclude, limit))
+
+
+    # -- potential time (oversteer/potential.py): the block this feature added; see POTENTIAL_DDL --
+
+    def potential(self, stage, car):
+        """The stored potential of a stage and car: potential.stage()'s dict (`sections`, `profile`, the layers'
+        totals) plus `version` and `built`; None where there is none (or the file has no table yet)."""
+        try:
+            rows = self._rows('SELECT data_version, built, runs, ds, pb_s, user_s, grip_s, car_s, sections, profile '
+                              'FROM stage_potential WHERE stage = ? AND car = ?', (stage, car))
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        v, built, runs, ds, pb, user, grip, car_s, sections, profile = rows[0]
+        return {'version': v, 'built': built, 'runs': runs, 'ds': ds, 'pb_s': pb, 'user_s': user, 'grip_s': grip,
+                'car_s': car_s, 'sections': json.loads(sections), 'profile': json.loads(profile)}
+
+    def envelope(self, car, surface):
+        """The stored envelope of a car on a surface ({data_version, runs, built, game, data}), or None."""
+        try:
+            rows = self._rows('SELECT data_version, runs, built, game, data FROM envelopes WHERE car = ? AND '
+                              'surface = ?', (car, surface))
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        v, runs, built, game, data = rows[0]
+        return {'version': v, 'runs': runs, 'built': built, 'game': game, 'data': json.loads(data)}
+
+    def surface_runs(self, car, surface, limit=40):
+        """The car's most recent runs that ended with a trace on `surface`, newest first: dicts of id, course,
+        finished, result_time, run_class, stage, surface (what the envelope is built from)."""
+        names = ('id', 'course', 'finished', 'result_time', 'run_class', 'stage', 'surface')
+        return [dict(zip(names, r)) for r in self._rows(
+            'SELECT {} FROM runs r JOIN sessions s ON r.session = s.id JOIN traces t ON t.run = r.id '
+            'WHERE s.car = ? AND r.surface = ? AND r.ended IS NOT NULL AND r.run_class IS NOT NULL '
+            "AND r.run_class != 'restart' ORDER BY r.started DESC, r.id DESC LIMIT ?".format(
+                ', '.join('r.' + n for n in names)), (car, surface, limit))]
 
 
 class Store(Reader):
@@ -1488,6 +1570,30 @@ class Store(Reader):
         """Record that a run's result_time is on `clock` ('game': the game's own; see RUN_CLOCK_DDL)."""
         self._do('INSERT OR REPLACE INTO run_clock (run, clock) VALUES (?, ?)', (run, clock))
 
+    def set_run_stop(self, run, stop_m):
+        """Record where along the spline the game's clock stopped for a run (see RUN_STOP_DDL)."""
+        self._do('INSERT OR REPLACE INTO run_stop (run, stop_m) VALUES (?, ?)', (run, stop_m))
+
+    LEARN_OUTLIER = 25.0         # m: a clock stop further than this from the median is left out (a hitch, not the line)
+
+    def learn_finishes(self):
+        """The stages' finish lines as the game's clock stopped them, {stage key: {'finish_m' (the median of the
+        runs' stops, less those further than LEARN_OUTLIER from it), 'finish_runs', 'finish_spread_m'}}; handed to
+        stage_tables (set_learnt), where it beats the shipped line. Returns it."""
+        stops = {}
+        for stage, stop in self._do('SELECT r.stage, s.stop_m FROM run_stop s JOIN runs r ON r.id = s.run '
+                                    'WHERE r.stage IS NOT NULL').fetchall():
+            stops.setdefault(stage, []).append(stop)
+        found = {}
+        for stage, values in stops.items():
+            middle = statistics.median(values)
+            kept = [v for v in values if abs(v - middle) <= self.LEARN_OUTLIER]
+            middle = statistics.median(kept)
+            found[stage] = {'finish_m': round(middle, 1), 'finish_runs': len(kept),
+                            'finish_spread_m': round(max(kept) - min(kept), 1)}
+        stage_tables.set_learnt(found)
+        return found
+
     def set_run_start(self, run, start_m):
         """Record where along the road spline a run began."""
         self._do('INSERT OR REPLACE INTO run_start (run, start_m) VALUES (?, ?)', (run, start_m))
@@ -1566,3 +1672,18 @@ class Store(Reader):
                  'last_shown = excluded.last_shown, times = coach_state.times + 1, value = excluded.value, '
                  'quiet = 0 WHERE excluded.last_shown - coach_state.last_shown >= ? '
                  'OR coach_state.last_shown IS NULL', (profile, car or 0, tip, at, at, value, gap))
+
+
+    # -- potential time (oversteer/potential.py): the block this feature added; see POTENTIAL_DDL --
+
+    def save_potential(self, stage, car, version, built, pot):
+        """Store a stage's potential (potential.stage()'s dict) for a car, replacing the last."""
+        self._do('INSERT OR REPLACE INTO stage_potential (stage, car, data_version, built, runs, ds, pb_s, user_s, '
+                 'grip_s, car_s, sections, profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 (stage, car, version, built, pot.get('runs'), pot.get('ds'), pot.get('pb_s'), pot.get('user_s'),
+                  pot.get('grip_s'), pot.get('car_s'), json.dumps(pot['sections']), json.dumps(pot['profile'])))
+
+    def save_envelope(self, car, surface, game, version, runs, built, data):
+        """Store a car's envelope on a surface (see POTENTIAL_DDL), replacing the last."""
+        self._do('INSERT OR REPLACE INTO envelopes (car, surface, game, data_version, runs, built, data) '
+                 'VALUES (?, ?, ?, ?, ?, ?, ?)', (car, surface, game, version, runs, built, json.dumps(data)))

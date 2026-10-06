@@ -761,12 +761,18 @@ class RunTracker:
             self._line_clock = (d, at)
         if sample.stage_time is None or clock.offset is None:
             self._finish_at(now, d, self._duration, None)    # no clock from the game: the run's own
-        elif clock.still >= CLOCK_SETTLE and speed > MOVING:
+        elif clock.still >= CLOCK_SETTLE and speed > MOVING and self._clock_stop_near_line():
             self._finish_at(now, self._clock_moved_d if self._clock_moved_d is not None else d,
                             sample.stage_time + clock.offset, 'game')
         elif sample.lap_distance > self._finish_line + FINISH_CLOCK_PAST:
             line_d, at = self._line_clock
             self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.offset, 'line')
+
+    def _clock_stop_near_line(self):
+        """The place the game's clock last moved is near the table's line (FINISH_CLOCK_BEFORE before it, up to
+        FINISH_CLOCK_PAST past it): a clock that stopped in the middle of the stage is not the finish."""
+        at = self._clock_moved_ld
+        return at is not None and self._finish_line - FINISH_CLOCK_BEFORE <= at <= self._finish_line + FINISH_CLOCK_PAST
 
     def _clock_finish(self, now, sample, speed):
         """ACR with the game's clock, before the table's line (but within FINISH_CLOCK_BEFORE of it): the clock
@@ -813,6 +819,7 @@ class RunTracker:
         summary.update(distance=self._distance, duration=self._duration, moving_time=self._moving,
                        stops=self._stops, finished=finished, result_time=self._result_time, laps_done=self._laps_done,
                        clock=self._result_clock, finish_line=self._finish_line or None,
+                       clock_stop=self._clock_moved_ld if self._result_clock == 'game' else None,
                        packets=sorted(self._packets), end=reason,
                        puddles=self._puddles / self._samples if self._samples else None,
                        progress=self._progress,
@@ -950,6 +957,7 @@ class RunTracker:
             store.set_run_finish(run, flying)            # timed at the flying finish: never re-timed
         if summary['finished'] == 1 and summary.get('clock') == 'game':
             store.set_run_clock(run, 'game')             # the game's own time: no finish line of ours moves it
+            self._learn_finish(store, run, stage, summary.get('clock_stop'))
         elif summary['finished'] == 1 and summary.get('clock') == 'line' and summary.get('finish_line'):
             store.set_run_finish(run, summary['finish_line'])    # the game's clock read at our line: moves with it
         store.add_trace(run, trace)
@@ -958,6 +966,19 @@ class RunTracker:
         # looks at the stamp reads the file
         self.learner.log.after_commit(self._history_changed)
         return True
+
+    def _learn_finish(self, store, run, stage, stop):
+        """The place the game stopped its clock is the stage's flying finish: kept per run, the stage's line learnt
+        from them (Store.learn_finishes), and where that moved the line the runs timed to the old one are timed
+        again (retime_finishes)."""
+        if stop is None or not stage:
+            return
+        before = (stage_tables.entry(stage) or {}).get('finish_m')
+        store.set_run_stop(run, stop)
+        store.learn_finishes()
+        after = (stage_tables.entry(stage) or {}).get('finish_m')
+        if after is not None and (before is None or abs(after - before) >= FINISH_MOVED):
+            retime_finishes(store)
 
     def _history_changed(self):
         self.learner.history_changed += 1

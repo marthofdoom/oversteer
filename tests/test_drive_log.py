@@ -876,6 +876,35 @@ def test_a_clock_stopped_well_before_the_last_pace_note_is_the_finish(tmp_path):
     learner.close()
 
 
+def test_a_run_on_the_games_clock_teaches_the_finish_and_old_runs_move_to_it(tmp_path):
+    """Petit Ballon has no flying finish in the table: a run before the bridge sent the clock ended at the last pace
+    note (the stop control), 245 m past where the game stops its clock. The clock run learns that line, and the
+    old run is timed again to it."""
+    from oversteer import stage_tables
+    stage = 'acr:alsace:col-du-petit-ballon'
+    assert stage_tables.entry(stage).get('finish_m') is None
+    old, _ = acr_clock_drive(0.0, 6050.0, track='Alsace Petit Ballon', start=195.0, game_line=9999.0)
+    for _, s, _ in old:
+        s.stage_time = None                                    # the bridge before version 4
+        if s.lap_distance > 5900.0:
+            s.speed = 5.0                                      # slowing to the stop control
+    new, at_line = acr_clock_drive(old[-1][0] + 30.0, 5800.0, track='Alsace Petit Ballon', start=195.0, game_line=5740.0)
+    learner, reader, session = drive_runs(tmp_path, old + new)
+    first, second = [r for r in session['runs'] if r['distance'] > 300]
+    learnt = stage_tables.entry(stage)
+    assert abs(learnt['finish_m'] - 5740.0) < 2.5 and learnt['finish_runs'] == 1
+    row = learner.log.store.run(first['id'])
+    assert abs(row['result_time'] - (5740.0 - 195.0) / 22.0) < 0.3          # at the learnt line now
+    assert abs(row['result_time'] - second['result_time']) < 0.6            # the clock's reaction time apart
+    assert abs(second['result_time'] - at_line) < 1e-3
+    learner.close()
+    # and the next start knows it (the file has it)
+    stage_tables.set_learnt({})
+    again = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    assert abs(stage_tables.entry(stage)['finish_m'] - 5740.0) < 2.5
+    again.close()
+
+
 def test_a_game_clock_that_does_not_stop_near_the_line_is_read_at_it(tmp_path):
     """No stop within FINISH_CLOCK_PAST of the table's line: the game's clock interpolated at the line."""
     from oversteer import stage_tables
