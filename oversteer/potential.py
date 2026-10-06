@@ -45,13 +45,15 @@ from .telemetry_store import TRACE_CHANNELS
 CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 G = cc.G
 
-ALGO = 3                         # bumps when the numbers a stored potential holds would change
+ALGO = 4                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)
 P_GRIP = 98.0                    # percentile of the driver's g-g: the lowest at which the potential beat every section
 P_CAR = 99.5                     # the highest grip any run reached
 SMOOTH_K = 10                    # grid points the curvature is smoothed over (20 m: 10 Hz rows are 3-7 m apart)
+SMOOTH_TIGHT = 3                 # grid points the curvature is smoothed over (6 m) where the path is tighter than TIGHT_RADIUS
+TIGHT_RADIUS = 40.0              # m (read through SMOOTH_K): a corner tighter than this is read through SMOOTH_TIGHT
 SMOOTH_A = 1                     # rows the envelope's accelerations are smoothed over: none (a 10 Hz row is one packet; the research's 60 Hz
                                  # envelope was smoothed over 0.15 s, and 1 row here lands within 2 s of its P98 potential, 3 rows 4-5 s over it)
 SMOOTH_AX = 3                    # rows the run's own lateral g is smoothed over where grip used is read
@@ -204,7 +206,12 @@ def curvature(arr, grid, plan=None):
     else:
         yaw = arr['yaw_rate']
         k = resample(arr, np.where(arr['speed'] > V_MIN, yaw / np.maximum(arr['speed'], V_MIN), np.nan), grid)
-    k = _smooth(k, SMOOTH_K)
+    smooth = _smooth(k, SMOOTH_K)
+    # a tight corner's whole turn is shorter than the window (a hairpin of 5.5 m radius turns 180 degrees in 17 m): the
+    # window spreads it and the radius reads 8.8 m. Where the smoothed path is tight, a short window is the radius
+    fine = _smooth(k, SMOOTH_TIGHT)
+    tight = (np.abs(smooth) > 1 / TIGHT_RADIUS) & np.isfinite(fine)
+    k = np.where(tight, fine, smooth)
     k[~(speed > V_MIN)] = np.nan
     return k
 

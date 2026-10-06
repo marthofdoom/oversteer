@@ -370,3 +370,38 @@ def test_on_splits_puts_the_potentials_sections_on_the_splits_bounds(monkeypatch
     assert out[2]['tail'] and not out[0]['tail']
     assert [r['split'] for r in potential.top3(out)] == [1]                   # not the launch's, not the slow-down's
     assert potential.on_splits(pot, rows, found, 7, bad=[(650.0, 650.0)])[1]['time'] is None
+
+
+def _path_arr(radius, straight=150.0, turn=math.pi, speed=10.0):
+    """A run's arrays along a straight, an arc of `radius` through `turn`, a straight: positions on ACR's axes
+    (x, y up, -north), 10 Hz rows at `speed`."""
+    arc = radius * turn
+    total = 2 * straight + arc
+    rows = []
+    for i in range(int(total / speed / 0.1)):
+        s = i * speed * 0.1
+        if s < straight:
+            east, north, _h = s, 0.0, 0.0
+        elif s < straight + arc:
+            a = (s - straight) / radius
+            east, north = straight + radius * math.sin(a), radius * (1 - math.cos(a))
+            _h = a
+        else:
+            east, north = straight + radius * math.sin(turn) + (s - straight - arc) * math.cos(turn), \
+                radius * (1 - math.cos(turn)) + (s - straight - arc) * math.sin(turn)
+        row = dict.fromkeys(TRACE_CHANNELS, NAN)
+        row.update(t=i * 0.1, distance=s, speed=speed, x=east, y=1.0, z=-north, gear=2.0)
+        rows.append(tuple(row[c] for c in TRACE_CHANNELS))
+    return potential.arrays(rows), total
+
+
+@pytest.mark.parametrize('radius', (5.5, 12.0, 60.0))
+def test_the_curvature_reads_a_hairpins_radius_not_the_smoothing_windows(radius):
+    """Smoothed over 20 m, a hairpin of 5.5 m radius (a turn of 17 m) read 8.8 m: the grip layer allowed a speed that
+    no car could turn it at. Against a circle fit of the same positions, the radius reads within 12 %."""
+    arr, total = _path_arr(radius)
+    grid = np.arange(0.0, total, potential.DS)
+    k = potential.curvature(arr, grid, 'acr')
+    peak = np.nanmax(np.abs(k))
+    assert 1 / peak == pytest.approx(radius, rel=0.12)
+    assert k[np.nanargmax(np.abs(k))] > 0                                      # the arc bends north: a left turn
