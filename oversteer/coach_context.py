@@ -1098,7 +1098,8 @@ def grid_times(trace, corners, grid, bounds):
 def stitched(reference, runs):
     """The best time through each section of the reference's grid over the reference and `runs`
     ([{'run', 'trace', 'corners'}]), by grid_times: `base` (the reference's), `best`, `who` (the run id that set
-    it), `runner_up` (the next best time, None with one run's), `gain` (base less best, per section), `total`
+    it), `runner_up` (the next best time, None with one run's), `gain` (base less best, per section the
+    reference timed), `total`
     (what the best sections together beat the reference by), and `per_run` ({run id: {section: seconds}}). None
     without a grid. sum_of_best() puts them against the quickest run."""
     grid, bounds = grid_of(reference)
@@ -1110,9 +1111,8 @@ def stitched(reference, runs):
     for run in runs:
         found = grid_times(run['trace'], run['corners'], grid, bounds)
         per_run[run['run']] = found
-        for j, t in found.items():
-            if j in times:
-                times[j].append((t, run['run']))
+        for j, t in found.items():                       # a section the reference did not time (an off) has the others'
+            times.setdefault(j, []).append((t, run['run']))
     best, who, runner_up = {}, {}, {}
     for j, ts in times.items():
         ts.sort(key=lambda x: x[0])

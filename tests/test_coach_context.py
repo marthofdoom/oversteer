@@ -944,3 +944,19 @@ def test_a_corners_call_ignores_a_crash_row_and_follows_the_reference():
     mine = [dict(corner, tightness='4')]
     out = cc.analyse({'finished': 1, 'course': tr[-1][C['distance']]}, tr, mine, [], {}, reference=ref)
     assert out['corners'][0]['tightness'] == '2'
+
+
+def test_a_section_the_reference_did_not_time_still_has_the_best_of_the_others():
+    """The reference went off in a section (no time for it): the finish split's Best was '–' though other runs timed it."""
+    ref_tr, ref_corners = road(vmin2=10.0, second_brake=1000.0)
+    cc.describe_corners(ref_tr, ref_corners, cc.build_sections(ref_tr, ref_corners))
+    quick_tr, quick_corners = road(vmin2=13.0, second_brake=1030.0)
+    cc.describe_corners(quick_tr, quick_corners, cc.build_sections(quick_tr, quick_corners))
+    reference = dict(reference_from(ref_tr, ref_corners), run=1)
+    # the reference's second section has an off in it: not timed
+    spoilt = dict(reference, corners=[dict(k, off=1) if k['d'] > 900 else k for k in ref_corners])
+    base = cc.grid_times(spoilt['trace'], spoilt['corners'], *cc.grid_of(reference))
+    assert 1 not in base
+    best = cc.stitched(spoilt, [{'run': 2, 'trace': quick_tr, 'corners': quick_corners}])
+    assert 1 in best['best'] and best['who'][1] == 2 and 1 not in best['base'] and 1 not in best['gain']
+    assert cc.sum_of_best(best, 2, 100.0)[0] <= 100.0
