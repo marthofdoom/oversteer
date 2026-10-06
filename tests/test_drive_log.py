@@ -4,6 +4,8 @@ import sqlite3
 import threading
 import time
 
+import pytest
+
 from oversteer import drive_log
 from oversteer.drive_log import DriveLog, SENT_LENGTH_TOLERANCE
 from oversteer.shift_learner import ShiftLearner
@@ -617,6 +619,7 @@ def test_acr_run_ends_when_the_car_rests_after_the_finish(tmp_path):
     assert run['distance'] < 5400                          # the standing seconds are not in it
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_acr_finish_is_the_flying_finish_else_the_last_pace_note(tmp_path):
     from oversteer import stage_tables
     bidno = stage_tables.acr_stage('Wales Afon Bidno', start=238.0)
@@ -852,6 +855,7 @@ def test_the_game_clock_stopped_before_the_tables_line(tmp_path):
     learner.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_clock_stopped_well_before_the_last_pace_note_is_the_finish(tmp_path):
     """45 stages have no flying finish in the table: the game's clock stops 200-300 m before the last pace note
     (the stop control). The run finished there: not 11 s later at the note, and not at all for a car that
@@ -876,6 +880,7 @@ def test_a_clock_stopped_well_before_the_last_pace_note_is_the_finish(tmp_path):
     learner.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_run_on_the_games_clock_teaches_the_finish_and_old_runs_move_to_it(tmp_path):
     """Petit Ballon has no flying finish in the table: a run before the bridge sent the clock ended at the last pace
     note (the stop control), 245 m past where the game stops its clock. The clock run learns that line, and the
@@ -905,6 +910,7 @@ def test_a_run_on_the_games_clock_teaches_the_finish_and_old_runs_move_to_it(tmp
     again.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_game_clock_that_does_not_stop_near_the_line_is_read_at_it(tmp_path):
     """No stop within FINISH_CLOCK_PAST of the table's line: the game's clock interpolated at the line."""
     from oversteer import stage_tables

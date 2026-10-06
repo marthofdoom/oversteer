@@ -4,6 +4,8 @@ the same corner from run to run, the limiter held on a straight against the refe
 select() does with praise and technique lines. Runs here are written as the store holds them (corners, events,
 metrics, a trace where the rule reads one)."""
 
+import pytest
+
 from oversteer import coach, coach_context as cc
 from oversteer.coach import Coach, DAY, Tip, select
 from oversteer.telemetry_store import TRACE_CHANNELS
@@ -838,6 +840,7 @@ def test_a_run_that_began_mid_stage_is_not_timed_through_the_first_section_on_th
         stage_tables.set_tables(None)
 
 
+@pytest.mark.usefixtures('without_real_lines')
 def test_the_sector_bounds_of_a_stage_entry():
     from oversteer import stage_tables
     bidno = stage_tables.entry('acr:wales:afon-bidno-severn')

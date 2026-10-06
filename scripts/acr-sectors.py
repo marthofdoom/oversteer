@@ -3,12 +3,12 @@
 installed game and print where each lies along the road spline, in the units of
 the shared memory's distance (m along the stage's centre spline).
 
-    scripts/acr-sectors.py [--game-dir DIR] [--retoc PATH] [--work DIR] [--json PATH]
+    scripts/acr-sectors.py [--game-dir DIR] [--retoc PATH] [--work DIR] [--json PATH] [--write]
 
 Needs `retoc` (github.com/trumank/retoc, MIT; it fetches the Oodle library it
 needs on first use) to turn the game's IoStore containers (Oodle-compressed,
 not encrypted) into legacy packages; everything else is read here. The game's
-files are only read, never written; the work directory holds the converted
+files are only read, never written (`--write` puts the lines into the stage table, nothing else); the work directory holds the converted
 level cells of one map at a time and is emptied after each map. Only derived
 numbers are printed, never game data.
 
@@ -349,6 +349,30 @@ def estimate(entry):
     return [round(b['start_m'], 1)] + [round(e, 1) for _, e in b['bounds']] if b else None
 
 
+LINES_SOURCE = 'game level data (RaceSector actors on the centre spline), scripts/acr-sectors.py, build 2026-09-12'
+
+
+def write_stages(path, result):
+    """Put each found variant's lines into the stage table at `path` (idempotent: only the sector_lines_*
+    fields of the entries found, in the table's own formatting, the rest as it was). High confidence for
+    the point-to-point stages, medium for the circuit (Livigno: the lap line, then the splits, no finish;
+    its distance has no capture yet)."""
+    with open(path, encoding='utf-8') as f:
+        table = json.load(f)
+    for s in table['stages']:
+        v = result.get(s['game_variant_id'])
+        if v is None:
+            continue
+        s['sector_lines_m'] = [round(d, 1) for d in v['gates_m']]
+        s['sector_lines_source'] = LINES_SOURCE
+        s['sector_lines_confidence'] = 'medium' if v.get('circuit') else 'high'
+        if v.get('circuit'):
+            s['sector_lines_circuit'] = True
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(table, f, indent=1, ensure_ascii=False)
+        f.write('\n')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--game-dir', default=GAME_DIR)
@@ -356,6 +380,8 @@ def main():
     ap.add_argument('--work', default=WORK, help='scratch directory for one map\'s converted cells (emptied after each)')
     ap.add_argument('--stages', default=STAGES, help='the stage table, to name the variants and compare')
     ap.add_argument('--json', help='write {game_variant_id: {...}} here')
+    ap.add_argument('--write', action='store_true',
+                    help='write sector_lines_m, sector_lines_source and sector_lines_confidence into the stage table (--stages), nothing else')
     ap.add_argument('maps', nargs='*', default=MAPS)
     args = ap.parse_args()
     stages = json.load(open(args.stages))['stages']
@@ -401,6 +427,8 @@ def main():
     if args.json:
         with open(args.json, 'w') as f:
             json.dump(result, f, indent=1, sort_keys=True)
+    if args.write:
+        write_stages(args.stages, result)
 
 
 if __name__ == '__main__':

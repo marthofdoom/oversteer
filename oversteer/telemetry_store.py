@@ -719,6 +719,14 @@ class Reader:
             return None                              # a file the writer has not opened since this table
         return rows[0][0] if rows else None
 
+    def run_clock(self, run_id):
+        """The clock a run's times are on: 'game' for the game's own stage clock (run_clock), else None."""
+        try:
+            rows = self._rows('SELECT clock FROM run_clock WHERE run = ?', (run_id,))
+        except sqlite3.OperationalError:
+            return None                              # a file the writer has not opened since this table
+        return rows[0][0] if rows else None
+
     def finish_unknown(self, run_id):
         """Whether a run was timed to the old finish line and could not be re-timed (a run_finish row with no finish)."""
         try:

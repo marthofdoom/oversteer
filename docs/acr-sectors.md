@@ -282,4 +282,5 @@ scripts/acr-sectors.py --retoc ~/.cache/oversteer-re/retoc/target/release/retoc 
 The script prints each variant's lines, its sectors against the table's,
 the current estimate's error, the pace-note distances, and flags (`!`) any
 check that fails. It reads the game and `data/telemetry/stages/acr.json`
-only, and writes only `--json`.
+only, and writes only `--json` and, with `--write`, the `sector_lines_*` fields of `acr.json`
+(idempotent; the rest of the table is as it was).
