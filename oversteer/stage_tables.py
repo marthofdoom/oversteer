@@ -12,7 +12,11 @@ share}, or a list, larger part first, where the shares are not known),
 `start_z` (its stages are told apart by the length the game sends and
 where they start), Assetto Corsa Rally's `track` and `config` where known
 and, from the game, `elevation_start_m`, `sectors_km` and
-`pacenote_first_m`/`pacenote_last_m` (along the road spline).
+`pacenote_first_m`/`pacenote_last_m` (along the road spline; the last note is the
+stop control), `finish_m` (the flying finish, from marth's runs where several agree:
+scripts/acr-finish.py, with `finish_runs`, `finish_spread_m`, `finish_confidence`,
+`finish_source`), `start_m` (the start line along the spline, where measured) and `discipline`
+where it is not a rally stage ('circuit' for Livigno).
 WRC Generations' come from the game's files (scripts/stage-tables.py):
 `code` and `level` (its route), `length_m` (the float it sends),
 `alt_codes` (other layouts of the stage, [{code, length_m}]),
@@ -131,6 +135,31 @@ def tables():
     return _tables
 
 
+# The finish lines learnt from the game's own clock (Store.learn_finishes): {stage key: {'finish_m',
+# 'finish_runs', 'finish_spread_m'}}, set by the store that has them. A learnt line beats the shipped one, which
+# beats the last pace note (the stop control): entry() and acr_stage() hand out the entry with it applied.
+_learnt = {}
+
+
+def set_learnt(found):
+    """Replace the learnt finish lines (the store's; {} forgets them)."""
+    global _learnt
+    _learnt = dict(found or {})
+
+
+def _learnt_entry(key, found):
+    """`found` (a shipped entry) with the stage's learnt finish line applied, or as it is without one."""
+    learnt = _learnt.get(key)
+    if not learnt or found is None:
+        return found
+    merged = dict(found)
+    runs = learnt.get('finish_runs') or 1
+    merged.update(finish_m=learnt['finish_m'], finish_runs=runs, finish_spread_m=learnt.get('finish_spread_m'),
+                  finish_confidence='high' if runs >= 2 else 'medium',
+                  finish_source="the game's own stage clock stopping, over {} of marth's runs".format(runs))
+    return merged
+
+
 def set_tables(value):
     """Replace the loaded tables (tests; None loads them again)."""
     global _tables
@@ -150,7 +179,7 @@ def acr_stage(track, start=None, length=None):
     sent, against each one's published length and last pace note."""
     if not track:
         return None
-    found = [e for e in tables().get('acr', {}).values()
+    found = [_learnt_entry(k, e) for k, e in tables().get('acr', {}).items()
              if e.get('track') and bridge_track(e['track']) == track]
     if len(found) > 1 and start is not None:
         low, high = START_BEFORE_NOTE
@@ -165,11 +194,90 @@ def acr_stage(track, start=None, length=None):
     return found[0] if len(found) == 1 else None
 
 
+# The game's official sectors (`sectors_km`) along the road spline. The bridge
+# sends no sector index or time (the graphics page's currentSectorIndex is not
+# read), so they are placed by length. Against marth's captures of Wales Afon Bidno:
+# the line is at 238.2 m on every run, the flying finish at 5287 m, so 5049 m
+# are driven against sectors that add up to 5100 (the published 4800 is not the
+# road): the sectors are taken as the road from the start line to the finish,
+# scaled to it. 24 of 46 rows' sectors do not add up to their length: those are left out.
+ROAD_BEFORE_NOTE = 25.0          # m the start line is before the first pace note, as far as the road length goes (start_line)
+START_BEFORE_FIRST_NOTE = 35.0   # m the start line is before the first pace note (25 on Afon Bidno and Elatia, 38-47 elsewhere)
+SECTOR_SCALE = (0.9, 1.1)        # the sectors' sum against the road from the start line to the finish
+SECTOR_SUM_TOLERANCE = 0.03      # the sectors' sum against the stage's length where there is no finish line
+
+
+def sector_bounds(entry):
+    """The official sectors of a stage entry along the road spline, or None where they cannot be
+    placed: {'start_m' (the start line), 'bounds': [(start_m, end_m)] per sector, 'confidence', 'source'}.
+    With `finish_m` the sectors are scaled to the road from the start line (`start_m` where measured,
+    else the first pace note less START_BEFORE_FIRST_NOTE) to the finish ('medium' with a measured
+    start line and a medium finish, else 'low'); without it they are laid end to end from the start line
+    where they add up to the stage's length ('low')."""
+    sectors = (entry or {}).get('sectors_km')
+    if not sectors or len(sectors) < 2 or not all(isinstance(v, (int, float)) and v > 0 for v in sectors):
+        return None
+    total = sum(sectors) * 1000.0
+    measured = entry.get('start_m')
+    start = measured
+    if start is None:
+        first = entry.get('pacenote_first_m')
+        if first is None:
+            return None
+        start = max(0.0, first - START_BEFORE_FIRST_NOTE)
+    finish = entry.get('finish_m')
+    if finish is not None and finish > start:
+        scale = (finish - start) / total
+        if not SECTOR_SCALE[0] <= scale <= SECTOR_SCALE[1]:
+            return None
+        source = 'scaled to the finish line'
+        confidence = 'medium' if measured is not None and entry.get('finish_confidence') in ('medium', 'high') else 'low'
+    else:
+        length = entry.get('length_m')
+        if not length or abs(total - length) > SECTOR_SUM_TOLERANCE * length:
+            return None
+        last = entry.get('pacenote_last_m')
+        if last is not None and start + total > last:
+            return None
+        scale, source, confidence = 1.0, 'laid end to end from the start line', 'low'
+    bounds, at = [], start
+    for v in sectors:
+        bounds.append((at, at + v * 1000.0 * scale))
+        at = bounds[-1][1]
+    return {'start_m': start, 'bounds': bounds, 'confidence': confidence, 'source': source}
+
+
+START_LINE_PAST = 30.0           # m: an ACR run that began further along the road than this past the stage's start line did not start the stage
+
+
+def start_line(entry):
+    """Where an ACR stage's start line is along the road spline: measured (`start_m`), else the first pace
+    note less ROAD_BEFORE_NOTE, else None."""
+    if not entry:
+        return None
+    if entry.get('start_m') is not None:
+        return entry['start_m']
+    if entry.get('pacenote_first_m') is not None:
+        return entry['pacenote_first_m'] - ROAD_BEFORE_NOTE
+    return None
+
+
+def road_length(entry):
+    """The road a run drives on an ACR stage, from the start line to the finish (the flying finish, else the
+    last pace note), or None where either end is not known. The `length` the game sends is the length of its
+    spline, which is longer than the road."""
+    if not entry:
+        return None
+    start = start_line(entry)
+    end = entry.get('finish_m') or entry.get('pacenote_last_m')
+    return end - start if start is not None and end is not None and end > start else None
+
+
 def entry(key):
     """The shipped entry of a stage key, or None."""
     if not key:
         return None
-    return tables().get(key.split(':', 1)[0], {}).get(key)
+    return _learnt_entry(key, tables().get(key.split(':', 1)[0], {}).get(key))
 
 
 def candidates_surface(candidates):

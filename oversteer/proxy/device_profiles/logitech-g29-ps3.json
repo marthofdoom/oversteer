@@ -1,0 +1,103 @@
+{
+  "id": "logitech-g29-ps3",
+  "name": "Logitech G29 Driving Force Racing Wheel",
+  "vendor": "046d",
+  "product": "c24f",
+  "version": "0111",
+  "bustype": "usb",
+  "phys": "^usb-.*/input0$",
+  "kind": "wheel",
+  "verified": true,
+  "anti_cheat_class": "unknown",
+  "notes": "PS3 mode (046d:c24f). Capture is the real device on marth's rig via sysfs; Auto-detected by Assetto Corsa Rally on marth's rig; other titles not checked here.",
+  "capture": {
+    "date": "2026-10-05",
+    "source": "marth's rig",
+    "method": "keys from sysfs; axis ranges and FF effects read (read-only, no grab) from the combined device, which mirrors the wheel's own axes under new-lg4ff",
+    "complete": true
+  },
+  "capabilities": {
+    "keys": [
+      "BTN_TRIGGER",
+      "BTN_THUMB",
+      "BTN_THUMB2",
+      "BTN_TOP",
+      "BTN_TOP2",
+      "BTN_PINKIE",
+      "BTN_BASE",
+      "BTN_BASE2",
+      "BTN_BASE3",
+      "BTN_BASE4",
+      "BTN_BASE5",
+      "BTN_BASE6",
+      "KEY:300",
+      "KEY:301",
+      "KEY:302",
+      "BTN_DEAD",
+      "BTN_TRIGGER_HAPPY1",
+      "BTN_TRIGGER_HAPPY2",
+      "BTN_TRIGGER_HAPPY3",
+      "BTN_TRIGGER_HAPPY4",
+      "BTN_TRIGGER_HAPPY5",
+      "BTN_TRIGGER_HAPPY6",
+      "BTN_TRIGGER_HAPPY7",
+      "BTN_TRIGGER_HAPPY8",
+      "BTN_TRIGGER_HAPPY9"
+    ],
+    "abs": {
+      "ABS_X": {
+        "min": 0,
+        "max": 65535,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_Y": {
+        "min": 0,
+        "max": 255,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_Z": {
+        "min": 0,
+        "max": 255,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_RZ": {
+        "min": 0,
+        "max": 255,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_HAT0X": {
+        "min": -1,
+        "max": 1,
+        "fuzz": 0,
+        "flat": 0
+      },
+      "ABS_HAT0Y": {
+        "min": -1,
+        "max": 1,
+        "fuzz": 0,
+        "flat": 0
+      }
+    },
+    "ff": [
+      "FF_RUMBLE",
+      "FF_PERIODIC",
+      "FF_CONSTANT",
+      "FF_SPRING",
+      "FF_FRICTION",
+      "FF_DAMPER",
+      "FF_INERTIA",
+      "FF_RAMP",
+      "FF_SQUARE",
+      "FF_TRIANGLE",
+      "FF_SINE",
+      "FF_SAW_UP",
+      "FF_SAW_DOWN",
+      "FF_GAIN",
+      "FF_AUTOCENTER"
+    ]
+  }
+}

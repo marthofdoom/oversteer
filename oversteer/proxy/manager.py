@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import time
@@ -32,6 +33,32 @@ STATUS_STALE = 3 * STATUS_HEARTBEAT
 
 def in_flatpak():
     return os.path.exists('/.flatpak-info')
+
+
+def wine_running(proc='/proc'):
+    """True while a Wine/Proton game's wineserver runs. Re-creating input
+    devices under a running Wine game crashes Assetto Corsa Rally's RawInput.
+    Inside Flatpak /proc only shows the sandbox, so ask the host."""
+    if in_flatpak():
+        try:
+            result = subprocess.run(
+                ['flatpak-spawn', '--host', 'pgrep', '-x', 'wineserver|wineserver64'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+            return result.returncode == 0
+        except Exception:
+            return False
+    try:
+        pids = os.listdir(proc)
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc, pid, 'comm')) as f:
+                if f.read().strip() in ('wineserver', 'wineserver64'):
+                    return True
+        except (OSError, ValueError):
+            pass
+    return False
 
 
 def system_dir_readable():

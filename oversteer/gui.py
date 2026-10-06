@@ -1,7 +1,7 @@
 import configparser
 import csv
 from datetime import datetime
-from evdev import ecodes
+from evdev import ecodes, InputEvent
 import glob
 import locale as Locale
 from locale import gettext as _
@@ -105,7 +105,10 @@ class Gui:
         self.button_config[0] = [-1]
         self.pressed_button_count = 0
         self.hotkey_capture = None
+        self.hotkey_repeater = hotkeys.Repeater(self._hotkey_repeat_step, GLib.timeout_add, GLib.source_remove)
+        self.hat_held = {}                      # hat axis code -> direction held (input thread)
         self.keyboard_hotkeys = None
+        self.keyboard_release_seen = False      # the portal has sent a Deactivated
         self.keyboard_needs_bind = False
         self.keyboard_session_failed = False
         self.global_hotkeys = {}
@@ -191,7 +194,7 @@ class Gui:
                     '/bin/sh',
                     '-c',
                     copy_cmd +
-                    'udevadm control --reload-rules && udevadm trigger',
+                    'udevadm control --reload-rules && udevadm trigger && udevadm settle',
                 ])
                 if return_code == 0:
                     self.ui.info_dialog(_("Permissions rules installed."),
@@ -301,10 +304,22 @@ class Gui:
             logging.debug("combine status: %s", e)
         return True
 
+    def _confirm_wine_running(self):
+        """True when it is fine to re-create the combined device: no Wine
+        game runs, or the user accepted the risk."""
+        from .proxy.manager import wine_running
+        if not wine_running():
+            return True
+        return self.ui.confirmation_dialog(_("A game is running under Wine or Proton. "
+                "Applying this restarts the combined device, which can crash some "
+                "games (Assetto Corsa Rally). Apply anyway?"))
+
     def start_proxy_service(self):
         """Start oversteer-proxy.service through pkexec, off the GTK thread."""
         from .proxy import install
         if self.combine_busy:
+            return
+        if not self._confirm_wine_running():
             return
         self.combine_busy = True
         self.ui.set_combine_busy(True, _("Starting…"))
@@ -375,6 +390,9 @@ class Gui:
                         specs.append(spec)
                     except SpecError:
                         pass
+        if not self._confirm_wine_running():
+            self.refresh_equipment()
+            return
         # Candidate directory: what the installer sees; copied to the user
         # config only when the install went through. It lives under the
         # config dir, not /tmp: inside Flatpak /tmp is private to the sandbox
@@ -446,6 +464,7 @@ class Gui:
 
     def change_device(self, device_id):
         self.cancel_hotkey_capture()
+        self.hotkey_repeater.stop()
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
@@ -471,6 +490,8 @@ class Gui:
         else:
             self.model = Model(self.device, self.ui)
             self.models[self.device.get_id()] = self.model
+        # The pedal response attributes may only now be readable
+        self.model.refresh_pedal_responses()
 
         self.ui.set_max_range(self.device.get_max_range())
         self.ui.set_modes(self.model.get_mode_list())
@@ -618,6 +639,11 @@ class Gui:
         the invert_pedals value about to be written, so events arriving
         while the driver catches up are read the new way."""
         self.pedal_axes = self.device.pedal_axes(mask) if self.device is not None else {}
+        if self.pedal_axes and self.model is not None and self.model.get_device() is self.device:
+            # The input device may have opened only now (proxy restarting,
+            # ACL not yet applied): pick up responses the model couldn't
+            # resolve and write the ones a profile set that never got out.
+            self.model.refresh_pedal_responses()
         # Which bit each box flips depends on the wheel: the pedal shown as
         # the clutch is not always the axis the driver calls the clutch.
         self.ui.set_pedal_bits({name: (self.pedal_axes[code][2] if code in self.pedal_axes else None)
@@ -752,6 +778,9 @@ class Gui:
                 mapping.invert = bool(state)
                 changed = True
         if not changed:
+            self.ui.set_handbrake_invert(self.handbrake_invert)
+            return
+        if not self._confirm_wine_running():
             self.ui.set_handbrake_invert(self.handbrake_invert)
             return
         os.makedirs(user_dir(), 0o700, exist_ok=True)
@@ -961,7 +990,8 @@ class Gui:
             snapshot = self.shift_learner.snapshot()
         if snapshot is not None:
             snapshot = dict(snapshot, methods=self._method_shifts(snapshot['key']))
-        self.ui.set_telemetry_view(live, snapshot)
+        from .telemetry_web import live_dict
+        self.ui.set_telemetry_view(live, snapshot, live_dict(telemetry))
         self._refresh_history(snapshot['key'] if snapshot is not None else None)
         if self.telemetry_web is not None and not self.telemetry_web.remote_seen:
             self.refresh_web_status()                 # until the page is opened from another device
@@ -991,6 +1021,7 @@ class Gui:
             return
         self._history = history
         self.ui.set_telemetry_history(history)
+        self.ui.set_run_source(learner._reader, learner.profile, history['car_id'])
         if history['tips'] and self.ui.telemetry_tab_visible() and learner.log is not None:
             profile, car, tips = learner.profile, history['car_id'], history['tips']
             learner.log.post(lambda: coach.seen(learner.log.store, profile, car, tips))
@@ -1360,10 +1391,13 @@ class Gui:
         start declares them (silently, once the desktop knows them all)."""
         from .global_shortcuts import GlobalShortcuts
         if self.keyboard_hotkeys is not None:
+            if (self.hotkey_repeater.holder or '').startswith('key:'):
+                self.hotkey_repeater.stop()
             self.keyboard_hotkeys.close()
         self.keyboard_session_failed = False
         self.keyboard_hotkeys = GlobalShortcuts(self.APP_ID, self.on_keyboard_hotkey,
-                                                self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed)
+                                                self.on_keyboard_hotkeys_bound, self.on_keyboard_hotkeys_failed,
+                                                self.on_keyboard_hotkey_released)
         if not self.keyboard_hotkeys.start():
             self.keyboard_hotkeys = None
             self.ui.set_keyboard_triggers(None)
@@ -1441,7 +1475,57 @@ class Gui:
 
     def on_keyboard_hotkey(self, action_id):
         if not self._hotkeys_suppressed():
-            self.run_hotkey(action_id)
+            if self.run_hotkey(action_id) and self.keyboard_release_seen:
+                # A portal that never sends Deactivated would leave the
+                # repeat running to the limit: only repeat once one has.
+                self.hotkey_repeater.press('key:' + action_id, action_id)
+
+    def on_keyboard_hotkey_released(self, action_id):
+        self.keyboard_release_seen = True
+        self.hotkey_repeater.release('key:' + action_id)
+
+    def _hotkey_repeat_step(self, action_id):
+        """One repeat of a held hotkey; False ends the repeating."""
+        if self.hotkey_capture is not None or self.device is None or self._hotkeys_suppressed():
+            return False
+        holder = self.hotkey_repeater.holder or ''
+        if holder.startswith('wheel:btn:') and not self._wheel_key_down(int(holder[len('wheel:btn:'):])):
+            return False
+        return bool(self.run_hotkey(action_id))
+
+    def _wheel_key_down(self, code):
+        """Whether the wheel still holds the key, so a release that was lost
+        (the input device dropped while held) can't leave a repeat running.
+        True when the device can't say."""
+        input_device = getattr(self.device, 'input_device', None)
+        active_keys = getattr(input_device, 'active_keys', None)
+        if active_keys is None:
+            return True
+        try:
+            normalize = self.device.normalize_event
+            return code in {normalize(InputEvent(0, 0, ecodes.EV_KEY, c, 1)).code for c in active_keys()}
+        except OSError:
+            return False
+
+    def _post_hotkey(self, callback, *args):
+        """Run a wheel press or release on the main thread at normal priority:
+        GLib's default idle priority would queue a release behind the axis
+        updates posted every few milliseconds."""
+        GLib.idle_add(callback, *args, priority=GLib.PRIORITY_DEFAULT)
+
+    def _wheel_input_lost(self):
+        """Events were dropped or the input device was reopened (input
+        thread): a release may be among them, so nothing counts as held."""
+        self.hat_held.clear()
+        # at the priority of the presses, so it stays in order with them
+        GLib.idle_add(self._stop_wheel_repeat, priority=GLib.PRIORITY_DEFAULT)
+
+    def _stop_wheel_repeat(self):
+        """Main thread: end a repeat the wheel started; a keyboard
+        repeat has its own release."""
+        if (self.hotkey_repeater.holder or '').startswith('wheel:'):
+            self.hotkey_repeater.stop()
+        return False
 
     def _hotkeys_suppressed(self):
         """Presses that belong to something else: the Preferences button
@@ -1469,6 +1553,7 @@ class Gui:
         self.ui.set_hotkeys(self.model.get_hotkeys())
 
     def start_hotkey_capture(self, action_id):
+        self.hotkey_repeater.stop()
         self.hotkey_capture = None if self.hotkey_capture == action_id else action_id
         self.ui.set_hotkey_capture(self.hotkey_capture)
 
@@ -1481,6 +1566,10 @@ class Gui:
         bindings = self.hotkey_bindings()
         if bindings.pop(action_id, None) is not None:
             self._store_hotkeys(bindings)
+
+    def on_wheel_hotkey_release(self, wheel_input):
+        """A wheel button came up (main thread)."""
+        self.hotkey_repeater.release('wheel:' + wheel_input)
 
     def on_wheel_hotkey(self, wheel_input, suppressed=False):
         """A wheel button went down (main thread)."""
@@ -1507,7 +1596,8 @@ class Gui:
             return
         for action_id, bound in self.hotkey_bindings().items():
             if bound == wheel_input:
-                self.run_hotkey(action_id)
+                if self.run_hotkey(action_id):
+                    self.hotkey_repeater.press('wheel:' + wheel_input, action_id)
                 return
 
     def _use_buttons_input(self, wheel_input):
@@ -1526,7 +1616,9 @@ class Gui:
 
     def run_hotkey(self, action_id):
         """Move the action's control as if by hand (main thread); the
-        control's own handler writes the model and the driver."""
+        control's own handler writes the model and the driver. Returns True
+        when a step moved the control (so holding the button may repeat it),
+        False at its limit, None for anything that does not repeat."""
         action = hotkeys.BY_ID.get(action_id)
         if action is None or self.device is None:
             return
@@ -1545,17 +1637,19 @@ class Gui:
             self.ui.set_hotkeys_status('{}: {}'.format(action.label, name or _("no saved profiles")))
             return
         if action.kind == 'range':
+            before = self.model.get_range()
             self.add_range(action.delta)
             value = self.model.get_range()
             self.hotkey_feedback(fraction=(value - 40) / max(1, self.device.get_max_range() - 40))
             self.ui.set_hotkeys_status('{}: {}°'.format(action.label, value))
-            return
+            return value != before
         adjustment = widget.get_adjustment()
         delta = action.delta
         if action.kind == 'shift':
             unit = self.model.get_rev_leds_shift_unit()
             delta *= hotkeys.SHIFT_STEP[unit]
-        widget.set_value(widget.get_value() + delta)       # the adjustment clamps it
+        before = widget.get_value()
+        widget.set_value(before + delta)       # the adjustment clamps it
         value = widget.get_value()
         low, high = adjustment.get_lower(), adjustment.get_upper() - adjustment.get_page_size()
         fraction = (value - low) / (high - low) if high > low else 1.0
@@ -1571,6 +1665,17 @@ class Gui:
             shown = str(int(value))
         self.hotkey_feedback(fraction=fraction)
         self.ui.set_hotkeys_status('{}: {}'.format(action.label, shown))
+        return value != before
+
+    def _hat_hotkey(self, event):
+        """A hat axis event as hotkey press and release (input thread)."""
+        held = self.hat_held.pop(event.code, 0)
+        if held and held != event.value:
+            self._post_hotkey(self.on_wheel_hotkey_release, hotkeys.hat_input(event.code, held))
+        if event.value:
+            self.hat_held[event.code] = event.value
+            self._post_hotkey(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
+                              self._hotkeys_suppressed())
 
     def hotkey_feedback(self, fraction=None, state=None):
         """Show the new level on the rev LEDs for a moment, over the rev
@@ -1607,6 +1712,8 @@ class Gui:
 
     def process_events(self, events):
         for event in events:
+            if event.type == ecodes.EV_SYN and event.code == ecodes.SYN_DROPPED:
+                self._wheel_input_lost()
             if event.type == ecodes.EV_ABS:
                 if event.code == ecodes.ABS_X:
                     self.last_wheel_axis_value = event.value
@@ -1634,25 +1741,23 @@ class Gui:
                         self.ui.safe_call(self.ui.set_handbrake_input, pulled)
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
-                    if event.value:
-                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
-                                          self._hotkeys_suppressed())
+                    self._hat_hotkey(event)
                     if event.value == -1:
                         self.on_button_press(100, 1)
                     elif event.value == 1:
                         self.on_button_press(101, 1)
                 elif event.code == ecodes.ABS_HAT0Y:
                     self.ui.safe_call(self.ui.set_haty_input, event.value)
-                    if event.value:
-                        self.ui.safe_call(self.on_wheel_hotkey, hotkeys.hat_input(event.code, event.value),
-                                          self._hotkeys_suppressed())
+                    self._hat_hotkey(event)
                     if event.value == -1:
                         self.on_button_press(102, 1)
                     elif event.value == 1:
                         self.on_button_press(103, 1)
             if event.type == ecodes.EV_KEY:
+                if event.value == 0:
+                    self._post_hotkey(self.on_wheel_hotkey_release, hotkeys.key_input(event.code))
                 if event.value == 1:
-                    self.ui.safe_call(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
+                    self._post_hotkey(self.on_wheel_hotkey, hotkeys.key_input(event.code), self._hotkeys_suppressed())
                     kind = self.shift_buttons.get(event.code)
                     if kind is not None:
                         self.launch_inputs['shift_press'] = (time.monotonic(), kind)
@@ -1680,9 +1785,13 @@ class Gui:
         while 1:
             if self.device is not None and self.device.is_ready():
                 try:
-                    events = self.device.read_events(0.5)
+                    device = self.device
+                    drops = getattr(device, 'input_drops', 0)
+                    events = device.read_events(0.5)
                     if events is not None:
                         self.process_events(events)
+                    if getattr(device, 'input_drops', 0) != drops:
+                        self._wheel_input_lost()
                 except OSError as e:
                     logging.debug(e)
                     time.sleep(1)

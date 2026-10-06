@@ -52,6 +52,7 @@ import threading
 import time
 
 from . import car_data
+from .telemetry_formats import plan_xyz
 
 POWER_BIN = 100                  # rpm per power band
 POWER_KEEP = 40                  # samples kept per band (most recent)
@@ -91,6 +92,13 @@ GRADE_PATH = 2.0                 # m of travel in the window before the climb ov
 SHIFT_STEP = 25                  # rpm resolution of the search
 SHIFT_CONFIRM = 3                # steps the next gear must stay ahead (noise)
 LIMITER_BAND = 0.985             # within this of the limiter counts as on it
+ADVICE_MIN = 5                   # changes up in a gear before its shares are judged (as coach.SHIFT_MIN)
+ADVICE_CUT = 0.25                # share on the cut: a tip (as coach.SHIFT_CUT, ...EARLY, ...TWO, ...ON)
+ADVICE_EARLY = 0.6
+ADVICE_TWO = 0.3
+ADVICE_ON = 0.6
+ADVICE_ON_CUT = 0.1
+LAUNCH_WITHIN = 0.02             # a launch figure this close to the game's limiter is the launch overshooting the cut
 DRAG_C0 = 0.15                   # m/s^2: rolling resistance, typical car
 DRAG_C2 = 3.5e-4                 # 1/m: aerodynamic drag / mass, typical car
 BOOST_HOLD = 0.8                 # s of full throttle before power counts: turbo lag (calibrate; learnt per car later)
@@ -114,16 +122,21 @@ G = 9.80665
 DRIVEN = {'fwd': (0, 1), 'rwd': (2, 3), 'awd': (0, 1, 2, 3)}     # wheel indices (FL, FR, RL, RR)
 
 
-def drive_slip(sample, drivetrain=None):
+def drive_slip(sample, drivetrain=None, radii=None):
     """(slip, kind) of the driven wheels, or None where the game sends no
     wheel speeds or slip. From wheel speeds: how much faster the driven
     wheels turn than the car moves (0.1 = 10 %), 'raw'; from Forza's slip
     ratio, its own figure where 1 is the grip limit, 'normalised'. The
     driven wheels are the drivetrain's, or the fastest wheel when it is
-    unknown (the driven ones are the ones that spin)."""
+    unknown (the driven ones are the ones that spin). Where the game sends
+    wheel rotation but no tyre radius (ACR's is 0), `radii` is the car's
+    learnt one."""
     wheels = DRIVEN.get(drivetrain)
-    if sample.wheel_speed is not None and sample.speed and sample.speed > MIN_SPEED:
-        speeds = [abs(v) for v in sample.wheel_speed]
+    wheel_speed = sample.wheel_speed
+    if wheel_speed is None and radii is not None and sample.wheel_rot is not None:
+        wheel_speed = [w * r for w, r in zip(sample.wheel_rot, radii)]
+    if wheel_speed is not None and sample.speed and sample.speed > MIN_SPEED:
+        speeds = [abs(v) for v in wheel_speed]
         driven = sum(speeds[i] for i in wheels) / len(wheels) if wheels else max(speeds)
         return driven / sample.speed - 1.0, 'raw'
     if sample.slip_ratio is not None:
@@ -315,6 +328,12 @@ class CarModel:
         an earlier launch's figure either way. True when it changed."""
         if not rpm:
             return False
+        if source == 'launch':
+            # A launch overshoots the cut: within LAUNCH_WITHIN of the game's figure, the game's stands
+            game = float(self.shipped['limiter_rpm']) if self.shipped else (
+                self.limiter if self.limiter_source == 'game' else None)
+            if game and abs(rpm - game) <= LAUNCH_WITHIN * game:
+                return False
         rank, known = LIMITER_SOURCES.get(source, 0), LIMITER_SOURCES.get(self.limiter_source, -1)
         same = rank == known and (rpm > self.limiter * 1.001
                                   or (source == 'launch' and abs(rpm - self.limiter) > 1.0))
@@ -327,8 +346,11 @@ class CarModel:
         """The limiter when a launch measured it or the game reported it
         (or its files say, car_data); 0 when only the highest rpm seen
         stands in for it (OutGauge sends no maximum)."""
-        if self.shipped and self.limiter_source != 'launch':
-            return float(self.shipped['limiter_rpm'])
+        if self.shipped:
+            game = float(self.shipped['limiter_rpm'])
+            # A launch figure within LAUNCH_WITHIN of it is the launch overshooting (stored by an older version too)
+            if self.limiter_source != 'launch' or abs(self.limiter - game) <= LAUNCH_WITHIN * game:
+                return game
         return self.limiter if self.limiter_source in ('launch', 'game') else 0.0
 
     def ceiling(self):
@@ -713,18 +735,28 @@ class CarModel:
         """A plain dict for the GUI, its best changes up for `surface`
         (None: whatever the surface); `bands` from best_bands() give each
         learnt best change up its range (best_low, best_high)."""
+        from . import coach_context as cc
         gears = self.gears()
         top = self.top_gear()
         bands = bands or {}
         gear_set, miss = self.gear_set()
         data = self.game_data()
+        lights = (self.shipped or {}).get('shift_lights_rpm')
+        context = {'limiter': self.known_limiter() or None, 'lights': lights, 'surface': surface,
+                   'best_for': lambda gear: self.best_for(gear, surface if surface in SURFACES else None),
+                   'pulls': lambda gear: len({v[3] for v in self.drive.get(
+                       (surface if surface in SURFACES else None, gear), ())})}
         rows = []
         for gear in (gears if data is None else sorted(set(gears) | set(range(1, top + 1)))):
             last = gear + 1 not in gears if data is None else gear >= top
             best = self.best_for(gear, surface) if not last else None
             average = self.average_upshift(gear)
             band = bands.get(gear) if best and best['source'] == 'learnt' and not best['grip_limited'] else None
+            # The game's lights band the coach judges the change up against (shift_band), where the game ships lights
+            lit = cc.shift_band(context, gear) if best and lights and lights.get('shift') else None
             rows.append({
+                'lights_low': lit[0] if lit else None,
+                'lights_high': lit[1] if lit else None,
                 'gear': gear,
                 'ratio': self.ratio(gear),
                 'ratio_samples': len(self.ratios.get(gear, [])),
@@ -748,74 +780,77 @@ class CarModel:
                 'surface': surface, 'gear_set': gear_set['id'] if gear_set else None,
                 'ratio_miss': miss}
 
-    def advice(self, session_limiter_time=0.0, surface=None):
+    def advice(self, held_limiter_time=0.0, surface=None):
         """Coaching from what has been learnt, for `surface` (None:
-        whatever the surface): a list of sentences. At most TIPS_SHOWN
-        tips (the largest rpm errors first), one line of praise and one
-        line each about grip-limited gears, re-tuned gears and what is
-        still being learnt, so the same list is not repeated gear by
-        gear."""
+        whatever the surface): a list of sentences. The changes up of each
+        gear (the last SHIFTS_KEEP flat out) are judged against the game's
+        lights band the way the coach judges a run's
+        (coach_context.shift_band, docs/coach-techniques.md section 7.3 R1):
+        a share on the limiter cut (a tip from a quarter of them), a share
+        below the band (a tip from 60 %, on tarmac, or on a loose surface in
+        3rd and up where the gear is measured not grip-limited), both, or on
+        the band ("Spot on", from 60 % with at most a tenth on the cut). At
+        most TIPS_SHOWN tips, one line of praise and one line each about
+        grip-limited gears, re-tuned gears and what is still being learnt,
+        so the same list is not repeated gear by gear. `held_limiter_time`
+        is the seconds of the session held on the limiter on straights."""
+        from . import coach_context as cc
         tips = []                        # (weight, sentence): the biggest first
         spot_on = []
         grip_limited = []
         waiting = []                     # early on a loose surface whose grip in the gear is not measured
         ceiling = self.ceiling()
+        limiter = self.known_limiter() or None
         top = self.top_gear()
+        lights = (self.shipped or {}).get('shift_lights_rpm')
+        word = 'lights band' if lights else 'shift band'
+        context = {'limiter': limiter, 'lights': lights, 'surface': surface,
+                   'best_for': lambda gear: self.best_for(gear, surface if surface in SURFACES else None),
+                   'pulls': lambda gear: len({v[3] for v in self.drive.get(
+                       (surface if surface in SURFACES else None, gear), ())})}
         for gear in range(1, (top or 0)):
-            best = self.best_for(gear, surface)
-            average = self.average_upshift(gear)
-            step = self.step(gear)
-            if best is None or best['coverage'] < SHIFT_COVERAGE or average is None or average[1] < 3 or not step:
+            best = self.best_for(gear, surface if surface in SURFACES else None)
+            peaks = self.upshifts.get(gear) or []
+            if best is None or best['coverage'] < SHIFT_COVERAGE or len(peaks) < ADVICE_MIN or not self.step(gear):
                 continue
-            best_rpm, (shift_rpm, count) = best['rpm'], average
-            engine_rpm = best['engine_rpm']              # above the lowered best, up to here: the same drive
+            band = cc.shift_band(context, gear)
+            if band is None:
+                continue
+            low, high, _ = band
+            n = len(peaks)
+            cut = sum(1 for p in peaks if limiter and p >= limiter * LIMITER_BAND) / n
+            early = sum(1 for p in peaks if p < low - cc.EARLY_BELOW and not (limiter and p >= limiter * LIMITER_BAND)) / n
+            on = sum(1 for p in peaks if low - cc.EARLY_BELOW <= p <= high + cc.BAND_SLACK
+                     and not (limiter and p >= limiter * LIMITER_BAND)) / n
             change = '{}→{}'.format(gear, gear + 1)
-            source = ' (the game\'s engine data)' if best['source'] == 'game' else ''
-            if best['grip_limited'] and engine_rpm > best_rpm:
-                grip_limited.append('{} from {:.0f} to {:.0f} rpm'.format(change, best_rpm, engine_rpm))
-            if shift_rpm < best_rpm - 200:
-                if best['grip_limited']:
-                    # Below where the next gear reaches the grip limit too
-                    tips.append((best_rpm - shift_rpm, '{}: you change up around {:.0f} rpm, {:.0f} early; hold it '
-                                 'to about {:.0f} (lowered for grip on {}).'.format(change, shift_rpm,
-                                                                                   best_rpm - shift_rpm, best_rpm,
-                                                                                   surface)))
-                    continue
-                if surface in LOOSE and best['grip_limited'] is None:
-                    waiting.append(change)
-                    continue
-                cost = self.drive_lost(gear, shift_rpm)
-                tips.append((best_rpm - shift_rpm, '{}: you change up around {:.0f} rpm, {:.0f} early; hold it to '
-                             'about {:.0f}{}.{}'.format(change, shift_rpm, best_rpm - shift_rpm, best_rpm, source,
-                                                       cost)))
-            elif shift_rpm > engine_rpm + 200:
-                best_rpm = engine_rpm
-                if best_rpm >= ceiling * 0.99:
-                    tips.append((shift_rpm - best_rpm, '{}: you change up around {:.0f} rpm, on the limiter; this car '
-                                 'pulls to the limiter in {}, so change as the lights flash.'.format(
-                                     change, shift_rpm, gear)))
-                else:
-                    stay = self.engine_drive(gear, shift_rpm) if self.game_data() else self.power_at(shift_rpm)
-                    after = (self.engine_drive(gear + 1, shift_rpm * step) if self.game_data()
-                             else self.power_at(shift_rpm * step))
-                    cost = ''
-                    if stay and after and stay < after:
-                        cost = ' By then gear {} would give {:.0f} % more drive.'.format(
-                            gear + 1, (after / stay - 1) * 100)
-                    tips.append((shift_rpm - best_rpm, '{}: you change up around {:.0f} rpm, {:.0f} late; change at '
-                                 'about {:.0f}{}.{}'.format(change, shift_rpm, shift_rpm - best_rpm, best_rpm, source,
-                                                           cost)))
-            else:
-                spot_on.append((change, count))
-        if session_limiter_time > 3:
-            # Seconds on the limiter weigh like a few hundred rpm of error
-            tips.append((session_limiter_time * 100, '{:.0f} s on the limiter at full throttle this session: the '
-                         'engine makes nothing there. Change up when the lights flash.'.format(session_limiter_time)))
+            # The plausibility gate shift_band applies to a lowered band: measured over enough pulls, not above
+            # the engine's own drive, and never 3rd and up on tarmac
+            share = best.get('grip_share')
+            if (best['grip_limited'] and best['engine_rpm'] > best['rpm']
+                    and context['pulls'](gear) >= cc.GRIP_PULLS and share is not None and share <= cc.GRIP_SHARE_MAX
+                    and not (gear >= 3 and surface == 'tarmac')):
+                grip_limited.append('{} from {:.0f} to {:.0f} rpm'.format(change, best['rpm'], best['engine_rpm']))
+            # The cut and early shares are not told here: the coach judges them per surface, without the
+            # launch and by what they cost a stage (coach.Coach._shift_tips), and a pooled live share
+            # nagged about changes it calls technique or too cheap to coach. Grip-limited and unmeasured
+            # gears are still named below, for the coach's lines to be read by.
+            if early >= ADVICE_EARLY and not cut >= ADVICE_CUT and surface not in ('tarmac',) \
+                    and surface in SURFACES and surface not in ('snow', 'ice') and gear >= 3 \
+                    and best['grip_limited'] is None:
+                waiting.append(change)
+            elif on >= ADVICE_ON and cut <= ADVICE_ON_CUT and gear > 1:
+                # 1st's changes up include the launch's, which the learnt peaks cannot tell from the rest
+                spot_on.append((change, n))
+        if held_limiter_time > 3:
+            # Seconds held on the limiter on a straight weigh like a few hundred rpm of error
+            tips.append((held_limiter_time * 0.1, '{:.0f} s held on the limiter on straights this session, with no '
+                         'corner to use it for: the engine makes nothing there. Change up as the lights '
+                         'flash.'.format(held_limiter_time)))
         lines = [text for _, text in sorted(tips, key=lambda tip: -tip[0])[:TIPS_SHOWN]]
         if spot_on:
             names = [change for change, _ in spot_on]
-            lines.append('Spot on: {} within 200 rpm of the best ({} changes).'.format(
-                _listed(names), sum(count for _, count in spot_on)))
+            lines.append("Spot on: {} on the {} ({} changes).".format(
+                _listed(names), word, sum(count for _, count in spot_on)))
         if grip_limited:
             lines.append('On {} the lower gear is grip-limited, so changing up anywhere in the range gives the same '
                          'drive: {}.'.format(surface, _listed(grip_limited)))
@@ -1024,11 +1059,14 @@ class ShiftLearner:
         self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
         self._wheels = DrivenWheels()
         from .drive_log import RunTracker
+        from .live_buffer import LiveBuffer
+        self.live_run = LiveBuffer()        # the run going on, for the live view: every write is under self.lock
         self.runs = RunTracker(self)
         self._session_moving = 0.0          # s on the move this session, for the re-tune window
         self._session_distance = 0.0        # m
         self._retuned = set()               # gears re-tuned this session
         self.session_limiter_time = 0.0
+        self.session_held_time = 0.0         # s of held-straight limiter episodes of the session's runs (coach_context)
         self.history_changed = 0            # counts up when history readers should query again
         self._loaded = None                 # load_snapshot(): ((profile, key, updated), snapshot)
         self._shift_cache = {}
@@ -1058,8 +1096,49 @@ class ShiftLearner:
         log.on_rollback.append(self._rolled_back)
         if self.threaded:
             log.ticks.append(self.publish)
+            log.ticks.append(self._backfill_tick)
         with self.lock:
             self.log = log
+
+    BACKFILL_BATCH = 3                  # runs worked over per batch
+    BACKFILL_QUIET = 2.0                # s without a packet before a batch is started
+
+    _backfilled = False                 # nothing left to work over (the drive-log thread's belief)
+    _backfill_queued = False
+
+    def _backfill_tick(self):
+        """Drive-log thread, once a second: queue a batch of the backfill of
+        runs from before the context layer (drive_log.backfill_step) when no
+        run is on and the game has been quiet a moment: a batch takes the
+        thread for a second or two, and the first live run after an upgrade
+        must not wait behind sixty traces."""
+        if self._backfilled or self._backfill_queued or self.log is None:
+            return
+        if self.runs.run is not None or (self._last_feed is not None
+                                         and time.monotonic() - self._last_feed < self.BACKFILL_QUIET):
+            return
+        self._backfill_queued = self.log.post(self._backfill_batch)
+
+    def _backfill_batch(self):
+        from .drive_log import backfill_step
+        self._backfill_queued = False
+        if backfill_step(self, self.BACKFILL_BATCH) == 0:
+            self._backfilled = True
+        return True
+
+    def backfill(self):
+        """Work every run from before the context layer over now (tests,
+        replays and the command line; the app does it a few runs at a time
+        from its drive-log thread). Returns the number of runs."""
+        from .drive_log import backfill_step
+        total = 0
+        while self.log is not None:
+            done = backfill_step(self, self.BACKFILL_BATCH)
+            self.log.store.commit()
+            total += done
+            if not done:
+                break
+        return total
 
     def close(self):
         self.save()
@@ -1132,6 +1211,7 @@ class ShiftLearner:
         self.car = car
         self._reset_motion()
         self.session_limiter_time = 0.0
+        self.session_held_time = 0.0
 
     def _save_locked(self, force=False):
         """Have the drive log write the current car's model (at most every
@@ -1157,6 +1237,7 @@ class ShiftLearner:
         self._sessions += 1
         self.session = self._sessions
         self.session_limiter_time = 0.0
+        self.session_held_time = 0.0
         self._session_moving, self._session_distance, self._retuned = 0.0, 0.0, set()
         if self.log is not None:
             self.log.post(self._write_session_start, self.session, self.profile, self.car, self.wall(now),
@@ -1351,7 +1432,8 @@ class ShiftLearner:
             if self.car is None:
                 return None
             copy, limiter_time, surface = self.car.copy(), self.session_limiter_time, self._shown_surface()
-        return self._snapshot_of(copy, limiter_time, self._bands_of(copy), surface)
+            held = self.session_held_time
+        return self._snapshot_of(copy, limiter_time, self._bands_of(copy), surface, held)
 
     published = None                    # the drive-log thread's last snapshot of the current car
 
@@ -1366,10 +1448,11 @@ class ShiftLearner:
                 self.published = self._lights = None
                 return
             copy, limiter_time, surface = self.car.copy(), self.session_limiter_time, self._shown_surface()
+            held = self.session_held_time
             now = self.surface
         top = copy.top_gear() or 0
         self._lights = (copy.key, now, {g: copy.best_for(g, now) for g in range(1, top)})
-        self.published = self._snapshot_of(copy, limiter_time, self._bands_of(copy), surface)
+        self.published = self._snapshot_of(copy, limiter_time, self._bands_of(copy), surface, held)
 
     def _shown_surface(self):
         """The surface the live snapshot is for: the run's, else the one
@@ -1389,10 +1472,13 @@ class ShiftLearner:
         return cached[1]
 
     @staticmethod
-    def _snapshot_of(car, session_limiter_time=0.0, bands=None, surface=None):
+    def _snapshot_of(car, session_limiter_time=0.0, bands=None, surface=None, held_time=None):
+        """`session_limiter_time` is every second on the cut this session (what the tab shows);
+        the advice only counts `held_time` of them, the held-straight ones (coach_context), where
+        given: the rest is the shift, the corner and the wheelspin."""
         data = car.snapshot(bands, surface)
         data['session_limiter_time'] = session_limiter_time
-        data['advice'] = car.advice(session_limiter_time, surface)
+        data['advice'] = car.advice(session_limiter_time if held_time is None else held_time, surface)
         return data
 
     def shift_rpm(self, gear):
@@ -1473,7 +1559,10 @@ class ShiftLearner:
             car = self.car
             if sample.car_class is not None:
                 car.car_class = sample.car_class
-            if sample.drivetrain is not None:
+            shipped_drivetrain = car.shipped.get('drivetrain') if car.shipped else None
+            if shipped_drivetrain in DRIVEN:
+                car.drivetrain = shipped_drivetrain          # the game's files beat a vote (a Fabia is AWD)
+            elif sample.drivetrain is not None:
                 car.drivetrain = sample.drivetrain
             if self.session is None:
                 self._start_session_locked(now, sample)
@@ -1528,7 +1617,7 @@ class ShiftLearner:
             recent.append((now, rpm, throttle))
             while now - recent[0][0] > SHIFT_WINDOW:
                 recent.popleft()
-            slip = drive_slip(sample, car.drivetrain)
+            slip = drive_slip(sample, car.drivetrain, car.radii)
             self._slip = slip[0] if slip is not None and slip[1] == 'raw' else None
         pending = self._pending
         if pending:
@@ -1537,14 +1626,15 @@ class ShiftLearner:
                 last['engage_rpm'] = rpm              # the revs the new gear brought, once the clutch bites
             if now - pending[0]['_t'] > DOUBLE_TAP_REVERT:
                 self._flush_shifts_locked(car, now)
-        self._speeds.append((now, speed, sample.pos[1] if sample.pos is not None else None, rpm))
+        pos = plan_xyz(sample.game, sample.pos)         # the map's axes: (east, height, north), whatever the game's
+        self._speeds.append((now, speed, pos[1] if pos is not None else None, rpm))
         while self._speeds and now - self._speeds[0][0] > ACCEL_WINDOW:
             self._speeds.popleft()
         positions = self._positions
         if sample.pos is None:
             positions.clear()
         else:
-            positions.append(sample.pos)
+            positions.append(pos)
             while len(positions) > len(self._speeds):
                 positions.popleft()
 
@@ -1618,7 +1708,7 @@ class ShiftLearner:
         if not on_ratio:
             # Wheelspin or a jump, or a gear not learnt yet: no power from it
             return
-        slip = drive_slip(sample, car.drivetrain)
+        slip = drive_slip(sample, car.drivetrain, car.radii)
         if slip is not None and slip[0] > SLIP_POWER[slip[1]]:
             return                                   # spinning: the drive is not reaching the road
         if sample.power is not None:
@@ -1795,7 +1885,7 @@ class ShiftLearner:
         """(what the drive accelerates the car by, slope-free): an
         accelerometer reading as it is (gravity is in it); otherwise the
         change of speed plus what the slope takes, from the car's forward
-        vector (world y up) or from how much its position climbed over the
+        vector (the plan's height: plan_xyz) or from how much its position climbed over the
         distance it travelled; otherwise the change of speed alone (False:
         a hill is in it; None: positions came, but the car went too short
         a way for its climb to be a slope)."""
@@ -1805,7 +1895,7 @@ class ShiftLearner:
         if accel is None:
             return None, False
         if sample.forward is not None:
-            return accel + G * sample.forward[1], True
+            return accel + G * plan_xyz(sample.game, sample.forward)[1], True
         grade = self._grade()
         if grade is not None:
             return accel + G * grade, True
@@ -1813,7 +1903,7 @@ class ShiftLearner:
 
     def _grade(self):
         """The sine of the road's slope over the recent window, from the
-        positions (y up): the climb over the path length. None without
+        positions (plan_xyz: height second): the climb over the path length. None without
         positions or when the car barely moved."""
         points = self._positions
         if len(points) < ACCEL_MIN_POINTS:

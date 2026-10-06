@@ -27,15 +27,17 @@ def in_sandbox():
 
 class GlobalShortcuts:
 
-    def __init__(self, app_id, on_activated, on_bound=None, on_failed=None):
+    def __init__(self, app_id, on_activated, on_bound=None, on_failed=None, on_deactivated=None):
         """`on_activated(shortcut_id)` runs when a bound key is pressed;
         `on_bound({shortcut_id: trigger description})` whenever we learn
         which keys the desktop has assigned; `on_failed(message)` when
-        the portal is missing or turns a request down."""
+        the portal is missing or turns a request down;
+        `on_deactivated(shortcut_id)` when the key is let go (hold to repeat)."""
         self.app_id = app_id
         self.on_activated = on_activated
         self.on_bound = on_bound
         self.on_failed = on_failed
+        self.on_deactivated = on_deactivated
         self.conn = None
         self.session = None
         self.version = 0
@@ -89,6 +91,8 @@ class GlobalShortcuts:
                 return
             self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'Activated', OBJECT_PATH, None,
                                        Gio.DBusSignalFlags.NONE, self._activated)
+            self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'Deactivated', OBJECT_PATH, None,
+                                       Gio.DBusSignalFlags.NONE, self._deactivated)
             self.conn.signal_subscribe(BUS_NAME, INTERFACE, 'ShortcutsChanged', OBJECT_PATH, None,
                                        Gio.DBusSignalFlags.NONE, self._changed)
             token = self._token()
@@ -219,3 +223,8 @@ class GlobalShortcuts:
         session, shortcut_id = args.unpack()[:2]
         if session == self.session:
             self.on_activated(shortcut_id)
+
+    def _deactivated(self, conn, sender, obj, iface, signal, args):
+        session, shortcut_id = args.unpack()[:2]
+        if session == self.session and self.on_deactivated is not None:
+            self.on_deactivated(shortcut_id)

@@ -1,0 +1,302 @@
+{
+ "stages": {
+  "Wales Afon Bidno": {
+   "stage": "Afon Bidno - Severn",
+   "runs": 26,
+   "span_m": [
+    238,
+    5519
+   ],
+   "corner_notes": 54,
+   "detected_corners": 31,
+   "recall": 0.63,
+   "recall_grade_1_to_4_and_HP": 0.931,
+   "precision_r_lt_150m": 0.968,
+   "apex_after_note_m_median": 29.6,
+   "grade_exact": 0.265,
+   "grade_within_1": 0.735,
+   "spearman_grade_vs_radius": 0.718,
+   "curvature_pairwise_r_between_runs": 0.573
+  },
+  "Greece Loutraki - Aghii Theodor": {
+   "stage": "Loutraki - Aghii Theodori",
+   "runs": 3,
+   "span_m": [
+    224,
+    10557
+   ],
+   "corner_notes": 104,
+   "detected_corners": 94,
+   "recall": 0.875,
+   "recall_grade_1_to_4_and_HP": 0.963,
+   "precision_r_lt_150m": 0.923,
+   "apex_after_note_m_median": 32.9,
+   "grade_exact": 0.385,
+   "grade_within_1": 0.714,
+   "spearman_grade_vs_radius": 0.548,
+   "curvature_pairwise_r_between_runs": null
+  },
+  "Greece Elatia": {
+   "stage": "Elatia",
+   "runs": 2,
+   "span_m": [
+    212,
+    6751
+   ],
+   "corner_notes": 42,
+   "detected_corners": 42,
+   "recall": 0.714,
+   "recall_grade_1_to_4_and_HP": 0.957,
+   "precision_r_lt_150m": 0.846,
+   "apex_after_note_m_median": 32.5,
+   "grade_exact": 0.367,
+   "grade_within_1": 0.767,
+   "spearman_grade_vs_radius": 0.736,
+   "curvature_pairwise_r_between_runs": null
+  },
+  "Alsace For_t": {
+   "stage": "For\u00eat de Munster",
+   "runs": 10,
+   "span_m": [
+    3774,
+    10760
+   ],
+   "corner_notes": 58,
+   "detected_corners": 56,
+   "recall": 0.724,
+   "recall_grade_1_to_4_and_HP": 0.879,
+   "precision_r_lt_150m": 0.818,
+   "apex_after_note_m_median": 44.5,
+   "grade_exact": 0.333,
+   "grade_within_1": 0.643,
+   "spearman_grade_vs_radius": 0.034,
+   "curvature_pairwise_r_between_runs": 0.295
+  },
+  "Alsace Steigenbach": {
+   "stage": "Steigenbach",
+   "runs": 1,
+   "span_m": [
+    259,
+    9419
+   ],
+   "corner_notes": 66,
+   "detected_corners": 62,
+   "recall": 0.773,
+   "recall_grade_1_to_4_and_HP": 1.0,
+   "precision_r_lt_150m": 0.85,
+   "apex_after_note_m_median": 40.5,
+   "grade_exact": 0.275,
+   "grade_within_1": 0.784,
+   "spearman_grade_vs_radius": 0.547,
+   "curvature_pairwise_r_between_runs": null
+  },
+  "Alsace Obersteigen": {
+   "stage": "Obersteigen",
+   "runs": 2,
+   "span_m": [
+    4606,
+    9330
+   ],
+   "corner_notes": 34,
+   "detected_corners": 36,
+   "recall": 0.735,
+   "recall_grade_1_to_4_and_HP": 1.0,
+   "precision_r_lt_150m": 0.8,
+   "apex_after_note_m_median": 34.5,
+   "grade_exact": 0.64,
+   "grade_within_1": 0.8,
+   "spearman_grade_vs_radius": 0.792,
+   "curvature_pairwise_r_between_runs": null
+  },
+  "Alsace Sommet": {
+   "stage": "Sommet de Munster",
+   "runs": 4,
+   "span_m": [
+    5145,
+    10825
+   ],
+   "corner_notes": 37,
+   "detected_corners": 25,
+   "recall": 0.595,
+   "recall_grade_1_to_4_and_HP": 0.9,
+   "precision_r_lt_150m": 0.909,
+   "apex_after_note_m_median": 45.2,
+   "grade_exact": 0.318,
+   "grade_within_1": 0.864,
+   "spearman_grade_vs_radius": 0.721,
+   "curvature_pairwise_r_between_runs": 0.564
+  },
+  "Greece Aghii Theodori - Loutrak": {
+   "stage": "Aghii Theodori - Loutraki",
+   "runs": 11,
+   "span_m": [
+    298,
+    10676
+   ],
+   "corner_notes": 107,
+   "detected_corners": 96,
+   "recall": 0.822,
+   "recall_grade_1_to_4_and_HP": 0.947,
+   "precision_r_lt_150m": 0.958,
+   "apex_after_note_m_median": 30.5,
+   "grade_exact": 0.33,
+   "grade_within_1": 0.58,
+   "spearman_grade_vs_radius": 0.471,
+   "curvature_pairwise_r_between_runs": 0.199
+  }
+ },
+ "overall": {
+  "median_radius_by_grade_m": {
+   "HP": 8.2,
+   "1": 12.8,
+   "2": 30.0,
+   "3": 43.6,
+   "4": 81.8,
+   "5": 94.8,
+   "6": 66.2,
+   "flat": 52.5
+  },
+  "grade_exact": 0.352,
+  "grade_within_1": 0.705,
+  "confusion_rows_note_cols_predicted": {
+   "HP": [
+    15,
+    3,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0
+   ],
+   "1": [
+    5,
+    5,
+    1,
+    1,
+    1,
+    1,
+    0,
+    0
+   ],
+   "2": [
+    2,
+    10,
+    28,
+    10,
+    1,
+    0,
+    0,
+    2
+   ],
+   "3": [
+    2,
+    4,
+    28,
+    22,
+    9,
+    2,
+    16,
+    10
+   ],
+   "4": [
+    1,
+    4,
+    7,
+    3,
+    25,
+    48,
+    20,
+    12
+   ],
+   "5": [
+    4,
+    3,
+    5,
+    1,
+    6,
+    36,
+    9,
+    3
+   ],
+   "6": [
+    1,
+    1,
+    1,
+    0,
+    1,
+    2,
+    4,
+    0
+   ],
+   "flat": [
+    1,
+    0,
+    0,
+    2,
+    0,
+    2,
+    1,
+    0
+   ]
+  }
+ },
+ "crests": {
+  "Wales Afon Bidno": {
+   "crest_notes": 9,
+   "detected": 9,
+   "recall": 0.333,
+   "precision": 0.444,
+   "recall_if_random": 0.187
+  },
+  "Greece Loutraki - Aghii Theodor": {
+   "crest_notes": 14,
+   "detected": 12,
+   "recall": 0.214,
+   "precision": 0.25,
+   "recall_if_random": 0.126
+  },
+  "Greece Elatia": {
+   "crest_notes": 7,
+   "detected": 4,
+   "recall": 0.143,
+   "precision": 0.25,
+   "recall_if_random": 0.069
+  },
+  "Alsace For_t": {
+   "crest_notes": 4,
+   "detected": 5,
+   "recall": 0.5,
+   "precision": 0.4,
+   "recall_if_random": 0.066
+  },
+  "Alsace Steigenbach": {
+   "crest_notes": 2,
+   "detected": 8,
+   "recall": 0.0,
+   "precision": 0.0,
+   "recall_if_random": 0.083
+  },
+  "Alsace Obersteigen": {
+   "crest_notes": 1,
+   "detected": 3,
+   "recall": 0.0,
+   "precision": 0.0,
+   "recall_if_random": 0.09
+  },
+  "Alsace Sommet": {
+   "crest_notes": 6,
+   "detected": 3,
+   "recall": 0.167,
+   "precision": 0.333,
+   "recall_if_random": 0.049
+  },
+  "Greece Aghii Theodori - Loutrak": {
+   "crest_notes": 14,
+   "detected": 14,
+   "recall": 0.0,
+   "precision": 0.0,
+   "recall_if_random": 0.147
+  }
+ }
+}

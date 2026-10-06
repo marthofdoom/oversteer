@@ -1,0 +1,781 @@
+{
+ "runs": [
+  {
+   "capture": "20260925-205207.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.52,
+    1.43,
+    1.58,
+    1.53
+   ],
+   "g_p98": 0.94,
+   "share_time_over_90pct_grip": 0.015,
+   "r_gg_vs_force_usage_timeseries": 0.636,
+   "r_gg_vs_force_usage_per_corner": 0.315,
+   "corners": 47,
+   "r_frontminusrear_vs_bodyslip_per_corner": 0.029,
+   "balance_front_minus_rear_median": 0.03
+  },
+  {
+   "capture": "20260925-212030.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.51,
+    1.49,
+    1.6,
+    1.56
+   ],
+   "g_p98": 0.97,
+   "share_time_over_90pct_grip": 0.012,
+   "r_gg_vs_force_usage_timeseries": 0.745,
+   "r_gg_vs_force_usage_per_corner": 0.384,
+   "corners": 44,
+   "r_frontminusrear_vs_bodyslip_per_corner": 0.086,
+   "balance_front_minus_rear_median": 0.03
+  },
+  {
+   "capture": "20260925-212030.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.47,
+    1.44,
+    1.56,
+    1.51
+   ],
+   "g_p98": 0.94,
+   "share_time_over_90pct_grip": 0.014,
+   "r_gg_vs_force_usage_timeseries": 0.773,
+   "r_gg_vs_force_usage_per_corner": 0.605,
+   "corners": 47,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.165,
+   "balance_front_minus_rear_median": 0.039
+  },
+  {
+   "capture": "20260925-214432.ovcap.gz",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "surface": "gravel",
+   "km": 4.95,
+   "peak_mu_FL_FR_RL_RR": [
+    1.59,
+    1.53,
+    1.66,
+    1.6
+   ],
+   "g_p98": 1.08,
+   "share_time_over_90pct_grip": 0.011,
+   "r_gg_vs_force_usage_timeseries": 0.689,
+   "r_gg_vs_force_usage_per_corner": 0.26,
+   "corners": 39,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.24,
+   "balance_front_minus_rear_median": 0.043
+  },
+  {
+   "capture": "20260925-222302.ovcap.gz",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "surface": "gravel",
+   "km": 10.33,
+   "peak_mu_FL_FR_RL_RR": [
+    1.6,
+    1.59,
+    1.7,
+    1.64
+   ],
+   "g_p98": 1.06,
+   "share_time_over_90pct_grip": 0.013,
+   "r_gg_vs_force_usage_timeseries": 0.681,
+   "r_gg_vs_force_usage_per_corner": 0.514,
+   "corners": 87,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.131,
+   "balance_front_minus_rear_median": 0.04
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "surface": "tarmac",
+   "km": 1.54,
+   "peak_mu_FL_FR_RL_RR": [
+    0.85,
+    0.89,
+    0.88,
+    0.91
+   ],
+   "g_p98": 0.82,
+   "share_time_over_90pct_grip": 0.133,
+   "r_gg_vs_force_usage_timeseries": 0.155,
+   "r_gg_vs_force_usage_per_corner": 0.82,
+   "corners": 8,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.66,
+   "balance_front_minus_rear_median": 0.112
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "surface": "tarmac",
+   "km": 4.7,
+   "peak_mu_FL_FR_RL_RR": [
+    0.89,
+    0.9,
+    0.87,
+    0.91
+   ],
+   "g_p98": 0.82,
+   "share_time_over_90pct_grip": 0.164,
+   "r_gg_vs_force_usage_timeseries": 0.322,
+   "r_gg_vs_force_usage_per_corner": 0.401,
+   "corners": 30,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.638,
+   "balance_front_minus_rear_median": 0.078
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "surface": "tarmac",
+   "km": 1.61,
+   "peak_mu_FL_FR_RL_RR": [
+    0.85,
+    0.88,
+    0.86,
+    0.91
+   ],
+   "g_p98": 0.88,
+   "share_time_over_90pct_grip": 0.167,
+   "r_gg_vs_force_usage_timeseries": 0.477,
+   "r_gg_vs_force_usage_per_corner": -0.195,
+   "corners": 8,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.76,
+   "balance_front_minus_rear_median": 0.126
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "surface": "tarmac",
+   "km": 1.55,
+   "peak_mu_FL_FR_RL_RR": [
+    0.84,
+    0.87,
+    0.78,
+    0.89
+   ],
+   "g_p98": 0.87,
+   "share_time_over_90pct_grip": 0.201,
+   "r_gg_vs_force_usage_timeseries": 0.355,
+   "r_gg_vs_force_usage_per_corner": -0.222,
+   "corners": 9,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.641,
+   "balance_front_minus_rear_median": 0.078
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "surface": "tarmac",
+   "km": 4.45,
+   "peak_mu_FL_FR_RL_RR": [
+    0.89,
+    0.89,
+    0.85,
+    0.88
+   ],
+   "g_p98": 0.84,
+   "share_time_over_90pct_grip": 0.138,
+   "r_gg_vs_force_usage_timeseries": 0.508,
+   "r_gg_vs_force_usage_per_corner": -0.099,
+   "corners": 30,
+   "r_frontminusrear_vs_bodyslip_per_corner": 0.355,
+   "balance_front_minus_rear_median": 0.082
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "surface": "tarmac",
+   "km": 6.99,
+   "peak_mu_FL_FR_RL_RR": [
+    0.9,
+    0.9,
+    0.89,
+    0.9
+   ],
+   "g_p98": 0.85,
+   "share_time_over_90pct_grip": 0.138,
+   "r_gg_vs_force_usage_timeseries": 0.615,
+   "r_gg_vs_force_usage_per_corner": 0.325,
+   "corners": 47,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.37,
+   "balance_front_minus_rear_median": 0.113
+  },
+  {
+   "capture": "20260927-210925.ovcap.gz",
+   "track": "Greece Elatia",
+   "car": "Skoda Fabia RS Rally2",
+   "surface": "gravel",
+   "km": 6.54,
+   "peak_mu_FL_FR_RL_RR": [
+    1.49,
+    1.49,
+    1.57,
+    1.54
+   ],
+   "g_p98": 1.02,
+   "share_time_over_90pct_grip": 0.011,
+   "r_gg_vs_force_usage_timeseries": 0.785,
+   "r_gg_vs_force_usage_per_corner": 0.715,
+   "corners": 39,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.161,
+   "balance_front_minus_rear_median": 0.051
+  },
+  {
+   "capture": "20261002-155356.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.62,
+    1.57,
+    1.44,
+    1.38
+   ],
+   "g_p98": 0.92,
+   "share_time_over_90pct_grip": 0.013,
+   "r_gg_vs_force_usage_timeseries": 0.642,
+   "r_gg_vs_force_usage_per_corner": 0.67,
+   "corners": 45,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.506,
+   "balance_front_minus_rear_median": -0.021
+  },
+  {
+   "capture": "20261002-160206.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "surface": "gravel",
+   "km": 4.97,
+   "peak_mu_FL_FR_RL_RR": [
+    1.59,
+    1.56,
+    1.44,
+    1.31
+   ],
+   "g_p98": 0.95,
+   "share_time_over_90pct_grip": 0.017,
+   "r_gg_vs_force_usage_timeseries": 0.542,
+   "r_gg_vs_force_usage_per_corner": -0.053,
+   "corners": 44,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.598,
+   "balance_front_minus_rear_median": -0.02
+  },
+  {
+   "capture": "20261002-160206.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "surface": "gravel",
+   "km": 2.12,
+   "peak_mu_FL_FR_RL_RR": [
+    1.67,
+    1.65,
+    1.31,
+    1.32
+   ],
+   "g_p98": 0.97,
+   "share_time_over_90pct_grip": 0.016,
+   "r_gg_vs_force_usage_timeseries": 0.693,
+   "r_gg_vs_force_usage_per_corner": 0.549,
+   "corners": 17,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.638,
+   "balance_front_minus_rear_median": -0.039
+  },
+  {
+   "capture": "20261002-160206.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "surface": "gravel",
+   "km": 4.73,
+   "peak_mu_FL_FR_RL_RR": [
+    1.65,
+    1.57,
+    1.33,
+    1.36
+   ],
+   "g_p98": 0.95,
+   "share_time_over_90pct_grip": 0.012,
+   "r_gg_vs_force_usage_timeseries": 0.579,
+   "r_gg_vs_force_usage_per_corner": -0.289,
+   "corners": 40,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.299,
+   "balance_front_minus_rear_median": -0.033
+  },
+  {
+   "capture": "20261002-160206.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.66,
+    1.6,
+    1.47,
+    1.38
+   ],
+   "g_p98": 0.94,
+   "share_time_over_90pct_grip": 0.015,
+   "r_gg_vs_force_usage_timeseries": 0.635,
+   "r_gg_vs_force_usage_per_corner": 0.428,
+   "corners": 43,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.502,
+   "balance_front_minus_rear_median": 0.002
+  },
+  {
+   "capture": "20261002-160206.ovcap.gz",
+   "track": "Alsace Steigenbach",
+   "car": "Hyundai i20N Rally2",
+   "surface": "tarmac",
+   "km": 9.16,
+   "peak_mu_FL_FR_RL_RR": [
+    1.47,
+    1.46,
+    1.48,
+    1.5
+   ],
+   "g_p98": 1.38,
+   "share_time_over_90pct_grip": 0.048,
+   "r_gg_vs_force_usage_timeseries": 0.816,
+   "r_gg_vs_force_usage_per_corner": 0.793,
+   "corners": 44,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.288,
+   "balance_front_minus_rear_median": 0.073
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 1.9,
+   "peak_mu_FL_FR_RL_RR": [
+    1.64,
+    1.68,
+    1.69,
+    1.69
+   ],
+   "g_p98": 1.03,
+   "share_time_over_90pct_grip": 0.013,
+   "r_gg_vs_force_usage_timeseries": 0.668,
+   "r_gg_vs_force_usage_per_corner": 0.365,
+   "corners": 16,
+   "r_frontminusrear_vs_bodyslip_per_corner": 0.455,
+   "balance_front_minus_rear_median": 0.024
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.59,
+    1.57,
+    1.65,
+    1.63
+   ],
+   "g_p98": 1.0,
+   "share_time_over_90pct_grip": 0.012,
+   "r_gg_vs_force_usage_timeseries": 0.775,
+   "r_gg_vs_force_usage_per_corner": 0.649,
+   "corners": 43,
+   "r_frontminusrear_vs_bodyslip_per_corner": 0.024,
+   "balance_front_minus_rear_median": 0.02
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 3.01,
+   "peak_mu_FL_FR_RL_RR": [
+    1.59,
+    1.54,
+    1.67,
+    1.6
+   ],
+   "g_p98": 1.02,
+   "share_time_over_90pct_grip": 0.011,
+   "r_gg_vs_force_usage_timeseries": 0.64,
+   "r_gg_vs_force_usage_per_corner": 0.474,
+   "corners": 29,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.157,
+   "balance_front_minus_rear_median": 0.032
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.53,
+    1.51,
+    1.61,
+    1.59
+   ],
+   "g_p98": 1.0,
+   "share_time_over_90pct_grip": 0.013,
+   "r_gg_vs_force_usage_timeseries": 0.754,
+   "r_gg_vs_force_usage_per_corner": 0.671,
+   "corners": 44,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.083,
+   "balance_front_minus_rear_median": 0.037
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.58,
+    1.5,
+    1.65,
+    1.59
+   ],
+   "g_p98": 0.99,
+   "share_time_over_90pct_grip": 0.012,
+   "r_gg_vs_force_usage_timeseries": 0.769,
+   "r_gg_vs_force_usage_per_corner": 0.774,
+   "corners": 48,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.064,
+   "balance_front_minus_rear_median": 0.034
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.56,
+    1.51,
+    1.62,
+    1.6
+   ],
+   "g_p98": 1.0,
+   "share_time_over_90pct_grip": 0.014,
+   "r_gg_vs_force_usage_timeseries": 0.749,
+   "r_gg_vs_force_usage_per_corner": 0.761,
+   "corners": 40,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.268,
+   "balance_front_minus_rear_median": 0.037
+  },
+  {
+   "capture": "20261003-193057.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.62,
+    1.57,
+    1.64,
+    1.65
+   ],
+   "g_p98": 1.01,
+   "share_time_over_90pct_grip": 0.009,
+   "r_gg_vs_force_usage_timeseries": 0.725,
+   "r_gg_vs_force_usage_per_corner": 0.497,
+   "corners": 40,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.139,
+   "balance_front_minus_rear_median": 0.029
+  },
+  {
+   "capture": "20261003-193057.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "surface": "gravel",
+   "km": 5.28,
+   "peak_mu_FL_FR_RL_RR": [
+    1.58,
+    1.54,
+    1.62,
+    1.61
+   ],
+   "g_p98": 1.01,
+   "share_time_over_90pct_grip": 0.012,
+   "r_gg_vs_force_usage_timeseries": 0.761,
+   "r_gg_vs_force_usage_per_corner": 0.651,
+   "corners": 39,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.197,
+   "balance_front_minus_rear_median": 0.031
+  },
+  {
+   "capture": "20261005-175627.ovcap.gz",
+   "track": "Alsace Obersteigen",
+   "car": "Hyundai i20N Rally2",
+   "surface": "tarmac",
+   "km": 4.72,
+   "peak_mu_FL_FR_RL_RR": [
+    0.89,
+    0.9,
+    0.89,
+    0.91
+   ],
+   "g_p98": 0.98,
+   "share_time_over_90pct_grip": 0.17,
+   "r_gg_vs_force_usage_timeseries": 0.798,
+   "r_gg_vs_force_usage_per_corner": 0.401,
+   "corners": 30,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.132,
+   "balance_front_minus_rear_median": 0.072
+  },
+  {
+   "capture": "20261005-204823.ovcap.gz",
+   "track": "Alsace Sommet",
+   "car": "Hyundai i20N Rally2",
+   "surface": "tarmac",
+   "km": 5.68,
+   "peak_mu_FL_FR_RL_RR": [
+    1.45,
+    1.43,
+    1.51,
+    1.47
+   ],
+   "g_p98": 1.31,
+   "share_time_over_90pct_grip": 0.052,
+   "r_gg_vs_force_usage_timeseries": 0.829,
+   "r_gg_vs_force_usage_per_corner": 0.637,
+   "corners": 33,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.284,
+   "balance_front_minus_rear_median": 0.091
+  },
+  {
+   "capture": "20261005-204823.ovcap.gz",
+   "track": "Alsace Sommet",
+   "car": "Hyundai i20N Rally2",
+   "surface": "tarmac",
+   "km": 5.68,
+   "peak_mu_FL_FR_RL_RR": [
+    1.4,
+    1.43,
+    1.5,
+    1.46
+   ],
+   "g_p98": 1.29,
+   "share_time_over_90pct_grip": 0.053,
+   "r_gg_vs_force_usage_timeseries": 0.826,
+   "r_gg_vs_force_usage_per_corner": 0.615,
+   "corners": 33,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.466,
+   "balance_front_minus_rear_median": 0.106
+  },
+  {
+   "capture": "20261005-204823.ovcap.gz",
+   "track": "Alsace Sommet",
+   "car": "Hyundai i20N Rally2",
+   "surface": "tarmac",
+   "km": 2.89,
+   "peak_mu_FL_FR_RL_RR": [
+    1.43,
+    1.37,
+    1.47,
+    1.43
+   ],
+   "g_p98": 1.29,
+   "share_time_over_90pct_grip": 0.052,
+   "r_gg_vs_force_usage_timeseries": 0.745,
+   "r_gg_vs_force_usage_per_corner": 0.717,
+   "corners": 20,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.378,
+   "balance_front_minus_rear_median": 0.1
+  },
+  {
+   "capture": "20261005-204823.ovcap.gz",
+   "track": "Alsace Sommet",
+   "car": "Hyundai i20N Rally2",
+   "surface": "tarmac",
+   "km": 5.68,
+   "peak_mu_FL_FR_RL_RR": [
+    1.47,
+    1.44,
+    1.49,
+    1.48
+   ],
+   "g_p98": 1.32,
+   "share_time_over_90pct_grip": 0.049,
+   "r_gg_vs_force_usage_timeseries": 0.83,
+   "r_gg_vs_force_usage_per_corner": 0.77,
+   "corners": 34,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.261,
+   "balance_front_minus_rear_median": 0.111
+  },
+  {
+   "capture": "20261005-213827.ovcap.gz",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "surface": "gravel",
+   "km": 10.38,
+   "peak_mu_FL_FR_RL_RR": [
+    1.64,
+    1.65,
+    1.72,
+    1.73
+   ],
+   "g_p98": 1.15,
+   "share_time_over_90pct_grip": 0.01,
+   "r_gg_vs_force_usage_timeseries": 0.644,
+   "r_gg_vs_force_usage_per_corner": 0.431,
+   "corners": 89,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.333,
+   "balance_front_minus_rear_median": 0.019
+  },
+  {
+   "capture": "20261005-213827.ovcap.gz",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "surface": "gravel",
+   "km": 2.52,
+   "peak_mu_FL_FR_RL_RR": [
+    1.69,
+    1.66,
+    1.74,
+    1.67
+   ],
+   "g_p98": 1.1,
+   "share_time_over_90pct_grip": 0.012,
+   "r_gg_vs_force_usage_timeseries": 0.623,
+   "r_gg_vs_force_usage_per_corner": 0.54,
+   "corners": 23,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.306,
+   "balance_front_minus_rear_median": 0.031
+  },
+  {
+   "capture": "20261005-213827.ovcap.gz",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "surface": "gravel",
+   "km": 3.5,
+   "peak_mu_FL_FR_RL_RR": [
+    1.67,
+    1.72,
+    1.72,
+    1.71
+   ],
+   "g_p98": 1.1,
+   "share_time_over_90pct_grip": 0.004,
+   "r_gg_vs_force_usage_timeseries": 0.593,
+   "r_gg_vs_force_usage_per_corner": 0.709,
+   "corners": 30,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.589,
+   "balance_front_minus_rear_median": 0.028
+  },
+  {
+   "capture": "20261005-213827.ovcap.gz",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "surface": "gravel",
+   "km": 10.38,
+   "peak_mu_FL_FR_RL_RR": [
+    1.67,
+    1.65,
+    1.75,
+    1.72
+   ],
+   "g_p98": 1.11,
+   "share_time_over_90pct_grip": 0.01,
+   "r_gg_vs_force_usage_timeseries": 0.745,
+   "r_gg_vs_force_usage_per_corner": 0.705,
+   "corners": 89,
+   "r_frontminusrear_vs_bodyslip_per_corner": -0.391,
+   "balance_front_minus_rear_median": 0.024
+  }
+ ],
+ "surfaces": {
+  "gravel / Skoda Fabia RS Rally2": {
+   "runs": 6,
+   "peak_mu_axle_front": 1.49,
+   "peak_mu_axle_rear": 1.57
+  },
+  "tarmac / Peugeot 208 Rally4": {
+   "runs": 6,
+   "peak_mu_axle_front": 0.88,
+   "peak_mu_axle_rear": 0.89
+  },
+  "gravel / Peugeot 208 Rally4": {
+   "runs": 5,
+   "peak_mu_axle_front": 1.61,
+   "peak_mu_axle_rear": 1.37
+  },
+  "tarmac / Hyundai i20N Rally2": {
+   "runs": 6,
+   "peak_mu_axle_front": 1.43,
+   "peak_mu_axle_rear": 1.48
+  },
+  "gravel / Hyundai i20N Rally2": {
+   "runs": 8,
+   "peak_mu_axle_front": 1.56,
+   "peak_mu_axle_rear": 1.63
+  },
+  "gravel / VW Polo GTI R5": {
+   "runs": 4,
+   "peak_mu_axle_front": 1.67,
+   "peak_mu_axle_rear": 1.72
+  }
+ },
+ "surface_g_p98": {
+  "gravel": [
+   0.92,
+   0.94,
+   0.94,
+   0.94,
+   0.95,
+   0.95,
+   0.97,
+   0.97,
+   0.99,
+   1.0,
+   1.0,
+   1.0,
+   1.01,
+   1.01,
+   1.02,
+   1.02,
+   1.03,
+   1.06,
+   1.08,
+   1.1,
+   1.1,
+   1.11,
+   1.15
+  ],
+  "tarmac": [
+   0.82,
+   0.82,
+   0.84,
+   0.85,
+   0.87,
+   0.88,
+   0.98,
+   1.29,
+   1.29,
+   1.31,
+   1.32,
+   1.38
+  ]
+ },
+ "summary": {
+  "median_r_timeseries": 0.689,
+  "median_r_per_corner": 0.54
+ }
+}

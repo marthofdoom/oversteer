@@ -32,7 +32,7 @@ import socket
 import threading
 import urllib.parse
 
-from . import coach, tuning
+from . import coach, live_buffer, run_analysis, tuning
 from .telemetry_store import open_reader
 
 DEFAULT_PORT = 5301
@@ -185,8 +185,9 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
     the Oversteer profile whose data is shown, `status()` extra status
     fields (the UDP port, the current car and session); `learner` (a
     ShiftLearner, optional) gives the car being driven its live shift
-    table. start() binds and serves from a daemon thread; stop() shuts it
-    down."""
+    table, and its `live_run` (a live_buffer.LiveBuffer) the run going on
+    for `live?since=`. start() binds and serves from a daemon thread;
+    stop() shuts it down."""
 
     daemon_threads = True
     allow_reuse_address = True
@@ -303,7 +304,9 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                     reader.close()
             return 200, body
         if path == 'live':
-            return 200, self.live()
+            if 'since' not in query:
+                return 200, self.live()                  # the dash alone, as before phase 3
+            return 200, self.live_run(query.get('since'), query.get('limit'))
         reader = self.reader()
         if reader is None:
             return (200, []) if path in ('cars',) else (404, {'error': 'no telemetry database yet'})
@@ -311,6 +314,19 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             return self._query(reader, profile, path, query)
         finally:
             reader.close()
+
+    def live_run(self, since, limit=None):
+        """`live?since=<seq>[&limit=<rows>]` (docs/telemetry-ui-design.md,
+        "Phase 3 live API"): the live run's rows after `since` and its delta,
+        with the dash (live_dict) under `dash`. Lock-free and without the
+        database: it reads the snapshots the listener published."""
+        buffer = getattr(self.learner, 'live_run', None)
+        if buffer is not None:
+            body = buffer.read(since, limit=max(1, min(live_buffer.CAPACITY, _int(limit, live_buffer.CAPACITY))))
+        else:
+            body = live_buffer.LiveBuffer().read(since)
+        body['dash'] = self.live()
+        return body
 
     def _query(self, reader, profile, path, query):
         parts = path.split('/')
@@ -350,7 +366,51 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                 return 404, {'error': 'no such car'}
             # The page only reads: tips are not marked as seen here
             tips = coach.Coach(reader).tips(profile, car['id'] if car else None)
-            return 200, {'tips': [t.to_dict() for t in tips]}
+            return 200, {'tips': [t.to_dict() for t in tips],
+                         'splits': self._splits(reader, profile, car['id']) if car else None}
+        if parts == ['potential']:
+            # The stage view of the potential time: `potential?stage=<key>&car=<id>` (oversteer/potential.py)
+            car = self._car(reader, profile, query.get('car')) if query.get('car') else None
+            if car is None or not query.get('stage'):
+                return 404, {'error': 'a stage and a car are needed'}
+            found = run_analysis.stage_potential(reader, {'stage': query.get('stage'), 'car': car['id']})
+            return (200, found) if found else (404, {'error': 'no potential for that stage and car yet'})
+        if parts[0] == 'runs':
+            return self._runs(reader, profile, parts, query)
+        return 404, {'error': 'not found'}
+
+    @staticmethod
+    def _splits(reader, profile, car_id):
+        """coach.splits(), or None when it fails: the tips are served either way."""
+        try:
+            return coach.splits(reader, profile, car_id)
+        except Exception:
+            logging.exception("telemetry web page: splits")
+            return None
+
+    def _runs(self, reader, profile, parts, query):
+        """The Run view (oversteer/run_analysis.py): `runs?car=<id>` the car's recent runs on its latest stage,
+        `runs/<id>` one run's header, its comparison candidates and the coach's advice about it,
+        `runs/<id>/trace?vs=pb|prev|<run id>&step=<m>` the run and the comparison on a distance grid with the
+        coach's sections."""
+        if len(parts) == 1:
+            car = self._car(reader, profile, query.get('car'))
+            if car is None:
+                return 404, {'error': 'no such car'}
+            return 200, run_analysis.recent_runs(reader, car['id'], max(1, min(60, _int(query.get('limit'), 12))))
+        run = reader.run(_int(parts[1], -1))
+        if run is None or self._car(reader, profile, run['car']) is None:
+            return 404, {'error': 'no such run'}
+        if len(parts) == 2:
+            tips = run_analysis.car_tips(reader, profile, run['car'], self.reader_path)
+            return 200, run_analysis.head(reader, run['id'], tips)
+        if parts[2:] == ['trace']:
+            try:
+                step = max(1.0, min(20.0, float(query.get('step') or run_analysis.STEP)))
+            except ValueError:
+                step = run_analysis.STEP
+            found = run_analysis.analysis(reader, run['id'], query.get('vs') or 'pb', step, self.reader_path)
+            return (200, found) if found is not None else (404, {'error': 'this run has no trace'})
         return 404, {'error': 'not found'}
 
     @staticmethod

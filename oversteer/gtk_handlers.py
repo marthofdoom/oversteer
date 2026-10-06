@@ -90,14 +90,19 @@ class GtkHandlers:
         wrange = int(self.ui.wheel_range.get_value() * 10)
         self.ui.overlay_wheel_range.set_label(str(wrange))
 
+    # A radio group emits 'clicked' on the button being deactivated first;
+    # only the one that became active is a choice.
     def on_combine_none_clicked(self, widget):
-        self.model.set_combine_pedals(0)
+        if widget.get_active():
+            self.model.set_combine_pedals(0)
 
     def on_combine_brakes_clicked(self, widget):
-        self.model.set_combine_pedals(1)
+        if widget.get_active():
+            self.model.set_combine_pedals(1)
 
     def on_combine_clutch_clicked(self, widget):
-        self.model.set_combine_pedals(2)
+        if widget.get_active():
+            self.model.set_combine_pedals(2)
 
     def on_invert_handbrake_clicked(self, widget):
         if not self.ui.updating_invert_pedals:

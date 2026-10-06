@@ -1,0 +1,169 @@
+{
+ "stage": "Wales Afon Bidno",
+ "car": "Hyundai i20N Rally2",
+ "surface": "gravel",
+ "percentile": 98.0,
+ "floor": true,
+ "curvature_from": "yaw",
+ "runs": 6,
+ "run_times_s": [
+  196.2,
+  198.0,
+  198.1,
+  199.6,
+  188.4,
+  187.7
+ ],
+ "pb_captured_s": 187.7,
+ "sum_of_best_sections_s": 183.1,
+ "potential_s": 171.4,
+ "layers_s": {
+  "pb": 187.7,
+  "user (sum of best)": 183.1,
+  "grip (P98 of own g-g)": 171.4,
+  "car (best grip any run, engine from car data)": 162.7
+ },
+ "car_envelope": {
+  "lat_g": [
+   0.93,
+   0.93,
+   1.33,
+   0.98,
+   1.07,
+   1.04,
+   0.91,
+   0.95,
+   0.84,
+   0.57,
+   0.57,
+   0.57
+  ],
+  "brake_g": [
+   0.66,
+   0.66,
+   0.73,
+   0.97,
+   1.02,
+   1.05,
+   1.11,
+   1.19,
+   1.06,
+   0.85,
+   0.85,
+   0.85
+  ],
+  "drive_g": [
+   0.86,
+   0.86,
+   0.86,
+   0.86,
+   0.7,
+   0.57,
+   0.45,
+   0.37,
+   0.3,
+   0.18,
+   0.18,
+   0.18
+  ],
+  "mass_kg": 1400,
+  "gear_set": "Hyundaii20Rally2Set1"
+ },
+ "owner_pb_s": 188.0,
+ "target_s": 173.0,
+ "envelope": {
+  "bins_kmh": [
+   4,
+   22,
+   40,
+   58,
+   76,
+   94,
+   112,
+   130,
+   148,
+   166,
+   184,
+   202
+  ],
+  "lat_g": [
+   0.97,
+   0.94,
+   0.89,
+   0.86,
+   0.91,
+   0.88,
+   0.79,
+   0.82,
+   0.72,
+   0.52,
+   0.52,
+   0.52
+  ],
+  "brake_g": [
+   0.75,
+   0.58,
+   0.72,
+   0.82,
+   0.92,
+   0.96,
+   1.03,
+   1.13,
+   1.04,
+   0.83,
+   0.83,
+   0.83
+  ],
+  "drive_g": [
+   0.84,
+   0.81,
+   0.76,
+   0.74,
+   0.68,
+   0.55,
+   0.43,
+   0.36,
+   0.24,
+   0.16,
+   0.16,
+   0.16
+  ]
+ },
+ "sections_where_potential_not_faster_than_best": 0,
+ "target_mode": {
+  "gap_s": 14.7,
+  "available_total_s": 16.3,
+  "gap_over_available": 0.9,
+  "calls": [
+   "The 3 right at 1.3 km: you use 49 % of the grip; about 1.5 s is there. Get to full throttle sooner after the apex.",
+   "The 4 left at 2.1 km: you use 79 % of the grip; about 1.4 s is there. Brake later and carry the speed to the turn-in.",
+   "The 6 left at 4.2 km: about 1.3 s is there, mostly on the exit: full throttle sooner and longer.",
+   "The 5 left at 3.6 km: about 0.9 s is there, mostly on the exit: full throttle sooner and longer.",
+   "The 1 right at 2.5 km: you use 74 % of the grip; about 0.8 s is there. Brake later and carry the speed to the turn-in.",
+   "The 3 left at 0.2 km: you use 83 % of the grip; about 0.8 s is there. Carry 5 km/h more through the apex."
+  ]
+ }
+}
+d0     d1     corner    R          car    grip    user      pb   avail   v_pb  v_pot  grip    mu cause     tgt
+238    444    4 r           76    8.51    8.87    9.19    9.42    0.55   75.4   96.0  0.08  0.54 apex     0.50
+444    572    3 l           26    6.20    6.67    7.55    7.55    0.88   40.6   53.1  0.83  0.58 apex     0.79
+572    778    5 r           82    6.60    6.96    7.40    7.82    0.86   82.6  102.2  0.58  0.42 entry    0.78
+778    968    1 l           12    7.45    8.16    8.73    9.04    0.88   29.9   39.1  0.68  0.59 entry    0.79
+968    1166   4 l           54    6.96    7.29    7.91    7.91    0.62   73.4   87.9  0.83  0.56 entry    0.56
+1166   1314   4 r           57    5.34    5.64    5.85    5.85    0.21   78.7   81.3  0.85  0.56 exit     0.19
+1314   1440   3 r           40    4.87    5.19    5.60    5.88    0.69   68.5   69.7  0.76  0.57 entry    0.62
+1440   1772   3 r           45   10.24   10.73   11.63   12.40    1.67   56.1   75.1  0.49  0.63 exit     1.51
+1772   1976   3 r           43    7.68    8.05    8.83    8.83    0.78   69.6   77.2  0.77  0.55 exit     0.70
+1976   2114   4 l           61    4.48    4.74    5.23    5.47    0.74   60.8   85.9  0.77   0.6 apex     0.67
+2114   2376   4 l           60    8.35    8.78    9.53   10.36    1.58   60.0   84.9  0.79  0.59 entry    1.43
+2376   2688   5 l           81    8.75    8.99    9.40    9.63    0.64   99.3  103.4  1.38  0.54 exit     0.58
+2688   2824   1 r            9    6.96    7.60    8.17    8.51    0.92   18.6   30.7  0.74   0.6 entry    0.83
+2824   2956   1 l            8    8.69    9.67   10.03   10.03    0.36   26.3   30.9  0.71   0.6 exit     0.32
+2956   3124   4 r           46    6.08    6.48    6.95    6.95    0.47   63.6   72.5  0.10  0.46 exit     0.42
+3124   3256   3 l           38    5.75    6.17    6.46    6.64    0.46   55.9   66.9  0.88  0.57 entry    0.42
+3256   3440   5 r           86    5.60    5.88    6.24    6.24    0.36   82.7   88.1  0.18  0.39 exit     0.32
+3440   3590   5 l          121    4.02    4.13    4.36    4.36    0.23  117.3  131.3  0.50  0.66 exit     0.21
+3590   3766   5 r           81    4.92    5.00    5.05    5.07    0.07  108.5  110.1  0.36  0.64 entry    0.06
+3766   4116   5 l          124    8.50    8.93    9.43    9.96    1.03   96.8  115.4  0.52  0.48 exit     0.93
+4116   4400   4 r           60    7.03    7.26    7.86    8.04    0.78   87.4   98.3  0.59  0.67 entry    0.70
+4400   5276   6 l          145   19.68   20.22   21.71   21.71    1.49  104.3  112.1  0.02  0.45 exit     1.34

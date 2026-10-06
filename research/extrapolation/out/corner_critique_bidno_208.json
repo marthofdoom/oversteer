@@ -1,0 +1,164 @@
+{
+ "stage": "Wales Afon Bidno",
+ "car": "Peugeot 208 Rally4",
+ "passes": 83,
+ "sections": 20,
+ "band_low_rpm": 2500.0,
+ "prevalence": {
+  "gear_longer": 0.084,
+  "gear_shorter": 0.325,
+  "exit_below_band": 0.0,
+  "counter_steer_s_median": 0.21
+ },
+ "cost": {
+  "gear_longer_than_best (s)": {
+   "coef": 0.276,
+   "ci90": [
+    0.089,
+    0.564
+   ]
+  },
+  "gear_shorter_than_best (s)": {
+   "coef": 0.187,
+   "ci90": [
+    -0.044,
+    0.359
+   ]
+  },
+  "exit_below_band (s)": {
+   "coef": 0.0,
+   "ci90": [
+    -0.0,
+    0.0
+   ]
+  },
+  "counter_steer (s per s)": {
+   "coef": 0.267,
+   "ci90": [
+    0.089,
+    0.461
+   ]
+  },
+  "body_slip_over_median (s per deg)": {
+   "coef": -0.014,
+   "ci90": [
+    -0.043,
+    0.011
+   ]
+  },
+  "apex_speed_below_best (s per km/h, the control)": {
+   "coef": 0.044,
+   "ci90": [
+    0.027,
+    0.065
+   ]
+  }
+ },
+ "pb_corner_calls": [
+  {
+   "d0": 3440,
+   "d1": 3590,
+   "cost_s": 0.29,
+   "what": "1.1 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 3590,
+   "d1": 3766,
+   "cost_s": 0.21,
+   "what": "0.8 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.43
+  },
+  {
+   "d0": 444,
+   "d1": 572,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 1.17
+  },
+  {
+   "d0": 572,
+   "d1": 778,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.8
+  },
+  {
+   "d0": 968,
+   "d1": 1166,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.59
+  },
+  {
+   "d0": 1166,
+   "d1": 1314,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.93
+  },
+  {
+   "d0": 1314,
+   "d1": 1440,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.67
+  },
+  {
+   "d0": 1440,
+   "d1": 1772,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 1.28
+  },
+  {
+   "d0": 1976,
+   "d1": 2114,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.99
+  },
+  {
+   "d0": 2114,
+   "d1": 2376,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.93
+  },
+  {
+   "d0": 3124,
+   "d1": 3256,
+   "cost_s": 0.19,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.52
+  },
+  {
+   "d0": 4116,
+   "d1": 4400,
+   "cost_s": 0.17,
+   "what": "0.6 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 2688,
+   "d1": 2824,
+   "cost_s": 0.17,
+   "what": "0.6 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 778,
+   "d1": 968,
+   "cost_s": 0.12,
+   "what": "0.5 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.58
+  },
+  {
+   "d0": 2376,
+   "d1": 2688,
+   "cost_s": 0.11,
+   "what": "0.4 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  }
+ ]
+}

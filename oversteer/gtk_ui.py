@@ -4,11 +4,14 @@ from locale import gettext as _
 import logging
 import math
 import os
+import time
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
+from . import steam_options
 from .telemetry import DEFAULT_PORT
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
-from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_items, live_status, shift_summary, shift_table
+from . import telemetry_plot
+from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, splits_row, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -37,6 +40,7 @@ class GtkUi:
         self._set_builder_objects()
 
         self._set_markers()
+        self._build_pedal_response()
 
         cell_renderer = Gtk.CellRendererText()
         self.device_combobox.pack_start(cell_renderer, True)
@@ -57,6 +61,7 @@ class GtkUi:
         self.disable_save_profile()
         self._build_hotkeys_page()
         self._build_telemetry_page()
+        self._build_wheel_launch_options()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -295,6 +300,7 @@ class GtkUi:
         self.wheel_sensitivity.set_value(int(sensitivity))
 
     def set_combine_pedals(self, combine_pedals):
+        self.set_pedal_response_combined(bool(combine_pedals))
         if combine_pedals is None:
             self.combine_brakes.set_sensitive(False)
             self.combine_clutch.set_sensitive(False)
@@ -342,6 +348,8 @@ class GtkUi:
         """{'clutch'|'accelerator'|'brakes': invert_pedals bit or None} for
         the current device."""
         self.pedal_bits = dict(bits)
+        for name in self.pedal_response:
+            self._update_pedal_response_button(name)
 
     def _pedal_boxes(self):
         return zip(self.PEDAL_BOXES, (self.invert_clutch, self.invert_accelerator, self.invert_brakes))
@@ -356,6 +364,173 @@ class GtkUi:
                 box.set_active(bool(mask) and bit is not None and bool(mask & bit))
         finally:
             self.updating_invert_pedals = False
+
+    # Controls tab grid column of each pedal
+    PEDAL_COLUMNS = {'clutch': 0, 'brakes': 1, 'accelerator': 2}
+
+    def _build_pedal_response(self):
+        """A 'Response...' button under each pedal's Invert box, opening a
+        popover with the pedal's deadzone, full-travel point and curve."""
+        self.updating_pedal_response = False
+        self.showing_pedal_preset = False
+        self.pedal_response_shown = {}       # name -> last response set, None if none
+        self.pedal_response_combined = False
+        self.pedal_response = {}
+        self.pedal_preset = {}
+        grid = self.invert_clutch.get_parent()
+        for name, column in self.PEDAL_COLUMNS.items():
+            popover_box = Gtk.Grid(row_spacing=6, column_spacing=10, margin=10)
+            model = self.controller.model
+            start = self._response_scale(0, model.RESPONSE_START_MAX, 5)
+            end = self._response_scale(model.RESPONSE_END_MIN, 100, 5)
+            sensitivity = self._response_scale(0, 100, 10)
+            sensitivity.add_mark(0, Gtk.PositionType.BOTTOM, _("Soft"))
+            sensitivity.add_mark(50, Gtk.PositionType.BOTTOM, _("Linear"))
+            sensitivity.add_mark(100, Gtk.PositionType.BOTTOM, _("Sharp"))
+            start.set_tooltip_text(_("How far the pedal travels before it starts to register (deadzone at the released end)."))
+            end.set_tooltip_text(_("How far the pedal travels before it reads full."))
+            sensitivity.set_tooltip_text(_("50 is linear; lower is softer at the start of the travel, higher is sharper."))
+            presets = self.controller.model.PEDAL_PRESETS[name]
+            preset = Gtk.ComboBoxText()
+            preset.append('custom', _("Custom"))
+            for pid, label, _response, _note in presets:
+                preset.append(pid, _(label))
+            preset.set_active_id('custom')
+            note = Gtk.Label(label="", halign=Gtk.Align.START, xalign=0, wrap=True, max_width_chars=34)
+            note.get_style_context().add_class('dim-label')
+            note.set_no_show_all(True)
+            reset = Gtk.Button(label=_("Reset"), halign=Gtk.Align.END)
+            for row, (label, scale) in enumerate(((_("Starts at"), start), (_("Full at"), end), (_("Sensitivity"), sensitivity))):
+                label = Gtk.Label(label=label, halign=Gtk.Align.START, valign=Gtk.Align.START)
+                popover_box.attach(label, 0, row, 1, 1)
+                popover_box.attach(self._response_row(scale, scale is not sensitivity), 1, row, 1, 1)
+            popover_box.attach(Gtk.Label(label=_("Preset"), halign=Gtk.Align.START), 0, 3, 1, 1)
+            popover_box.attach(preset, 1, 3, 1, 1)
+            popover_box.attach(note, 1, 4, 1, 1)
+            popover_box.attach(reset, 1, 5, 1, 1)
+            popover_box.show_all()
+            popover = Gtk.Popover()
+            popover.add(popover_box)
+            button = Gtk.MenuButton(label=_("Response…"), halign=Gtk.Align.CENTER, popover=popover, sensitive=False)
+            button.set_tooltip_text(_("Reshape this pedal: a deadzone at the start of the travel, where it reaches full, and a curve. The bars show what games see. Saved in the profile. Needs a driver with pedal_response."))
+            button.show()
+            grid.attach(button, column, 4, 1, 1)
+            self.pedal_response[name] = (button, start, end, sensitivity)
+            self.pedal_response_shown[name] = None
+            self.pedal_preset[name] = (preset, note)
+            preset.connect('changed', self._on_pedal_preset_changed, name)
+            for scale in (start, end, sensitivity):
+                scale.connect('value-changed', self._on_pedal_response_changed, name)
+            reset.connect('clicked', self._on_pedal_response_reset, name)
+
+    @staticmethod
+    def _response_scale(low, high, step):
+        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, low, high, 1)
+        scale.set_digits(0)
+        scale.set_size_request(200, -1)
+        scale.set_hexpand(True)
+        scale.set_draw_value(False)
+        scale.get_adjustment().set_page_increment(step)
+        return scale
+
+    @staticmethod
+    def _response_row(scale, percent=True):
+        """The scale with its value, in a label of a fixed width so the three
+        tracks come out the same length. `percent` adds a '%' (the sensitivity
+        is not a percentage); the label is kept the same width either way. Without
+        it the label sits at the top, level with the track, as the sensitivity
+        track has marks under it."""
+        value = Gtk.Label(label="", width_chars=5, xalign=1)
+        if not percent:
+            value.set_valign(Gtk.Align.START)
+            value.set_margin_top(4)
+        def show(scale):
+            value.set_text("{:.0f} %".format(scale.get_value()) if percent else "{:.0f}".format(scale.get_value()))
+        scale.connect('value-changed', show)
+        show(scale)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.pack_start(scale, True, True, 0)
+        row.pack_start(value, False, False, 0)
+        return row
+
+    def get_pedal_response(self, name):
+        _button, start, end, sensitivity = self.pedal_response[name]
+        return int(start.get_value()), int(end.get_value()), int(sensitivity.get_value())
+
+    def set_pedal_response(self, name, response):
+        """Show a pedal's (start, end, sensitivity); None greys the button
+        out (the driver has no pedal response)."""
+        _button, start, end, sensitivity = self.pedal_response[name]
+        self.pedal_response_shown[name] = response
+        self._update_pedal_response_button(name)
+        if response is None:
+            return
+        self.updating_pedal_response = True
+        try:
+            for scale, value in zip((start, end, sensitivity), response):
+                scale.set_value(value)
+            self._show_pedal_preset(name)
+        finally:
+            self.updating_pedal_response = False
+
+    def set_pedal_response_combined(self, combined):
+        """The driver ignores the responses while the pedals are combined."""
+        self.pedal_response_combined = bool(combined)
+        for name in self.pedal_response:
+            self._update_pedal_response_button(name)
+
+    def _update_pedal_response_button(self, name):
+        """The Response button needs a value, a driver that has the
+        attributes, the pedal on this device and the pedals not combined."""
+        device = self.controller.model.get_device()
+        usable = (self.pedal_response_shown[name] is not None
+                  and device is not None and device.has_pedal_response()
+                  and self.pedal_bits.get(name) is not None
+                  and not self.pedal_response_combined)
+        self.pedal_response[name][0].set_sensitive(bool(usable))
+
+    def _show_pedal_preset(self, name):
+        """Preset box and note follow the three controls."""
+        model = self.controller.model
+        current = model.data.get(name + '_response') or self.get_pedal_response(name)
+        combo, note = self.pedal_preset[name]
+        match = [(pid, text) for pid, _label, response, text in self.controller.model.PEDAL_PRESETS[name]
+                 if response == current]
+        self.showing_pedal_preset = True
+        try:
+            combo.set_active_id(match[0][0] if match else 'custom')
+        finally:
+            self.showing_pedal_preset = False
+        text = match[0][1] if match else None
+        note.set_text(_(text) if text else "")
+        note.set_visible(bool(text))
+
+    def _on_pedal_preset_changed(self, combo, name):
+        if self.updating_pedal_response or self.showing_pedal_preset or combo.get_active_id() in (None, 'custom'):
+            return
+        response = self.controller.model.set_pedal_preset(name, combo.get_active_id())
+        self.set_pedal_response(name, response)
+
+    def _on_pedal_response_changed(self, widget, name):
+        if self.updating_pedal_response:
+            return
+        model = self.controller.model
+        _button, *scales = self.pedal_response[name]
+        shown = self.get_pedal_response(name)
+        # Only the moved scale comes from the UI: the others may show a value
+        # clamped for display that the driver holds beyond the scale's range.
+        response = shown
+        stored = model.data.get(name + '_response')
+        if stored is not None:
+            mixed = tuple(s if scale is widget else st for scale, s, st in zip(scales, shown, stored))
+            if model.valid_response(mixed) is not None:
+                response = mixed
+        model.set_pedal_response(name, *response)
+        self._show_pedal_preset(name)   # after the model took it
+
+    def _on_pedal_response_reset(self, widget, name):
+        self.set_pedal_response(name, self.controller.model.DEFAULT_RESPONSE)
+        self.controller.model.set_pedal_response(name, *self.controller.model.DEFAULT_RESPONSE)
 
     def get_invert_pedals(self):
         mask = 0
@@ -492,6 +667,24 @@ class GtkUi:
 
     def set_launch_options(self, text):
         self.launch_options.set_text(text)
+        self.wheel_launch_guidance.set_text(steam_options.guidance(text))
+
+    def _build_wheel_launch_options(self):
+        """A row at the foot of the Devices tab: the Steam launch options
+        for wheels and the combined device under Proton."""
+        entry = Gtk.Entry(editable=False, text=steam_options.WHEEL_OPTIONS)
+        entry.set_width_chars(len(steam_options.WHEEL_OPTIONS) + 1)
+        button = Gtk.Button(label=_("Copy"))
+        button.connect('clicked', lambda w: self._copy_text(entry.get_text()))
+        self.wheel_launch_guidance = self._status_label()
+        self.wheel_launch_guidance.set_text(steam_options.guidance(''))
+        listbox = self._list()
+        listbox.add(self._setting_row(
+            _("Steam launch options for wheels under Proton"), tooltip=steam_options.WHEEL_TOOLTIP,
+            controls=(entry, button), status=self.wheel_launch_guidance))
+        page = self.builder.get_object('devices_page')
+        page.pack_start(listbox, False, False, 0)
+        listbox.show_all()
 
     def copy_launch_options(self):
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
@@ -854,19 +1047,26 @@ class GtkUi:
         return self._setting_row(text, subtitle, tooltip, tuple(extra) + (switch,), status), switch
 
     def _build_telemetry_page(self):
-        """The Telemetry tab (docs/telemetry-coaching.md, section 12), in
-        two views: "Car and coaching" (the car, the telemetry arriving now,
-        its learnt shift points, coaching, sessions and setup) and
-        "Settings" (receiving telemetry, the rev lights, moved from Tools,
-        the web page and recording), in framed lists like the other tabs."""
+        """The Telemetry tab (docs/telemetry-coaching.md, section 12; the
+        sub-tabs of docs/telemetry-ui-design.md), in three views:
+        "Coaching" (the car, the telemetry arriving now, its learnt shift
+        points, coaching, sessions and setup), "Telemetry" (the live dash)
+        and "Settings" (receiving telemetry, the rev lights, moved from
+        Tools, the web page and recording), in framed lists like the other
+        tabs. The splits row sits above Coaching and Telemetry."""
         self._telemetry_history = None
         self._telemetry_advice_lines = []
         self._telemetry_rows = None
         self._telemetry_coaching_shown = None
+        self._splits_shown = None
+        self._dash = None
+        self._dash_last = None
+        self._dash_last_at = 0.0
 
         stack = Gtk.Stack()
         stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        stack.add_titled(self._telemetry_overview(), 'overview', _("Car and coaching"))
+        stack.add_titled(self._telemetry_overview(), 'coaching', _("Coaching"))
+        stack.add_titled(self._telemetry_pane(), 'telemetry', _("Telemetry"))
         stack.add_titled(self._telemetry_settings_view(), 'settings', _("Settings"))
         self.telemetry_stack = stack
         switcher = Gtk.StackSwitcher(stack=stack, halign=Gtk.Align.CENTER)
@@ -875,7 +1075,10 @@ class GtkUi:
         page.set_margin_top(12)
         switcher.set_margin_bottom(4)
         page.pack_start(switcher, False, False, 0)
+        page.pack_start(self._build_splits_row(), False, False, 0)
         page.pack_start(stack, True, True, 0)
+        # The splits are about the stage, not about the settings
+        stack.connect('notify::visible-child-name', lambda s, p: self._show_splits_row())
 
         self.main_notebook.insert_page(page, Gtk.Label(label=_("Telemetry")), self.TELEMETRY_TAB_POSITION)
         self.main_notebook.connect('switch-page', lambda notebook, child, index:
@@ -998,6 +1201,98 @@ class GtkUi:
         self.telemetry_tuning = self._list()
         self._section(page, _("Setup"), self.telemetry_tuning)
         return self._scrolled(page)
+
+    def _telemetry_pane(self):
+        """The Telemetry view: Live (the dash) and Run (a run against the PB: gtk_run_view) under a switcher."""
+        from .gtk_run_view import RunView
+        inner = Gtk.Stack()
+        inner.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        inner.add_titled(self._telemetry_live_view(), 'live', _("Live"))
+        self.telemetry_run = RunView()
+        inner.add_titled(self.telemetry_run, 'run', _("Run"))
+        self.telemetry_inner_stack = inner
+        switcher = Gtk.StackSwitcher(stack=inner, halign=Gtk.Align.CENTER)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.pack_start(switcher, False, False, 0)
+        box.pack_start(inner, True, True, 0)
+        inner.connect('notify::visible-child-name', lambda s, p: self._show_run_view())
+        box.connect('map', lambda w: self._show_run_view())
+        return box
+
+    def _show_run_view(self):
+        if self.telemetry_inner_stack.get_visible_child_name() == 'run':
+            self.telemetry_run.refresh()
+
+    def set_run_source(self, reader, profile, car_id):
+        """Where the Run view reads runs from (a callable giving a read-only Reader), set by the controller
+        with the history it reads."""
+        self.telemetry_run.set_source(reader, profile, car_id)
+        self._show_run_view()
+
+    def show_run(self, run_id, distance=None, vs='pb'):
+        """Open Telemetry > Run on a run, zoomed to `distance` m (a debrief call's place)."""
+        self.telemetry_stack.set_visible_child_name('telemetry')
+        self.telemetry_inner_stack.set_visible_child_name('run')
+        self.telemetry_run.open_run(run_id, vs, True, distance)
+
+    def _telemetry_live_view(self):
+        """The Live view: the dash and its delta block on the left; the pedal and steering strips, g-g and the
+        stage minimap on the right (gtk_live_view), on the web page's visual system. Its data is read in process
+        from the live run's buffer by a timer that runs while the view is shown."""
+        from .gtk_live_view import LiveView
+        self.telemetry_live_view = LiveView(
+            read=lambda since: self.controller.shift_learner.live_run.read(since),
+            found=lambda: self._splits_shown, on_debrief=lambda: self.telemetry_stack.set_visible_child_name('coaching'),
+            on_ribbon=lambda: self.splits_ribbon.queue_draw(), calls=self._debrief_calls,
+            on_open_run=lambda run_id: self.show_run(run_id))
+        self.telemetry_dash = self.telemetry_live_view.dash_area
+        self.telemetry_dash.connect('draw', self._draw_dash)
+        return self._scrolled(self.telemetry_live_view)
+
+    def _debrief_calls(self):
+        """'3 calls' for the finished card, from the debrief's own count."""
+        history = self._telemetry_history or {}
+        tips = [t for t in history.get('tips') or [] if (t.get('kind') if isinstance(t, dict) else getattr(t, 'kind', None)) != 'still']
+        if not tips:
+            return ''
+        return _("1 call") if len(tips) == 1 else _("{} calls").format(len(tips))
+
+    DASH_PAUSE = 30.0                   # s a pause keeps the last values (dimmed) before the dash empties
+
+    def _draw_dash(self, area, cr):
+        telemetry_plot.dash(cr, area.get_allocated_width(), area.get_allocated_height(), self._dash, flash=True)
+        return False
+
+    def _set_dash(self, live):
+        """`live`: web.live_dict() of the sample arriving now, or None. A pause shows the last values dimmed."""
+        import time
+        now = time.monotonic()
+        data = None
+        if live and live.get('rpm') is not None:
+            def num(x):
+                return x if isinstance(x, (int, float)) and math.isfinite(x) else None
+            km = ''
+            distance, length = num(live.get('distance')), num(live.get('stage_length'))
+            if distance is not None and length:
+                km = _("{:.1f} / {:.1f} km").format(max(0.0, distance) / 1000.0, length / 1000.0)
+            elif distance is not None:
+                km = _("{:.1f} km").format(max(0.0, distance) / 1000.0)
+            share = num(live.get('progress'))
+            if share is None and distance is not None and length:
+                share = distance / length
+            speed = num(live.get('speed'))
+            data = {'gear': live.get('gear'), 'speed': None if speed is None else speed * 3.6, 'rpm': num(live['rpm']) or 0.0,
+                    'shift_rpm': num(live.get('shift_rpm')), 'learnt': live.get('learnt'), 'limiter': num(live.get('limiter')),
+                    'progress': share, 'km': km, 'title': _("Stage") if km else _("Driving")}
+            self._dash_last, self._dash_last_at = data, now
+        elif self._dash_last is not None and now - self._dash_last_at < self.DASH_PAUSE:
+            data = dict(self._dash_last, dim=True, note=_("paused {:.0f} s").format(now - self._dash_last_at))
+        else:
+            self._dash_last = None
+            data = {'gear': None, 'speed': None, 'rpm': 0.0, 'dim': True, 'title': _("No telemetry arriving")}
+        if data != self._dash:
+            self._dash = data
+            self.telemetry_dash.queue_draw()
 
     def _telemetry_settings_view(self):
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
@@ -1208,7 +1503,8 @@ class GtkUi:
         self.telemetry_sessions.show_all()
         self._show_coaching()
 
-    KIND_TAGS = {'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip'}
+    KIND_TAGS = {'top3': 'telemetry-tip', 'focus': 'telemetry-focus', 'praise': 'telemetry-praise', 'tip': 'telemetry-tip',
+                'technique': 'telemetry-technique'}
 
     def _show_coaching(self):
         """The coach's tips, one row each with its kind as a tag, the
@@ -1216,6 +1512,7 @@ class GtkUi:
         lines behind an expander at the end."""
         tips = self._telemetry_history['tips'] if self._telemetry_history else []
         items = coaching_items(tips, self._telemetry_advice_lines)
+        self._show_splits()
         if items == self._telemetry_coaching_shown:
             return                          # an open expander stays open
         self._telemetry_coaching_shown = items
@@ -1254,6 +1551,145 @@ class GtkUi:
             row.add(expander)
             listbox.add(row)
         listbox.show_all()
+
+    SPLIT_TONES = {'gold': 'telemetry-split-gold', 'ahead-gain': 'telemetry-split-ahead',
+                   'ahead-lose': 'telemetry-split-ahead', 'behind-gain': 'telemetry-split-behind',
+                   'behind-lose': 'telemetry-split-lose', 'none': 'dim-label'}
+
+    def _build_splits_row(self):
+        """The splits row above Coaching and Telemetry (docs/telemetry-ui-design.md, 4.4): the stage, PB, sum of
+        best and the last run on one line, a ribbon of the splits in LiveSplit's colours (the game's sectors as
+        wider cells at the end), and a click opens the table (split, last, difference, best; the sectors under it)."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_bottom(8)
+        button = Gtk.Button()
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.splits_label = Gtk.Label(xalign=0)
+        self.splits_label.set_ellipsize(3)          # Pango.EllipsizeMode.END
+        inner.pack_start(self.splits_label, False, False, 0)
+        self.splits_ribbon = Gtk.DrawingArea()
+        self.splits_ribbon.set_size_request(-1, 10)
+        self.splits_ribbon.connect('draw', self._draw_ribbon)
+        inner.pack_start(self.splits_ribbon, False, False, 0)
+        self.splits_potential = Gtk.Label(xalign=0)           # "Potential: you 3:03.1 · grip 2:51.4 · car 2:42.7"
+        self.splits_potential.set_ellipsize(3)
+        self.splits_potential.get_style_context().add_class('dim-label')
+        self.splits_potential.set_no_show_all(True)
+        inner.pack_start(self.splits_potential, False, False, 0)
+        button.add(inner)
+        button.set_tooltip_text(_("Show or hide the splits"))
+        box.pack_start(button, False, False, 0)
+        revealer = Gtk.Revealer()
+        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        revealer.set_reveal_child(True)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(40)
+        scrolled.set_max_content_height(220)
+        scrolled.set_propagate_natural_height(True)
+        self.splits_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.splits_body.set_margin_top(6)
+        scrolled.add(self.splits_body)
+        revealer.add(scrolled)
+        box.pack_start(revealer, False, False, 0)
+        button.connect('clicked', lambda w: revealer.set_reveal_child(not revealer.get_reveal_child()))
+        self.splits_revealer = revealer
+        self.splits_box = box
+        self._splits_tones = ([], [], None)
+        box.show_all()
+        box.set_no_show_all(True)               # shown by _show_splits_row() when there are splits
+        return box
+
+    def _draw_ribbon(self, area, cr):
+        tones, sectors, bounds = self._splits_tones
+        current, pulse = None, 1.0
+        live = getattr(self, 'telemetry_live_view', None)
+        state = live.ribbon_state() if live is not None else None
+        if state is not None and len(state[0]) == len(tones):
+            tones, current = state                      # a run is on: the splits completed in their tones, the current one lit
+            pulse = 0.675 + 0.325 * math.cos(2 * math.pi * time.monotonic())
+        telemetry_plot.ribbon(cr, area.get_allocated_width(), area.get_allocated_height(), tones, sectors, bounds,
+                              current=current, pulse=pulse)
+        return False
+
+    def _show_splits_row(self):
+        visible = bool(self._splits_shown) and self.telemetry_stack.get_visible_child_name() != 'settings'
+        self.splits_box.set_visible(visible)
+
+    def _show_splits(self):
+        found = splits_row(self._telemetry_history.get('splits') if self._telemetry_history else None)
+        if found == self._splits_shown:
+            return                          # an open table stays as it is
+        self._splits_shown = found
+        for child in self.splits_body.get_children():
+            child.destroy()
+        if found is None:
+            self._splits_tones = ([], [], None)
+            self._show_splits_row()
+            return
+        self._splits_tones = (found['tones'], [tone for _n, _t, _d, tone in found['sectors']], found['bounds'])
+        summary = '<b>{}</b>   PB <tt><b>{}</b></tt>   {} <tt><b>{}</b></tt>'.format(
+            GLib.markup_escape_text(found['stage']), clock(found['pb']), _("SoB"), clock(found['sob']))
+        if found['last'] is not None and found['delta'] is not None:
+            # PB only for a clean run that is the best: a learning or off run quicker than that is not a PB
+            tone = 'gold' if found['new_pb'] else 'ahead-gain' if round(found['delta'], 1) <= 0 else 'behind-lose'
+            summary += '   {} <tt>{}</tt> <span foreground="{}"><tt><b>{}</b></tt></span>'.format(
+                _("Last"), clock(found['last']), telemetry_plot.TONES[tone],
+                _("PB") if found['new_pb'] else signed(found['delta']))
+        self.splits_label.set_markup(summary)
+        self.splits_potential.set_visible(bool(found.get('potential_line')))
+        self.splits_potential.set_text(found.get('potential_line') or '')
+        self.splits_potential.set_tooltip_text(_("What the layers mean: you, the sum of your best splits; grip, a lap simulation at the grip you reach 2 % of the time; car, at the best grip any run of the car reached, with its engine."))
+        self.splits_label.set_tooltip_text(
+            _("Times run to the estimated flying finish of the stage.") if found.get('finish_m') else None)
+        grid = Gtk.Grid(column_spacing=16, row_spacing=4)
+        has_avail = bool(found.get('potential_line'))                 # the stage's potential is known: a time available column
+        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 PB"), _("Best"), _("Save")) + ((_("Avail"),) if has_avail else ())):
+            label = Gtk.Label(xalign=0 if col == 0 else 1)
+            label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(head)))
+            label.get_style_context().add_class('telemetry-header')
+            grid.attach(label, col, 0, 1, 1)
+        for n, row in enumerate(found['rows'], 1):
+            tone = row[4]
+            for col, value in enumerate((row[0], row[1], row[2], row[3], row[5]) + ((found['avail'][n - 1],) if has_avail else ())):
+                label = Gtk.Label(xalign=0 if col == 0 else 1)
+                markup = GLib.markup_escape_text(value)
+                if col:
+                    markup = '<span font_features="tnum"><tt>{}</tt></span>'.format(markup)
+                if col == 2 and tone in telemetry_plot.TONES and tone != 'none' and value != '\u2013':
+                    markup = '<span foreground="{}">{}</span>'.format(telemetry_plot.TONES[tone], markup)
+                elif n > len(found['rows']) - 2:
+                    markup = '<b>{}</b>'.format(markup)
+                label.set_markup(markup)
+                grid.attach(label, col, n, 1, 1)
+        self.splits_body.pack_start(grid, False, False, 0)
+        if found['sectors']:
+            sectors = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+            for name, last, delta, tone in found['sectors']:
+                label = Gtk.Label(xalign=0)
+                colour = telemetry_plot.TONES[tone] if tone != 'none' else telemetry_plot.DIM
+                label.set_markup('<b>{}</b>  <tt>{}</tt>  <span foreground="{}"><tt>{}</tt></span>'.format(
+                    GLib.markup_escape_text(name), GLib.markup_escape_text(last), colour, GLib.markup_escape_text(delta)))
+                sectors.pack_start(label, False, False, 0)
+            self.splits_body.pack_start(sectors, False, False, 0)
+            if found['estimated']:
+                note = Gtk.Label(label=_("\u2248 Sector positions estimated from the game's sector lengths."), xalign=0)
+                note.get_style_context().add_class('dim-label')
+                self.splits_body.pack_start(note, False, False, 0)
+        text = _("Gold \u2605: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: "
+                 "behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what "
+                 "the split could still gain against its best.")
+        if found.get('finish_m') is None:
+            text += ' ' + _("The finish split includes the slow-down to the stop.")
+        note = Gtk.Label(label=text, xalign=0)
+        note.set_line_wrap(True)
+        note.get_style_context().add_class('dim-label')
+        self.splits_body.pack_start(note, False, False, 0)
+        self.splits_body.show_all()
+        self._show_splits_row()
 
     LABEL_CHOICES = (
         ('discipline', _("Discipline"), ('rally-stage', 'hillclimb', 'circuit', 'rallycross', 'drift', 'free-roam',
@@ -1390,11 +1826,13 @@ class GtkUi:
 
     LIVE_STATES = ('off', 'waiting', 'live')
 
-    def set_telemetry_view(self, live, snapshot):
+    def set_telemetry_view(self, live, snapshot, dash=None):
         """`live`: (state, markup) of the telemetry arriving now
         (telemetry_view.live_status()). `snapshot`: the shown car's
-        learner snapshot, or None."""
+        learner snapshot, or None. `dash`: telemetry_web.live_dict() for
+        the dash of the Telemetry view."""
         state, markup = live
+        self._set_dash(dash)
         self.telemetry_live.set_markup(markup)
         context = self.telemetry_live_dot.get_style_context()
         for name in self.LIVE_STATES:

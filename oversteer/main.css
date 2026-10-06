@@ -86,8 +86,14 @@ window#overlay-window .overlay-leds levelbar:nth-child(5) block.filled {
 .telemetry-focus { color: #e66100; }
 .telemetry-praise { color: #2ec27e; }
 .telemetry-tip { color: #3584e4; }
+.telemetry-technique { color: alpha(currentColor, 0.65); }
 .telemetry-dot { color: alpha(currentColor, 0.4); }
 .telemetry-dot.telemetry-waiting { color: #e5a50a; }
 .telemetry-dot.telemetry-live { color: #2ec27e; }
 .telemetry-header { font-size: smaller; padding-bottom: 6px; }
 .telemetry-cell { padding: 3px 0; }
+/* The splits, in LiveSplit's colours (the web page's tokens) */
+.telemetry-split-gold { color: #d8af1f; }
+.telemetry-split-ahead { color: #29cc54; }
+.telemetry-split-behind { color: #cc7870; }
+.telemetry-split-lose { color: #cc3729; }

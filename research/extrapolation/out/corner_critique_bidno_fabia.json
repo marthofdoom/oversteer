@@ -1,0 +1,150 @@
+{
+ "stage": "Wales Afon Bidno",
+ "car": "Skoda Fabia RS Rally2",
+ "passes": 63,
+ "sections": 19,
+ "band_low_rpm": 3000.0,
+ "prevalence": {
+  "gear_longer": 0.127,
+  "gear_shorter": 0.127,
+  "exit_below_band": 0.016,
+  "counter_steer_s_median": 0.41
+ },
+ "cost": {
+  "gear_longer_than_best (s)": {
+   "coef": 0.527,
+   "ci90": [
+    0.196,
+    1.034
+   ]
+  },
+  "gear_shorter_than_best (s)": {
+   "coef": 0.202,
+   "ci90": [
+    -0.025,
+    0.403
+   ]
+  },
+  "exit_below_band (s)": {
+   "coef": -0.97,
+   "ci90": [
+    -1.676,
+    0.0
+   ]
+  },
+  "counter_steer (s per s)": {
+   "coef": 0.41,
+   "ci90": [
+    0.091,
+    0.795
+   ]
+  },
+  "body_slip_over_median (s per deg)": {
+   "coef": -0.008,
+   "ci90": [
+    -0.025,
+    0.015
+   ]
+  },
+  "apex_speed_below_best (s per km/h, the control)": {
+   "coef": 0.036,
+   "ci90": [
+    0.024,
+    0.052
+   ]
+  }
+ },
+ "pb_corner_calls": [
+  {
+   "d0": 4116,
+   "d1": 4400,
+   "cost_s": 0.53,
+   "what": "a gear longer than your fastest pass",
+   "excess_s": 0.51
+  },
+  {
+   "d0": 4400,
+   "d1": 5276,
+   "cost_s": 0.53,
+   "what": "a gear longer than your fastest pass",
+   "excess_s": 2.05
+  },
+  {
+   "d0": 1772,
+   "d1": 1976,
+   "cost_s": 0.51,
+   "what": "1.2 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.68
+  },
+  {
+   "d0": 444,
+   "d1": 572,
+   "cost_s": 0.49,
+   "what": "1.2 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 2376,
+   "d1": 2688,
+   "cost_s": 0.32,
+   "what": "0.8 s of counter-steer (the rear stepped out)",
+   "excess_s": 1.12
+  },
+  {
+   "d0": 2688,
+   "d1": 2824,
+   "cost_s": 0.32,
+   "what": "0.8 s of counter-steer (the rear stepped out)",
+   "excess_s": 1.77
+  },
+  {
+   "d0": 2824,
+   "d1": 2956,
+   "cost_s": 0.31,
+   "what": "0.8 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.4
+  },
+  {
+   "d0": 3124,
+   "d1": 3256,
+   "cost_s": 0.25,
+   "what": "0.6 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 2956,
+   "d1": 3124,
+   "cost_s": 0.22,
+   "what": "0.5 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 1166,
+   "d1": 1314,
+   "cost_s": 0.15,
+   "what": "0.4 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 3766,
+   "d1": 4116,
+   "cost_s": 0.11,
+   "what": "0.3 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.06
+  },
+  {
+   "d0": 968,
+   "d1": 1166,
+   "cost_s": 0.1,
+   "what": "0.2 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  },
+  {
+   "d0": 3440,
+   "d1": 3590,
+   "cost_s": 0.1,
+   "what": "0.2 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.0
+  }
+ ]
+}

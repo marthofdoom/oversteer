@@ -9,7 +9,12 @@ import pytest
 
 from oversteer import telemetry_web
 from oversteer.telemetry_web import TelemetryWeb, allowed_host
-from tests.test_coach import History, error
+from tests.test_coach import History
+
+
+def held(value=2.0):
+    """A metric that gives a tip with no car data behind it."""
+    return {'name': 'limiter.held', 'value': value, 'count': 10}
 
 
 @pytest.fixture
@@ -18,7 +23,7 @@ def served(tmp_path):
     h.store.save_model('rally', 'eawrc/17', 'eawrc', 'Test car', {'key': 'eawrc/17', 'ratios': {}})
     session = None
     for _ in range(3):
-        session = h.session([error(2, 450.0), {'name': 'limiter.per_km', 'value': 0.2, 'count': 10}])
+        session = h.session([held(), {'name': 'limiter.top', 'value': 0.2, 'count': 1}])
     other = h.store.car_id('circuit', 'eawrc/17', 'eawrc')
     h.store.begin()
     other_session = h.store.start_session('circuit', other, 'eawrc', 1.8e9)
@@ -63,9 +68,9 @@ def test_every_endpoint(served):
     sessions = get_json(web, '/api/v1/cars/{}/sessions?limit=2'.format(h.car))
     assert len(sessions) == 2 and sessions[0]['id'] == session and len(sessions[0]['runs']) == 1
     one = get_json(web, '/api/v1/sessions/{}'.format(session))
-    assert one['runs'][0]['metrics'][0]['name'] == 'shift.error' and one['runs'][0]['laps'] == []
+    assert one['runs'][0]['metrics'][0]['name'] == 'limiter.held' and one['runs'][0]['laps'] == []
     tips = get_json(web, '/api/v1/coach?car={}'.format(h.car))['tips']
-    assert tips and tips[0]['id'].startswith('shift.late:2')
+    assert tips and tips[0]['id'] == 'limiter.held'
     # The page reads: nothing is marked as seen
     assert h.store.coach_state('rally', h.car) == {}
 
@@ -92,6 +97,9 @@ def test_the_page_and_its_headers(served):
     assert 'captureStream' in page and 'MediaRecorder' in page
     for external in ('src="http', "src='http", 'href="http', '@import', 'url('):
         assert external not in page
+    # The sub-tabs, the splits row and no inline style attributes (the CSP allows <style> by hash only)
+    assert 'data-tab="coaching"' in page and 'data-tab="telemetry"' in page and 'id="splits"' in page
+    assert ' style="' not in page and "onclick=" not in page
     for name, value in (('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'no-referrer'),
                         ('Cache-Control', 'no-store')):
         assert response.getheader(name) == value
@@ -195,7 +203,7 @@ def test_the_stage_of_the_run_going_on(tmp_path):
     """The run's matched stage wins over the game's key."""
     from types import SimpleNamespace
     h = History(tmp_path / 't.db')
-    session = h.session([error(2, 450.0)], stage='dirt:1')
+    session = h.session([held()], stage='dirt:1')
     h.store.begin()
     h.store.upsert_stage('dirt:1', 'dirt', 5000.0, 'Kakaristo')
     h.store.commit()
@@ -242,3 +250,21 @@ def test_public_addresses_are_refused(served):
     assert web.verify_request(None, ('127.0.0.1', 1)) and web.verify_request(None, ('192.168.1.20', 1))
     assert web.verify_request(None, ('100.101.102.103', 1))        # a tailnet's shared addresses
     assert not web.verify_request(None, ('8.8.8.8', 1)) and not web.verify_request(None, ('not an address', 1))
+
+
+def test_the_coach_json_carries_the_splits(tmp_path):
+    from tests.test_coach_places import Stage, drive_traced
+    h = Stage(tmp_path / 'telemetry.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=13.0, reference=a)
+    drive_traced(h, v2=16.0, v3=11.0, reference=a)
+    web = TelemetryWeb(port=0, bind='local', reader_path=str(tmp_path / 'telemetry.db'), profile=lambda: h.profile)
+    assert web.start()
+    try:
+        found = get_json(web, '/api/v1/coach?car={}'.format(h.car))
+        splits = found['splits']
+        assert splits['name'] == 'Test Stage' and splits['splits'] and splits['possible'] <= splits['best']
+        assert {'name', 'last', 'best', 'gold', 'delta', 'finish'} <= set(splits['splits'][0])
+        assert get_json(web, '/api/v1/coach')['splits'] is None
+    finally:
+        web.stop()

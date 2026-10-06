@@ -1,5 +1,7 @@
 """The Telemetry tab's strings, built without a display
 (docs/telemetry-coaching.md, section 12)."""
+from pathlib import Path
+
 from oversteer import telemetry_view as view
 from oversteer.coach import Tip
 
@@ -86,14 +88,15 @@ def test_web_status():
 
 
 def test_gather_from_the_database(tmp_path):
-    from tests.test_coach import History, error
+    from tests.test_coach import History
     h = History(tmp_path / 't.db')
     for _ in range(3):
-        h.session([error(2, 450.0)])
+        h.session([{'name': 'limiter.held', 'value': 2.0, 'count': 10}])
     found = view.gather(h.store, 'rally', 'eawrc/17')
-    assert found['car_id'] == h.car and found['tips'][0].id.startswith('shift.late:2')
+    assert found['car_id'] == h.car and found['tips'][0].id == 'limiter.held'
     assert found['context'][0].startswith('discipline unknown') and len(found['sessions']) == 3
     assert found['tuning'][0].startswith('No setup recorded yet')
+    assert found['splits'] is None                      # no run with corners to split
     assert view.gather(h.store, 'rally', 'nothing/1')['car_id'] is None
 
 
@@ -129,6 +132,19 @@ def test_shift_table():
     assert view.shift_table(snapshot)[1][1][1] == '5200–7500 rpm (grip)'
     assert view.shift_summary(shipped) == ("Limiter 7500 rpm  ·  best changes up from the game's engine data  ·  "
                                            "checked for grip on gravel")
+
+
+def test_shift_table_lights_band():
+    """A Rally2's best change up is the coach's lights band, not the limiter the engine data ends at."""
+    row = {'gear': 1, 'ratio': 360.0, 'ratio_samples': 80, 'best': 7500.0, 'engine_best': 7500.0, 'source': 'game',
+           'grip_limited': False, 'best_low': None, 'best_high': None, 'lights_low': 6900.0, 'lights_high': 7100.0,
+           'average_shift': None, 'shifts': 0, 'last': False}
+    snapshot = {'limiter': 7500.0, 'gears': [row, dict(row, gear=2, engine_best=6600.0, lights_high=6900.0),
+                                             dict(row, gear=3, last=True)], 'power_bands': 30,
+                'power_source': 'game data', 'methods': {}, 'surface': 'gravel'}
+    rows = view.shift_table(snapshot)[1]
+    assert rows[0][1] == '6900–7100 rpm (lights)' and rows[0][3] == '92 %'
+    assert rows[1][1] == '6900 rpm (lights)  engine 6600'
 
 
 def test_capture_status():
@@ -169,3 +185,98 @@ def test_preferences_through_configparser(tmp_path):
     again = configparser.ConfigParser()
     again.read(str(path))
     assert view.read_preferences(again['DEFAULT'])['telemetry_web_port'] == 6000
+
+
+def test_a_technique_line_is_labelled_neutrally_in_both_windows():
+    tips = [Tip('t', 'technique', 'You left-foot brake.')]
+    assert view.coaching_items(tips) == [('Technique', 'You left-foot brake.', 'technique')]
+    assert view.coaching_lines(tips) == [('Technique: You left-foot brake.', 'technique')]
+    root = Path(__file__).resolve().parent.parent
+    page = (root / 'data/telemetry/web/index.html').read_text()
+    assert 'technique: "Technique"' in page and '.k-technique' in page          # not the raw kind, not the tip's blue
+    assert '.telemetry-technique' in (root / 'oversteer/main.css').read_text()
+    assert "'technique': 'telemetry-technique'" in (root / 'oversteer/gtk_ui.py').read_text()
+
+
+def test_the_splits_summary_and_rows():
+    assert view.splits_lines(None) == (None, [])
+    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'splits': [
+        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': True, 'delta': 0.0, 'finish': False},
+        {'name': 'the 1 left at 0.7 km', 'last': 8.38, 'best': 7.94, 'gold': False, 'delta': 0.44, 'finish': False},
+        {'name': 'the 2 right at 1.6 km', 'last': None, 'best': 6.36, 'gold': False, 'delta': None, 'finish': False},
+        {'name': 'the 6 right at 4.8 km', 'last': 70.0, 'best': 71.0, 'gold': False, 'delta': -1.0, 'finish': True}]}
+    summary, rows = view.splits_lines(found)
+    assert summary == 'Afon Bidno  ·  Best 3:17.7  ·  SoB 3:14.5 (−3.2)'
+    assert rows[0] == ('left-left at 0.3 km', '0:06.8', '0:06.8', 'gold', 'gold')
+    assert rows[1][3:] == ('+0.4', 'bad') and rows[2][1:] == ('–', '0:06.4', '–', '')
+    assert rows[3][3:] == ('−1.0', 'good') and rows[3][0].endswith('(finish)')
+
+
+def test_the_splits_row_tones_rows_and_sectors():
+    assert view.splits_row(None) is None
+    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'last': 198.8, 'runs': 3,
+             'new_pb': False, 'finish_m': 5287.0, 'splits': [
+        # gold: the split's own best, margin over the previous best; the PB's time through it was 7.1
+        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': True, 'delta': 0.0, 'finish': False,
+         'pb': 7.1, 'cum': -0.34, 'margin': 0.3, 'd0': 0.0, 'd1': 300.0},
+        # ahead of the PB overall (cum < 0) but lost time in the split: ahead-lose
+        {'name': 'the 1 left at 0.7 km', 'last': 8.38, 'best': 7.94, 'gold': False, 'delta': 0.44, 'finish': False,
+         'pb': 8.1, 'cum': -0.06, 'margin': None, 'd0': 300.0, 'd1': 700.0},
+        # behind overall and lost in the split; the PB's time was 9.0
+        {'name': 'the 2 right', 'last': 9.9, 'best': 9.0, 'gold': False, 'delta': 0.9, 'finish': False,
+         'pb': 9.0, 'cum': 0.84, 'margin': None, 'd0': 700.0, 'd1': 1000.0},
+        # behind overall but gained in the split: behind-gain
+        {'name': 'the 4 left', 'last': 5.0, 'best': 4.9, 'gold': False, 'delta': 0.1, 'finish': False,
+         'pb': 5.2, 'cum': 0.64, 'margin': None, 'd0': 1000.0, 'd1': 1100.0},
+        {'name': 'the 5 left', 'last': None, 'best': 3.5, 'gold': False, 'delta': None, 'finish': True,
+         'pb': 3.5, 'cum': None, 'margin': None, 'd0': 1100.0, 'd1': 1200.0}],
+        'sectors': [{'name': 'S1', 'last': 75.9, 'best': 75.9, 'gold': True, 'delta': 0.0, 'confidence': 'medium'},
+                    {'name': 'S2', 'last': 70.0, 'best': 69.6, 'gold': False, 'delta': 0.46, 'confidence': 'low'}]}
+    row = view.splits_row(found)
+    assert row['stage'] == 'Afon Bidno'
+    assert row['tones'] == ['gold', 'ahead-lose', 'behind-lose', 'behind-gain', 'none']
+    assert row['bounds'][1] == (300.0, 700.0) and row['finish_m'] == 5287.0 and not row['new_pb']
+    assert row['rows'][0][:4] == ('1. left-left at 0.3 km', '6.8', '★ −0.3', '6.8')       # gold: the margin, not ±0.0
+    assert row['rows'][1][2] == '+0.3' and row['rows'][1][5] == '0.4'                       # against the PB; what is left to save
+    assert row['rows'][4][1:3] == ('–', '–')                                               # not run
+    assert row['rows'][-2][:3] == ('Stage', '3:18.8', '+1.1') and row['rows'][-2][4] == 'behind-lose'
+    assert row['rows'][-1][2] == '−3.2'
+    # Sectors: n is whatever the game has; low confidence is marked
+    assert [s[:2] for s in row['sectors']] == [('S1', '75.9'), ('S2', '≈70.0')] and row['estimated']
+    assert [s[3] for s in row['sectors']] == ['gold', 'behind-lose']
+    none = view.splits_row(dict(found, sectors=None, last=None))
+    assert none['sectors'] == [] and not none['estimated'] and none['delta'] is None
+    assert none['rows'][-2][4] == 'none' and none['rows'][-2][2] == '–'              # no time: not painted
+    assert view.splits_row(dict(found, splits=[dict(r, last=r['best'], delta=0.0, gold=True) for r in found['splits']]))['tones'] \
+        == ['gold'] * 5
+    # a new PB says PB (the badge is the caller's, on new_pb); a difference of nothing is ±0.0
+    assert view.splits_row(dict(found, new_pb=True, last=197.74))['rows'][-2][2] == '★ ±0.0'
+    assert view.signed(0.04) == '±0.0' and view.signed(-0.04) == '±0.0' and view.signed(0.06) == '+0.1'
+    assert view.signed(-1.04) == '−1.0' and view.signed(None) == '–'
+
+
+def test_split_tone_is_livesplits_rule_against_the_pb():
+    tone = view.split_tone
+    assert tone(None, None, False) == 'none' and tone(5.0, 0.0, True, -1.0, 5.5) == 'gold'
+    assert tone(5.0, 0.2, False, -0.5, 5.5) == 'ahead-gain'     # ahead overall, quicker than the PB's split
+    assert tone(5.0, 0.2, False, -0.5, 4.8) == 'ahead-lose'     # ahead overall, slower in the split
+    assert tone(5.0, 0.2, False, 0.5, 5.5) == 'behind-gain' and tone(5.0, 0.2, False, 0.5, 4.8) == 'behind-lose'
+    assert tone(5.0, 0.0, False, 0.04, 5.0) == 'ahead-gain'     # level to the tenth is not behind
+    assert tone(5.0, 0.3, False) == 'behind-lose' and tone(5.0, 0.0, False) == 'ahead-gain'   # no PB data: against the best
+
+
+def test_splits_row_takes_a_sector_with_no_times():
+    from oversteer import telemetry_view as tv
+    found = {'name': 'Afon Bidno - Severn', 'last': 190.0, 'best': 186.1, 'possible': 186.1, 'gain': 0.0, 'runs': 3,
+             'splits': [{'name': 'left-left at 0.3 km', 'last': 6.8, 'best': 6.8, 'gold': True, 'delta': 0.0,
+                         'finish': False}],
+             'sectors': [{'name': 'S3', 'last': None, 'best': None, 'gold': False, 'delta': None,
+                          'confidence': 'medium'}]}
+    row = tv.splits_row(found)
+    assert row is not None and [s for s in row['sectors'] if s[0] == 'S3']
+
+
+def test_gather_survives_a_failing_splits(monkeypatch):
+    from oversteer import coach, telemetry_view as tv
+    monkeypatch.setattr(coach, 'splits', lambda *a: 1 / 0)
+    assert tv._splits(None, 'p', 1) is None

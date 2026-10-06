@@ -404,6 +404,32 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
 - `decode_sample` accepts `OVST3_SIZE` next to `OVST_SIZE` and
   `OVST2_SIZE` in its length check (it matches on the size set today), and
   checks the version byte against the length as it does for v2.
+
+**OVST (bridge) v4.** v3's 324 bytes unchanged, then one float (328 bytes):
+
+```c
+float stage_clock;   /* graphics currentTime (wchar_t[15] at 12, shared by AC/ACC/ACR) in s; NaN if empty/unreadable */
+```
+
+The bridge parses `[[h:]m:]s[.fff]` (ACR writes `"00:58.094"`) and
+`m:ss:mmm`; only the leading field may pass 59 (`parse_clock`, between the
+`clock-parse` markers; `tests/test_shm_bridge.py` compiles it natively
+and checks it against a Python mirror and marth's dump). ACR leaves
+`iCurrentTime` (graphics 140) and the sector fields (164, 168) at 0 but
+fills this string with the stage's clock: 0 until the start, frozen while
+paused, stopped at its flying finish, 0 again on a restart (marth's raw
+dump, 27 216 pages: the parse agrees on every one). The decoder sets
+`stage_time` from it for ACR only: in AC and ACC it is the lap's time,
+which starts again every lap and, with no lap counter in the packet, would
+read as a restart.
+
+From v4 on a version only appends: the decoder takes any packet of version
+≥ 4 and length ≥ `OVST4_SIZE` and reads the fields it knows (v1 to v3 stay
+one exact length each). Compatibility: an old bridge (v3) with this app
+decodes as before, with no clock (the run's own clock, as before); this
+bridge with an app from before v4 is not decoded at all (that app takes
+v3 only at exactly 324 bytes), so the bridge and the app go together (the
+bridge is started from the app's tree when the game launches).
 - **Build.** Neither `x86_64-w64-mingw32-gcc` nor `zig` is installed here.
   `scripts/build-shm-bridge.sh` is run with `zig` from `pip install ziglang`
   in a scratch venv (a build tool, never an app dependency). If that fails,
@@ -544,7 +570,7 @@ float world_pos[3];                  /* graphics carCoordinates (player) */
 Each capture, once labelled, becomes a fixture in `tests/data/` if under
 ~1 MB (cut to the useful seconds by `telemetry-replay.py --cut A:B`).
 
-## 7. Data model (SQLite, schema v2)
+## 7. Data model (SQLite, schema v3)
 
 ### 7.1 Conventions
 
@@ -552,8 +578,11 @@ Each capture, once labelled, becomes a fixture in `tests/data/` if under
   journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`.
 - Version in `PRAGMA user_version`: 0 with a `cars` table = v1 (today), 1 =
   v1 with the Codemasters rescale done (Step A, §7.3 step 2), 2 = this
-  design. Migrations run in one transaction at open; the old file is
-  first copied to `telemetry.db.v1.bak` (once).
+  design, 3 = the same with the coach's context layer
+  (docs/coach-techniques.md §7.2: `runs.course` and `run_class`, the phase,
+  section and loss columns of `corners`, `shifts.d`, the `events` table).
+  Migrations run in one transaction at open; the old file is
+  first copied to `telemetry.db.v1.bak` (v2 → v3: `.v2.bak`, once).
 - Times are Unix epoch seconds (REAL). JSON columns hold things whose shape
   will change with calibration (feature vectors, evidence), never things
   that are queried.
@@ -628,6 +657,11 @@ CREATE TABLE traces (               -- kept apart so list queries on runs never 
     version INTEGER NOT NULL,
     data BLOB NOT NULL              -- zlib(array('f')) at 10 Hz, see TRACE_CHANNELS
 );
+-- Trace version 2: t is the run's clock (drive_log.RunClock: the game's stage
+-- clock where it sends one, else the run's own, no pause in either); a 19th
+-- channel `wall` is the wall clock since the first row (version 1's t), which
+-- puts the changes of gear (timed by the wall clock) on t. Version 1 (t the
+-- wall clock, a pause in it) is read as version 2 with wall = t.
 CREATE TABLE laps (
     id INTEGER PRIMARY KEY,
     run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -1015,7 +1049,51 @@ limiter, and marth's 2→3 to 4→5 are within 200 rpm of them.
   exit speeds 2 s either side; counter-steer fraction = time with steer sign
   opposite to yaw rate (both positive left, §5.2; a test drives a simulated
   left-hand corner with and without a slide).
-- **Trace** at 10 Hz (§7.2).
+- **Trace** at 10 Hz (§7.2). Its `t` (version 2) is the run's clock
+  (`RunClock`): the game's stage clock where it sends one that runs, else
+  the run's own (the packets' gaps capped at 0.2 s, pauses out); for a
+  standing start t at the finish is the result. Segment times are on it
+  too.
+- **ACR's finish with the game's clock** (bridge v4): the finish is where
+  the game's clock stops. With the clock running, a run is finished when
+  it has stood still for 1 s with the car moving (0.25 s once past the
+  table's line), past 500 m, and the place it last moved is within 400 m
+  before the table's line (flying finish, else the last pace note: the
+  game stops its clock 194-320 m before the note on the 45 stages with no
+  flying finish in the table) or 100 m past it. The result is that time
+  and the course the place it last moved; the live card follows the stop,
+  and a car stopped at the stop control short of the note has finished. If
+  the clock does not stop within 100 m past the table's line, the clock
+  interpolated at the line is the result, marked by a `run_finish` row
+  with that line (no `run_clock` row), so a line that moves corrects it.
+  A run that ended on the clock's stop is marked in `run_clock`:
+  `retime_finishes` never moves it. A clock back to 0 with the car moving
+  and the distance running on is a lap of a looped stage, not a restart.
+- **Learnt finish lines.** The place the clock stopped (spline metres)
+  is the flying finish, exact: each such run keeps it (`run_stop`), the
+  stage's `finish_m` is the median of them (less any 25 m from it;
+  `Store.learn_finishes`, read at open and after each run) and beats the
+  shipped table's, which beats the last pace note (`stage_tables.entry`).
+  When it moves the line, `retime_finishes` times the runs that ended at
+  the stop control (or at the line it replaced) again, by the trace's time
+  between the two: a v3 run's time on those stages then lands within about
+  a third of a second of a clock run's less the start offset below.
+  `scripts/acr-finish.py` takes `finish_m` from a v4 capture's clock stop
+  (exact) where there is one, else from the brake onset.
+- **Start offset.** A run on the game's clock starts its time at the
+  game's go, 0.26 to 2.8 s (typically 0.5 s) before the car reaches
+  3 m/s, where an older run's own clock starts; nothing recorded the
+  game's time at an old run's start, so the two cannot be put on one scale
+  afterwards. A new run therefore reads slower than an old one of the
+  same pace by that offset (an old run on a stage with no flying finish
+  read 7-12 s slower still until it was moved to the learnt line, so the
+  two biases are opposite and the latter is the larger). Rule: once a
+  stage and a car have a run in `run_clock`, only the clock runs rank
+  there (the PB, the coach's reference and possible, the live reference,
+  the run view's PB: `stage_runs(ranked=True)`); the run list and the
+  other statistics still use every run. A run on the clock is compared
+  with nothing older than itself. The trace's `t` of a clock run starts at
+  the game's time (`trace[0].t`, the offset from 3 m/s).
 - **Start-cell stage key** for games that name no stage (Forza Horizon,
   BeamNG, AC practice): `cell:<game>:<x/50>:<z/50>:<heading/45°>` of the
   run's start, completed by the run length rounded to 100 m once it ends.
@@ -1155,23 +1233,30 @@ Labels come from the tab (Step C) and the web page never writes them.
 
 | Name | Unit | Counted when | Weight / gate |
 |---|---|---|---|
-| `shift.error` (per gear, per method) | rpm, signed vs best | flat-out upshifts with a known best | full on tarmac/circuit; low on gravel/snow (traction-limited, short-shifting can be right); silent when surface unknown and the car is traction-limited (slip at the shift > κ₀); with the game tier (§8.6) that is rare in the user's rally games |
-| `shift.in_band` | fraction within the confidence band ±100 rpm | same | same |
-| `limiter.per_km` | s/km, gears below top | always | all disciplines |
+| `shift.in_band`, `shift.early_share`, `shift.cut_share` (per gear, per method) | share of the run's flat-out changes up by one on the game's lights band (±100 rpm), below it by 100 rpm or more, on the limiter cut | judged changes (not the launch's), 5 or more over the sessions read | tip from a cut share of 25 %, an early share of 60 % on tarmac and circuits (on a loose surface only in 3rd and up where the gear is measured not grip-limited), both together; praise from 60 % on the band; silent on a drift profile (docs/coach-techniques.md §7.3 R1) |
+| `shift.cost` (per gear, per method) | s a stage the early and cut changes cost | same | a tip needs 0.2 s a stage, else a note once |
+| `shift.slip` | driven-wheel slip at the change | wheel speeds sent | lets an early change be coached where the surface is unknown |
+| `limiter.held` | s/km held on the limiter on a straight, below top gear | the limiter and the top gear known (the game's count, else the shipped gear set's) | all disciplines but drift; the limiter between corners, at a shift, in a crawl or in wheelspin is not counted |
 | `limiter.top` | s per run in top gear | always | goes to tuning (§10), not driving |
 | `launch.t50` | s from release to 50 km/h | launch detected | rally, rallycross, drag |
-| `launch.slip` | peak drive slip in the first 2 s | wheel speeds sent | per surface |
-| `launch.bog` / `launch.stall` | count | rpm < 60 % of launch rpm / 0 | all |
-| `pedal.overlap` | fraction with throttle and brake > 20 % | always | reported only on circuit or tarmac and only with a slower exit than the driver's best there (left-foot braking is technique on loose surfaces) |
-| `pedal.coast` | s/km with both < 5 % above 10 m/s | always | compared with the driver's own runs of the same stage, never absolute |
+| `launch.g` | g, mean a_long over the first half second in the launch gear | launch detected | per surface |
+| `launch.slip` | peak drive slip in the first 2 s, else the slip from the revs | wheel speeds sent, or the shipped gearing | per surface |
+| `launch.cut` | s the revs sat on the limiter in the launch gear, in the first 8 s | the driver's own launch, the limiter known | a tip from 0.3 s in 3 of the last 5 launches on a surface ("change up as the cut comes in"); no launch coaching for WRC Generations (speed channel unchecked) |
+| `launch.bog` / `launch.stall` | 0/1 | bog: under 0.3 g or 0.5 s over the median t50 of the last launches / stall: the revs under 300 in the launch gear | not the game's own launch (the clutch never pressed while standing), not a launch the driver restarted within 10 s |
+| `pedal.overlap_entry`, `pedal.overlap_exit` | share of the phase with throttle and brake > 20 % | pedals sent; not partial or restart runs; an off's surroundings left out | entry: a `technique` line once ("you left-foot brake into 7 in 10 corners on gravel", read from the corners' own `overlap_entry`), never praise; exit: a tip on tarmac and circuit for 3 or more corners with 0.3 s on both pedals leaving them that lost 0.1 s of exit time |
+| `pedal.drag` | s/km on both pedals on a straight | same | a tip on tarmac and circuits |
+| `pedal.coast_entry`, `pedal.coast_exit`, `pedal.coast_straight` | s/km with both < 5 % above 10 m/s, by phase | same | by phase, against the reference, never absolute: entry on tarmac and circuit outside hairpins when the reference coasted 0.3 s less and the entry lost 0.1 s; the exit and the throttle through `throttle_on_t` (the throttle 0.3 s later than the reference's in 2 or more corners that lost exit time; silent on snow and ice) |
 | `hpattern.neutral` | median s per shift | H-pattern shifts | per method |
 | `hpattern.missed`, `hpattern.skip` | per 100 shifts | H-pattern | |
 | `downshift.over_rev` | per 100 downshifts | engage rpm known | |
 | `seq.double_tap` | per 100 shifts | sequential/paddles | |
 | `handbrake.per_km` | pulls/km | handbrake known | rally, drift |
-| `counter_steer` | fraction of cornering time | steer + yaw rate | technique on loose, habit or setup on tarmac |
-| `consistency.split_sd` | s, SD of splits at every 10 % of the stage | ≥ 3 runs of the stage | per stage |
-| `corner.loss` | s lost in the 3 worst corners vs own best run | ≥ 2 runs of the stage | per stage |
+| `counter_steer` | fraction of cornering time, bends under 90° of heading change | steer + yaw rate | technique on loose, habit or setup on tarmac |
+| `exit.low` (per gear) | share of exits with the revs under the power band that pulled under 80 % of the in-band exits | exits not in a slide | tuning (§10): 50 % of 10 exits, 70 % of 15 on loose surfaces and in FWD cars, never for 1st |
+| `exit.spin` (per gear) | share of exits whose second after throttle-on ran over 0.15 slip from the revs | the shipped gearing known | tuning: the long gear is right where the gear below spun |
+| `consistency.split_sd` | s, SD of splits at every 10 % of the stage (cut at the finish) | ≥ 3 finished clean runs of the car | per stage |
+| `corner.loss` | s lost in the 3 worst sections vs the car's best finished clean run | a reference in the same conditions; not a learning run | per stage; the tips read the stored sections instead (§9.2, "By place") and use this total only for a stage whose corners are not stored |
+| `corner.spread` | m/s, the largest SD of the minimum speed through the same section over the last runs | ≥ 4 runs | per stage; each section's own is an event, and a tip names up to three sections over 8 km/h and a tenth of their speed |
 
 ### 9.2 Over time
 
@@ -1186,22 +1271,52 @@ Labels come from the tab (Step C) and the web page never writes them.
 - **Habit**: a metric beyond its threshold in ≥ 70 % of ≥ 5 sessions in a
   slice. One **focus** habit at a time: the one with the largest estimated
   time cost (shift error × drive lost, limiter time), ties broken by count.
-- **Rate limiting** (`coach_state`): at most 3 tips and 1 praise per view;
+- **Rate limiting** (`coach_state`): at most 3 tips and 2 praise lines per view (and one praise line is added when two tips show, so a view does not read as a list of faults);
   a tip is re-shown when its value got worse by ≥ 20 %, after 14 days, or
   when the user asks ("Show all"); after two showings without change it
   becomes a quiet "still:" line (*run 5:* a showing is a sitting: views
   within 6 h of the last counted one are the same showing) at the bottom, at most 3 of those, oldest
   dropped. The same limits apply to praise and to "Still learning the
   engine"; today's per-gear "spot on" on every refresh goes.
-- **Phrasing**: observation + number + consequence + one action, in the
-  sentence style of today's `CarModel.advice`. Praise carries a number too.
-  Examples:
+- **Phrasing**: observation with its place + the number against the named
+  reference + what it cost + one action (docs/coach-techniques.md §7.5).
+  Praise carries a number and a place too. The coach does not say what the
+  driver was thinking, does not explain technique the driver uses, and uses
+  no absolutes. Selection (`select()`): the focus is the costliest tip, when
+  it is a habit (a habit that is not the costliest is a plain tip); a tip
+  costing under a tenth of the costliest one that has seconds from a run
+  goes to the quiet lines; a `technique` line (correct technique, described)
+  is shown once and comes back when its share moved 20 points; two praise
+  lines. Examples from the first designs:
   - "2→3 with the H-pattern: you change up at 6400 rpm, 500 early; 3rd gives
     9 % less drive there. Hold it to about 6900."
   - "With the H-pattern you change up 400 rpm earlier than with the
     paddles." (shifter comparison, needs ≥ 10 shifts each)
   - "Better: 4 of your last 5 stages had your 2→3 within 100 rpm of the
     best; two weeks ago you were 500 early."
+- **By place** (build step 2, `Coach._place_tips`): the newest run of each
+  of the three newest stages is read from its stored corners and events
+  (not from the metrics) against the car's best finished clean or learning
+  run of the stage in the same conditions, named in the sentence ("Skoda
+  Fabia RS Rally2, 251.9 s on 25 Sep"). The costliest three sections that
+  lost 0.1 s or more are tips (`corner.section:<stage>:<d>`) with the call
+  and distance of the corner, what was done differently (braking point,
+  minimum, exit speed, throttle) and the action for the pattern (over-slowing,
+  under-committed, overdriven, late throttle, over-rotated, slower, or where
+  the time went when the numbers agree). Patterns across the run are one tip
+  naming their corners and are not said again per corner (`throttle.late`,
+  `pedal.exit`, `coast.entry`). A spin or near stop is a corner tip
+  (`corner.spin`, `corner.stall`; not for WRC Generations); an off is a note
+  (`corner.off`) and its surroundings are left out. A run that beat the
+  reference is praised with where (`corner.best`), a section where the run
+  was the best of the car's runs is praised (`corner.bestsection`), a gravel
+  entry that braked earlier for the same minimum and left faster is praised
+  (`corner.entry`), and the best sections of all runs put together give a
+  once-only note (`corner.possible`). The first section holds the launch and
+  is never a corner. A held-straight limiter episode is a tip only against a
+  quicker reference over the same road to the next braking
+  (`limiter.held:<stage>:<d>`); a gear held into the same corner in 3 of the
+  last 5 runs is described once (`technique:held:...`).
 - **Gating**: coaching that depends on discipline or surface is silent when
   either is unknown, and says so once ("tips about short-shifting wait until
   the surface is known").
@@ -1219,8 +1334,8 @@ Labels come from the tab (Step C) and the web page never writes them.
   limiting (`coach_state`) is unchanged.
 
 `Coach(reader).tips(profile, car_id=None, limit=3) -> list[Tip]` with
-`Tip(id, kind ('focus', 'tip', 'praise', 'still'), text, evidence,
-value)`; `Coach.seen(tips)` updates `coach_state` (drive-log thread).
+`Tip(id, kind ('focus', 'tip', 'praise', 'technique', 'note', 'still'), text,
+evidence, value)`; `Coach.seen(tips)` updates `coach_state` (drive-log thread).
 *As built:* `coach.seen(store, profile, car_id, tips)`, a function, since
 it writes through the drive log's store while `Coach` only reads; kind
 `note` for the surface gate (said once).
@@ -1235,10 +1350,10 @@ family (never click counts) and whether it is a setup or a driving matter.
 |---|---|---|
 | Final drive too short | `limiter.top` > 1 s per run on ≥ 3 runs of the same stage (a Rally2 on one long tarmac straight is normal) | lengthen final drive / top gear, if the setup allows |
 | Final drive too long | top gear used > 5 % of the time but never above 85 % of the limiter, on ≥ 3 runs of the same stage | shorten final drive, if the setup allows |
-| A gear too long for the stage | rpm 1 s after throttle reapplication after corners in gear n below the power band on > 50 % of exits | shorten gear n, or use n−1 there |
+| A gear too long for the stage | exits in gear n with the revs 1 s after throttle-on below the power band that **bogged** (pulled under 80 % of the in-band exits' acceleration at the same speed, not in a slide): on > 50 % of 10 exits, on > 70 % of 15 on loose surfaces and in FWD cars; silent where the gear below spun (`exit.spin`, 30 % of 5 exits, from the revs and the shipped gearing), never for 1st, and for 2nd only where 1st's exits are measured | shorten gear n, or use n−1 there |
 | Bottoming | travel saturating (Forza normalised 1.0, AC `suspensionMaxTravel`, DiRT/EA saturation) per km, split into landings (vertical accel spike) and compressions; for DiRT and WRCG only once their suspension units are verified by capture | ride height up / springs or bump stiffer |
 | Spring/damper balance | travel histogram piled at one end; > 1.5 oscillations after a hit | softer/stiffer; more damping |
-| Understeer/oversteer | sign and change between tunes of the steer-vs-a_lat gradient (arbitrary units: steering lock unknown); counter-steer fraction per surface | rear/front anti-roll bar, springs, differential |
+| Understeer/oversteer | the change between tunes of the steer-vs-a_lat gradient **pooled per surface** (arbitrary units: steering lock unknown; no absolute "the car understeers"); counter-steer fraction on tarmac in bends under 90° of heading change (a hairpin is rotated) | rear/front anti-roll bar, springs, differential |
 | Open differential | inside-wheel spin on > 30 % of hairpin exits | lock the differential more |
 | Brake balance | front vs rear locking under braking (wheel speeds) | brake bias |
 
@@ -1568,7 +1683,7 @@ checklist below.
   damper balance (per-wheel suspension travel, verified units), open
   differential and brake balance (per-wheel speeds). The trace carries
   one drive-slip channel and a suspension RMS; adding the per-wheel
-  channels means a trace version 2 (old traces stay readable as v1).
+  channels means a trace version 3 (older traces stay readable).
 - A QR code for the web URL (no stdlib encoder; would need ~300 lines).
 - Every **calibrate** threshold stays a default until labelled captures
   exist; the first calibration pass needs the captures of §6.3.
@@ -1812,6 +1927,17 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   4.9 km with sectors of 6.3 km and notes over 6.47 km (confidence
   lowered to medium). The one known `trackSplineLength` (Cwmbiga - Afon
   Biga, 12077.95 m) is 156 m past its last note (11921.5 m). `track`
+  `pacenote_last_m` is the stop control, not the finish: on marth's runs
+  the car is at 120-160 km/h 200 m before it and at 20-40 km/h on it. The
+  game's pace-note tables do have a `Finish` note (45 stages; Afon Bidno
+  at 5277 m: the game clock stops 19-28 m after it, extrapolation §4.9), but
+  it is not where the run is timed from; before the bridge sent a stage
+  clock `finish_m` (the flying finish, ~225 m before the stop
+  control on Afon Bidno) is derived by `scripts/acr-finish.py` from where
+  the final slowdown starts, over at least two consistent runs (Afon
+  Bidno - Severn: 10 runs, spread 35 m, medium); other stages keep the
+  last note until they have runs. The run finishes at `finish_m` when
+  present.
   collides only on `Alsace For_t` in English (and de, es, fr, it); in
   Chinese the bridge's ASCII turns nearly every name to `_`, 10 groups
   collide, and names cannot identify a stage.

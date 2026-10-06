@@ -1,6 +1,11 @@
 import configparser
 import logging
 
+def N_(text):
+    """Marks a string for translation; it is translated where shown."""
+    return text
+
+
 class Model:
 
     profile = None
@@ -17,6 +22,9 @@ class Model:
         'inertia_mode': None,
         'combine_pedals': None,
         'invert_pedals': None,
+        'clutch_response': None,
+        'accelerator_response': None,
+        'brakes_response': None,
         'ffb_enabled': None,
         'spring_level': None,
         'damper_level': None,
@@ -48,6 +56,9 @@ class Model:
         'inertia_mode': 'boolean',
         'combine_pedals': 'integer',
         'invert_pedals': 'integer',
+        'clutch_response': 'tuple',
+        'accelerator_response': 'tuple',
+        'brakes_response': 'tuple',
         'ffb_enabled': 'boolean',
         'spring_level': 'integer',
         'damper_level': 'integer',
@@ -68,10 +79,31 @@ class Model:
         'start_app_manually': 'boolean',
     }
 
+    # pedal response: (start %, end %, sensitivity), in pedal-travel terms
+    # from the released end, whichever way invert_pedals has the axis. The
+    # popover offers start up to 45 and end from 55; the model keeps to the
+    # same ranges so what it holds is always what the UI can show.
+    DEFAULT_RESPONSE = (0, 100, 50)
+    RESPONSE_START_MAX = 45
+    RESPONSE_END_MIN = 55
+    PEDAL_RESPONSES = ('clutch', 'accelerator', 'brakes')
+    # Presets the Response popover offers: (id, label, response, note)
+    LINEAR_PRESET = ('linear', N_('Linear'), (0, 100, 50), None)
+    PEDAL_PRESETS = {
+        'clutch': (LINEAR_PRESET,),
+        'accelerator': (LINEAR_PRESET,),
+        'brakes': (LINEAR_PRESET,
+                   ('spring_brake', N_('Spring brake (recommended)'), (3, 85, 40),
+                    N_("Stock spring-and-rubber brakes: full braking where the rubber starts to bite, "
+                       "a softer start for trail braking. Set the game's own brake curve to linear."))),
+    }
+
     def __init__(self, device = None, ui = None):
         self.ui = ui
         self.reference_values = None
         self.data = self.defaults.copy()
+        self.pedal_response_written = set()   # pedals whose response the driver has
+        self.pedal_axis_warned = set()        # pedals already warned about as missing
         if device != None:
             self.set_device(device)
 
@@ -109,6 +141,9 @@ class Model:
             'inertia_mode': self.device.get_inertia_mode(),
             'combine_pedals': self.device.get_combine_pedals(),
             'invert_pedals': self.device.get_invert_pedals(),
+            'clutch_response': self.read_pedal_response('clutch'),
+            'accelerator_response': self.read_pedal_response('accelerator'),
+            'brakes_response': self.read_pedal_response('brakes'),
             'ffb_enabled': True if self.device.get_ff_gain() is not None else None,
             'spring_level': self.device.get_spring_level(),
             'damper_level': self.device.get_damper_level(),
@@ -129,8 +164,67 @@ class Model:
             'start_app_manually': False,
         }
 
+    def pedal_bit(self, name):
+        """The invert_pedals bit (also the driver's pedal_response_* key) of
+        the named pedal on this device; None when it has no such pedal."""
+        mask = self.device.get_invert_pedals() or 0
+        for code, (_released, _pressed, bit) in self.device.pedal_axes(mask).items():
+            if bit and self.device.PEDAL_NAMES.get(code) == name:
+                return bit
+        return None
+
+    def read_pedal_response(self, name):
+        """What the driver holds for the pedal, so reading the device never
+        resets its curves; None when it has no pedal response."""
+        if not self.device.has_pedal_response():
+            return None
+        bit = self.pedal_bit(name)
+        if bit is None:
+            return None
+        try:
+            return self.valid_response(self.device.get_pedal_response(bit))
+        except OSError as e:
+            logging.warning("Can't read the %s response: %s", name, e)
+            return None
+
+    @classmethod
+    def valid_response(cls, value):
+        """A (start, end, sensitivity) of three ints with 0 <= start < end <=
+        100 and 0 <= sensitivity <= 100; None when it isn't one. Values past
+        the ranges the UI offers are kept (the UI clamps them for display),
+        so what the driver holds is never rewritten unless the user changes it."""
+        try:
+            start, end, sensitivity = value
+            if not all(isinstance(v, int) and not isinstance(v, bool) for v in (start, end, sensitivity)):
+                return None
+        except (TypeError, ValueError):
+            return None
+        if not 0 <= start < end <= 100 or not 0 <= sensitivity <= 100:
+            return None
+        return (start, end, sensitivity)
+
+    def refresh_pedal_responses(self):
+        """Read the pedal responses again where the model has none, for after
+        the udev rules made the attributes readable and writable or the input
+        device opened, and write the ones a profile set that never got out."""
+        for name in self.PEDAL_RESPONSES:
+            key = name + '_response'
+            if self.data[key] is None:
+                self.data[key] = self.read_pedal_response(name)
+                if self.data[key] is not None:
+                    # what the driver holds: nothing to write
+                    self.pedal_response_written.add(name)
+                    if self.ui is not None:
+                        self.ui.set_pedal_response(name, self.data[key])
+            elif name not in self.pedal_response_written:
+                self.apply_pedal_response(name)
+
     def update_from_device_settings(self):
         self.data.update(self.read_device_settings())
+        for name in self.PEDAL_RESPONSES:
+            if self.data[name + '_response'] is not None:
+                # what the driver holds: nothing to write back
+                self.pedal_response_written.add(name)
 
     def get_profile(self):
         return self.profile
@@ -157,7 +251,10 @@ class Model:
             elif self.types[key] == 'boolean':
                 data[key] = bool(int(value))
             elif self.types[key] == 'tuple':
-                data[key] = tuple(map(int, value.split(',')))
+                try:
+                    data[key] = tuple(map(int, value.split(',')))
+                except ValueError:
+                    logging.warning("Profile %s: ignoring invalid %s %s", profile_file, key, value)
 
         # Profiles from before the force feedback switch existed
         if data['ffb_enabled'] is None and data['ff_gain'] is not None:
@@ -167,6 +264,19 @@ class Model:
         # greying the boxes out.
         if data['invert_pedals'] is None:
             data['invert_pedals'] = self.device.get_invert_pedals()
+        # Likewise for the pedal response: an older profile leaves it as is
+        for name in self.PEDAL_RESPONSES:
+            key = name + '_response'
+            valid = None
+            if data[key] is not None:
+                valid = self.valid_response(data[key])
+                if valid is None:
+                    logging.warning("Profile %s: ignoring invalid %s %s", profile_file, key, data[key])
+                data[key] = valid
+            if valid is not None:
+                self.pedal_response_written.discard(name)
+            if data[key] is None:
+                data[key] = self.data.get(key)
         if data['rev_leds'] is not None:
             if data['rev_leds_shift_unit'] == 'launch':
                 # a development build had the launch limiter as a unit
@@ -287,6 +397,67 @@ class Model:
     def get_invert_pedals(self):
         return self.data['invert_pedals']
 
+    def apply_pedal_response(self, name):
+        """Write a pedal's response to the driver. It is in pedal-travel
+        terms, from the released end: the driver mirrors it itself when
+        invert_pedals flips the axis. It ignores the settings while the
+        pedals are combined, so nothing is written then."""
+        response = self.data[name + '_response']
+        if response is None or not self.device or self.data['combine_pedals']:
+            return
+        bit = self.pedal_bit(name)
+        if bit is None:
+            # once per pedal: update_pedals gets here on every refresh
+            level = logging.debug if name in self.pedal_axis_warned else logging.warning
+            self.pedal_axis_warned.add(name)
+            level("No %s axis on the input device (yet); pedal response not written", name)
+            return
+        try:
+            if self.device.set_pedal_response(bit, *response):
+                self.pedal_response_written.add(name)
+        except OSError as e:
+            logging.warning("Can't set the %s response: %s", name, e)
+
+    def apply_pedal_responses(self):
+        for name in self.PEDAL_RESPONSES:
+            self.apply_pedal_response(name)
+
+    def set_pedal_response(self, name, start, end, sensitivity):
+        start, end, sensitivity = int(start), int(end), int(sensitivity)
+        if self.valid_response((start, end, sensitivity)) != (start, end, sensitivity):
+            raise ValueError("pedal response out of range: {} {} {}".format(start, end, sensitivity))
+        key = name + '_response'
+        if self.data[key] is None:
+            return
+        if self.set_if_changed(key, (start, end, sensitivity)):
+            self.pedal_response_written.discard(name)
+            self.apply_pedal_response(name)
+
+    def set_pedal_preset(self, name, preset_id):
+        for pid, _label, response, _note in self.PEDAL_PRESETS[name]:
+            if pid == preset_id:
+                self.set_pedal_response(name, *response)
+                return response
+        raise ValueError("no preset {} for {}".format(preset_id, name))
+
+    def set_clutch_response(self, start, end, sensitivity):
+        self.set_pedal_response('clutch', start, end, sensitivity)
+
+    def set_accelerator_response(self, start, end, sensitivity):
+        self.set_pedal_response('accelerator', start, end, sensitivity)
+
+    def set_brakes_response(self, start, end, sensitivity):
+        self.set_pedal_response('brakes', start, end, sensitivity)
+
+    def get_clutch_response(self):
+        return self.data['clutch_response']
+
+    def get_accelerator_response(self):
+        return self.data['accelerator_response']
+
+    def get_brakes_response(self):
+        return self.data['brakes_response']
+
     def get_ff_gain(self):
         return self.data['ff_gain']
 
@@ -326,6 +497,11 @@ class Model:
         value = int(value)
         if self.set_if_changed('combine_pedals', value):
             self.device.set_combine_pedals(value)
+            if self.ui is not None:
+                self.ui.set_pedal_response_combined(bool(value))
+            if not value:
+                # The driver ignored the responses while combined
+                self.apply_pedal_responses()
 
     def get_combine_pedals(self):
         return self.data['combine_pedals']
@@ -515,6 +691,7 @@ class Model:
             self.device.set_ff_gain(self.data['ff_gain'])
         if self.data['invert_pedals'] is not None:
             self.device.set_invert_pedals(self.data['invert_pedals'])
+        self.apply_pedal_responses()
         if self.data['spring_level'] is not None:
             self.device.set_spring_level(self.data['spring_level'])
         if self.data['damper_level'] is not None:
@@ -540,6 +717,8 @@ class Model:
         self.ui.set_inertia_mode(data['inertia_mode'])
         self.ui.set_combine_pedals(data['combine_pedals'])
         self.ui.set_invert_pedals(data['invert_pedals'])
+        for name in self.PEDAL_RESPONSES:
+            self.ui.set_pedal_response(name, data[name + '_response'])
         self.ui.set_spring_level(data['spring_level'])
         self.ui.set_damper_level(data['damper_level'])
         self.ui.set_friction_level(data['friction_level'])

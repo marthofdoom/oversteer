@@ -94,7 +94,7 @@ def _written_metrics():
 
 def test_every_metric_the_coach_writes_maps_to_an_aspect():
     written = _written_metrics()
-    assert {'shift.error', 'limiter.per_km', 'counter_steer', 'corner.loss'} <= written     # the grep works
+    assert {'shift.in_band', 'limiter.held', 'counter_steer', 'corner.loss'} <= written     # the grep works
     mapped = m.metric_aspects()
     assert written - set(mapped) == set()
     # and nothing claims a metric that is no longer written

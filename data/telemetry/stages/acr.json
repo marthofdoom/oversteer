@@ -334,7 +334,13 @@
     1.6
    ],
    "pacenote_first_m": 262.8,
-   "pacenote_last_m": 5510.0
+   "pacenote_last_m": 5510.0,
+   "start_m": 238.2,
+   "finish_m": 5287.4,
+   "finish_runs": 10,
+   "finish_spread_m": 34.9,
+   "finish_confidence": "medium",
+   "finish_source": "marth's runs: where the final slowdown to the stop control starts (median of 10), the pace notes' Finish note is not used (the clock stops 19-28 m past it)"
   },
   {
    "location": "Wales",
@@ -551,6 +557,7 @@
   },
   {
    "location": "Livigno Circuit",
+   "discipline": "circuit",
    "stage": "Main Circuit",
    "track": "Livigno Circuit Main Circuit",
    "config": null,
@@ -581,6 +588,7 @@
   },
   {
    "location": "Livigno Circuit",
+   "discipline": "circuit",
    "stage": "Main Circuit Reverse",
    "track": "Livigno Circuit Main Reverse",
    "config": null,

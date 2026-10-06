@@ -16,6 +16,8 @@ import socket
 import threading
 import time
 
+from . import car_data
+
 # Decoding lives in telemetry_formats; these stay importable from here
 from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 
@@ -214,6 +216,8 @@ class Telemetry:
         self.last_packet = 0.0
         self.last_source = None
         self.learned_max = 0.0
+        self.seen_max = 0.0               # the highest rpm seen in this car (what 'seen' tells the learner)
+        self._seen_car = None
         self._thread = None
         self._sock = None
         self._unknown_sizes = set()
@@ -401,7 +405,7 @@ class Telemetry:
         self.last_packet = 0.0
         self.last_source = None
         self._source = None
-        self.learned_max = 0.0
+        self.learned_max = self.seen_max = 0.0
         self._learned_at = 0.0
         # Menus or a loading screen: the next stage may be another car,
         # and it starts with a launch anyway
@@ -460,6 +464,14 @@ class Telemetry:
         if self.launch:
             self._learn_launch(now, rpm, pedals, sample.speed)
             self._raise_launch(now, sample, throttle, clutch)
+        # What the learner is told the limiter is, and where from
+        learn_limiter, learn_source = max_rpm, 'game'
+        if max_rpm is None and sample.car is not None:
+            # No maximum sent (ACR sends 0): the car's limiter from the game's files, where it has them
+            shipped = (car_data.entry(sample.car) or {}).get('limiter_rpm')
+            if shipped:
+                max_rpm = learn_limiter = float(shipped)
+                self.last_max_rpm = max_rpm
         if max_rpm is None:
             # OutGauge: learn the ceiling from the highest RPM seen. It
             # sags slowly (per second, not per packet) so a change of
@@ -472,13 +484,19 @@ class Telemetry:
             self._learned_at = now
             self.learned_max = max(self.learned_max, rpm, rpm / shift_fraction if not shift_rpm else 0.0)
             max_rpm = self.learned_max
+            # The learner gets the highest rpm seen, not the lights' ceiling (which is rpm / shift fraction
+            # above it and would be learnt as the engine's limiter)
+            if sample.car != self._seen_car:
+                self._seen_car, self.seen_max = sample.car, 0.0
+            self.seen_max = max(self.seen_max, rpm)
+            learn_limiter, learn_source = self.seen_max, 'seen'
         else:
             self.last_max_rpm = max_rpm
         # Everything is relative to the shift point: the bar completes
         # there and flashes above it.
         if self.launch and self.launch_max:
             max_rpm = self.launch_max
-        learnt = self._feed_learner(now, sample, max_rpm, pedals, throttle, clutch)
+        learnt = self._feed_learner(now, sample, learn_limiter, learn_source, pedals, throttle, clutch)
         if learnt:
             # A gear that pulls to the limiter learns the limiter itself as
             # its shift point: the engine could never reach 3 % past it,
@@ -499,7 +517,7 @@ class Telemetry:
             self.leds.set_count(lit)
             self._lit = lit
 
-    def _feed_learner(self, now, sample, max_rpm, pedals, throttle, clutch):
+    def _feed_learner(self, now, sample, limiter, source, pedals, throttle, clutch):
         """Teach the learner; the learnt shift point for this gear when
         the rev lights should use it."""
         learner = self.learner
@@ -507,8 +525,6 @@ class Telemetry:
             return None
         if self.launch and self.launch_max:
             limiter, source = self.launch_max, 'launch'
-        else:
-            limiter, source = max_rpm, 'game' if sample.max_rpm is not None else 'seen'
         try:
             if sample.car is None:
                 # Forza's menus send packets at full rate with no car: the

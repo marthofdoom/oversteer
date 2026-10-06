@@ -1,0 +1,13 @@
+{
+  "id": "fanatec-clubsport-handbrake",
+  "name": "Fanatec ClubSport Handbrake",
+  "vendor": "0eb7",
+  "product": "00e5",
+  "version": "0001",
+  "bustype": "usb",
+  "phys": ".*",
+  "kind": "handbrake",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "VID/PID/version from equipment.HANDBRAKE_IDENTITY (what the proxy already presents); capabilities not captured."
+}

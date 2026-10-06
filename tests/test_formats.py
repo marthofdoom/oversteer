@@ -87,6 +87,34 @@ def test_codemasters_true_rpm_and_rpm_over_10():
     assert codemasters_unit(733.3) == RAD_S                             # nothing round: DiRT's unit
 
 
+def test_codemasters_unit_is_the_one_that_makes_the_roundest_plausible_rpm():
+    from oversteer import telemetry_formats
+    # 1000 raw is 9549.3 rpm as rad/s (0.7 off a round figure: the first unit to pass) and exactly 10000 as rpm / 10
+    assert codemasters_unit(1000.0) == 10.0
+    assert codemasters_unit(785.398) == RAD_S and codemasters_unit(7000.0) == 1.0
+    # a unit never gives 30000 rpm or more: 4000 raw is 38197 as rad/s
+    assert codemasters_unit(4000.0) == 1.0
+    # no unit gives a plausible rpm: none, and nothing is cached for it
+    assert codemasters_unit(50.0) is None
+    telemetry_formats._codemasters_units.clear()
+    assert decode_sample(codemasters(40, 50, unit=1.0, size=280)) is None
+    assert telemetry_formats._codemasters_units == {}
+
+
+def test_eawrc_progress_stays_within_the_stage():
+    over = decode_sample(eawrc(stage_current_distance=10150.0, stage_length=10000.0))     # rolling on past the line
+    assert over.progress == 1.0
+    under = decode_sample(eawrc(stage_current_distance=-20.0, stage_length=10000.0))      # behind the start line
+    assert under.progress == 0.0
+
+
+def test_codemasters_vertical_acceleration_is_unknown_not_zero():
+    import math
+    sample = decode_sample(codemasters(6000, 7500))
+    assert sample.accel is not None and math.isnan(sample.accel[2])            # the format has no vertical channel
+    assert all(math.isfinite(v) for v in sample.accel[:2])
+
+
 def test_codemasters_gears():
     assert decode_sample(codemasters(3000, 7500, gear=0.0)).gear == 0
     assert decode_sample(codemasters(3000, 7500, gear=10.0)).gear == -1     # reverse in DiRT Rally
@@ -214,6 +242,40 @@ def test_codemasters_motion_and_wheels():
     assert abs(sample.accel[0] + 9.80665) < 1e-4 and abs(sample.accel[1] - 4.903325) < 1e-4
     assert sample.game_time == 95.0 and sample.stage_time == 90.0 and sample.gears == 6
     assert abs(sample.idle_rpm - 800) < 0.01
+
+
+def wrcg_full():
+    """A WRC Generations packet as marth's captures show it: z is up, the
+    "pitch" vector (14:17) points backwards, the "roll" vector (11:14) is the
+    car's left, suspension in metres that fall as it compresses."""
+    floats = list(struct.unpack('<70f', codemasters(6000, 7500, idle=800, size=280)))
+    floats[0:4] = [95.0, 90.0, 1200.0, 3.98]
+    floats[4:7] = [100.0, -40.0, 5.0]                           # position, z up
+    floats[8:11] = [0.0, 20.0, 0.0]                             # world velocity: heading +y
+    floats[11:14] = [-1.0, 0.0, 0.0]                            # sideways: the car's left
+    floats[14:17] = [0.0, -1.0, 0.0]                            # "forward", reversed
+    floats[17:21] = [0.40, 0.42, 0.44, 0.46]                    # suspension RL, RR, FL, FR (m)
+    floats[21:25] = [0.1, 0.2, 0.3, 0.4]                        # suspension velocity (m/s)
+    floats[25:29] = [19.0, 19.5, 20.0, 20.5]
+    floats[30] = 0.5                                            # steering: half left
+    floats[34:36] = [0.5, -1.0]
+    return struct.pack('<70f', *floats)
+
+
+def test_wrcg_motion_steer_and_suspension():
+    # Against marth's WRCG captures: the vector at 14:17 has cosine -0.99
+    # with the direction of motion, the one at 11:14 is the left (cosine
+    # 0.999 with up x forward), steer 30 correlates +0.2..0.5 with the
+    # heading rate (left positive) and the left wheels' suspension reads
+    # high in a left turn (r 0.9 with it) and the rear's falls under power
+    sample = decode_sample(wrcg_full())
+    assert sample.game == 'wrcg'
+    assert sample.forward == (0.0, 1.0, 0.0) and sample.up == (0.0, 0.0, 1.0)
+    assert sample.vel == (20.0, 0.0, 0.0)
+    assert sample.steer == 0.5
+    assert all(abs(a - b) < 1e-5 for a, b in zip(sample.susp, (-0.44, -0.46, -0.40, -0.42)))   # FL, FR, RL, RR
+    assert all(abs(a - b) < 1e-5 for a, b in zip(sample.susp_vel, (0.3, 0.4, 0.1, 0.2)))
+    assert sample.accel is None                                  # floats 34, 35 are not an acceleration
 
 
 def test_eawrc_motion_and_stage():

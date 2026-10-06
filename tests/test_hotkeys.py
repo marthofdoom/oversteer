@@ -95,3 +95,203 @@ def test_switch_state_display(tmp_path):
 def test_profile_switching_is_app_wide():
     assert set(hotkeys.GLOBAL_ACTIONS) <= set(hotkeys.BY_ID)
     assert all(hotkeys.BY_ID[a].kind == 'profile' for a in hotkeys.GLOBAL_ACTIONS)
+
+
+class FakeTimers:
+    """add_timeout/remove_timeout that run on demand instead of on a main loop."""
+
+    def __init__(self):
+        self.pending = {}
+        self.next = 1
+
+    def add(self, ms, callback):
+        handle = self.next
+        self.next += 1
+        self.pending[handle] = (ms, callback)
+        return handle
+
+    def remove(self, handle):
+        del self.pending[handle]
+
+    def fire(self):
+        """Fire the one pending timer; returns the delay it was set for."""
+        (handle, (ms, callback)), = self.pending.items()
+        del self.pending[handle]
+        callback()
+        return ms
+
+
+def _repeater(results):
+    timers = FakeTimers()
+    steps = []
+
+    def step(action_id):
+        steps.append(action_id)
+        return results.pop(0) if results else True
+    return hotkeys.Repeater(step, timers.add, timers.remove), timers, steps
+
+
+def test_hold_repeats_after_400_then_every_120():
+    repeater, timers, steps = _repeater([])
+    repeater.press('wheel:btn:300', 'ff_gain_up')
+    assert [ms for ms, _cb in timers.pending.values()] == [400]
+    assert timers.fire() == 400
+    assert timers.fire() == 120
+    assert timers.fire() == 120
+    assert steps == ['ff_gain_up'] * 3
+
+
+def test_release_stops_repeating_and_other_buttons_do_not():
+    repeater, timers, steps = _repeater([])
+    repeater.press('wheel:btn:300', 'ff_gain_up')
+    repeater.release('wheel:btn:301')
+    assert len(timers.pending) == 1
+    repeater.release('wheel:btn:300')
+    assert not timers.pending and not steps
+
+
+def test_limit_stops_repeating():
+    repeater, timers, steps = _repeater([True, False])
+    repeater.press('key:range_up', 'range_up')
+    timers.fire()
+    timers.fire()
+    assert not timers.pending and len(steps) == 2
+
+
+def test_toggles_and_profile_switches_never_repeat():
+    repeater, timers, steps = _repeater([])
+    for action_id in ('ffb_toggle', 'profile_next', 'nonsense'):
+        repeater.press('wheel:btn:300', action_id)
+        assert not timers.pending
+
+
+def test_a_new_press_and_stop_replace_the_old_hold():
+    repeater, timers, steps = _repeater([])
+    repeater.press('wheel:btn:300', 'ff_gain_up')
+    repeater.press('wheel:btn:301', 'ff_gain_down')
+    assert len(timers.pending) == 1
+    timers.fire()
+    assert steps == ['ff_gain_down']
+    repeater.stop()
+    assert not timers.pending
+
+
+def test_step_stopping_the_repeater_does_not_reschedule():
+    timers = FakeTimers()
+    holder = []
+    repeater = hotkeys.Repeater(lambda a: holder[0].stop() or True, timers.add, timers.remove)
+    holder.append(repeater)
+    repeater.press('x', 'ff_gain_up')
+    timers.fire()
+    assert not timers.pending
+
+
+# -- Gui wiring, driven on a stand-in for self --
+
+class FakeGui:
+    """The parts of Gui the hotkey gating touches."""
+    def __init__(self, results=None):
+        from types import SimpleNamespace
+        self.timers = FakeTimers()
+        self.ran = []
+        self.results = results if results is not None else []
+        self.hotkey_repeater = hotkeys.Repeater(lambda a: self.step(a), self.timers.add, self.timers.remove)
+        self.keyboard_release_seen = False
+        self.hotkey_capture = None
+        self.device = SimpleNamespace(input_device=None, normalize_event=lambda e: e)
+        self.hat_held = {}
+        self.posted = []
+        self.ui = SimpleNamespace(safe_call=lambda cb, *a: self.posted.append((cb, a)))
+
+    def step(self, action_id):
+        from oversteer.gui import Gui
+        return Gui._hotkey_repeat_step(self, action_id)
+
+    def _hotkeys_suppressed(self):
+        return False
+
+    def run_hotkey(self, action_id):
+        self.ran.append(action_id)
+        return self.results.pop(0) if self.results else True
+
+    def _wheel_key_down(self, code):
+        from oversteer.gui import Gui
+        return Gui._wheel_key_down(self, code)
+
+    def _stop_wheel_repeat(self):
+        from oversteer.gui import Gui
+        return Gui._stop_wheel_repeat(self)
+
+
+def test_keyboard_hold_repeats_only_after_a_release_was_seen():
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    Gui.on_keyboard_hotkey(gui, 'ff_gain_up')
+    assert gui.hotkey_repeater.holder is None and not gui.timers.pending   # first hold: no repeat
+    Gui.on_keyboard_hotkey_released(gui, 'ff_gain_up')
+    assert gui.keyboard_release_seen
+    Gui.on_keyboard_hotkey(gui, 'ff_gain_up')
+    assert gui.hotkey_repeater.holder == 'key:ff_gain_up'
+    assert gui.timers.fire() == hotkeys.REPEAT_FIRST_MS
+    Gui.on_keyboard_hotkey_released(gui, 'ff_gain_up')
+    assert gui.hotkey_repeater.holder is None
+
+
+def test_wheel_repeat_stops_when_the_key_is_no_longer_down():
+    from types import SimpleNamespace
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    keys = [288]
+    gui.device.input_device = SimpleNamespace(active_keys=lambda: list(keys))
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    gui.timers.fire()
+    assert gui.ran == ['ff_gain_up'] and gui.hotkey_repeater.holder == 'wheel:btn:288'
+    keys.clear()                                   # the release was lost
+    gui.timers.fire()
+    assert gui.ran == ['ff_gain_up'] and gui.hotkey_repeater.holder is None
+    # a device that can't say keeps repeating
+    gui.device.input_device = SimpleNamespace()
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    gui.timers.fire()
+    assert gui.ran == ['ff_gain_up', 'ff_gain_up']
+
+
+def test_syn_dropped_clears_what_is_held(monkeypatch):
+    from oversteer import gui as gui_module
+    from oversteer.gui import Gui
+    monkeypatch.setattr(gui_module.GLib, 'idle_add', lambda cb, *a, **kw: None)
+    gui = FakeGui()
+    gui.hat_held[ecodes.ABS_HAT0X] = 1
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    Gui._wheel_input_lost(gui)
+    assert gui.hat_held == {}
+    Gui._stop_wheel_repeat(gui)
+    assert gui.hotkey_repeater.holder is None
+
+
+def test_wheel_repeat_compares_normalized_codes():
+    from types import SimpleNamespace
+    from oversteer.gui import Gui
+    gui = FakeGui()
+    gui.device.normalize_event = lambda e: SimpleNamespace(code=e.code + 1000)   # a remapped button
+    gui.device.input_device = SimpleNamespace(active_keys=lambda: [288])
+    assert Gui._wheel_key_down(gui, 1288)
+    assert not Gui._wheel_key_down(gui, 288)
+
+
+def test_input_lost_leaves_a_keyboard_repeat_alone(monkeypatch):
+    from oversteer import gui as gui_module
+    from oversteer.gui import Gui
+    posted = []
+    monkeypatch.setattr(gui_module.GLib, 'idle_add', lambda cb, *a, **kw: posted.append((cb, kw)))
+    gui = FakeGui()
+    gui.hotkey_repeater.press('key:ff_gain_up', 'ff_gain_up')
+    Gui._wheel_input_lost(gui)
+    (callback, kw), = posted
+    assert kw == {'priority': gui_module.GLib.PRIORITY_DEFAULT}
+    Gui._stop_wheel_repeat(gui)
+    assert gui.hotkey_repeater.holder == 'key:ff_gain_up'
+    gui.hotkey_repeater.release('key:ff_gain_up')
+    gui.hotkey_repeater.press('wheel:btn:288', 'ff_gain_up')
+    Gui._stop_wheel_repeat(gui)
+    assert gui.hotkey_repeater.holder is None

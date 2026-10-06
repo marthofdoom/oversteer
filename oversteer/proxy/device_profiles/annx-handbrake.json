@@ -1,0 +1,27 @@
+{
+  "id": "annx-handbrake",
+  "name": "FigoTech ANNX handbreak",
+  "vendor": "8086",
+  "product": "0a01",
+  "version": "0110",
+  "bustype": "usb",
+  "phys": "^usb-.*/input0$",
+  "kind": "handbrake",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "Name is spelled \"handbreak\" by the device firmware. One axis (ABS_THROTTLE), no buttons. Proxied as the Fanatec ClubSport Handbrake. Capture via sysfs; abs range not captured.",
+  "capture": {
+    "date": "2026-10-05",
+    "source": "marth's rig",
+    "method": "sysfs capability bitmaps (device node is root-only/hidden by the proxy udev rule)",
+    "complete": false,
+    "missing": "abs min/max/fuzz/flat/resolution"
+  },
+  "capabilities": {
+    "keys": [],
+    "abs": {
+      "ABS_THROTTLE": {}
+    },
+    "ff": []
+  }
+}

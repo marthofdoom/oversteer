@@ -16,6 +16,7 @@ table) is the only surface evidence.
 import math
 
 from . import stage_tables
+from .telemetry_formats import plan_xy
 
 CONFIDENCE = ('low', 'medium', 'high', 'game')
 
@@ -70,16 +71,18 @@ def _game(summary):
 
 # -- discipline --
 
-def _path(trace, x, z, step=CELL):
-    """Positions (x, z) about `step` metres apart along the trace, with the
-    distance driven to each; None without positions."""
+def _path(trace, x, y, z, game=None, step=CELL):
+    """Positions on the map (plan_xy of the game's world position) about
+    `step` metres apart along the trace, with the distance driven to each;
+    None without positions."""
     points = []
     driven = 0.0
     last = None
     for row in trace:
-        px, pz = row[x], row[z]
-        if px != px or pz != pz:                     # NaN: no position
+        px, py, pz = row[x], row[y], row[z]
+        if px != px or py != py or pz != pz:         # NaN: no position
             return None
+        px, pz = plan_xy(game, (px, py, pz))
         if last is None:
             points.append((px, pz, 0.0))
             last = (px, pz)
@@ -136,6 +139,16 @@ PROFILE_WORDS = (('rallycross', 'rallycross'), ('hillclimb', 'hillclimb'), ('hil
                  ('rally', 'rally-stage'), ('circuit', 'circuit'), ('track', 'circuit'), ('drift', 'drift'))
 
 
+def table_discipline(stage):
+    """The discipline an Assetto Corsa Rally stage key says it is: its table
+    entry's `discipline` (the Livigno circuit's), else a rally stage; None
+    for a key that is not an ACR table entry."""
+    entry = stage_tables.entry(stage)
+    if entry is None or not (stage or '').startswith('acr:'):
+        return None
+    return entry.get('discipline') or 'rally-stage'
+
+
 def classify_discipline(summary, trace, channels):
     """A Verdict on the run's discipline. `summary` is the run tracker's
     (game, laps, stage_length, packets, standing, launch, stops,
@@ -159,6 +172,10 @@ def classify_discipline(summary, trace, channels):
     elif game in ('dirt', 'wrcg') and length and length >= 1000.0:
         verdict = Verdict('rally-stage', 'game', ['{} sends one stage of {:.1f} km.'.format(
             _game(summary), length / 1000.0)])
+    elif game == 'acr' and table_discipline(summary.get('stage')):
+        found = table_discipline(summary['stage'])
+        verdict = Verdict(found, 'game', ['The stage table says {}: {}.'.format(found.replace('-', ' '),
+                                                                                summary['stage'])])
     elif game == 'forza-fm' and summary.get('stage'):
         verdict = Verdict('circuit', 'game', ['Forza Motorsport names the track ({}).'.format(summary['stage'])])
     if verdict is not None:
@@ -169,7 +186,7 @@ def classify_discipline(summary, trace, channels):
     # 2, 3, 5: the run's shape, once there is enough of it
     moving, distance = summary.get('moving_time') or 0.0, summary.get('distance') or 0.0
     enough = moving >= MIN_TIME and distance >= MIN_DISTANCE
-    points = _path(trace, c['x'], c['z']) if trace else None
+    points = _path(trace, c['x'], c['y'], c['z'], game) if trace else None
     answers = []                                     # (class, confidence, sentence)
     if not enough:
         missing.append('a longer run: {:.0f} s and {:.1f} km moving, {:.0f} s and {:.0f} km needed'.format(

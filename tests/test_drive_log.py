@@ -354,6 +354,14 @@ def test_wrc_generations_stage_by_the_distance_to_the_finish(tmp_path, monkeypat
     assert (stage['name'], stage['location'], stage['runs']) == ('Vargasen', 'Rally Sweden', 1)
 
 
+def test_run_start_is_stored_for_acr_only(tmp_path):
+    """Only ACR's lap_distance is a position on the road spline: another game's (WRC Generations sends -1) is not
+    where a run began."""
+    learner, reader, session = drive_runs(tmp_path, wrcg_samples(Course(STAGE), Course(STAGE).length))
+    [run] = session['runs']
+    assert run['stage'] is not None and reader.run_start(run['id']) is None
+
+
 def test_wrc_generations_two_stages_of_one_length(tmp_path, monkeypatch):
     """A stage and its reverse, one length, neither driven before: which
     stage stays open (a start cell key), but where is known."""
@@ -498,7 +506,40 @@ def test_acr_finish_restart_and_shared_names(tmp_path):
     runs = [r for r in session['runs'] if r['distance'] > 300]
     assert [r['finished'] for r in runs] == [0, 1]
     assert all(r['stage'] == 'acr:wales:afon-bidno-severn' for r in runs)
-    assert 230 < runs[1]['result_time'] < 250              # (5510 - 238) / 22 m/s from moving off
+    assert 225 < runs[1]['result_time'] < 235              # (5287 - 238) / 22 m/s from moving off: the flying finish, not the stop control
+
+
+def test_a_run_stores_where_along_the_spline_it_began(tmp_path):
+    standing = acr_drive(0.0, 238.0, 1500.0)
+    learner, reader, session = drive_runs(tmp_path, standing)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert reader.run_start(run['id']) == 238.0
+    mid = acr_drive(0.0, 3000.0, 3600.0, track='Wales Afon Bidno')        # a run that began mid-stage, rolling
+    learner, reader, session = drive_runs(tmp_path, mid, name='mid.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert reader.run_start(run['id']) == mid[0][1].lap_distance
+
+
+def test_an_acr_run_that_began_mid_stage_is_not_finished_at_the_flying_finish(tmp_path):
+    """A restart after a silence (or the second half of a run split by one) starts anywhere on the stage:
+    crossing the finish from there is not the stage's time."""
+    mid = acr_drive(0.0, 3000.0, 5530.0)
+    learner, reader, session = drive_runs(tmp_path, mid)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] != 1 and run['result_time'] is None
+    # a run that began at the line still is
+    learner, reader, session = drive_runs(tmp_path, acr_drive(0.0, 238.0, 5530.0), name='line.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+
+
+def test_an_acr_stage_is_not_guessed_from_the_distance_driven(tmp_path):
+    """ACR names its stage (the track name): a track the table does not know stays unnamed, however far the
+    run drove against some other stage's published length."""
+    drive = acr_drive(0.0, 0.0, 5600.0, track='Nowhere Unknown')
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['stage'] is None
 
 
 def test_acr_stages_of_one_name_told_apart_by_the_start():
@@ -540,3 +581,538 @@ def test_a_run_knows_its_surface_from_the_stage(tmp_path):
     other = ShiftLearner(str(tmp_path / 'other.db'))
     feed_course(other, course_samples(Course(STAGE)))
     assert other.surface is None
+
+
+def acr_after_finish(t0, d, track='Wales Afon Bidno', seconds=60.0, speed=0.0, car='acr/Skoda Fabia RS Rally2'):
+    """What ACR keeps sending after the finish: the results screen, the car
+    at `speed` on the spot (lap distance stays where it was)."""
+    from oversteer.telemetry import Sample
+    samples, t = [], t0
+    while t < t0 + seconds:
+        s = Sample(1500.0, 7500.0, gear=1, speed=speed, car=car, game='acr', throttle=0.0)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        samples.append((t, s, 0.0))
+        t += 0.1
+        d += speed * 0.1
+    return samples
+
+
+def test_acr_run_ends_when_the_car_rests_after_the_finish(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive = acr_drive(0.0, 238.0, 5530.0)
+    feed_course(learner, drive)
+    assert learner.runs.run is not None                    # not over yet: nothing past the line
+    before = learner.history_changed
+    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=5.0)
+    feed_course(learner, after[:10])
+    assert learner.runs.run is not None                    # a second of standing is not enough
+    feed_course(learner, after[10:])
+    learner.log.sync()
+    assert learner.runs.run is None                        # over seconds after the line, not at the next stage
+    assert learner.history_changed > before
+    reader = learner._reader()
+    session = reader.session(reader.history('_no_profile', drive[0][1].car)[0]['id'])
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and 225 < run['result_time'] < 235
+    assert run['distance'] < 5400                          # the standing seconds are not in it
+
+
+def test_acr_finish_is_the_flying_finish_else_the_last_pace_note(tmp_path):
+    from oversteer import stage_tables
+    bidno = stage_tables.acr_stage('Wales Afon Bidno', start=238.0)
+    assert bidno['pacenote_last_m'] - 300 < bidno['finish_m'] < bidno['pacenote_last_m'] - 150
+    assert bidno['finish_runs'] >= 2 and bidno['finish_spread_m'] < 45
+    elatia = stage_tables.acr_stage('Greece Elatia')
+    assert 'finish_m' not in elatia                        # no run to derive it from: the last note
+    drive = acr_drive(0.0, 100.0, 6730.0, track='Greece Elatia')
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and 295 < run['result_time'] < 308     # (6710 - 100) / 22 m/s
+
+
+def test_acr_post_finish_packets_do_not_start_a_run_and_a_restart_does(tmp_path):
+    first = acr_drive(0.0, 238.0, 5530.0)
+    t = first[-1][0] + 0.1
+    after = acr_after_finish(t, 5530.0, seconds=20.0, speed=5.0)       # rolling out, then on past the grace
+    t = after[-1][0] + 0.1
+    after += acr_after_finish(t, after[-1][1].lap_distance, seconds=30.0, speed=22.0)
+    second = acr_drive(after[-1][0] + 0.1, 238.0, 1500.0)              # the stage restarted
+    learner, reader, session = drive_runs(tmp_path, first + after + second)
+    runs = [r for r in session['runs'] if r['distance'] > 100]
+    assert [r['finished'] for r in runs] == [1, None]       # the restarted run is still open at the session's end
+    assert 225 < runs[0]['result_time'] < 235
+    assert 4950 < runs[0]['distance'] < 5150               # driven to the line, not the roll-out
+    assert runs[0]['ended'] < runs[1]['ended']
+
+
+def test_a_circuit_lap_in_acc_does_not_end_the_run(tmp_path):
+    """ACC's progress is the position around the lap: near 1 at the end of
+    every lap, not a finish."""
+    from oversteer.telemetry import Sample
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples, t = [], 0.0
+    for lap in range(3):
+        for i in range(400):
+            s = Sample(6000.0, 7500.0, gear=3, speed=40.0, car='acc/test', game='acc', throttle=0.8)
+            s.track, s.stage_length = 'monza', 1600.0
+            s.progress = i / 399.0
+            s.lap_distance = s.progress * 1600.0
+            samples.append((t, s, 0.8))
+            t += 0.1
+    feed_course(learner, samples[:420])                  # past the end of the first lap
+    run = learner.runs.run
+    assert run is not None
+    feed_course(learner, samples[420:])
+    assert learner.runs.run == run                       # 80 s on, the later laps are the same run
+
+
+def test_a_circuit_lap_is_not_a_finish_and_its_wrapping_distance_is_not_the_runs(tmp_path):
+    """AC and ACC send the position around the lap: progress near 1 and the lap distance back to 0 at the line,
+    every lap. The first lap's end is not the finish of the run, and the trace's distance goes on."""
+    from oversteer.telemetry import Sample
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples, t = [], 0.0
+    for lap in range(3):
+        for i in range(400):
+            s = Sample(6000.0, 7500.0, gear=3, speed=40.0, car='acc/test', game='acc', throttle=0.8)
+            s.track, s.stage_length = 'monza', 1600.0
+            s.progress = i / 399.0
+            s.lap_distance = s.progress * 1600.0
+            samples.append((t, s, 0.8))
+            t += 0.1
+    feed_course(learner, samples[:420])                  # past the end of the first lap
+    assert learner.runs.run is not None and learner.runs._finished is None
+    feed_course(learner, samples[420:])
+    learner.save()
+    reader = learner._reader()
+    history = reader.history('_no_profile', 'acc/test')
+    [run] = [r for r in reader.session(history[0]['id'])['runs'] if r['distance'] > 300]
+    assert run['finished'] != 1
+    distance = [row[1] for row in reader.trace(run['id'])]
+    assert all(b >= a for a, b in zip(distance, distance[1:])) and distance[-1] > 4000.0
+
+
+def test_a_run_past_the_progress_finish_ends_when_the_car_rests_though_the_game_repeats_its_packets(tmp_path):
+    """DiRT repeats its last packet after the finish (the stage clock frozen, the car at rest): that is still
+    the car standing, not 60 s to wait."""
+    import copy
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples = course_samples(Course(STAGE))
+    t_last, last, throttle = samples[-1]
+    assert last.progress >= 0.99
+    frozen = []
+    for i in range(1, 400):                                   # 6.6 s of the same packet, the car at rest
+        s = copy.copy(last)
+        s.speed = 0.0
+        frozen.append((t_last + i / 60, s, 0.0))
+    feed_course(learner, samples + frozen)
+    assert learner.runs.run is None
+
+
+def test_a_pause_just_after_progress_says_finished_does_not_end_the_run_before_the_line(tmp_path):
+    """Progress reaches 0.99 before the line: the game repeating its packets in a pause there (the stage clock
+    where it was at the progress finish, progress under 1) is not the car at rest past the finish."""
+    import copy
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples = course_samples(Course(STAGE))
+    first = next(i for i, (_, s, _) in enumerate(samples) if s.progress >= 0.99)
+    t_at, at, throttle = samples[first]
+    assert at.progress < 1.0
+    frozen = []
+    for i in range(1, 400):                                   # 6.6 s of the same packet, the car at rest
+        s = copy.copy(at)
+        s.speed = 0.0
+        frozen.append((t_at + i / 60, s, 0.0))
+    feed_course(learner, samples[:first + 1] + frozen)
+    assert learner.runs.run is not None
+
+
+def test_a_lap_of_a_multi_lap_race_is_not_the_runs_end_whatever_the_game(tmp_path):
+    """Rallycross: progress is the lap's, near 1 at the end of every lap, with laps above 1."""
+    from oversteer.telemetry import Sample
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples, t = [], 0.0
+    for lap in range(3):
+        for i in range(400):
+            s = Sample(6000.0, 7500.0, gear=3, speed=40.0, car='dirt/test', game='dirt', throttle=0.8)
+            s.track, s.stage_length, s.laps, s.lap = 'rx', 1600.0, 3, lap
+            s.progress = i / 399.0
+            s.lap_distance = s.progress * 1600.0
+            samples.append((t, s, 0.8))
+            t += 0.1
+    feed_course(learner, samples[:420])
+    run = learner.runs.run
+    assert run is not None
+    feed_course(learner, samples[420:])                       # 80 s past the first lap's end
+    assert learner.runs.run == run
+
+
+def test_history_changed_is_said_after_the_commit_not_before(tmp_path):
+    """A reader that sees the stamp move must find the run in the file."""
+    for threaded in (False, True):
+        learner = ShiftLearner(str(tmp_path / 'telemetry{}.db'.format(threaded)), threaded=threaded)
+        log, seen = learner.log, []
+        learner.history_changed = 0
+        def work():
+            log.after_commit(lambda: seen.append(log.store.db.in_transaction))
+            return True
+        log.post(work)
+        assert log.sync() and seen == [False]
+        learner.close()
+    # and a run's end bumps the stamp only once the run is written
+    learner = ShiftLearner(str(tmp_path / 'run.db'))
+    states = []
+    bump = learner.runs._history_changed
+    learner.runs._history_changed = lambda: (states.append(learner.log.store.db.in_transaction), bump())
+    feed_course(learner, course_samples(Course(STAGE)))
+    learner.save()
+    assert states and not any(states) and learner.history_changed >= 1
+
+
+# -- the game's clock (bridge version 4) --
+
+def acr_clock_drive(t0, until, react=0.5, pause_at=None, pause=30.0, game_line=5295.4, speed=22.0,
+                    track='Wales Afon Bidno', car='acr/Skoda Fabia RS Rally2', start=238.0):
+    """ACR as bridge version 4 sends it: the stage's clock runs from the go
+    (`react` s before the car moves), stops at the game's own finish line
+    (`game_line`, a little past the table's flying finish) and goes on
+    sending the frozen time; while the game is paused (at `pause_at` m, for
+    `pause` s) nothing is sent and the clock stands. The position is sent,
+    as ACR does (a pause is then no silence). Returns (samples, the game's
+    time at its line)."""
+    from oversteer.telemetry import Sample
+    samples, t, d, clock = [], t0, start, None
+    for i in range(20):                                        # standing at the line, then the go
+        s = Sample(1500.0, 7500.0, gear=1, speed=0.0, car=car, game='acr', throttle=0.0)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        s.stage_time = max(0.0, (i - 19) * 0.1 + react)
+        s.pos = (d, 0.0, 0.0)
+        samples.append((t, s, 0.0))
+        t += 0.1
+    game = samples[-1][1].stage_time
+    paused = False
+    while d < until:
+        s = Sample(6000.0, 7500.0, gear=3, speed=speed, car=car, game='acr', throttle=0.8)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        s.stage_time = game if clock is None else clock
+        s.pos = (d, 0.0, 0.0)
+        samples.append((t, s, 0.8))
+        if pause_at is not None and not paused and d >= pause_at:
+            paused = True
+            t += pause                                         # nothing sent, nothing moves
+        t += 0.1
+        d_next = d + speed * 0.1
+        if clock is None:
+            if d_next >= game_line:
+                clock = game + (game_line - d) / speed         # the clock stops at the game's line
+            else:
+                game += 0.1
+        d = d_next
+    return samples, clock
+
+
+def test_the_game_clock_is_the_result_and_the_traces_clock_through_a_pause(tmp_path):
+    from oversteer import coach_context
+    drive, at_line = acr_clock_drive(0.0, 5530.0, pause_at=2000.0)
+    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=5.0)
+    for _, s, _ in after:
+        s.stage_time = at_line
+    learner, reader, session = drive_runs(tmp_path, drive + after)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+    # The game's own time, where its clock stopped: the go to its line, no pause in it
+    assert abs(run['result_time'] - at_line) < 1e-3 and abs(at_line - (0.5 + (5295.4 - 238.0) / 22.0)) < 0.11
+    assert run['duration'] < at_line + 0.5                      # the run's own clock, the 30 s pause not in it
+    trace = reader.trace(run['id'])
+    t, wall = coach_context.CH['t'], coach_context.CH['wall']
+    steps = [b[t] - a[t] for a, b in zip(trace, trace[1:])]
+    assert min(steps) >= 0.0 and max(steps) < 0.5               # the pause is not in t...
+    assert max(b[wall] - a[wall] for a, b in zip(trace, trace[1:])) > 29.0    # ...it is in the wall clock
+    assert abs(trace[0][t] - 0.5) < 0.11                        # t is the game's clock from the first row
+    course = reader.run(run['id'])['course']
+    rows = coach_context.stage_rows(trace, course, True, run['result_time'])
+    end = coach_context.time_at(rows, coach_context.along(rows), course)
+    assert abs(end - run['result_time']) < 0.11                 # the trace's clock at the finish is the result
+    assert store_clock(learner, run['id']) == 'game'
+    learner.close()
+
+
+def store_clock(learner, run):
+    rows = learner.log.store.db.execute('SELECT clock FROM run_clock WHERE run = ?', (run,)).fetchall()
+    return rows[0][0] if rows else None
+
+
+def test_the_game_clock_stopped_before_the_tables_line(tmp_path):
+    """The game's line short of the table's: its time, where its clock stopped."""
+    drive, at_line = acr_clock_drive(0.0, 5530.0, game_line=5250.0)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and abs(run['result_time'] - at_line) < 1e-3
+    assert abs(at_line - (0.5 + (5250.0 - 238.0) / 22.0)) < 0.11
+    learner.close()
+
+
+def test_a_clock_stopped_well_before_the_last_pace_note_is_the_finish(tmp_path):
+    """45 stages have no flying finish in the table: the game's clock stops 200-300 m before the last pace note
+    (the stop control). The run finished there: not 11 s later at the note, and not at all for a car that
+    stopped short of it."""
+    from oversteer import stage_tables
+    assert 'finish_m' not in stage_tables.acr_stage('Alsace Petit Ballon') or not \
+        stage_tables.acr_stage('Alsace Petit Ballon')['finish_m']
+    drive, at_line = acr_clock_drive(0.0, 5800.0, track='Alsace Petit Ballon', start=195.0, game_line=5740.0)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and abs(run['result_time'] - at_line) < 1e-3
+    assert abs(reader.run(run['id'])['course'] - (5740.0 - 195.0)) < 25.0
+    assert store_clock(learner, run['id']) == 'game'
+    final = learner.live_run.read(0)['final']
+    assert final is not None and abs(final['time'] - at_line) < 0.11       # the live card at the stop too
+    learner.close()
+    # a clock that stopped much earlier (a stage's middle) is not the finish
+    drive, _ = acr_clock_drive(0.0, 5800.0, track='Alsace Petit Ballon', start=195.0, game_line=3000.0)
+    learner, reader, session = drive_runs(tmp_path, drive, name='early.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] != 1
+    learner.close()
+
+
+def test_a_run_on_the_games_clock_teaches_the_finish_and_old_runs_move_to_it(tmp_path):
+    """Petit Ballon has no flying finish in the table: a run before the bridge sent the clock ended at the last pace
+    note (the stop control), 245 m past where the game stops its clock. The clock run learns that line, and the
+    old run is timed again to it."""
+    from oversteer import stage_tables
+    stage = 'acr:alsace:col-du-petit-ballon'
+    assert stage_tables.entry(stage).get('finish_m') is None
+    old, _ = acr_clock_drive(0.0, 6050.0, track='Alsace Petit Ballon', start=195.0, game_line=9999.0)
+    for _, s, _ in old:
+        s.stage_time = None                                    # the bridge before version 4
+        if s.lap_distance > 5900.0:
+            s.speed = 5.0                                      # slowing to the stop control
+    new, at_line = acr_clock_drive(old[-1][0] + 30.0, 5800.0, track='Alsace Petit Ballon', start=195.0, game_line=5740.0)
+    learner, reader, session = drive_runs(tmp_path, old + new)
+    first, second = [r for r in session['runs'] if r['distance'] > 300]
+    learnt = stage_tables.entry(stage)
+    assert abs(learnt['finish_m'] - 5740.0) < 2.5 and learnt['finish_runs'] == 1
+    row = learner.log.store.run(first['id'])
+    assert abs(row['result_time'] - (5740.0 - 195.0) / 22.0) < 0.3          # at the learnt line now
+    assert abs(row['result_time'] - second['result_time']) < 0.6            # the clock's reaction time apart
+    assert abs(second['result_time'] - at_line) < 1e-3
+    learner.close()
+    # and the next start knows it (the file has it)
+    stage_tables.set_learnt({})
+    again = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    assert abs(stage_tables.entry(stage)['finish_m'] - 5740.0) < 2.5
+    again.close()
+
+
+def test_a_game_clock_that_does_not_stop_near_the_line_is_read_at_it(tmp_path):
+    """No stop within FINISH_CLOCK_PAST of the table's line: the game's clock interpolated at the line."""
+    from oversteer import stage_tables
+    finish = stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['finish_m']
+    drive, _ = acr_clock_drive(0.0, 5530.0, game_line=9999.0)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+    assert abs(run['result_time'] - (0.5 + (finish - 238.0) / 22.0)) < 0.11
+    # read at the table's line, not the game's own stop: no 'game' mark (a moved line corrects it), the line it was timed at
+    assert store_clock(learner, run['id']) is None
+    row = learner.log.store.db.execute('SELECT finish_m FROM run_finish WHERE run = ?', (run['id'],)).fetchall()
+    assert row and abs(row[0][0] - finish) < 1e-6
+    learner.close()
+    # the same on a stage with no flying finish: the last pace note is the line it was timed at
+    last = stage_tables.acr_stage('Alsace Petit Ballon')['pacenote_last_m']
+    drive, _ = acr_clock_drive(0.0, 6200.0, track='Alsace Petit Ballon', start=195.0, game_line=9999.0)
+    learner, reader, session = drive_runs(tmp_path, drive, name='note.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    row = learner.log.store.db.execute('SELECT finish_m FROM run_finish WHERE run = ?', (run['id'],)).fetchall()
+    assert run['finished'] == 1 and store_clock(learner, run['id']) is None and row and abs(row[0][0] - last) < 1e-6
+    learner.close()
+
+
+def test_a_restart_starts_the_game_clock_again(tmp_path):
+    first, _ = acr_clock_drive(0.0, 1500.0)
+    second, at_line = acr_clock_drive(first[-1][0] + 0.1, 5530.0, react=0.3)
+    learner, reader, session = drive_runs(tmp_path, first + second)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert [r['finished'] for r in runs] == [0, 1]
+    assert abs(runs[1]['result_time'] - at_line) < 1e-3        # its own clock, from its own go
+    assert reader.trace(runs[1]['id'])[0][0] < 1.0
+    learner.close()
+
+
+def test_the_clock_alone_restarts_a_run(tmp_path):
+    """The clock back to 0 with the car at rest where the distance does not jump back (the stage restarted
+    within its first 100 m): a new run."""
+    drive, _ = acr_clock_drive(0.0, 3000.0)
+    for _, s, _ in drive[200:]:
+        s.stage_time -= drive[200][1].stage_time
+    for _, s, _ in drive[198:204]:
+        s.speed = 0.0                                      # the car stood where it was put back
+    learner, reader, session = drive_runs(tmp_path, drive)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert len(runs) == 2 and runs[0]['finished'] == 0
+    learner.close()
+
+
+def test_a_looped_stage_clock_back_to_zero_while_moving_is_a_lap_not_a_restart(tmp_path):
+    """ACR's clock drops to 0 as the car crosses the line of a loop at speed, the distance running on: the same
+    run, timed through the lap (the result is the run's time, not the clock's since the lap)."""
+    drive, at_line = acr_clock_drive(0.0, 5530.0)
+    reset = drive[200][1].stage_time
+    for _, s, _ in drive[200:]:
+        s.stage_time -= reset
+    learner, reader, session = drive_runs(tmp_path, drive)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert len(runs) == 1 and runs[0]['finished'] == 1
+    assert abs(runs[0]['result_time'] - at_line) < 0.35
+    learner.close()
+
+
+def test_an_old_bridge_still_times_the_run_on_its_own_clock(tmp_path):
+    """No clock (bridge version 3): the run's own clock, as before, and no run_clock row."""
+    drive, _ = acr_clock_drive(0.0, 5530.0, pause_at=2000.0)
+    for _, s, _ in drive:
+        s.stage_time = None
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and 225 < run['result_time'] < 235
+    trace = reader.trace(run['id'])
+    assert max(b[0] - a[0] for a, b in zip(trace, trace[1:])) < 0.5     # the pause is not in t either
+    assert store_clock(learner, run['id']) is None
+    learner.close()
+
+
+def test_run_clock():
+    from oversteer.drive_log import RunClock, CLOCK_STOPPED
+    c = RunClock(0.4)                                          # running at the first packet: the game's own
+    for st in (0.5, 0.6, 0.7):
+        c.tick(st, 0.1)
+    assert abs(c.t - 0.7) < 1e-9 and c.exact
+    c.tick(None, 0.1)                                          # a packet without it: on by the run's own time
+    c.tick(0.9, 0.1)
+    assert abs(c.t - 0.9) < 1e-9 and c.exact                   # and back on the game's
+    c.tick(0.2, 0.1)                                           # it went back without the run ending (a lap)
+    assert abs(c.t - 1.0) < 1e-9 and not c.exact
+    c.tick(0.3, 0.1)
+    assert abs(c.t - 1.1) < 1e-9                               # never back, following on
+    for _ in range(int(CLOCK_STOPPED / 0.1) + 5):
+        c.tick(0.3, 0.1)                                       # stopped (past the finish)
+    assert c.t > 1.1 + 0.3 and c.still > CLOCK_STOPPED
+    late = RunClock(0.0)                                       # the run began before the game's clock started
+    late.tick(0.0, 0.1)
+    late.tick(0.05, 0.1)
+    assert abs(late.t - 0.15) < 1e-9 and not late.exact
+    own = RunClock(None)
+    own.tick(None, 0.1)
+    own.tick(None, 0.2)
+    assert abs(own.t - 0.3) < 1e-9
+
+
+def test_acr_frozen_packets_with_the_car_stopped_count_as_time_at_rest(tmp_path, monkeypatch):
+    """The car stood with the game's clock standing too (ACR sends nothing in a pause, so this is a stop): the
+    run's duration and stops count it; the trace's clock does not."""
+    from oversteer import coach_context, drive_detect
+    seen = []
+    real = drive_detect.detect_run
+    monkeypatch.setattr(drive_detect, 'detect_run',
+                        lambda store, run, summary, *a, **k: (seen.append(summary), real(store, run, summary, *a, **k))[1])
+    base, _ = acr_clock_drive(0.0, 1500.0)
+    drive, _ = acr_clock_drive(0.0, 1500.0)
+    stuck = drive[300][1].stage_time
+    for _, s, _ in drive[300:350]:                             # five seconds
+        s.speed = 0.0
+        s.stage_time = stuck
+        s.lap_distance = drive[300][1].lap_distance
+    for _, s, _ in drive[350:]:
+        s.stage_time -= 5.0                                    # the clock stood those five seconds
+    a, _, sa = drive_runs(tmp_path, base)
+    b, _, sb = drive_runs(tmp_path, drive, name='stuck.db')
+    [one] = [r for r in sa['runs'] if r['distance'] > 300]
+    [two] = [r for r in sb['runs'] if r['distance'] > 300]
+    assert two['duration'] > one['duration'] - 1.0 and two['moving_time'] < two['duration'] - 4.0
+    assert [x['stops'] for x in seen] == [0, 1]
+    trace = b._reader().trace(two['id'])
+    t = coach_context.CH['t']
+    assert max(y[t] - x[t] for x, y in zip(trace, trace[1:])) < 0.5     # the trace's t is unaffected
+    a.close()
+    b.close()
+
+
+def test_run_clock_frozen_at_the_first_packet_is_not_a_clock_that_stopped():
+    """A non-zero clock standing still from the first packet (the last run's finish, not yet reset) has not run: it
+    is not 'stopped past the finish', and t follows the run's own time until the clock moves."""
+    from oversteer.drive_log import RunClock, CLOCK_STOPPED
+    c = RunClock(58.0)
+    for _ in range(int(CLOCK_STOPPED / 0.1) + 5):
+        c.tick(58.0, 0.1)
+    assert c.still == 0.0 and abs(c.t - (58.0 + 1.4)) < 1e-6          # on from where it stood, by the run's own time
+    c.tick(58.1, 0.1)                                                  # then it moves: the game's clock from here
+    c.tick(58.2, 0.1)
+    assert abs(c.t - (58.0 + 1.4 + 0.2)) < 1e-6 and not c.exact
+
+
+def test_the_clock_must_stand_still_for_a_quarter_second_to_be_stopped(tmp_path):
+    """A clock repeated for a fifth of a second with the car moving (a hitch) is not the game's finish."""
+    from oversteer.drive_log import CLOCK_SETTLE
+    assert CLOCK_SETTLE >= 0.25
+    drive, at_line = acr_clock_drive(0.0, 5530.0, game_line=5330.0)
+    hitch = [i for i, (_, s, _) in enumerate(drive) if s.lap_distance > 5290.0][0]
+    repeat = drive[hitch][1].stage_time
+    for _, s, _ in drive[hitch:hitch + 2]:
+        s.stage_time = repeat                                         # two packets (0.2 s) at 22 m/s
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert abs(run['result_time'] - at_line) < 0.11               # the stop at the game's line, not the hitch
+    learner.close()
+
+
+def test_a_stage_that_ends_by_its_clock_stopping_finishes_the_live_run(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    from tests.test_store import _tables
+    length = Course(STAGE).length
+    monkeypatch.setattr(stage_tables, '_tables', _tables('wrcg', {'location': 'Rally Sweden', 'stage': 'Vargasen',
+                                                                  'length_m': length + 20.0, 'surface': 'snow'}))
+    course = Course(STAGE + [('straight', 300)])
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    samples = wrcg_samples(course, length)
+    feed_course(learner, samples[:int(len(samples) * 0.97)])
+    final = learner.live_run.read(0)['final']
+    assert final is not None and final['time'] > 100.0
+
+
+# -- one plan per game: positions are read through telemetry_formats.plan_xy --
+
+def _circle_trace(game, turns=0.5, n=80, radius=60.0):
+    """Trace rows of a car driving a left-hand arc (counter-clockwise on the map) with no yaw rate sent, its world
+    positions in `game`'s axes: ACR (x, y up, -north), WRC Generations (x, north, z up)."""
+    import math as m
+    from oversteer.telemetry_store import TRACE_CHANNELS
+    rows = []
+    for i in range(n):
+        a = 2 * m.pi * turns * i / (n - 1)
+        east, north = radius * m.sin(a), radius * (1 - m.cos(a))
+        pos = {'acr': (east, 1.0, -north), 'wrcg': (east, north, 1.0)}[game]
+        row = dict.fromkeys(TRACE_CHANNELS, float('nan'))
+        row.update(t=i * 0.1, distance=10.0 * i, speed=20.0, x=pos[0], y=pos[1], z=pos[2])
+        rows.append(tuple(row[c] for c in TRACE_CHANNELS))
+    return rows
+
+
+def test_the_heading_rate_from_positions_is_the_same_turn_in_every_games_axes():
+    acr, wrcg = _circle_trace('acr'), _circle_trace('wrcg')
+    a, w = drive_log._yaw_rates(acr, 'acr'), drive_log._yaw_rates(wrcg, 'wrcg')
+    assert all(abs(x - y) < 1e-9 for x, y in zip(a[3:], w[3:])) and all(v > 0 for v in a[3:])     # left is positive
+    assert abs(sum(a[3:]) / len(a[3:]) - __import__('math').pi / 7.9) < 0.01                                          # half a turn in 7.9 s
+    assert abs(drive_log._yaw_rates(wrcg, 'acr')[10]) < 1e-9                                  # the wrong axes: no turn
+    assert len(drive_log.find_corners(wrcg, 'wrcg')) == len(drive_log.find_corners(acr, 'acr')) == 1
+
+
+def test_the_path_of_a_run_is_read_on_the_games_plan():
+    from oversteer import drive_detect
+    from oversteer.telemetry_store import TRACE_CHANNELS
+    c = {n: i for i, n in enumerate(TRACE_CHANNELS)}
+    a = drive_detect._path(_circle_trace('acr'), c['x'], c['y'], c['z'], 'acr')
+    w = drive_detect._path(_circle_trace('wrcg'), c['x'], c['y'], c['z'], 'wrcg')
+    assert len(a) == len(w) and all(abs(p[0] - q[0]) < 1e-9 and abs(p[1] - q[1]) < 1e-9 for p, q in zip(a, w))
+    wrong = drive_detect._path(_circle_trace('wrcg'), c['x'], c['y'], c['z'], 'acr')
+    assert all(p[1] == wrong[0][1] for p in wrong)       # the height as north: a path that never turns

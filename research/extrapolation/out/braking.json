@@ -1,0 +1,87 @@
+{
+ "zones": {
+  "acr": 1658,
+  "wrcg": 217
+ },
+ "acr": {
+  "lock_share": 0.486,
+  "hard_lock_share": 0.209,
+  "brake_at_slowest_share": 0.169,
+  "wheel_slip_max_median_lock_vs_not": [
+   0.74,
+   0.25
+  ],
+  "r_peak_dec_speed_vs_forces": 0.877,
+  "peak_dec_g_median": 0.62,
+  "build_s_median": 0.19,
+  "release_s_median": 0.51,
+  "trail_share_median": 0.46
+ },
+ "wrcg": {
+  "lock_share": 0.18,
+  "peak_dec_g_median": 1.42,
+  "trail_share_median": 0.06
+ },
+ "onset_consistency": {
+  "acr / Wales Afon Bidno / Skoda Fabia RS Rally2": {
+   "full_runs": 3,
+   "zones_in_3plus_runs": 28,
+   "onset_iqr_m_median": 9.2,
+   "onset_iqr_m_p90": 18.6,
+   "least_consistent": [
+    [
+     2201,
+     24.1
+    ],
+    [
+     1154,
+     23.6
+    ],
+    [
+     3467,
+     21.2
+    ]
+   ]
+  },
+  "acr / Wales Afon Bidno / Peugeot 208 Rally4": {
+   "full_runs": 3,
+   "zones_in_3plus_runs": 25,
+   "onset_iqr_m_median": 6.8,
+   "onset_iqr_m_p90": 14.8,
+   "least_consistent": [
+    [
+     4724,
+     34.7
+    ],
+    [
+     1027,
+     31.6
+    ],
+    [
+     3699,
+     15.6
+    ]
+   ]
+  },
+  "acr / Wales Afon Bidno / Hyundai i20N Rally2": {
+   "full_runs": 6,
+   "zones_in_3plus_runs": 32,
+   "onset_iqr_m_median": 7.4,
+   "onset_iqr_m_p90": 22.8,
+   "least_consistent": [
+    [
+     646,
+     67.6
+    ],
+    [
+     4245,
+     33.2
+    ],
+    [
+     1707,
+     25.5
+    ]
+   ]
+  }
+ }
+}

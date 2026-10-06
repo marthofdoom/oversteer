@@ -17,6 +17,7 @@ import math
 import os
 import re
 import sqlite3
+import statistics
 import threading
 import time
 import urllib.parse
@@ -25,7 +26,7 @@ from array import array
 
 from . import stage_tables
 
-VERSION = 2
+VERSION = 3
 
 SCHEMA = """
 CREATE TABLE cars (
@@ -88,7 +89,9 @@ CREATE TABLE runs (                 -- one stage attempt, one lap session, one s
     discipline TEXT, discipline_conf TEXT, discipline_evidence TEXT,   -- evidence: JSON list of sentences
     surface TEXT, surface_conf TEXT, surface_evidence TEXT,
     wet TEXT, wet_evidence TEXT,
-    detector_version INTEGER        -- which calibration produced the verdicts
+    detector_version INTEGER,       -- which calibration produced the verdicts
+    course REAL,                    -- m along the stage at the finish, or where the trace ends (coach_context.stage_rows)
+    run_class TEXT                  -- 'clean', 'learning', 'off', 'partial', 'restart' (coach_context.run_class)
 );
 CREATE TABLE traces (               -- kept apart so list queries on runs never page through blobs
     run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
@@ -116,7 +119,19 @@ CREATE TABLE corners (
     entry_speed REAL, min_speed REAL, exit_speed REAL,
     gear_min INTEGER, heading_change REAL, duration REAL,
     counter_steer REAL,             -- fraction of the corner steering against the yaw
-    handbrake INTEGER, exit_spin REAL
+    handbrake INTEGER, exit_spin REAL,
+    d0 REAL, d1 REAL,               -- distance at the ends of the yaw window
+    complex INTEGER,                -- the section (a run of linked corners) this corner belongs to, from 0
+    tightness TEXT,                 -- the call: '1'..'6', 'hairpin', 'long', 'fast'... (coach_context.tightness)
+    radius REAL,                    -- m at the slowest point
+    brake_d REAL, brake_peak REAL,  -- m before the slowest point where the strongest braking began, and its peak
+    throttle_on_t REAL, throttle_t REAL,   -- s from the slowest point to the throttle past 0.2, and to 0.95
+    relifts INTEGER,
+    coast_entry REAL, coast_exit REAL,     -- s with both pedals off, by phase
+    overlap_entry REAL, overlap_exit REAL, -- s with both pedals on, by phase
+    section_t REAL,                 -- s through the section (on its first corner)
+    loss_entry REAL, loss_exit REAL,       -- s lost to the reference run, split at the slowest point
+    off INTEGER                     -- within 100 m of an off, a stall, a spin or a hit: not compared
 );
 CREATE TABLE shifts (
     id INTEGER PRIMARY KEY,
@@ -127,14 +142,26 @@ CREATE TABLE shifts (
     gear_to INTEGER,
     direction TEXT DEFAULT 'up',
     rpm REAL NOT NULL,              -- peak over the last 0.3 s in the old gear
-    best REAL, best_low REAL, best_high REAL,
+    best REAL, best_low REAL, best_high REAL,   -- the learner best and band when the change was made, then once the run
+                                    -- ended update_shift() overwrites them with the coach band (the crossover and
+                                    -- the lights band): nothing reads the learner values after that
     throttle REAL,                  -- max over the same window
     method TEXT,                    -- 'h-pattern', 'sequential', 'paddles', 'auto', NULL
     neutral_time REAL,              -- s between leaving and engaging
     engage_rpm REAL,
     flat_out INTEGER,               -- counts for shift-point coaching
     slip REAL,                      -- driven-wheel slip at the change, when known
-    flags TEXT                      -- 'missed', 'skip', 'over-rev', 'double-tap'
+    flags TEXT,                     -- 'missed', 'skip', 'over-rev', 'double-tap', 'cut', 'launch'
+    d REAL                          -- distance along the run at the change
+);
+CREATE TABLE events (               -- located things that happened in a run (coach_context)
+    id INTEGER PRIMARY KEY,
+    run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,             -- 'limiter', 'off', 'stop', 'stall', 'spin', 'hit', 'launch', 'spread'
+    class TEXT,                     -- limiter: 'shift', 'held-corner' and so on, off: 'reverse', 'long', 'hit'
+    d0 REAL, d1 REAL, t0 REAL, t1 REAL,
+    gear INTEGER, value REAL,
+    detail TEXT                     -- JSON
 );
 CREATE TABLE metrics (
     id INTEGER PRIMARY KEY,
@@ -183,7 +210,80 @@ CREATE INDEX metrics_name ON metrics (name, discipline, surface, session);
 CREATE INDEX metrics_session ON metrics (session, name);
 CREATE INDEX segments_run ON segments (run);
 CREATE INDEX corners_run ON corners (run);
+CREATE INDEX events_run ON events (run, kind);
 """
+
+# Which finish line a finished ACR run was timed at (metres along the road;
+# NULL: a run that could not be re-timed). Kept in a table of its own, made
+# when a file is opened, rather than a runs column: a column would need a
+# schema version, a migration and the fresh schema above changed for one
+# bookkeeping fact. A finished ACR run on a stage with a flying finish
+# (finish_m) and no row here was timed to the old line, the last pace note
+# (drive_log.retime_finishes).
+RUN_FINISH_DDL = """
+CREATE TABLE IF NOT EXISTS run_finish (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    finish_m REAL
+)"""
+
+# Where along the road spline (metres, the game's lap distance) a run began:
+# the start line for a run that began standing at it, anywhere else for one
+# that began mid-stage (a restart after a silence). A table of its own for the
+# reason run_finish is one. The traces' distances are driven from this point.
+RUN_START_DDL = """
+CREATE TABLE IF NOT EXISTS run_start (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    start_m REAL
+)"""
+
+# Which clock a finished run's result_time is on where it is the game's own
+# ('game': ACR's stage clock from bridge version 4, read where the game
+# stopped it at its finish). Such a time does not depend on where the stage
+# tables put the finish, so drive_log.retime_finishes leaves it alone. No
+# row: the run's own clock, or a game whose result never depended on our
+# tables. A table of its own for the reason run_finish is one.
+RUN_CLOCK_DDL = """
+CREATE TABLE IF NOT EXISTS run_clock (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    clock TEXT NOT NULL
+)"""
+
+# Where along the road spline (metres) the game's own stage clock stopped, for
+# each ACR run that ended on it: the flying finish, exactly. The stage's finish
+# line is learnt from these (Store.learn_finishes: their median per stage) and
+# beats the shipped table's. A table of its own for the reason run_finish is one.
+RUN_STOP_DDL = """
+CREATE TABLE IF NOT EXISTS run_stop (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    stop_m REAL NOT NULL
+)"""
+
+# -- potential time (oversteer/potential.py, docs/telemetry-extrapolation.md section 6.1) --
+# Two tables made when a file is opened, for the reason run_finish is one. `envelopes`: the driver's g-g envelope per
+# car and surface (the P98 and the car's P99.5 bins of lateral, braking and drive acceleration by speed, as JSON),
+# `data_version` the runs it was built from. `stage_potential`: per stage and car the three layers' totals and, as
+# JSON, the sections (potential per layer, the PB's columns) and the speed profiles; `data_version` the runs and the
+# algorithm it came from, so it is recomputed only when they change.
+POTENTIAL_DDL = ("""
+CREATE TABLE IF NOT EXISTS envelopes (
+    car INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+    surface TEXT NOT NULL,
+    game TEXT,
+    data_version TEXT NOT NULL,
+    runs INTEGER, built REAL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (car, surface)
+)""", """
+CREATE TABLE IF NOT EXISTS stage_potential (
+    stage TEXT NOT NULL,
+    car INTEGER NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+    data_version TEXT NOT NULL,
+    built REAL,
+    runs INTEGER, ds REAL, pb_s REAL, user_s REAL, grip_s REAL, car_s REAL,
+    sections TEXT NOT NULL,
+    profile TEXT NOT NULL,
+    PRIMARY KEY (stage, car)
+)""")
 
 # The first schema, as development builds after Oversteer 0.13.1 created it
 # (no release had a database): kept to migrate from, and for the tests that
@@ -225,10 +325,30 @@ CREATE INDEX IF NOT EXISTS shifts_session ON shifts (session);
 # The 10 Hz trace of a run: one row of these per sample, NaN where the game
 # does not send it. Position is in it (not in the design's first list)
 # because topology and elevation re-run from it.
+# Version 2: `t` is the run's clock (drive_log.RunClock): the game's stage
+# clock where it sends one (ACR from bridge version 4, DiRT, EA WRC...),
+# else the run's own time; a pause is in neither, so t through a stretch is
+# the time it took, and for a standing start t at the finish is the result.
+# `wall` is the seconds since the run's first row on the wall clock (version
+# 1's `t`, pauses and all): it puts what is timed by the wall clock (the
+# changes of gear) on t.
+# Version 1 had `t` as the wall clock (a pause in it) and no `wall`; it is
+# read as version 2 with `wall` its t (unpack_trace) and its t left as it
+# was, so what was stored from it (events, sections) still lines up.
 TRACE_CHANNELS = ('t', 'distance', 'speed', 'rpm', 'gear', 'throttle', 'brake', 'clutch', 'handbrake', 'steer',
-                  'a_long', 'a_lat', 'yaw_rate', 'slip_drive', 'susp_rms', 'x', 'y', 'z')
-TRACE_VERSION = 1
+                  'a_long', 'a_lat', 'yaw_rate', 'slip_drive', 'susp_rms', 'x', 'y', 'z', 'wall')
+TRACE_VERSION = 2
+TRACE_VERSIONS = (1, 2)              # the versions read
+TRACE_V1_CHANNELS = 18
 TRACES_CAP = 200 * 1024 * 1024       # bytes of traces kept; the oldest go first (their runs stay)
+
+# The corners table's columns, as a corner dict has them (find_corners and
+# coach_context fill them); and the events table's
+CORNER_FIELDS = ('d', 'direction', 'entry_speed', 'min_speed', 'exit_speed', 'gear_min', 'heading_change',
+                 'duration', 'counter_steer', 'handbrake', 'exit_spin', 'd0', 'd1', 'complex', 'tightness', 'radius',
+                 'brake_d', 'brake_peak', 'throttle_on_t', 'throttle_t', 'relifts', 'coast_entry', 'coast_exit',
+                 'overlap_entry', 'overlap_exit', 'section_t', 'loss_entry', 'loss_exit', 'off')
+EVENT_FIELDS = ('kind', 'class', 'd0', 'd1', 't0', 't1', 'gear', 'value', 'detail')
 
 STAGE_LENGTH_TOLERANCE = {'dirt': 2.0, 'wrcg': 2.0, 'acr': 10.0}     # m, a measured length on a rounding boundary
 STAGE_START_TOLERANCE = 15.0                                         # m of start z (DiRT)
@@ -456,6 +576,46 @@ def _migrate_v1(db, path):
     logging.info("telemetry store: upgraded to version %d (%d cars, %d sessions)", VERSION, len(kept), len(sessions))
 
 
+# Version 2 to 3 is additive: the columns the coach's context layer fills
+# (docs/coach-techniques.md, section 7.2) and the events table. The fresh
+# schema above has the same columns, in the same order.
+V3_COLUMNS = (
+    ('runs', 'course REAL'), ('runs', 'run_class TEXT'),
+    ('corners', 'd0 REAL'), ('corners', 'd1 REAL'), ('corners', 'complex INTEGER'), ('corners', 'tightness TEXT'),
+    ('corners', 'radius REAL'), ('corners', 'brake_d REAL'), ('corners', 'brake_peak REAL'),
+    ('corners', 'throttle_on_t REAL'), ('corners', 'throttle_t REAL'), ('corners', 'relifts INTEGER'),
+    ('corners', 'coast_entry REAL'), ('corners', 'coast_exit REAL'), ('corners', 'overlap_entry REAL'),
+    ('corners', 'overlap_exit REAL'), ('corners', 'section_t REAL'), ('corners', 'loss_entry REAL'),
+    ('corners', 'loss_exit REAL'), ('corners', 'off INTEGER'),
+    ('shifts', 'd REAL'),
+)
+
+
+def _migrate_v2(db, path):
+    """Version 2 to 3, in one transaction, after copying the database to
+    `<path>.v2.bak` once. Nothing is recomputed here: the drive log's
+    backfill (drive_log.backfill_step) fills the new columns of the runs
+    that have a trace, a few at a time."""
+    if path is not None and not os.path.exists(path + '.v2.bak'):
+        try:
+            _backup(db, path + '.v2.bak')
+        except (OSError, sqlite3.Error) as e:
+            logging.warning("telemetry store: no backup before the upgrade: %s", e)
+    db.execute('BEGIN')
+    try:
+        for table, column in V3_COLUMNS:
+            db.execute('ALTER TABLE {} ADD COLUMN {}'.format(table, column))
+        for statement in _split(SCHEMA):
+            if statement.startswith(('CREATE TABLE events', 'CREATE INDEX events_run')):
+                db.execute(statement)
+        db.execute('PRAGMA user_version = 3')
+        db.execute('COMMIT')
+    except sqlite3.Error:
+        db.execute('ROLLBACK')
+        raise
+    logging.info("telemetry store: upgraded to version 3")
+
+
 def _connect(path):
     db = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=10.0)
     db.execute('PRAGMA journal_mode = WAL')
@@ -481,11 +641,21 @@ def open_store(path):
             rescale_codemasters(db, path)
             version = 1
         if version == 1:
-            _migrate_v1(db, path)
+            _migrate_v1(db, path)                 # builds the current schema
+        elif version == 2:
+            _migrate_v2(db, path)
         elif version > VERSION:
             db.close()
             raise sqlite3.DatabaseError("{} is from a newer Oversteer (version {})".format(path, version))
-    return Store(db, path)
+    db.execute(RUN_FINISH_DDL)
+    db.execute(RUN_START_DDL)
+    db.execute(RUN_CLOCK_DDL)
+    db.execute(RUN_STOP_DDL)
+    for ddl in POTENTIAL_DDL:
+        db.execute(ddl)
+    store = Store(db, path)
+    store.learn_finishes()
+    return store
 
 
 def open_reader(path):
@@ -500,19 +670,27 @@ def open_reader(path):
 # -- traces --
 
 def pack_trace(rows):
-    """zlib(array('f')) of the rows (tuples of TRACE_CHANNELS)."""
+    """zlib(array('f')) of the rows (tuples of TRACE_CHANNELS; a shorter
+    row is padded with NaN)."""
     data = array('f')
+    n = len(TRACE_CHANNELS)
     for row in rows:
         data.extend(float('nan') if v is None else v for v in row)
+        if len(row) < n:
+            data.extend([float('nan')] * (n - len(row)))
     return zlib.compress(data.tobytes(), 6)
 
 
-def unpack_trace(blob):
-    """The rows back, as tuples of floats (NaN where not sent)."""
+def unpack_trace(blob, version=TRACE_VERSION):
+    """The rows back, as tuples of floats (NaN where not sent), as the
+    current version has them (see TRACE_CHANNELS for version 1)."""
     data = array('f')
     data.frombytes(zlib.decompress(blob))
-    n = len(TRACE_CHANNELS)
-    return [tuple(data[i:i + n]) for i in range(0, len(data) - n + 1, n)]
+    n = TRACE_V1_CHANNELS if version == 1 else len(TRACE_CHANNELS)
+    rows = [tuple(data[i:i + n]) for i in range(0, len(data) - n + 1, n)]
+    if version == 1:
+        rows = [row + (row[0],) for row in rows]     # its t was the wall clock
+    return rows
 
 
 def _json(value):
@@ -532,6 +710,22 @@ class Reader:
     def _rows(self, sql, args=()):
         with self.lock:
             return self.db.execute(sql, args).fetchall()
+
+    def run_start(self, run_id):
+        """Where along the road spline a run began (metres), or None where it was not recorded."""
+        try:
+            rows = self._rows('SELECT start_m FROM run_start WHERE run = ?', (run_id,))
+        except sqlite3.OperationalError:
+            return None                              # a file the writer has not opened since this table
+        return rows[0][0] if rows else None
+
+    def finish_unknown(self, run_id):
+        """Whether a run was timed to the old finish line and could not be re-timed (a run_finish row with no finish)."""
+        try:
+            rows = self._rows('SELECT finish_m FROM run_finish WHERE run = ?', (run_id,))
+        except sqlite3.OperationalError:
+            return False
+        return bool(rows) and rows[0][0] is None
 
     def cars(self, profile):
         """[(key, name)] of the profile's cars, by name."""
@@ -633,14 +827,35 @@ class Reader:
                                     'WHERE run = ? ORDER BY d0', (run_id,))]
 
     def corners(self, run_id):
-        names = ('d', 'direction', 'entry_speed', 'min_speed', 'exit_speed', 'gear_min', 'heading_change',
-                 'duration', 'counter_steer', 'handbrake', 'exit_spin')
-        return [dict(zip(names, r)) for r in self._rows(
-            'SELECT {} FROM corners WHERE run = ? ORDER BY d'.format(', '.join(names)), (run_id,))]
+        return [dict(zip(CORNER_FIELDS, r)) for r in self._rows(
+            'SELECT {} FROM corners WHERE run = ? ORDER BY d, id'.format(', '.join(CORNER_FIELDS)), (run_id,))]
+
+    def events(self, run_id, kind=None):
+        """The run's located events (kind: one of them), in order."""
+        where, args = 'run = ?', [run_id]
+        if kind is not None:
+            where += ' AND kind = ?'
+            args.append(kind)
+        out = []
+        for r in self._rows('SELECT {} FROM events WHERE {} ORDER BY COALESCE(d0, 0), id'.format(
+                ', '.join(EVENT_FIELDS), where), tuple(args)):
+            event = dict(zip(EVENT_FIELDS, r))
+            event['detail'] = json.loads(event['detail']) if event['detail'] else None
+            out.append(event)
+        return out
 
     def trace(self, run_id):
+        """The run's trace as the current version has it (an older version is converted), or None."""
         rows = self._rows('SELECT version, data FROM traces WHERE run = ?', (run_id,))
-        return unpack_trace(rows[0][1]) if rows and rows[0][0] == TRACE_VERSION else None
+        return unpack_trace(rows[0][1], rows[0][0]) if rows and rows[0][0] in TRACE_VERSIONS else None
+
+    def trace_runs(self, run_ids):
+        """The run ids among `run_ids` that have a trace of a version read (TRACE_VERSIONS), as a set."""
+        run_ids = list(run_ids)
+        if not run_ids:
+            return set()
+        return {r[0] for r in self._rows('SELECT run FROM traces WHERE version IN ({}) AND run IN ({})'.format(
+            ', '.join('?' * len(TRACE_VERSIONS)), ', '.join('?' * len(run_ids))), TRACE_VERSIONS + tuple(run_ids))}
 
     def shifts(self, session_id):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle',
@@ -685,7 +900,7 @@ class Reader:
 
     def run_shifts(self, run_id):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle',
-                 'method', 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags')
+                 'method', 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags', 'd', 'id')
         return [dict(zip(names, r)) for r in self._rows(
             'SELECT {} FROM shifts WHERE session = (SELECT session FROM runs WHERE id = ?) AND run = ? '    # by the session's index
             'ORDER BY at, id'.format(', '.join(names)), (run_id, run_id))]
@@ -694,12 +909,77 @@ class Reader:
         rows = self._rows('SELECT session FROM runs WHERE id = ?', (run_id,))
         return rows[0][0] if rows else None
 
-    def stage_runs(self, key, exclude=None, limit=20):
-        """The stage's recent runs that ended, newest first."""
-        names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time')
-        return [dict(zip(names, r)) for r in self._rows(
-            'SELECT {} FROM runs WHERE stage = ? AND id IS NOT ? AND ended IS NOT NULL '
-            'ORDER BY started DESC LIMIT ?'.format(', '.join(names)), (key, exclude, limit))]
+    # Runs on the game's own clock (run_clock) start their time at the game's go, 0.3-0.9 s before an older run's
+    # own clock does (the car reaching 3 m/s): the two are not on one scale
+    ON_CLOCK = '(r.id IN (SELECT run FROM run_clock) OR NOT EXISTS (SELECT 1 FROM run_clock c ' \
+               'JOIN runs r2 ON r2.id = c.run JOIN sessions s2 ON s2.id = r2.session ' \
+               'WHERE r2.stage = r.stage AND s2.car = s.car))'
+
+    def stage_runs(self, key, exclude=None, limit=20, car=None, run_class=None, ranked=False):
+        """The stage's recent runs that ended, newest first. `car` (a
+        cars.id) keeps the runs of that car, `run_class` (a class or a
+        tuple of them) the runs of those classes. `ranked`: the runs to
+        rank (the PB, the reference, the live delta) rather than to list:
+        once a car has a run on the game's own clock on the stage, only its
+        clock runs. Each run: id, started, distance, duration, finished,
+        result_time, course, run_class, wet, car, session, first_section
+        (s through the stage's first section, which holds the launch; None
+        where the run has no corners) and clock ('game' for a run on the
+        game's clock, else None)."""
+        names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time', 'course', 'run_class', 'wet')
+        where, args = ['r.stage = ?', 'r.id IS NOT ?', 'r.ended IS NOT NULL'], [key, exclude]
+        if car is not None:
+            where.append('s.car = ?')
+            args.append(car)
+        if run_class is not None:
+            classes = (run_class,) if isinstance(run_class, str) else tuple(run_class)
+            where.append('r.run_class IN ({})'.format(', '.join('?' * len(classes))))
+            args.extend(classes)
+        if ranked:
+            where.append(self.ON_CLOCK)
+        sql = ('SELECT {}, s.car, r.session, (SELECT c.section_t FROM corners c WHERE c.run = r.id '
+               'AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1), (SELECT k.clock FROM run_clock k WHERE k.run = r.id) '
+               'FROM runs r JOIN sessions s ON r.session = s.id WHERE {} ORDER BY r.started DESC, r.id DESC LIMIT ?')
+        try:
+            rows = self._rows(sql.format(', '.join('r.' + n for n in names), ' AND '.join(where)),
+                              tuple(args) + (limit,))
+        except sqlite3.OperationalError:                      # a file the writer has not opened since run_clock
+            where = [w for w in where if w is not self.ON_CLOCK]
+            rows = self._rows(sql.replace(', (SELECT k.clock FROM run_clock k WHERE k.run = r.id) ', ', NULL ').format(
+                ', '.join('r.' + n for n in names), ' AND '.join(where)), tuple(args) + (limit,))
+        return [dict(zip(names + ('car', 'session', 'first_section', 'clock'), r)) for r in rows]
+
+    def run(self, run_id):
+        """One run's row: id, session, car (cars.id), stage, started, ended, distance, duration, moving_time,
+        finished, result_time, course, run_class, discipline, surface, wet; None when there is none."""
+        names = ('id', 'session', 'stage', 'started', 'ended', 'distance', 'duration', 'moving_time', 'finished',
+                 'result_time', 'course', 'run_class', 'discipline', 'surface', 'wet')
+        rows = self._rows('SELECT {}, s.car FROM runs r JOIN sessions s ON r.session = s.id WHERE r.id = ?'.format(
+            ', '.join('r.' + n for n in names)), (run_id,))
+        return dict(zip(names + ('car',), rows[0])) if rows else None
+
+    def runs_to_backfill(self, limit=3):
+        """The oldest runs with a trace that the context layer has not
+        worked over (run_class not set), at most `limit`: run ids."""
+        return [r[0] for r in self._rows(
+            'SELECT r.id FROM runs r JOIN traces t ON t.run = r.id WHERE r.run_class IS NULL '
+            'AND r.ended IS NOT NULL ORDER BY r.id LIMIT ?', (limit,))]
+
+    def car_row(self, car_id):
+        """(profile, key) of a car id, or None."""
+        rows = self._rows('SELECT profile, key FROM cars WHERE id = ?', (car_id,))
+        return rows[0] if rows else None
+
+    def other_corners(self, car, stage, exclude=None, classes=None, limit=20):
+        """[(run id, [corner dicts])] of the car's runs on the stage, newest
+        first, for the section statistics: the runs of those classes
+        (default: any), without `exclude`."""
+        out = []
+        for run in self.stage_runs(stage, exclude=exclude, limit=limit, car=car, run_class=classes):
+            corners = self.corners(run['id'])
+            if corners:
+                out.append((run, corners))
+        return out
 
     METRIC_FIELDS = ('session', 'run', 'started', 'name', 'value', 'count', 'gear', 'method', 'discipline',
                      'surface', 'stage', 'distance', 'car', 'tune')
@@ -769,6 +1049,54 @@ class Reader:
                           'AND id IS NOT ? AND ended IS NOT NULL ORDER BY started DESC LIMIT ?', (key, exclude, limit))
 
 
+    # -- potential time (oversteer/potential.py): the block this feature added; see POTENTIAL_DDL --
+
+    def potentials_missing(self):
+        """[(stage, car, newest run)] of the stages and cars with a finished run of a ranked class (clean, learning,
+        off) and no stored potential (stage_potential), the newest first."""
+        return self._rows("SELECT r.stage, s.car, MAX(r.id) FROM runs r JOIN sessions s ON r.session = s.id "
+                          "WHERE r.finished = 1 AND r.stage IS NOT NULL AND s.car IS NOT NULL "
+                          "AND r.run_class IN ('clean', 'learning', 'off') AND NOT EXISTS (SELECT 1 FROM "
+                          "stage_potential p WHERE p.stage = r.stage AND p.car = s.car) "
+                          "GROUP BY r.stage, s.car ORDER BY MAX(r.id) DESC")
+
+    def potential(self, stage, car):
+        """The stored potential of a stage and car: potential.stage()'s dict (`sections`, `profile`, the layers'
+        totals) plus `version` and `built`; None where there is none (or the file has no table yet)."""
+        try:
+            rows = self._rows('SELECT data_version, built, runs, ds, pb_s, user_s, grip_s, car_s, sections, profile '
+                              'FROM stage_potential WHERE stage = ? AND car = ?', (stage, car))
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        v, built, runs, ds, pb, user, grip, car_s, sections, profile = rows[0]
+        return {'version': v, 'built': built, 'runs': runs, 'ds': ds, 'pb_s': pb, 'user_s': user, 'grip_s': grip,
+                'car_s': car_s, 'sections': json.loads(sections), 'profile': json.loads(profile)}
+
+    def envelope(self, car, surface):
+        """The stored envelope of a car on a surface ({data_version, runs, built, game, data}), or None."""
+        try:
+            rows = self._rows('SELECT data_version, runs, built, game, data FROM envelopes WHERE car = ? AND '
+                              'surface = ?', (car, surface))
+        except sqlite3.OperationalError:
+            return None
+        if not rows:
+            return None
+        v, runs, built, game, data = rows[0]
+        return {'version': v, 'runs': runs, 'built': built, 'game': game, 'data': json.loads(data)}
+
+    def surface_runs(self, car, surface, limit=40):
+        """The car's most recent runs that ended with a trace on `surface`, newest first: dicts of id, course,
+        finished, result_time, run_class, stage, surface (what the envelope is built from)."""
+        names = ('id', 'course', 'finished', 'result_time', 'run_class', 'stage', 'surface')
+        return [dict(zip(names, r)) for r in self._rows(
+            'SELECT {} FROM runs r JOIN sessions s ON r.session = s.id JOIN traces t ON t.run = r.id '
+            'WHERE s.car = ? AND r.surface = ? AND r.ended IS NOT NULL AND r.run_class IS NOT NULL '
+            "AND r.run_class != 'restart' ORDER BY r.started DESC, r.id DESC LIMIT ?".format(
+                ', '.join('r.' + n for n in names)), (car, surface, limit))]
+
+
 class Store(Reader):
     """The writer. Used by the drive-log thread only (one connection,
     transactions batched by the caller with begin() and commit())."""
@@ -788,6 +1116,19 @@ class Store(Reader):
     def rollback(self):
         if self.db.in_transaction:
             self.db.execute('ROLLBACK')
+
+    def savepoint(self, name):
+        """Start a nested transaction: what is written until release_savepoint() can be undone with
+        rollback_savepoint() without touching what was written before it."""
+        self._do('SAVEPOINT ' + name)
+
+    def release_savepoint(self, name):
+        self._do('RELEASE ' + name)
+
+    def rollback_savepoint(self, name):
+        """Undo what was written since savepoint(name), and close it."""
+        self._do('ROLLBACK TO ' + name)
+        self._do('RELEASE ' + name)
 
     def _do(self, sql, args=()):
         with self.lock:
@@ -1124,14 +1465,30 @@ class Store(Reader):
 
     def prune_traces(self, cap=TRACES_CAP):
         """Drop the oldest traces beyond `cap` bytes in total; their runs,
-        metrics and verdicts stay."""
+        metrics and verdicts stay. The trace of each car's best finished run
+        on a stage (the reference the coach reads the sections against, in
+        each wetness) is kept: without it the stage gets no tips by place.
+        A run whose trace is gone is not backfilled when the metrics change
+        meaning: its old ones stay."""
         total = self._do('SELECT COALESCE(SUM(LENGTH(data)), 0) FROM traces').fetchone()[0]
         if total <= cap:
             return 0
+        best = {}
+        for run, stage, car, wet, result, first in self._do(
+                'SELECT r.id, r.stage, s.car, r.wet, r.result_time, (SELECT c.section_t FROM corners c WHERE '
+                'c.run = r.id AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1) FROM runs r JOIN sessions s ON '
+                'r.session = s.id WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                "AND r.run_class IN ('clean', 'learning') AND r.id IN (SELECT run FROM traces)").fetchall():
+            key = (stage, car, wet)
+            if key not in best or result - (first or 0.0) < best[key][0]:
+                best[key] = (result - (first or 0.0), run)
+        kept = {run for _, run in best.values()}
         dropped = 0
         for run, size in self._do('SELECT run, LENGTH(data) FROM traces ORDER BY run').fetchall():
             if total <= cap:
                 break
+            if run in kept:
+                continue
             self._do('DELETE FROM traces WHERE run = ?', (run,))
             total -= size
             dropped += 1
@@ -1147,15 +1504,171 @@ class Store(Reader):
                         (run, d0, d1, t0, t1, json.dumps(features), pushed, surface, margin)).lastrowid
 
     def add_corners(self, run, corners):
-        names = ('d', 'direction', 'entry_speed', 'min_speed', 'exit_speed', 'gear_min', 'heading_change',
-                 'duration', 'counter_steer', 'handbrake', 'exit_spin')
+        names = CORNER_FIELDS
         for corner in corners:
             self._do('INSERT INTO corners (run, {}) VALUES (?, {})'.format(', '.join(names), ', '.join('?' * len(names))),
                      (run,) + tuple(corner.get(n) for n in names))
 
+    def add_events(self, run, events):
+        """Events (dicts of EVENT_FIELDS; `detail` any JSON-able value)."""
+        for e in events:
+            detail = e.get('detail')
+            self._do('INSERT INTO events (run, {}) VALUES (?, {})'.format(
+                ', '.join(EVENT_FIELDS), ', '.join('?' * len(EVENT_FIELDS))),
+                (run,) + tuple(_json(detail) if n == 'detail' else e.get(n) for n in EVENT_FIELDS))
+
+    def clear_derived(self, run, keep_metrics=()):
+        """Forget what the context layer works out from a run's trace
+        (its corners, events and metrics, but the metrics named in
+        `keep_metrics`): the backfill writes them again."""
+        self._do('DELETE FROM corners WHERE run = ?', (run,))
+        self._do('DELETE FROM events WHERE run = ?', (run,))
+        marks = ', '.join('?' * len(keep_metrics))
+        self._do('DELETE FROM metrics WHERE run = ?{}'.format(' AND name NOT IN ({})'.format(marks) if keep_metrics else ''),
+                 (run,) + tuple(keep_metrics))
+
+    def stage_keys(self):
+        """The stage keys any run was on."""
+        return [r[0] for r in self._rows('SELECT DISTINCT stage FROM runs WHERE stage IS NOT NULL')]
+
+    def set_stage_discipline(self, stage, value, evidence):
+        """The stage table's word on the discipline of every run on `stage`
+        that does not already say it from the game: the runs' verdict, their
+        metrics' tag, the learnt stage prior and the sessions' summaries.
+        Returns the number of runs changed."""
+        runs = [r[0] for r in self._rows(
+            'SELECT id FROM runs WHERE stage = ? AND (discipline IS NOT ? OR discipline_conf IS NOT ?)',
+            (stage, value, 'game'))]
+        for run in runs:
+            self._do('UPDATE runs SET discipline = ?, discipline_conf = ?, discipline_evidence = ? WHERE id = ?',
+                     (value, 'game', json.dumps(evidence), run))
+            self._do('UPDATE metrics SET discipline = ? WHERE run = ?', (value, run))
+        if runs:
+            self._do('UPDATE stages SET discipline_prior = ? WHERE key = ? AND discipline_prior_source = ? '
+                     'AND discipline_prior IS NOT ?', (value, stage, 'learnt', value))
+            for (session,) in self._rows('SELECT DISTINCT session FROM runs WHERE stage = ?', (stage,)):
+                self.summarise_session(session)
+        return len(runs)
+
+    def car_drivetrains(self):
+        """[(id, key, drivetrain column, model's drivetrain)] of every car."""
+        out = []
+        for car, key, column, model in self._rows('SELECT id, key, drivetrain, model FROM cars'):
+            try:
+                found = json.loads(model).get('drivetrain')
+            except (ValueError, AttributeError):
+                found = None
+            out.append((car, key, column, found))
+        return out
+
+    def set_car_drivetrain(self, car, value):
+        """Write a car's drivetrain, in its column and in its stored model."""
+        row = self._do('SELECT model FROM cars WHERE id = ?', (car,)).fetchone()
+        try:
+            model = json.loads(row[0]) if row else None
+        except ValueError:
+            model = None
+        if isinstance(model, dict):
+            model['drivetrain'] = value
+            self._do('UPDATE cars SET drivetrain = ?, model = ? WHERE id = ?', (value, json.dumps(model), car))
+        else:
+            self._do('UPDATE cars SET drivetrain = ? WHERE id = ?', (value, car))
+
+    def finished_untimed(self, game='acr'):
+        """[(run, stage, result_time, course)] of the finished runs of a game
+        with no recorded finish line (run_finish) and not on the game's own clock (run_clock), oldest first."""
+        return self._do("SELECT id, stage, result_time, course FROM runs WHERE finished = 1 AND stage LIKE ? "
+                        "AND id NOT IN (SELECT run FROM run_finish) AND id NOT IN (SELECT run FROM run_clock) "
+                        "ORDER BY id", (game + ':%',)).fetchall()
+
+    def finished_timed(self, game='acr'):
+        """[(run, stage, result_time, course, finish_m)] of the finished runs of a game timed at a recorded
+        finish line (run_finish), leaving out those on the game's own clock (run_clock), oldest first."""
+        return self._do("SELECT r.id, r.stage, r.result_time, r.course, f.finish_m FROM runs r JOIN run_finish f "
+                        "ON f.run = r.id WHERE r.finished = 1 AND r.stage LIKE ? AND f.finish_m IS NOT NULL "
+                        "AND r.id NOT IN (SELECT run FROM run_clock) ORDER BY r.id", (game + ':%',)).fetchall()
+
+    def set_run_finish(self, run, finish_m):
+        """Record the finish line a run was timed at (None: it was not re-timed)."""
+        self._do('INSERT OR REPLACE INTO run_finish (run, finish_m) VALUES (?, ?)', (run, finish_m))
+
+    def clock_runs_without_stop(self, game='acr'):
+        """[(run, stage, start_m, course)] of the finished runs of a game on the game's own clock (run_clock) that
+        began at a recorded place (run_start) and have no recorded clock stop (run_stop): recorded by a build between
+        the two."""
+        return self._do("SELECT r.id, r.stage, s.start_m, r.course FROM runs r JOIN run_clock k ON k.run = r.id "
+                        "AND k.clock = 'game' JOIN run_start s ON s.run = r.id WHERE r.finished = 1 "
+                        "AND r.stage LIKE ? AND r.course IS NOT NULL AND r.id NOT IN (SELECT run FROM run_stop) "
+                        "ORDER BY r.id", (game + ':%',)).fetchall()
+
+    def forget_unknown_finishes_without_course(self):
+        """A run marked as not re-timable (a run_finish row with no finish) for want of a course (NULL in a database
+        migrated from version 2) is no failure: the mark goes and its class is cleared for the backfill. Returns
+        the number of runs."""
+        runs = [r[0] for r in self._do('SELECT f.run FROM run_finish f JOIN runs r ON r.id = f.run '
+                                       'WHERE f.finish_m IS NULL AND r.course IS NULL').fetchall()]
+        for run in runs:
+            self._do('DELETE FROM run_finish WHERE run = ?', (run,))
+            self._do('UPDATE runs SET run_class = NULL WHERE id = ?', (run,))
+        return len(runs)
+
+    def queue_stage_runs(self, stage):
+        """Queue the finished runs of a stage for the backfill (run_class cleared)."""
+        self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))
+
+    def set_run_clock(self, run, clock):
+        """Record that a run's result_time is on `clock` ('game': the game's own; see RUN_CLOCK_DDL)."""
+        self._do('INSERT OR REPLACE INTO run_clock (run, clock) VALUES (?, ?)', (run, clock))
+
+    def set_run_stop(self, run, stop_m):
+        """Record where along the spline the game's clock stopped for a run (see RUN_STOP_DDL)."""
+        self._do('INSERT OR REPLACE INTO run_stop (run, stop_m) VALUES (?, ?)', (run, stop_m))
+
+    LEARN_OUTLIER = 25.0         # m: a clock stop further than this from the median is left out (a hitch, not the line)
+
+    def learn_finishes(self):
+        """The stages' finish lines as the game's clock stopped them, {stage key: {'finish_m' (the median of the
+        runs' stops, less those further than LEARN_OUTLIER from it), 'finish_runs', 'finish_spread_m'}}; handed to
+        stage_tables (set_learnt), where it beats the shipped line. Returns it."""
+        stops = {}
+        for stage, stop in self._do('SELECT r.stage, s.stop_m FROM run_stop s JOIN runs r ON r.id = s.run '
+                                    'WHERE r.stage IS NOT NULL').fetchall():
+            stops.setdefault(stage, []).append(stop)
+        found = {}
+        for stage, values in stops.items():
+            middle = statistics.median(values)
+            kept = [v for v in values if abs(v - middle) <= self.LEARN_OUTLIER]
+            middle = statistics.median(kept)
+            found[stage] = {'finish_m': round(middle, 1), 'finish_runs': len(kept),
+                            'finish_spread_m': round(max(kept) - min(kept), 1)}
+        stage_tables.set_learnt(found)
+        return found
+
+    def set_run_start(self, run, start_m):
+        """Record where along the road spline a run began."""
+        self._do('INSERT OR REPLACE INTO run_start (run, start_m) VALUES (?, ?)', (run, start_m))
+
+    def update_run(self, run, **fields):
+        """Set columns of a run (unlike end_run, counts nothing)."""
+        names = sorted(fields)
+        if names:
+            self._do('UPDATE runs SET {} WHERE id = ?'.format(', '.join(n + ' = ?' for n in names)),
+                     tuple(fields[n] for n in names) + (run,))
+
+    def update_shift(self, shift_id, flags=None, d=None, band=None):
+        """What the context layer made of a change of gear: its flags, the
+        distance, and the band it was judged against (`band`: (low, high,
+        crossover): best_low and best_high are the band, best the crossover,
+        for the drive lost; left as they are without one)."""
+        if band is not None:
+            self._do('UPDATE shifts SET flags = ?, d = ?, best_low = ?, best_high = ?, best = ? WHERE id = ?',
+                     (flags, d, band[0], band[1], band[2], shift_id))
+        else:
+            self._do('UPDATE shifts SET flags = ?, d = ? WHERE id = ?', (flags, d, shift_id))
+
     def add_shift(self, session, run, shift):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle', 'method',
-                 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags')
+                 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags', 'd')
         return self._do('INSERT INTO shifts (session, run, {}) VALUES (?, ?, {})'.format(
             ', '.join(names), ', '.join('?' * len(names))), (session, run) + tuple(shift.get(n) for n in names)).lastrowid
 
@@ -1209,3 +1722,18 @@ class Store(Reader):
                  'last_shown = excluded.last_shown, times = coach_state.times + 1, value = excluded.value, '
                  'quiet = 0 WHERE excluded.last_shown - coach_state.last_shown >= ? '
                  'OR coach_state.last_shown IS NULL', (profile, car or 0, tip, at, at, value, gap))
+
+
+    # -- potential time (oversteer/potential.py): the block this feature added; see POTENTIAL_DDL --
+
+    def save_potential(self, stage, car, version, built, pot):
+        """Store a stage's potential (potential.stage()'s dict) for a car, replacing the last."""
+        self._do('INSERT OR REPLACE INTO stage_potential (stage, car, data_version, built, runs, ds, pb_s, user_s, '
+                 'grip_s, car_s, sections, profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 (stage, car, version, built, pot.get('runs'), pot.get('ds'), pot.get('pb_s'), pot.get('user_s'),
+                  pot.get('grip_s'), pot.get('car_s'), json.dumps(pot['sections']), json.dumps(pot['profile'])))
+
+    def save_envelope(self, car, surface, game, version, runs, built, data):
+        """Store a car's envelope on a surface (see POTENTIAL_DDL), replacing the last."""
+        self._do('INSERT OR REPLACE INTO envelopes (car, surface, game, data_version, runs, built, data) '
+                 'VALUES (?, ?, ?, ?, ?, ?, ?)', (car, surface, game, version, runs, built, json.dumps(data)))

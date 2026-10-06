@@ -16,7 +16,7 @@ SURFACES = {'tarmac': _("tarmac"), 'gravel': _("gravel"), 'snow': _("snow"), 'ic
             'loose-low': _("snow or wet gravel")}
 METHODS = {'h-pattern': _("H-pattern"), 'sequential': _("sequential"), 'paddles': _("paddles"),
            'auto': _("automatic"), 'mixed': _("mixed shifting")}
-KINDS = {'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': ''}
+KINDS = {'top3': _("Top 3"), 'focus': _("Focus"), 'tip': '', 'praise': _("Better"), 'still': '', 'note': '', 'technique': _("Technique")}
 CHANGES = {'first': _("first seen"), 'final-drive': _("final drive changed"), 'user': _("set by you")}
 
 
@@ -84,7 +84,18 @@ def shift_table(snapshot):
                 best, share = _("learning…"), ''
             else:
                 best = '{:.0f} rpm'.format(row['best'])
-                if row.get('grip_limited'):
+                shown = row['best']
+                lit_low, lit_high = row.get('lights_low'), row.get('lights_high')
+                if lit_low is not None and lit_high is not None:
+                    # The band the coach judges the change up against: the game's lights, inside the limiter's margin
+                    best = '{:.0f}–{:.0f} rpm'.format(lit_low, lit_high) if lit_high - lit_low >= 1.0 \
+                        else '{:.0f} rpm'.format(lit_low)
+                    best += ' ' + _("(lights)")
+                    shown = lit_low
+                    engine = row.get('engine_best')
+                    if engine and limiter and engine < limiter - 1.0 and abs(engine - lit_low) >= 1.0:
+                        best += '  ' + _("engine {:.0f}").format(engine)
+                elif row.get('grip_limited'):
                     # Anywhere up to the engine's best gives the same drive
                     if (row.get('engine_best') or 0) > row['best']:
                         best = '{:.0f}–{:.0f} rpm'.format(row['best'], row['engine_best'])
@@ -94,7 +105,7 @@ def shift_table(snapshot):
                 low, high = row.get('best_low'), row.get('best_high')
                 if low is not None and high is not None and high - low >= 1.0:
                     band = '{:.0f}–{:.0f}'.format(low, high)
-                share = '{:.0f} %'.format(row['best'] / limiter * 100) if limiter else ''
+                share = '{:.0f} %'.format(shown / limiter * 100) if limiter else ''
         mine = '{:.0f} rpm ({})'.format(row['average_shift'], row['shifts']) if row['average_shift'] else '—'
         per_method = []
         for method, _name in used:
@@ -159,6 +170,148 @@ def coaching_lines(tips, advice=None):
     """coaching_items() as (line, kind), the badge before the text."""
     return [('{}: {}'.format(badge, text) if badge else text, kind)
             for badge, text, kind in coaching_items(tips, advice)]
+
+
+def clock(seconds):
+    """m:ss.s, '–' for none."""
+    if seconds is None:
+        return '–'
+    minutes = int(seconds // 60)
+    return '{}:{:04.1f}'.format(minutes, seconds - 60 * minutes)
+
+
+def signed(delta):
+    """±s.s with a real minus sign, '–' for none; a difference that rounds to nothing is ±0.0, never +0.0 or -0.0."""
+    if delta is None:
+        return '–'
+    r = round(delta, 1)
+    return '{}{:.1f}'.format('+' if r > 0 else '\u2212' if r < 0 else '\u00b1', abs(r))
+
+
+def splits_lines(found):
+    """coach.splits() as (summary, rows): the summary line ('Afon Bidno · Best 3:17.7 · SoB 3:14.5 (−3.2)')
+    and one (name, last, best, delta, tone) per split, tone 'gold' (the last run set the best), 'good'
+    (level with or ahead of it), 'bad' or '' (not run). (None, []) without splits."""
+    if not found:
+        return None, []
+    summary = '{}  ·  {} {}  ·  {} {}'.format(found['name'].split(' - ')[0], _("Best"), clock(found['best']),
+                                              _("SoB"), clock(found['possible']))
+    if found.get('gain') is not None:
+        summary += ' (\u2212{:.1f})'.format(found['gain'])
+    rows = []
+    for r in found['splits']:
+        tone = '' if r['last'] is None else 'gold' if r['gold'] else 'good' if r['delta'] <= 0.05 else 'bad'
+        name = r['name'][4:] if r['name'].startswith('the ') else r['name']
+        rows.append((name + (_(" (finish)") if r['finish'] else ''), clock(r['last']), clock(r['best']),
+                     'gold' if tone == 'gold' else signed(r['delta']), tone))
+    return summary, rows
+
+
+def split_tone(last, delta, gold, cum=None, pb=None):
+    """LiveSplit's colour rule for a split (LiveSplitStateHelper.GetSplitColor; the web page's splitTone):
+    'gold' for a best split, else 'ahead' or 'behind' by the cumulative time against the PB (`cum`, the last run's
+    elapsed time at the split's end less the PB's: ahead when it is not over zero) and 'gain' or 'lose' by what
+    the split itself did against the PB's (`last` less `pb`): 'ahead-gain', 'ahead-lose', 'behind-gain',
+    'behind-lose'; 'none' when not run. Without `cum` and `pb` (older data) `delta`, against the best, stands in
+    for both."""
+    if last is None or delta is None:
+        return 'none'
+    if gold:
+        return 'gold'
+    if cum is None or pb is None:
+        cum = seg = delta
+    else:
+        seg = last - pb
+    return ('ahead' if round(cum, 1) <= 0 else 'behind') + '-' + ('gain' if round(seg, 1) <= 0 else 'lose')
+
+
+def _split_cells(r):
+    """(Δ PB text, save text, tone) of a split of coach.splits(): the split against the PB's (a gold one shows
+    how far it beat the previous best), what it could still save against the best."""
+    tone = split_tone(r['last'], r['delta'], r['gold'], r.get('cum'), r.get('pb'))
+    if r['last'] is None:
+        return '–', '–', tone
+    if r['gold']:
+        text = '\u2605' + (' ' + signed(-r['margin']) if r.get('margin') else '')
+    else:
+        text = signed(r['last'] - r['pb'] if r.get('pb') is not None else r['delta'])
+    save = r['delta'] if r['delta'] is not None and round(r['delta'], 1) > 0 else None
+    return text, '–' if save is None else '{:.1f}'.format(save), tone
+
+
+def potential_line(potential):
+    """'Potential: you 3:03.1 · grip 2:51.4 · car 2:42.7' (oversteer/potential.py: the sum of best, the lap
+    simulation at the driver's own grip, at the car's), the layers it has; None without a grip layer."""
+    if not potential or potential.get('grip') is None:
+        return None
+    parts = [(_("you"), potential.get('user')), (_("grip"), potential['grip']), (_("car"), potential.get('car'))]
+    return _("Potential") + ': ' + ' \u00b7 '.join('{} {}'.format(name, clock(t)) for name, t in parts if t is not None)
+
+
+def splits_row(found):
+    """coach.splits() for the splits row of the Coaching and Telemetry views, or None without splits: a dict
+    with `stage` (short name), `name`, `pb`, `sob`, `gain`, `last`, `delta` (last less PB, None unless the last
+    run finished), `new_pb` (the last run is the PB, and clean: the only time the row says PB), `finish_m` and
+    `finish_confidence` (the times end at the stage's flying finish), `tones` (one per split, for the ribbon),
+    `bounds` ((d0, d1) per split, for cells as long as the splits), `rows` ((name, last, Δ PB, best, tone, save)
+    per split, the stage total and the sum of best at the end), `sectors` ((name, last, delta, tone) per game
+    sector, the last time marked with a leading '≈' where the position is estimated; [] without) and
+    `estimated`, `potential` (the three layers, user / grip / car seconds) with `potential_line` (its words) and
+    `avail` (the time available against the grip layer per row of `rows`, as text; '' where there is none)."""
+    if not found:
+        return None
+    pb, last = found.get('best'), found.get('last')
+    tones, rows, bounds = [], [], []
+    for n, r in enumerate(found['splits'], 1):
+        text, save, tone = _split_cells(r)
+        tones.append(tone)
+        bounds.append((r.get('d0'), r.get('d1')))
+        name = r['name'][4:] if r['name'].startswith('the ') else r['name']
+        rows.append(('{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
+                     '–' if r['last'] is None else '{:.1f}'.format(r['last']), text,
+                     '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone, save))
+    delta = None if last is None or pb is None else last - pb
+    new_pb = bool(found.get('new_pb'))
+    rows.append((_("Stage"), clock(last), '–' if delta is None else ('\u2605 ' if new_pb else '') + signed(delta), clock(pb),
+                 'none' if delta is None else 'gold' if new_pb else 'ahead-gain' if round(delta, 1) <= 0 else 'behind-lose',
+                 '–' if delta is None or round(delta, 1) <= 0 else '{:.1f}'.format(delta)))
+    gain = found.get('gain')
+    rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')),
+                 'gold', ''))
+    pot = found.get('potential')
+    avail = []
+    for r in found['splits']:
+        a = r.get('available')
+        avail.append('\u2013' if a is None or round(a, 1) <= 0 else '{:.1f}'.format(a))
+    grip = (pot or {}).get('grip')
+    avail.append('\u2013' if last is None or grip is None or round(last - grip, 1) <= 0 else '{:.1f}'.format(last - grip))
+    avail.append('')
+    sectors, estimated = [], False
+    for r in found.get('sectors') or []:
+        low = r.get('confidence') == 'low'
+        estimated = estimated or low
+        mark = '\u2248' if low else ''
+        text, _save, tone = _split_cells(r)
+        sectors.append((r['name'], '–' if r['last'] is None else mark + '{:.1f}'.format(r['last']),
+                        text if r['last'] is not None else '–' if r['best'] is None
+                        else _("best {}").format(mark + '{:.1f}'.format(r['best'])), tone))
+    return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
+            'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
+            'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
+            'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs'), 'potential': pot,
+            'potential_line': potential_line(pot), 'avail': avail}
+
+
+def _splits(reader, profile, car_id):
+    """coach.splits(), or None when it fails: the splits must never take the
+    rest of the view (or the GTK refresh timer) down with them."""
+    from . import coach
+    try:
+        return coach.splits(reader, profile, car_id)
+    except Exception:
+        import logging
+        logging.exception("splits")
+        return None
 
 
 def tuning_lines(tune, notes):
@@ -357,7 +510,7 @@ def gather(reader, profile, key, show_all=False):
     car = reader.car(profile, key) if key else None
     if car is None:
         return {'car_id': None, 'context': (_("No session recorded yet."), []), 'tips': [], 'tuning': [],
-                'sessions': [], 'last_session': None}
+                'sessions': [], 'last_session': None, 'splits': None}
     sessions = reader.sessions(car['id'], 1)
     session = sessions[0] if sessions else None
     runs = reader.runs(session['id']) if session else []
@@ -369,4 +522,169 @@ def gather(reader, profile, key, show_all=False):
     return {'car_id': car['id'], 'context': context_line(session, runs, stage), 'tips': tips,
             'tuning': tuning_lines(tuning.tune_summary(reader, car['id'], car['game']), notes),
             'sessions': session_rows(reader.history(profile, car['key'], 10)),
-            'last_session': session}
+            'last_session': session, 'splits': _splits(reader, profile, car['id'])}
+
+
+# -- the live run (docs/telemetry-ui-design.md, "Phase 3 live API"): the rows of the run the tab has been shown,
+# and the strings of the delta block, the ribbon and the finished card; the web page's liveIngest/liveShow rules --
+
+GRAVITY = 9.80665
+LIVE_KEEP = 30.0                     # s of rows kept for the strips
+LIVE_BUS = ('t', 'distance', 'throttle', 'brake', 'clutch', 'handbrake', 'steer', 'a_long', 'a_lat', 'x', 'z')
+
+
+def signed2(delta):
+    """±s.ss with a real minus sign ('–' for none): the live delta's two decimals; a difference that rounds to
+    nothing is ±0.00, never +0.00 or -0.00."""
+    if delta is None:
+        return '–'
+    r = round(delta, 2)
+    return '{}{:.2f}'.format('+' if r > 0 else '−' if r < 0 else '±', abs(r))
+
+
+class LiveTrack:
+    """What the tab has seen of the live run: the rows of the last 30 s (dicts: t, d, thr, brk, clu, hb, steer,
+    along and alat in g, x, z), every position of the run, the tone of each split as it was completed (by the
+    reference's grid index), and the last body. Rows are told apart by their clock, so a read that repeats rows
+    (back on the tab) adds nothing, and rows missed while the tab was hidden leave a gap in the strips. The main
+    thread only."""
+
+    def __init__(self):
+        self.since = 0
+        self.n = None
+        self.epoch = None                    # the Oversteer process the held rows came from
+        self.rows = []
+        self.path = []
+        self.last_t = -1.0
+        self.tones = {}
+        self.body = None
+        self.dismissed = None                # the run number whose finished card was put away
+
+    def clear(self):
+        self.rows, self.path, self.last_t, self.tones = [], [], -1.0, {}
+
+    def resync(self):
+        """Read the whole buffer next time (back on the tab); what is already held is not added twice."""
+        self.since = 0
+
+    def ingest(self, body):
+        epoch = body.get('epoch')
+        if body.get('reset') or (epoch and self.epoch and epoch != self.epoch) or (body['run']['n'] if body.get('run') else None) != self.n:
+            self.clear()
+        self.epoch = epoch
+        self.n = body['run']['n'] if body.get('run') else None
+        self.since = body['seq']
+        self.body = body
+        index = {c: i for i, c in enumerate(body['channels'])}
+        pick = {name: index.get(name) for name in LIVE_BUS}
+        for r in body['samples']:
+            def v(name):
+                i = pick[name]
+                return None if i is None else r[i]
+            t = v('t')
+            if t is None or t <= self.last_t:
+                continue
+            self.last_t = t
+            along, alat = v('a_long'), v('a_lat')
+            row = {'t': t, 'd': v('distance'), 'thr': v('throttle'), 'brk': v('brake'), 'clu': v('clutch'),
+                   'hb': v('handbrake'), 'steer': v('steer'),
+                   'along': None if along is None else along / GRAVITY, 'alat': None if alat is None else alat / GRAVITY,
+                   'x': v('x'), 'z': v('z')}
+            self.rows.append(row)
+            if row['x'] is not None and row['z'] is not None:
+                self.path.append((row['x'], row['z']))
+        keep = 0
+        while keep < len(self.rows) and self.rows[keep]['t'] < self.last_t - LIVE_KEEP:
+            keep += 1
+        del self.rows[:keep]
+        if len(self.path) > 30000:
+            del self.path[:5000]
+        # A split's tone as it is completed: ahead or behind the PB by the clock at its end, gaining or losing by the
+        # split's own time (LiveSplit's rule; gold needs the best splits, which the live run does not have)
+        split = body.get('split')
+        if body.get('ref') and split and split.get('prev') and body.get('delta') is not None \
+                and split['prev']['index'] not in self.tones:
+            cum = body['delta'] - (split['delta'] if split.get('delta') is not None else 0.0)
+            seg = split['prev']['delta']
+            self.tones[split['prev']['index']] = ('ahead' if round(cum, 1) <= 0 else 'behind') + '-' + \
+                ('gain' if round(seg, 1) <= 0 else 'lose')
+
+
+def live_phase(body, track):
+    """'idle', 'live', 'stale', 'finished' (shown as the finished card) or 'put-away' (finished, the card put away)."""
+    state = body['state']
+    if state == 'finished':
+        return 'put-away' if track.dismissed == body['run']['n'] else 'finished'
+    return state
+
+
+def live_cursor(body, bounds):
+    """The index of the splits-row cell the car is in, by distance (the row's `bounds`, not list position: the
+    grid has a launch section the row leaves out), or None between cells or past the finish."""
+    d = body.get('distance')
+    if d is None or body['state'] == 'finished':
+        return None
+    found = None
+    for j, b in enumerate(bounds or ()):
+        if b and None not in b and b[0] <= d < b[1]:
+            found = j
+    return found
+
+
+def live_ribbon(body, track, bounds):
+    """(tones per cell, current cell) for the splits ribbon while a run is on, or None: completed splits in the tone
+    they were completed in, the rest unlit."""
+    ref = body.get('ref')
+    if not bounds or body['state'] == 'idle':
+        return None
+    tones = []
+    for b in bounds:
+        g = -1
+        if ref and b and b[0] is not None:
+            for i, s in enumerate(ref['splits']):
+                if abs(s['d0'] - b[0]) < 2.0:
+                    g = i
+                    break
+        tones.append(track.tones.get(g, 'none'))
+    return tones, live_cursor(body, bounds)
+
+
+def live_delta_view(body, bounds=None):
+    """The dict telemetry_plot.live_delta draws, or None while there is nothing to say: the delta only with a
+    reference that is ready and a delta; 'no PB yet' as a note; 'vs PB · split n ±x.xx · finish ≈'."""
+    if body['state'] not in ('live', 'stale'):
+        return None
+    if body.get('ref_status') == 'none':
+        return {'note': _("No PB yet on this stage: finish a clean run"), 'dim': True}
+    ref = body.get('ref')
+    if body.get('ref_status') != 'ready' or body.get('delta') is None or not ref:
+        return None
+    split = body.get('split')
+    cur = live_cursor(body, bounds) if bounds else None
+    label = '–'
+    if split and split.get('delta') is not None:
+        if bounds:
+            label = '{} {}'.format(cur + 1, signed2(split['delta'])) if cur is not None else '–'
+        else:
+            label = signed2(split['delta'])
+    return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'split': label,
+            'finish': clock(body['predicted']), 'dim': body['state'] == 'stale'}
+
+
+def live_done_view(body, found=None, calls=None):
+    """The finished card: `time`, `delta` (text, or '' without a PB), `delta_value`, `stage`, and `line` ('PB 3:06.0
+    · SoB 3:04.0 · 3 gold splits · 3 calls in the debrief', from the splits row `found` and the debrief's count)."""
+    final = body.get('final') or {}
+    ref = body.get('ref')
+    parts = ['PB ' + clock(ref['time'])] if ref else [_("No PB to compare with yet")]
+    if found:
+        if found.get('sob') is not None:
+            parts.append(_("SoB") + ' ' + clock(found['sob']))
+        golds = sum(1 for t in found.get('tones') or () if t == 'gold')
+        if golds:
+            parts.append((_("{} gold split") if golds == 1 else _("{} gold splits")).format(golds))
+    if calls:
+        parts.append(_("{} in the debrief").format(calls))
+    delta = final.get('delta')
+    return {'time': clock(final.get('time')), 'delta': '' if delta is None else signed2(delta), 'delta_value': delta,
+            'stage': (body.get('stage') or {}).get('name') or '', 'line': ' · '.join(parts)}

@@ -23,6 +23,7 @@ class Device:
     def __init__(self, device_manager, data):
         self.device_manager = device_manager
         self.input_device = None
+        self.input_drops = 0        # times the input device was dropped or reopened
         self._device_lock = threading.Lock()
         self.id = None
         self.vendor_id = None
@@ -230,6 +231,49 @@ class Device:
         logging.debug("Setting invert_pedals: %s", mask)
         with open(path, "w") as file:
             file.write(str(int(mask)))
+        return True
+
+    # sysfs suffix of pedal_response_<suffix>, by invert_pedals bit
+    PEDAL_RESPONSE_SUFFIX = {1: 'y', 2: 'z', 4: 'rz'}
+
+    def _pedal_response_file(self, bit):
+        suffix = self.PEDAL_RESPONSE_SUFFIX.get(bit)
+        if suffix is None:
+            return False
+        return self.checked_device_file("pedal_response_" + suffix)
+
+    def has_pedal_response(self):
+        """True when the driver can reshape the pedals (new-lg4ff with
+        pedal_response); older drivers have no such attributes."""
+        return any(self._pedal_response_file(bit) for bit in self.PEDAL_RESPONSE_SUFFIX)
+
+    def get_pedal_response(self, bit):
+        """(start, end, sensitivity) of the pedal whose invert_pedals bit is
+        `bit`, in pedal-travel terms as the driver holds it; None when it has
+        no such control or the value isn't three integers."""
+        path = self._pedal_response_file(bit)
+        if not path:
+            return None
+        with open(path, "r") as file:
+            values = file.read().split()
+        if len(values) != 3:
+            return None
+        try:
+            return tuple(int(v) for v in values)
+        except ValueError:
+            return None
+
+    def set_pedal_response(self, bit, start, end, sensitivity):
+        """Write a pedal's response in pedal-travel terms, from the released
+        end whichever way invert_pedals has the axis (the driver mirrors it
+        itself and ignores it while the pedals are combined)."""
+        path = self._pedal_response_file(bit)
+        if not path:
+            return False
+        value = "{} {} {}".format(int(start), int(end), int(sensitivity))
+        logging.debug("Setting pedal_response (bit %s): %s", bit, value)
+        with open(path, "w") as file:
+            file.write(value)
         return True
 
     def get_combine_pedals(self):
@@ -449,7 +493,7 @@ class Device:
             return False
         if not self.check_file_permissions('peak_ffb_level'):
             return False
-        for name in ('sensitivity', 'invert_pedals', 'app_gain', 'autocenter_persistent', 'inertia_mode'):
+        for name in ('sensitivity', 'invert_pedals', 'pedal_response_y', 'pedal_response_z', 'pedal_response_rz', 'app_gain', 'autocenter_persistent', 'inertia_mode'):
             if not self.check_file_permissions(name):
                 return False
         return True
@@ -583,6 +627,7 @@ class Device:
                 except OSError:
                     pass
                 self.input_device = None
+                self.input_drops += 1
             node = self._input_node()
             if node is not None:
                 if node != self.dev_name:
@@ -593,6 +638,7 @@ class Device:
     # invert_pedals bits, by the *raw* axis the driver sees
     PEDAL_BITS = {ecodes.ABS_Y: 1, ecodes.ABS_Z: 2, ecodes.ABS_RZ: 4}
     PEDALS = (ecodes.ABS_Y, ecodes.ABS_Z, ecodes.ABS_RZ)   # as Oversteer sees them: clutch, accelerator, brakes
+    PEDAL_NAMES = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'accelerator', ecodes.ABS_RZ: 'brakes'}
 
     def _axis_now(self, device, code, fallback):
         """An axis's current value. capabilities(absinfo=True) answers from
@@ -776,6 +822,7 @@ class Device:
                         except OSError:
                             pass
                         self.input_device = None
+                        self.input_drops += 1
 
     def normalize_event(self, event):
         #

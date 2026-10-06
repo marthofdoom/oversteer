@@ -1,0 +1,12 @@
+{
+  "id": "logitech-driving-force-shifter",
+  "name": "Logitech Driving Force Shifter",
+  "vendor": "046d",
+  "product": "c26f",
+  "bustype": "usb",
+  "phys": ".*",
+  "kind": "shifter",
+  "verified": false,
+  "anti_cheat_class": "unknown",
+  "notes": "VID/PID from equipment.KNOWN_SHIFTERS; name nominal, other fields not captured. Reports 6 gears + R as buttons."
+}

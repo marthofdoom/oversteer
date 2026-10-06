@@ -47,6 +47,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.15.0" date="2026-10-06">
+      <description><ul><li>Technique-aware coaching: tips by place and cause, praise, offs stated as facts, and a potential time per stage and car</li><li>Telemetry tab with Live and Run views on the web page and in GTK: delta to PB, splits and sum of best, traces, stage map, where the time went</li><li>Assetto Corsa Rally: flying finish learnt from the game's clock, results on the game's own stage clock (needs the new bridge: relaunch through oversteer-run), position and map fixed</li><li>Every telemetry channel decoded; WRC Generations fixes</li><li>Hold a hotkey to repeat a step, pedal response curves (needs new-lg4ff 0.8.0), Steam launch options for wheels under Proton</li><li>The telemetry database is migrated to schema v3 (backup kept as .v2.bak) and old runs are re-analysed in the background</li></ul></description>
+    </release>
     <release version="0.14.2" date="2026-09-28">
       <description><ul><li>Assetto Corsa Rally: each car's best upshift from the game's own engine data, finished stages and restarts recognised, the car's position read</li><li>Shift points per surface; a gear held back by grip on gravel is learnt from your driving</li><li>Shift at: Auto uses each gear's best upshift</li><li>Coaching measures your changes against the best for the surface and says where the best comes from</li></ul></description>
     </release>

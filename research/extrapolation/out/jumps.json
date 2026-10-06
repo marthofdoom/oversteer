@@ -1,0 +1,137 @@
+{
+ "airborne_events_truth": 46,
+ "airtime_s": {
+  "median": 0.21,
+  "max": 0.74
+ },
+ "detectors": {
+  "A_accel": {
+   "recall": 0.783,
+   "precision": 0.873,
+   "found": 118,
+   "airtime_err_median_s": 0.016,
+   "airtime_err_p90_abs_s": 0.131
+  },
+  "B_susp": {
+   "recall": 0.348,
+   "precision": 1.0,
+   "found": 33,
+   "airtime_err_median_s": -0.106,
+   "airtime_err_p90_abs_s": 0.207
+  },
+  "A_and_B": {
+   "recall": 0.283,
+   "precision": 1.0,
+   "found": 17,
+   "airtime_err_median_s": -0.146,
+   "airtime_err_p90_abs_s": 0.238
+  }
+ },
+ "landing": {
+  "events": 46,
+  "peak_load_g_median": 2.09,
+  "peak_load_g_max": 4.03,
+  "r_peak_az_vs_peak_load": 0.026,
+  "r_airtime_vs_peak_load": -0.149
+ },
+ "not_free_fall_stretches (roof/side)": [
+  {
+   "capture": "20260925-212030.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 1543,
+   "s": 1.36,
+   "a_z": -1.8
+  },
+  {
+   "capture": "20260925-212030.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 1559,
+   "s": 0.88,
+   "a_z": 3.2
+  },
+  {
+   "capture": "20260925-223341.ovcap.gz",
+   "track": "Alsace For_t",
+   "d": 8189,
+   "s": 1.41,
+   "a_z": -4.2
+  },
+  {
+   "capture": "20261002-160206.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 4912,
+   "s": 3.63,
+   "a_z": 8.4
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 1459,
+   "s": 0.89,
+   "a_z": -5.8
+  },
+  {
+   "capture": "20261003-182343.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 1611,
+   "s": 0.55,
+   "a_z": -5.0
+  },
+  {
+   "capture": "20261003-193057.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 1563,
+   "s": 1.49,
+   "a_z": -2.9
+  },
+  {
+   "capture": "20261003-193057.ovcap.gz",
+   "track": "Wales Afon Bidno",
+   "d": 1579,
+   "s": 0.18,
+   "a_z": -1.9
+  }
+ ],
+ "wrcg": [
+  {
+   "capture": "20260925-145356.ovcap.gz",
+   "freefall_from_positions": 13,
+   "susp_droop": 0,
+   "freefall_with_susp_droop": 0,
+   "susp_range_raw": [
+    0.00028,
+    0.00056
+   ]
+  },
+  {
+   "capture": "20260925-145356.ovcap.gz",
+   "freefall_from_positions": 4,
+   "susp_droop": 0,
+   "freefall_with_susp_droop": 0,
+   "susp_range_raw": [
+    0.00028,
+    0.00056
+   ]
+  },
+  {
+   "capture": "20261002-153038.ovcap.gz",
+   "freefall_from_positions": 60,
+   "susp_droop": 0,
+   "freefall_with_susp_droop": 0,
+   "susp_range_raw": [
+    0.00028,
+    0.00056
+   ]
+  },
+  {
+   "capture": "20261002-154439.ovcap.gz",
+   "freefall_from_positions": 17,
+   "susp_droop": 0,
+   "freefall_with_susp_droop": 0,
+   "susp_range_raw": [
+    0.00028,
+    0.00056
+   ]
+  }
+ ]
+}
