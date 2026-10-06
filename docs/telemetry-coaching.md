@@ -1852,6 +1852,15 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   4.9 km with sectors of 6.3 km and notes over 6.47 km (confidence
   lowered to medium). The one known `trackSplineLength` (Cwmbiga - Afon
   Biga, 12077.95 m) is 156 m past its last note (11921.5 m). `track`
+  `pacenote_last_m` is the stop control, not the finish: on marth's runs
+  the car is at 120-160 km/h 200 m before it and at 20-40 km/h on it. The
+  game's pace-note tables have no finish marker and the bridge sends no
+  stage clock, so `finish_m` (the flying finish, ~225 m before the stop
+  control on Afon Bidno) is derived by `scripts/acr-finish.py` from where
+  the final slowdown starts, over at least two consistent runs (Afon
+  Bidno - Severn: 10 runs, spread 35 m, medium); other stages keep the
+  last note until they have runs. The run finishes at `finish_m` when
+  present.
   collides only on `Alsace For_t` in English (and de, es, fr, it); in
   Chinese the bridge's ASCII turns nearly every name to `_`, 10 groups
   collide, and names cannot identify a stage.

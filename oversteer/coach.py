@@ -1626,6 +1626,70 @@ def _ref_is_quickest(ref, before):
                    and r.get('result_time') and r['result_time'] < ref['result_time'] for r in before)
 
 
+def splits(reader, profile, car_id):
+    """The car's split times on the stage of its most recent run (the coach's own reference and the
+    runs "possible" is built from), or None with fewer than two runs, no corners or no grid: a dict with
+    `stage`, `name`, `last` (the latest run's time, None unless it finished), `best` (the quickest finished
+    clean run's), `possible` (the best sections put together, never over `best`), `gain` (best less
+    possible), `runs`, and `splits`: per section of the reference's grid, `name`, `last`, `best`, `gold` (the
+    latest run set the best), `delta` (last less best) and `finish` (the last section holds the slow-down
+    to the stop where the finish is not a line). Sections an off touched are left out (grid_times)."""
+    rows = reader.metrics(profile, car_id, SESSIONS_READ)
+    started = {}
+    for r in rows:
+        if r['stage'] and r['run'] is not None:
+            started[r['run']] = r['started']
+    run = None
+    for run_id, _ in sorted(started.items(), key=lambda kv: -kv[1]):
+        found = reader.run(run_id)
+        if found is not None and found['run_class'] not in (None, 'restart', 'unclassified') \
+                and found['discipline'] != 'drift':
+            run = found
+            break
+    if run is None:
+        return None
+    stage = run['stage']
+    before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'])
+              if r['started'] <= run['started']]
+    ref = coach_context.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')], wet=run['wet'])
+    if ref is None:
+        return None
+    ref_trace, ref_corners = reader.trace(ref['id']), reader.corners(ref['id'])
+    if not ref_trace or not ref_corners:
+        return None
+    ref_rows = {'trace': coach_context.stage_rows(ref_trace, ref['course'], True, ref['result_time']),
+                'corners': ref_corners, 'course': ref['course'], 'run': ref['id']}
+    loaded = []
+    for r in ([run] + [r for r in before if r['id'] != ref['id'] and r['run_class'] in ('clean', 'learning', 'off',
+                                                                                    'partial')])[:POSSIBLE_RUNS]:
+        trace, found = reader.trace(r['id']), reader.corners(r['id'])
+        if trace and found:
+            loaded.append({'run': r['id'], 'trace': coach_context.stage_rows(
+                trace, r['course'], r['finished'] == 1, r['result_time']), 'corners': found})
+    best = coach_context.stitched(ref_rows, loaded)
+    if best is None:
+        return None
+    mine = next((x for x in loaded if x['run'] == run['id']), None)
+    last_times = coach_context.grid_times(mine['trace'], mine['corners'], best['grid'], best['bounds']) if mine else {}
+    finished = [r for r in before + [run] if r['run_class'] == 'clean' and r.get('finished') == 1 and r.get('result_time')]
+    best_time = min((r['result_time'] for r in finished), default=None)
+    possible = ref['result_time'] - best['total']
+    if best_time is not None:
+        possible = min(possible, best_time)
+    last = len(best['grid']) - 1
+    out = []
+    for j in sorted(best['best']):
+        t = last_times.get(j)
+        out.append({'name': coach_context.section_name(best['grid'][j]), 'last': t, 'best': best['best'][j],
+                    'gold': t is not None and best['who'].get(j) == run['id'],
+                    'delta': None if t is None else t - best['best'][j], 'finish': j == last})
+    if not out:
+        return None
+    return {'stage': stage, 'name': _stage_name(stage, reader.stage(stage)),
+            'last': run['result_time'] if run['finished'] == 1 else None, 'best': best_time, 'possible': possible,
+            'gain': None if best_time is None else best_time - possible, 'runs': len(loaded) + 1, 'splits': out}
+
+
 def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, techniques=()):
     """Rate limiting (coach_state) and the budget: the focus (the costliest tip, when it is a habit),
     then up to `limit` tips by cost. A coach opens with where the time is, so a tip is shown only when it

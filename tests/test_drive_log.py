@@ -498,7 +498,7 @@ def test_acr_finish_restart_and_shared_names(tmp_path):
     runs = [r for r in session['runs'] if r['distance'] > 300]
     assert [r['finished'] for r in runs] == [0, 1]
     assert all(r['stage'] == 'acr:wales:afon-bidno-severn' for r in runs)
-    assert 230 < runs[1]['result_time'] < 250              # (5510 - 238) / 22 m/s from moving off
+    assert 225 < runs[1]['result_time'] < 235              # (5287 - 238) / 22 m/s from moving off: the flying finish, not the stop control
 
 
 def test_acr_stages_of_one_name_told_apart_by_the_start():
@@ -572,8 +572,21 @@ def test_acr_run_ends_when_the_car_rests_after_the_finish(tmp_path):
     reader = learner._reader()
     session = reader.session(reader.history('_no_profile', drive[0][1].car)[0]['id'])
     [run] = [r for r in session['runs'] if r['distance'] > 300]
-    assert run['finished'] == 1 and 230 < run['result_time'] < 250
+    assert run['finished'] == 1 and 225 < run['result_time'] < 235
     assert run['distance'] < 5400                          # the standing seconds are not in it
+
+
+def test_acr_finish_is_the_flying_finish_else_the_last_pace_note(tmp_path):
+    from oversteer import stage_tables
+    bidno = stage_tables.acr_stage('Wales Afon Bidno', start=238.0)
+    assert bidno['pacenote_last_m'] - 300 < bidno['finish_m'] < bidno['pacenote_last_m'] - 150
+    assert bidno['finish_runs'] >= 2 and bidno['finish_spread_m'] < 45
+    elatia = stage_tables.acr_stage('Greece Elatia')
+    assert 'finish_m' not in elatia                        # no run to derive it from: the last note
+    drive = acr_drive(0.0, 100.0, 6730.0, track='Greece Elatia')
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and 295 < run['result_time'] < 308     # (6710 - 100) / 22 m/s
 
 
 def test_acr_post_finish_packets_do_not_start_a_run_and_a_restart_does(tmp_path):
@@ -586,8 +599,8 @@ def test_acr_post_finish_packets_do_not_start_a_run_and_a_restart_does(tmp_path)
     learner, reader, session = drive_runs(tmp_path, first + after + second)
     runs = [r for r in session['runs'] if r['distance'] > 100]
     assert [r['finished'] for r in runs] == [1, None]       # the restarted run is still open at the session's end
-    assert 230 < runs[0]['result_time'] < 250
-    assert 5200 < runs[0]['distance'] < 5400               # driven to the line, not the roll-out
+    assert 225 < runs[0]['result_time'] < 235
+    assert 4950 < runs[0]['distance'] < 5150               # driven to the line, not the roll-out
     assert runs[0]['ended'] < runs[1]['ended']
 
 

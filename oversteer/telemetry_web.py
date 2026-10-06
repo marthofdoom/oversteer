@@ -350,7 +350,8 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                 return 404, {'error': 'no such car'}
             # The page only reads: tips are not marked as seen here
             tips = coach.Coach(reader).tips(profile, car['id'] if car else None)
-            return 200, {'tips': [t.to_dict() for t in tips]}
+            return 200, {'tips': [t.to_dict() for t in tips],
+                         'splits': coach.splits(reader, profile, car['id']) if car else None}
         return 404, {'error': 'not found'}
 
     @staticmethod

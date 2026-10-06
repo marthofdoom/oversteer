@@ -334,7 +334,12 @@
     1.6
    ],
    "pacenote_first_m": 262.8,
-   "pacenote_last_m": 5510.0
+   "pacenote_last_m": 5510.0,
+   "finish_m": 5287.4,
+   "finish_runs": 10,
+   "finish_spread_m": 34.9,
+   "finish_confidence": "medium",
+   "finish_source": "marth's runs: where the final slowdown to the stop control starts (median of 10), the game's pace notes have no finish marker"
   },
   {
    "location": "Wales",

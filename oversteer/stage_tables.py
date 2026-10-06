@@ -12,7 +12,10 @@ share}, or a list, larger part first, where the shares are not known),
 `start_z` (its stages are told apart by the length the game sends and
 where they start), Assetto Corsa Rally's `track` and `config` where known
 and, from the game, `elevation_start_m`, `sectors_km` and
-`pacenote_first_m`/`pacenote_last_m` (along the road spline), and `discipline`
+`pacenote_first_m`/`pacenote_last_m` (along the road spline; the last note is the
+stop control), `finish_m` (the flying finish, from marth's runs where several agree:
+scripts/acr-finish.py, with `finish_runs`, `finish_spread_m`, `finish_confidence`,
+`finish_source`), and `discipline`
 where it is not a rally stage ('circuit' for Livigno).
 WRC Generations' come from the game's files (scripts/stage-tables.py):
 `code` and `level` (its route), `length_m` (the float it sends),

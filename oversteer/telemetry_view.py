@@ -357,7 +357,7 @@ def gather(reader, profile, key, show_all=False):
     car = reader.car(profile, key) if key else None
     if car is None:
         return {'car_id': None, 'context': (_("No session recorded yet."), []), 'tips': [], 'tuning': [],
-                'sessions': [], 'last_session': None}
+                'sessions': [], 'last_session': None, 'splits': None}
     sessions = reader.sessions(car['id'], 1)
     session = sessions[0] if sessions else None
     runs = reader.runs(session['id']) if session else []
@@ -369,4 +369,4 @@ def gather(reader, profile, key, show_all=False):
     return {'car_id': car['id'], 'context': context_line(session, runs, stage), 'tips': tips,
             'tuning': tuning_lines(tuning.tune_summary(reader, car['id'], car['game']), notes),
             'sessions': session_rows(reader.history(profile, car['key'], 10)),
-            'last_session': session}
+            'last_session': session, 'splits': coach.splits(reader, profile, car['id'])}
