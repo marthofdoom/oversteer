@@ -772,7 +772,7 @@ def test_history_changed_is_said_after_the_commit_not_before(tmp_path):
 # -- the game's clock (bridge version 4) --
 
 def acr_clock_drive(t0, until, react=0.5, pause_at=None, pause=30.0, game_line=5295.4, speed=22.0,
-                    track='Wales Afon Bidno', car='acr/Skoda Fabia RS Rally2'):
+                    track='Wales Afon Bidno', car='acr/Skoda Fabia RS Rally2', start=238.0):
     """ACR as bridge version 4 sends it: the stage's clock runs from the go
     (`react` s before the car moves), stops at the game's own finish line
     (`game_line`, a little past the table's flying finish) and goes on
@@ -781,7 +781,7 @@ def acr_clock_drive(t0, until, react=0.5, pause_at=None, pause=30.0, game_line=5
     as ACR does (a pause is then no silence). Returns (samples, the game's
     time at its line)."""
     from oversteer.telemetry import Sample
-    samples, t, d, clock = [], t0, 238.0, None
+    samples, t, d, clock = [], t0, start, None
     for i in range(20):                                        # standing at the line, then the go
         s = Sample(1500.0, 7500.0, gear=1, speed=0.0, car=car, game='acr', throttle=0.0)
         s.track, s.lap_distance, s.stage_length = track, d, 5599.8
@@ -849,6 +849,30 @@ def test_the_game_clock_stopped_before_the_tables_line(tmp_path):
     [run] = [r for r in session['runs'] if r['distance'] > 300]
     assert run['finished'] == 1 and abs(run['result_time'] - at_line) < 1e-3
     assert abs(at_line - (0.5 + (5250.0 - 238.0) / 22.0)) < 0.11
+    learner.close()
+
+
+def test_a_clock_stopped_well_before_the_last_pace_note_is_the_finish(tmp_path):
+    """45 stages have no flying finish in the table: the game's clock stops 200-300 m before the last pace note
+    (the stop control). The run finished there: not 11 s later at the note, and not at all for a car that
+    stopped short of it."""
+    from oversteer import stage_tables
+    assert 'finish_m' not in stage_tables.acr_stage('Alsace Petit Ballon') or not \
+        stage_tables.acr_stage('Alsace Petit Ballon')['finish_m']
+    drive, at_line = acr_clock_drive(0.0, 5800.0, track='Alsace Petit Ballon', start=195.0, game_line=5740.0)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and abs(run['result_time'] - at_line) < 1e-3
+    assert abs(reader.run(run['id'])['course'] - (5740.0 - 195.0)) < 25.0
+    assert store_clock(learner, run['id']) == 'game'
+    final = learner.live_run.read(0)['final']
+    assert final is not None and abs(final['time'] - at_line) < 0.11       # the live card at the stop too
+    learner.close()
+    # a clock that stopped much earlier (a stage's middle) is not the finish
+    drive, _ = acr_clock_drive(0.0, 5800.0, track='Alsace Petit Ballon', start=195.0, game_line=3000.0)
+    learner, reader, session = drive_runs(tmp_path, drive, name='early.db')
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] != 1
     learner.close()
 
 

@@ -205,6 +205,7 @@ FINISHED = 0.99                  # progress through the stage that counts as rea
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
 CLOCK_SETTLE = 0.25              # s of the run's own time the game's clock stands still, moving: it stopped (not a few frames repeated)
 FINISH_CLOCK_PAST = 100.0        # m past the table's finish line the game's clock may still stop at its own
+FINISH_CLOCK_BEFORE = 400.0      # m before the table's line (the last pace note, the stop control) the game's clock may have stopped
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
 # The game keeps sending after the finish (the results screen, the car rolling
 # out or parked), so a finished run is ended by what follows rather than by
@@ -516,6 +517,7 @@ class RunTracker:
         self._still = 0.0
         self._clock_run = RunClock(sample.stage_time)
         self._clock_moved_d = None                   # d at the last packet the game's clock moved
+        self._clock_moved_ld = None                  # and the lap distance (the place on the spline)
         self._line_clock = None                      # (d, the game's clock) where the run crossed the table's finish line
         self._seg_d0, self._seg_t0 = 0.0, self._clock_run.t
         self._rows = []
@@ -573,8 +575,8 @@ class RunTracker:
     def _clock(self, now, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
         stage clock stops at the line while the car rolls on."""
-        if self._finish_d is not None or sample.stage_time is None:
-            return
+        if self._finish_d is not None or sample.stage_time is None or sample.game == 'acr':
+            return                                   # (ACR's is told with the table's line: _line_finish, _clock_finish)
         if sample.stage_time != self._last_stage_time or self._clock_d is None:
             self._clock_d, self._clock_still = d, 0.0
         elif speed > START_MOVING and sample.stage_time > 0:
@@ -655,6 +657,7 @@ class RunTracker:
         d = self._d(sample)
         if self._clock_run.moved:
             self._clock_moved_d = d
+            self._clock_moved_ld = sample.lap_distance
         lap = sample.lap
         if lap is not None and self._last_lap is not None and lap > self._last_lap:
             self._laps_done += 1
@@ -693,6 +696,10 @@ class RunTracker:
                 and sample.lap_distance >= self._finish_line \
                 and self._from_line and (self._start_d is None or self._start_d < self._finish_line):
             self._line_finish(now, sample, d, speed)
+        elif self._finish_line and self._finished is None and sample.lap_distance is not None \
+                and sample.lap_distance >= self._finish_line - FINISH_CLOCK_BEFORE and self._from_line \
+                and (self._start_d is None or self._start_d < self._finish_line):
+            self._clock_finish(now, sample, speed)
         if sample.puddle is not None:
             self._samples += 1
             if any(p > 0 for p in sample.puddle):
@@ -760,6 +767,19 @@ class RunTracker:
         elif sample.lap_distance > self._finish_line + FINISH_CLOCK_PAST:
             line_d, at = self._line_clock
             self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.offset, 'game')
+
+    def _clock_finish(self, now, sample, speed):
+        """ACR with the game's clock, before the table's line (but within FINISH_CLOCK_BEFORE of it): the clock
+        standing still for CLOCK_STOPPED with the car moving, past FINISH_AFTER, is the finish. The game stops its
+        clock 194-320 m before the last pace note on the stages with no flying finish in the table; the run
+        finished there, whether the car goes on to the note or stops at the stop control short of it."""
+        clock = self._clock_run
+        if sample.stage_time is None or clock.offset is None or not clock.proven:
+            return
+        moved_d, at = self._clock_moved_d, self._clock_moved_ld
+        if clock.still >= CLOCK_STOPPED and speed > MOVING and moved_d is not None and moved_d >= FINISH_AFTER \
+                and at is not None and at >= self._finish_line - FINISH_CLOCK_BEFORE:
+            self._finish_at(now, moved_d, sample.stage_time + clock.offset, 'game')
 
     def _finish_at(self, now, d, result, clock):
         self._finished, self._result_time, self._result_clock = 1, result, clock
