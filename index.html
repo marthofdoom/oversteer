@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0c0f">
+<title>Countersteer · Real Runs</title>
+<!--
+  Countersteer, Real Runs: the telemetry page (Live and Run views, splits row, Coaching) playing real Assetto Corsa
+  Rally runs recorded by Oversteer. The numbers are in data.js (built by build.py from Oversteer's own readers:
+  coach_context sections and grid times, the coach's tips). Self-contained: inline CSS and JS, nothing fetched.
+  Add #autoplay for a kiosk loop (#autoplay&speed=1 starts at 1x); #run, #coaching and &s=N (stage) also work.
+-->
+<style>
+:root {
+  --bg: #0a0c0f; --panel: #11151a; --raised: #171c22; --line: #232a33; --grid: #1a2028;
+  --text: #eef2f6; --dim: #8c96a3; --faint: #56606c; --accent: #4c9dff;
+  --speed: #4cc3ff; --thr: #2fd27a; --brk: #ff4d4d; --steer: #b58cff; --rpm: #ffb020; --gear: #e8edf2;
+  --ref: #8c96a3; --slower: #ff5a4e; --faster: #2fd27a; --neutral: #3a424d;
+  --ls-ahead-gain: #29cc54; --ls-ahead-lose: #70cc89; --ls-behind-gain: #cc7870; --ls-behind-lose: #cc3729;
+  --ls-gold: #d8af1f; --ls-none: #2a313a;
+  --led-off: #1f252d; --led-g: #2fd27a; --led-y: #ffc21a; --led-r: #ff4d4d; --led-b: #4c9dff;
+  --warn: #ffb020; --bad: #ff4d4d; --good: #2fd27a;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
+  --top-h: 48px; --nav-h: 58px;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #eef0f3; --panel: #ffffff; --raised: #f5f6f8; --line: #d5dae1; --grid: #e6e9ee;
+  --text: #0e1116; --dim: #566170; --faint: #8a94a1; --accent: #1f6fd6;
+  --speed: #0a74b8; --thr: #128a47; --brk: #d42a2a; --steer: #7446d0; --rpm: #b06d00; --gear: #1b2129;
+  --ref: #8a94a1; --slower: #d42a2a; --faster: #128a47; --neutral: #c9cfd7;
+  --ls-ahead-gain: #138a37; --ls-ahead-lose: #4fa86a; --ls-behind-gain: #c06a62; --ls-behind-lose: #b52a1d;
+  --ls-gold: #a8840f; --ls-none: #dde1e7;
+  --led-off: #dde1e7; --led-g: #128a47; --led-y: #c99300; --led-r: #d42a2a; --led-b: #1f6fd6;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.35 var(--sans); overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; }
+.lbl { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+
+/* -- top bar: connection, sub-tab title, keep-awake -- */
+.top { position: sticky; top: 0; z-index: 5; background: var(--bg);
+  padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+.top-row { height: var(--top-h); display: flex; align-items: center; gap: 8px; }
+.conn { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 9px; border: 1px solid var(--line);
+  border-radius: 15px; font-size: 12.5px; color: var(--dim); white-space: nowrap; min-width: 0; }
+.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+.conn.stale .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent); }
+.conn.down .dot { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
+.conn.idle .dot { background: var(--faint); box-shadow: none; }
+.title { font-weight: 700; font-size: 15px; letter-spacing: .02em; margin-right: auto; }
+.icon-btn { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--dim); flex: none; }
+.icon-btn:active { background: var(--raised); }
+.icon-btn svg { width: 20px; height: 20px; }
+.wake.on { color: var(--good); }
+
+/* -- splits row: one line of numbers and a ribbon, 40 px -- */
+.splits { display: block; width: 100%; text-align: left; padding: 2px 0 7px; border-bottom: 1px solid var(--line); }
+.splits .l1 { display: flex; align-items: baseline; gap: 10px; height: 22px; white-space: nowrap; overflow: hidden; }
+.splits .stg { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.splits .kv { font-size: 13px; flex: none; }
+.splits .kv b { font-weight: 600; } .splits .kv i { font-style: normal; color: var(--dim); font-size: 10.5px; letter-spacing: .06em; margin-right: 4px; }
+.splits .now { margin-left: auto; font-weight: 700; }
+.ribbon { display: flex; gap: 1.5px; height: 7px; margin-top: 3px; }
+.ribbon i { flex: 1 1 0; border-radius: 1.5px; background: var(--ls-none); min-width: 0; }
+.ribbon i.cur { background: var(--text); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.sheet { display: none; padding: 6px 0 10px; border-bottom: 1px solid var(--line); max-height: 60vh; overflow: auto; }
+.sheet.open { display: block; }
+
+/* -- the page -- */
+main { padding: 0 max(12px, env(safe-area-inset-right)) calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px) max(12px, env(safe-area-inset-left)); }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 11px; margin: 10px 0; }
+.seg button { height: 34px; border-radius: 8px; font-size: 13px; font-weight: 600; letter-spacing: .06em; color: var(--dim); }
+.seg button[aria-selected="true"] { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; min-width: 0; }
+.panel-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.view { display: none; } .view.on { display: block; animation: fade .14s ease-out; }
+@keyframes fade { from { opacity: .3; } }
+
+/* -- live dash -- */
+.leds { display: grid; grid-template-columns: repeat(15, 1fr); gap: 3px; height: 16px; margin-bottom: 8px; }
+.leds i { border-radius: 3px; background: var(--led-off); }
+.leds i.g { background: var(--led-g); } .leds i.y { background: var(--led-y); } .leds i.r { background: var(--led-r); }
+.leds.flash i { background: var(--led-b); animation: blink .2s steps(2) infinite; }
+@keyframes blink { 50% { background: var(--led-off); } }
+.dash { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0 12px; align-items: center; }
+.gear { font: 800 clamp(104px, 31vw, 150px)/.86 var(--mono); text-align: center; letter-spacing: -.06em; }
+.gear.hot { color: var(--led-r); }
+.readouts { display: grid; gap: 6px; }
+.big { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; }
+.big b { font: 700 clamp(46px, 14vw, 64px)/1 var(--mono); letter-spacing: -.03em; }
+.big span { color: var(--dim); font-size: 12px; width: 34px; }
+.mid b { font-size: clamp(26px, 8vw, 34px); font-weight: 600; }
+.shiftat { display: flex; justify-content: flex-end; gap: 6px; font-size: 12px; color: var(--dim); }
+.shiftat b { color: var(--text); font-weight: 600; }
+.delta { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.delta .dv { font: 700 40px/1 var(--mono); letter-spacing: -.03em; min-width: 5.2ch; }
+.dbar { position: relative; height: 14px; background: var(--grid); border-radius: 3px; overflow: hidden; }
+.dbar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1.5px; background: var(--dim); }
+.dbar i { position: absolute; top: 0; bottom: 0; }
+.dmeta { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.dmeta b { color: var(--text); font-weight: 600; }
+.pos-slower { color: var(--slower); } .pos-faster { color: var(--faster); }
+canvas { display: block; width: 100%; touch-action: pan-y; }
+.duo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.duo .panel { margin-bottom: 0; }
+.progress { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); margin-top: 6px; }
+.dimmed { opacity: .38; filter: saturate(.4); transition: opacity .3s; }
+.banner { display: none; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 10px; margin-bottom: 10px; font-size: 13.5px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.banner.show { display: flex; }
+.banner.bad { border-color: color-mix(in srgb, var(--bad) 50%, transparent); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.banner b { font-weight: 700; }
+.done { display: none; }
+.done.show { display: block; }
+.done .t { font: 700 30px/1.1 var(--mono); }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 16px; border-radius: 10px;
+  background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+
+/* -- run analysis -- */
+.runhead { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; }
+.runhead .t { font: 700 24px/1.1 var(--mono); }
+.runhead .d { font: 700 20px/1.1 var(--mono); text-align: right; }
+.runhead .s { font-size: 12.5px; color: var(--dim); }
+.chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 8px -2px 0; padding: 0 2px; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--line); font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.chip[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.readout { position: sticky; top: calc(var(--top-h) + 41px + env(safe-area-inset-top)); z-index: 3; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px 10px 0 0; border-bottom: 0; padding: 8px 10px 6px; margin-top: 10px; }
+.readout .where { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.readout .where b { font-weight: 700; }
+.rgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 10px; margin-top: 6px; }
+.rgrid div { display: flex; justify-content: space-between; gap: 4px; font-size: 12.5px; min-width: 0; }
+.rgrid div span:first-child { color: var(--dim); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; }
+.rgrid .sw { display: inline-block; width: 8px; height: 2px; vertical-align: 3px; margin-right: 4px; }
+.strips { background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; padding: 0 0 6px; margin-bottom: 10px; }
+.zoom { display: flex; align-items: center; gap: 6px; padding: 6px 8px 0; }
+.zoom .chip { height: 36px; min-width: 44px; }
+.zoom .zname { flex: 1; text-align: center; font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--dim); padding: 6px 10px 0; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 14px; height: 2.5px; border-radius: 2px; display: inline-block; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 600; text-align: right; padding: 4px 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; padding: 0 4px; height: 40px; border-bottom: 1px solid var(--grid); font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td.name { font-family: var(--sans); white-space: normal; line-height: 1.2; }
+td.name small { display: block; color: var(--dim); font-size: 11px; }
+tr.tap { cursor: pointer; } tr.tap:active td { background: var(--raised); }
+tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lossbar { display: inline-block; height: 6px; border-radius: 2px; vertical-align: 1px; margin-right: 5px; background: var(--slower); }
+.foot { color: var(--faint); font-size: 11.5px; margin: 6px 2px 0; }
+
+/* -- bottom sub-tab bar, in thumb reach -- */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.nav button { height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: var(--dim); position: relative; }
+.nav button svg { width: 22px; height: 22px; }
+.nav button[aria-selected="true"] { color: var(--text); }
+.nav button[aria-selected="true"]::before { content: ""; position: absolute; top: 0; left: 30%; right: 30%; height: 2.5px; border-radius: 0 0 2px 2px; background: var(--accent); }
+.nav .badge { position: absolute; top: 9px; left: calc(50% + 8px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; }
+.placeholder { color: var(--dim); font-size: 14px; }
+.placeholder b { color: var(--text); }
+
+/* -- the mockup's own controls (not part of the design) -- */
+.demo { position: fixed; right: 10px; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 10px); z-index: 7; }
+.demo > button { width: 40px; height: 40px; border-radius: 20px; background: var(--raised); border: 1px solid var(--line); font-size: 11px; font-weight: 700; color: var(--dim); }
+.demo .menu { display: none; position: absolute; right: 0; bottom: 48px; width: 220px; background: var(--panel); border: 1px dashed var(--faint); border-radius: 10px; padding: 8px; font-size: 12.5px; }
+.demo.open .menu { display: block; }
+.demo .menu p { margin: 2px 2px 6px; color: var(--faint); font-size: 11px; }
+.demo .menu div { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.demo .menu button { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; }
+.demo .menu button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* -- a phone on its side: the dash beside the strips, the sub-tabs as a rail -- */
+@media (orientation: landscape) and (max-height: 520px) {
+  :root { --top-h: 40px; }
+  .nav { top: 0; right: auto; width: calc(64px + env(safe-area-inset-left)); grid-template-columns: 1fr; grid-template-rows: 1fr 1fr;
+    border-top: 0; border-right: 1px solid var(--line); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .nav button { height: auto; }
+  .nav button[aria-selected="true"]::before { top: 30%; bottom: 30%; left: 0; right: auto; width: 2.5px; height: auto; }
+  .top, main { margin-left: calc(64px + env(safe-area-inset-left)); }
+  main { padding-bottom: 16px; }
+  .demo { bottom: 10px; }
+  #live.on { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+  #live .panel { margin-bottom: 0; }
+  .seg { margin: 6px 0; } .seg button { height: 30px; }
+  .nav .badge { top: calc(50% - 30px); left: calc(50% + 6px); }
+  .gear { font-size: clamp(80px, 30vh, 120px); }
+}
+@media (min-width: 700px) {
+  main, .top { max-width: 680px; margin-left: auto; margin-right: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .leds.flash i, .ribbon i.cur { animation: none; }
+  .view.on { animation: none; }
+}
+
+/* -- real-runs additions -- */
+.speed { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 15px; flex: none; }
+.speed button { height: 26px; min-width: 38px; padding: 0 8px; border-radius: 13px; font-size: 12.5px; font-weight: 700; color: var(--dim); }
+.speed button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.stagechips { margin-top: 10px; }
+.stagechips .chip { height: 34px; }
+.stagesub { color: var(--dim); font-size: 12px; margin: 5px 2px 0; }
+.call { padding: 9px 0; border-bottom: 1px solid var(--grid); }
+.call:last-child { border-bottom: 0; }
+.call p { margin: 4px 0 0; font-size: 14px; line-height: 1.4; color: var(--text); }
+.kind { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; font-weight: 700; padding: 2px 7px; border-radius: 9px; border: 1px solid var(--line); color: var(--dim); }
+.kind.tip { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.kind.praise { color: var(--good); border-color: color-mix(in srgb, var(--good) 50%, transparent); }
+.kind.still { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+#aptag { display: none; position: fixed; left: 50%; transform: translateX(-50%); z-index: 8; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 8px);
+  background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 5px 12px; font-size: 11.5px; color: var(--dim); letter-spacing: .05em; white-space: nowrap; }
+body.ap #aptag { display: block; }
+body.ap .demo { display: none; }
+@media (max-width: 460px) { .title { display: none; } .speed { margin-left: auto; } }
+@media (orientation: landscape) and (max-height: 520px) { #aptag { bottom: 8px; } }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="top-row">
+    <span class="conn" id="conn"><span class="dot"></span><span id="conn-t">ACR · live</span></span>
+    <span class="title" id="title">Telemetry</span>
+    <div class="speed" id="speed" role="group" aria-label="Replay speed"><button data-x="1" aria-pressed="false">1×</button><button data-x="4" aria-pressed="false">4×</button></div>
+    <button class="icon-btn" id="theme" aria-label="Day or night colours" title="Day or night colours">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </div>
+  <button class="splits" id="splits" aria-expanded="false" aria-controls="sheet">
+    <div class="l1">
+      <span class="stg" id="sp-stage">–</span>
+      <span class="kv num"><i>PB</i><b id="sp-pb">–</b></span>
+      <span class="kv num"><i>SoB</i><b id="sp-sob">–</b></span>
+      <span class="kv num now" id="sp-now">–</span>
+    </div>
+    <div class="ribbon" id="ribbon" aria-hidden="true"></div>
+  </button>
+  <div class="sheet" id="sheet"><table id="splits-table"></table><p class="foot">Gold: the best you have done in that split. Colours as LiveSplit: green ahead of the comparison run, red behind; dark gaining time in the split, light losing it. SoB: every split's best put together.</p></div>
+</div>
+
+<main>
+  <div class="chips stagechips" id="stages" role="group" aria-label="Stage"></div>
+  <p class="stagesub" id="stage-sub"></p>
+  <section id="tab-telemetry">
+    <div class="seg" role="tablist" aria-label="Telemetry view">
+      <button role="tab" id="seg-live" aria-selected="true">LIVE</button>
+      <button role="tab" id="seg-run" aria-selected="false">RUN</button>
+    </div>
+
+    <div class="view on" id="live">
+      <div>
+        <div class="banner" id="banner"></div>
+        <div class="panel" id="dashpanel">
+          <div class="leds" id="leds" aria-hidden="true"></div>
+          <div class="dash">
+            <div class="gear num" id="gear">1</div>
+            <div class="readouts">
+              <div class="big"><b id="spd">–</b><span>km/h</span></div>
+              <div class="big mid"><b id="rpm">–</b><span>rpm</span></div>
+              <div class="shiftat">change up at <b class="num" id="shiftat">7000</b> <span>lights</span></div>
+            </div>
+          </div>
+          <div class="delta">
+            <div class="dv num" id="dv">+0.00</div>
+            <div class="dbar" id="dbar"><i id="dbar-i"></i></div>
+            <div class="dmeta"><span id="dm-l">vs <b class="num" id="pb2">–</b> · split <b class="num" id="dsplit">–</b></span><span>finish ≈ <b class="num" id="pred">–</b></span></div>
+          </div>
+        </div>
+        <div class="panel done" id="done">
+          <div class="panel-h"><span class="lbl" id="done-l">Run finished</span><span class="lbl">replay</span></div>
+          <div class="runhead"><span class="t num" id="done-t">–</span><span class="d num pos-slower" id="done-d">–</span>
+            <span class="s" id="done-s">–</span></div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="open-run">Open the run</button><button class="btn ghost" id="open-debrief">Debrief</button><button class="btn ghost" id="replay">Replay</button></div>
+        </div>
+      </div>
+      <div>
+        <div class="panel">
+          <div class="panel-h"><span class="lbl">Pedals · last 12 s</span><span class="lbl"><span style="color:var(--thr)">THR</span> · <span style="color:var(--brk)">BRK</span></span></div>
+          <canvas id="c-pedals" height="64"></canvas>
+          <div class="panel-h" style="margin:8px 0 4px"><span class="lbl">Steering</span><span class="lbl">L ▲ · R ▼</span></div>
+          <canvas id="c-steer" height="44"></canvas>
+        </div>
+        <div class="duo">
+          <div class="panel"><div class="panel-h"><span class="lbl">g-g</span><span class="lbl num" id="gtot">0.0 g</span></div><canvas id="c-gg"></canvas></div>
+          <div class="panel"><div class="panel-h"><span class="lbl">Stage</span><span class="lbl num" id="km">0.0 / 5.0</span></div><canvas id="c-minimap"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="run">
+      <div class="panel">
+        <div class="runhead">
+          <span class="t num" id="rh-t">–</span><span class="d num" id="rh-d">–</span>
+          <span class="s" id="rh-s">–</span><span class="s" id="rh-ref" style="text-align:right">–</span>
+        </div>
+        <div class="chips" role="group" aria-label="Compare with" id="cmp-chips"></div>
+      </div>
+
+      <div class="readout" id="readout">
+        <div class="where"><span><b class="num" id="ro-d">0.00 km</b> · <span id="ro-sec">–</span></span><span class="num" id="ro-dt">–</span></div>
+        <div class="rgrid" id="rgrid"></div>
+      </div>
+      <div class="strips">
+        <canvas id="c-strips"></canvas>
+        <div class="legend"><span><i style="background:var(--speed)"></i><span id="lg-run">Run</span> (channel colour)</span><span id="lg-refw"><i style="background:var(--ref)"></i><span id="lg-ref">–</span></span></div>
+        <div class="zoom">
+          <button class="chip" id="z-prev" aria-label="Previous section">◀</button>
+          <button class="chip" id="z-all">All</button>
+          <span class="zname" id="z-name">Whole stage</span>
+          <button class="chip" id="z-next" aria-label="Next section">▶</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><span class="lbl" id="map-h">Stage map · time per section</span><span class="lbl" id="map-k"><span class="pos-faster">gain</span> / <span class="pos-slower">loss</span></span></div>
+        <canvas id="c-map"></canvas>
+        <div id="elev-box" hidden>
+          <div class="panel-h" style="margin-top:10px"><span class="lbl">Height</span><span class="lbl num" id="elev-k">–</span></div>
+          <canvas id="c-elev"></canvas>
+        </div>
+        <p class="foot" id="map-foot">Shape from speed and yaw (approximate).</p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><span class="lbl" id="tw-h">Where the time went</span><span class="lbl">tap: show in traces</span></div>
+        <table id="corners"></table>
+        <p class="foot" id="corners-foot"></p>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h"><span class="lbl">g-g · whole run</span><span class="lbl" id="ggk"></span></div>
+        <canvas id="c-ggrun"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-coaching" hidden>
+    <div class="panel" style="margin-top:12px">
+      <div class="panel-h"><span class="lbl">The coach's debrief</span><span class="lbl" id="calls-car"></span></div>
+      <div id="calls"></div>
+      <p class="foot" id="calls-foot">The coach's own words for this car, in the order the app ranks them.</p>
+    </div>
+  </section>
+</main>
+
+<nav class="nav" role="tablist" aria-label="Sub-tabs">
+  <button role="tab" id="nav-coaching" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="2.5" y="13" width="4" height="6" rx="1.5"/><rect x="17.5" y="13" width="4" height="6" rx="1.5"/><path d="M20 19a4 4 0 0 1-4 3h-2"/></svg>
+    Coaching<span class="badge" id="nav-badge">3</span>
+  </button>
+  <button role="tab" id="nav-telemetry" aria-selected="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l3-7 4 14 3-9 2 2h5"/></svg>
+    Telemetry
+  </button>
+</nav>
+<div id="aptag">AUTOPLAY · tap anywhere to stop</div>
+
+<div class="demo" id="demo">
+  <button id="demo-btn" aria-label="Demo controls">DEMO</button>
+  <div class="menu">
+    <p>Show a connection state</p>
+    <div id="d-state">
+      <button data-s="live" aria-pressed="true">Live</button><button data-s="stale">Stale</button>
+      <button data-s="down">Offline</button><button data-s="done">Finished</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script>
+"use strict";
+// ======================================================================
+// Real runs (data.js: DATA, per stage the featured PB run, the runs it is compared with, the sections of its
+// grid and the coach's tips). Samples are every 5 m of stage distance; expanded to 1 m here.
+// ======================================================================
+const STEP = 5, STAGES = DATA.stages;
+let ST, CAR, LAST, cmp, alone, S, L, N, SOB, bestSec, XS, YS, ELEV, cmpIdx = 0, stageIdx = -1, RUNS = {};
+
+function expand(r) {
+  const o = {n: r.n, time: r.time, cls: r.cls, sec: r.sec, ok: r.ok};
+  const mk = (arr, scale, nearest) => {
+    const a = new Float32Array(L + 1);
+    for (let i = 0; i <= L; i++) {
+      const j = Math.min(N - 1, Math.floor(i / STEP)), f = i / STEP - j;
+      a[i] = nearest ? arr[Math.min(N, Math.round(i / STEP))] * scale : (arr[j] * (1 - f) + arr[j + 1] * f) * scale;
+    }
+    return a;
+  };
+  o.t = mk(r.t, 0.01); o.v = mk(r.v, 1 / 3.6); o.thr = mk(r.thr, 0.01); o.brk = mk(r.brk, 0.01); o.steer = mk(r.steer, 0.01);
+  o.gear = mk(r.gear, 1, true); o.rpm = mk(r.rpm, 10); o.alat = mk(r.alat, 0.01); o.along = mk(r.along, 0.01);
+  return o;
+}
+
+function loadStage(i) {
+  stageIdx = i; ST = STAGES[i];
+  N = ST.runs[ST.feat].t.length - 1; L = N * STEP;
+  CAR = {name: ST.car, limiter: ST.limiter, lights: ST.lights, gears: ST.gears};
+  RUNS = {}; for (const id in ST.runs) RUNS[id] = expand(ST.runs[id]);
+  LAST = RUNS[ST.feat];
+  S = ST.sections.map((s, k) => Object.assign({n: k + 1}, s));
+  bestSec = ST.best;
+  alone = ST.cmps.length === 0;
+  cmpIdx = 0; cmp = alone ? LAST : RUNS[ST.cmps[0].id];
+  const multi = ST.multi;
+  SOB = null;
+  if (multi) { let t = LAST.time; S.forEach((_, k) => { if (bestSec[k] != null && LAST.sec[k] != null) t -= LAST.sec[k] - bestSec[k]; }); SOB = Math.min(t, LAST.time); }
+  ELEV = ST.elev || null;
+  if (ST.xy) { XS = ST.xy[0]; YS = ST.xy[1]; } else { XS = Array.from({length: N + 1}, (_, k) => k * STEP); YS = new Array(N + 1).fill(0); }
+}
+function cmpLabel() { return alone ? "" : "Run " + cmp.n; }
+function nameOf(c) { return c === "clean" || c === "learning" ? "clean" : c === "off" ? "with an off" : c || ""; }
+
+// -- formatting: m:ss.s for times, signed tenths for losses, two decimals live --
+const MINUS = "−";
+function clock(t, dp = 1) { if (t == null) return "–"; const u = Math.pow(10, dp), q = Math.round(t * u), m = Math.floor(q / (60 * u)), s = (q - m * 60 * u) / u; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(dp); }
+function signed(x, dp = 1) { if (x == null) return "–"; const r = Math.abs(x) < 0.5 * Math.pow(10, -dp) ? 0 : x; return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp); }
+function km(d) { return (d / 1000).toFixed(2); }
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const $ = (id) => document.getElementById(id);
+
+// LiveSplit's colour rule: gold for a best section, else green when ahead of the comparison, red behind;
+// the darker shade when this section gained time, the lighter when it lost
+function isGold(k, run) { return ST.multi && run === LAST && run.ok[k] && bestSec[k] != null && run.sec[k] != null && run.sec[k] <= bestSec[k] + 1e-6; }
+function splitColour(k, run, ref) {
+  if (isGold(k, run)) return css("--ls-gold");
+  if (alone || run.sec[k] == null || ref.sec[k] == null) return css("--ls-none");
+  const e = Math.min(L, Math.round(S[k].end)), cum = run.t[e] - ref.t[e], seg = run.sec[k] - ref.sec[k];
+  return cum <= 0 ? css(seg <= 0 ? "--ls-ahead-gain" : "--ls-ahead-lose") : css(seg <= 0 ? "--ls-behind-gain" : "--ls-behind-lose");
+}
+
+// ======================================================================
+// Canvas helpers
+// ======================================================================
+function sized(cv, h) {
+  const dpr = Math.min(3, window.devicePixelRatio || 1), w = cv.clientWidth || cv.parentNode.clientWidth;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  cv.style.height = h + "px";
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  return {g, w, h};
+}
+function line(g, pts, colour, width = 1.5, alpha = 1) {
+  if (!pts.length) return;
+  g.save(); g.globalAlpha = alpha; g.strokeStyle = colour; g.lineWidth = width; g.lineJoin = "round"; g.beginPath();
+  pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); g.restore();
+}
+
+// ======================================================================
+// Splits row and sheet
+// ======================================================================
+const ribbon = $("ribbon");
+function buildRibbon() {
+  ribbon.innerHTML = "";
+  S.forEach((s) => { const i = document.createElement("i"); i.style.flexGrow = String(Math.max(1, s.end - s.start)); ribbon.appendChild(i); });
+}
+function ribbonUpTo(k, run) {
+  [...ribbon.children].forEach((c, j) => {
+    c.className = j === k ? "cur" : "";
+    c.style.background = j < k ? splitColour(j, run, cmp) : "";
+  });
+}
+function splitsTable() {
+  const tb = $("splits-table");
+  let html = `<tr><th>Split</th><th>Run ${LAST.n}</th><th>Δ ${alone ? "–" : "Run " + cmp.n}</th><th>Best</th><th>Save</th></tr>`;
+  S.forEach((s, k) => {
+    const mine = LAST.sec[k], d = alone || mine == null || cmp.sec[k] == null ? null : mine - cmp.sec[k];
+    const save = ST.multi && bestSec[k] != null && mine != null ? mine - bestSec[k] : null;
+    html += `<tr><td class="name">${s.n}. ${esc(s.name)}<small>${km(s.start)}–${km(s.end)} km</small></td><td>${mine == null ? "–" : mine.toFixed(1)}</td>` +
+      `<td style="color:${splitColour(k, LAST, cmp)}">${isGold(k, LAST) ? "★ " : ""}${signed(d)}</td><td>${bestSec[k] == null ? "–" : bestSec[k].toFixed(1)}</td>` +
+      `<td style="color:var(--dim)">${save == null || save < 0.05 ? "–" : save.toFixed(1)}</td></tr>`;
+  });
+  html += `<tr><td class="name"><b>Stage</b></td><td><b>${clock(LAST.time)}</b></td><td style="color:var(--${!alone && LAST.time > cmp.time ? "slower" : "faster"})"><b>${alone ? "–" : signed(LAST.time - cmp.time)}</b></td><td><b>${clock(SOB)}</b></td><td style="color:var(--dim)">${SOB == null ? "–" : (LAST.time - SOB).toFixed(1)}</td></tr>`;
+  tb.innerHTML = html;
+}
+$("splits").addEventListener("click", () => {
+  const sh = $("sheet"), open = !sh.classList.contains("open");
+  sh.classList.toggle("open", open); $("splits").setAttribute("aria-expanded", String(open));
+  if (open) splitsTable();
+});
+function headerTexts() {
+  $("sp-stage").textContent = ST.name; $("sp-pb").textContent = clock(LAST.time); $("sp-sob").textContent = clock(SOB);
+  $("pb2").textContent = alone ? "–" : "Run " + cmp.n + " " + clock(cmp.time);
+  $("dm-l").firstChild.textContent = alone ? "one run, " : "vs ";
+  $("stage-sub").textContent = `${ST.car} · ${(L / 1000).toFixed(1)} km · ${S.length} sections`;
+  $("seg-run").textContent = "RUN " + LAST.n;
+}
+
+// ======================================================================
+// LIVE: the run played back as if it were arriving, 10 Hz
+// ======================================================================
+const leds = $("leds");
+for (let i = 0; i < 15; i++) leds.appendChild(document.createElement("i"));
+function lights(rpm) {
+  // as the page does today: the first light at 60 % of the change-up point, all flashing past it
+  const target = CAR.lights.shift, on = Math.max(0, Math.min(15, Math.ceil(15 * (rpm - 0.6 * target) / (0.4 * target))));
+  leds.classList.toggle("flash", rpm >= target);
+  [...leds.children].forEach((c, i) => { c.className = rpm >= target || i >= on ? "" : i < 7 ? "g" : i < 12 ? "y" : "r"; });
+}
+function dAt(run, t) { let lo = 0, hi = L; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (run.t[m] <= t) lo = m; else hi = m; } return lo + (t - run.t[lo]) / Math.max(1e-3, run.t[hi] - run.t[lo]); }
+function at(arr, d) { const i = Math.max(0, Math.min(L - 1, Math.floor(d))), f = d - i; return arr[i] * (1 - f) + arr[i + 1] * f; }
+const hist = [];
+let clockT = 0, rate = 1, state = "live", lastFrame = performance.now(), lastSample = -1;
+
+function sampleAt(t) {
+  const d = Math.min(L, dAt(LAST, t));
+  return {t, d, v: at(LAST.v, d) * 3.6, rpm: at(LAST.rpm, d), gear: LAST.gear[Math.round(d)], thr: at(LAST.thr, d), brk: at(LAST.brk, d),
+    steer: at(LAST.steer, d), alat: at(LAST.alat, d), along: at(LAST.along, d), delta: alone ? 0 : at(LAST.t, d) - at(cmp.t, d)};
+}
+function secAt(d) { let k = 0; while (k < S.length - 1 && d >= S[k].end) k++; return k; }
+function gearText(g) { return g > 0 ? g : g < 0 ? "R" : "N"; }
+
+function drawLive(s) {
+  $("gear").textContent = gearText(s.gear);
+  $("gear").classList.toggle("hot", s.rpm >= CAR.lights.shift);
+  $("spd").textContent = Math.round(s.v);
+  $("rpm").textContent = Math.round(s.rpm / 10) * 10;
+  $("shiftat").textContent = s.gear >= CAR.gears ? "–" : CAR.lights.shift;
+  lights(s.rpm);
+  const dv = $("dv"), k = secAt(s.d), segStart = Math.round(S[k].start), bar = $("dbar-i");
+  if (alone) {
+    dv.textContent = "–"; dv.className = "dv num"; bar.style.width = "0"; $("dsplit").textContent = k + 1 + " –";
+    $("sp-now").innerHTML = `<span>${k + 1}/${S.length}</span>`;
+  } else {
+    dv.textContent = signed(s.delta, 2);
+    dv.className = "dv num " + (s.delta > 0.005 ? "pos-slower" : s.delta < -0.005 ? "pos-faster" : "");
+    const f = Math.max(-1, Math.min(1, s.delta / 2));
+    bar.style.background = f > 0 ? css("--slower") : css("--faster");
+    bar.style.left = f > 0 ? "50%" : (50 + f * 50) + "%"; bar.style.width = Math.abs(f) * 50 + "%";
+    const segDelta = (at(LAST.t, s.d) - LAST.t[segStart]) - (at(cmp.t, s.d) - cmp.t[segStart]);
+    $("dsplit").textContent = k + 1 + " " + signed(segDelta, 2);
+    $("sp-now").innerHTML = `<span class="${s.delta > 0 ? "pos-slower" : "pos-faster"}">${k + 1}/${S.length} ${signed(s.delta, 2)}</span>`;
+  }
+  $("pred").textContent = clock(LAST.time + (alone ? 0 : cmp.time - LAST.time + s.delta));
+  $("km").textContent = km(s.d).slice(0, -1) + " / " + (L / 1000).toFixed(1) + " km";
+  $("gtot").textContent = Math.hypot(s.alat, s.along).toFixed(1) + " g";
+  ribbonUpTo(k, LAST);
+  drawRolling(); drawGG($("c-gg"), s); drawMini(s.d);
+}
+
+function drawRolling() {
+  const span = 12, now = hist.length ? hist[hist.length - 1].t : 0;
+  const xOf = (w, t) => w - (now - t) / span * w;
+  { const {g, w, h} = sized($("c-pedals"), 64);
+    g.strokeStyle = css("--grid"); g.lineWidth = 1; for (const y of [0.5, h / 2, h - 0.5]) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+    for (const [key, col] of [["thr", "--thr"], ["brk", "--brk"]]) {
+      const pts = hist.map((s) => [xOf(w, s.t), h - 1 - s[key] * (h - 2)]);
+      if (!pts.length) continue;
+      g.save(); g.globalAlpha = .18; g.fillStyle = css(col); g.beginPath(); g.moveTo(pts[0][0], h);
+      pts.forEach(([x, y]) => g.lineTo(x, y)); g.lineTo(pts[pts.length - 1][0], h); g.fill(); g.restore();
+      line(g, pts, css(col), 1.75);
+    } }
+  { const {g, w, h} = sized($("c-steer"), 44);
+    g.strokeStyle = css("--grid"); g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+    line(g, hist.map((s) => [xOf(w, s.t), h / 2 - s.steer * (h / 2 - 2)]), css("--steer"), 1.75); }
+}
+
+function drawGG(cv, s, all) {
+  const size = Math.min(cv.clientWidth || 150, all ? 300 : 170);
+  const {g, w, h} = sized(cv, size), cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 6, sc = R / 1.4;
+  g.strokeStyle = css("--grid"); g.lineWidth = 1;
+  for (const r of [0.5, 1.0]) { g.beginPath(); g.arc(cx, cy, r * sc, 0, 7); g.stroke(); }
+  g.beginPath(); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  g.fillStyle = css("--faint"); g.font = "10px " + css("--mono"); g.fillText("1g", cx + sc + 2, cy - 3);
+  g.fillText("BRK", cx - 10, cy + R - 1); g.fillText("ACC", cx - 10, cy - R + 9);
+  if (all) {
+    for (const [run, col, a] of [[alone ? null : cmp, css("--ref"), .22], [LAST, css("--speed"), .3]]) {
+      if (!run) continue;
+      g.fillStyle = col; g.globalAlpha = a;
+      for (let i = 0; i < L; i += 6) g.fillRect(cx - run.alat[i] * sc - 1, cy - run.along[i] * sc - 1, 2.2, 2.2);
+    }
+    g.globalAlpha = 1; return;
+  }
+  const trail = hist.slice(-30);
+  trail.forEach((p, i) => { g.globalAlpha = (i + 1) / trail.length * .6; g.fillStyle = css("--speed"); g.fillRect(cx - p.alat * sc - 1.5, cy - p.along * sc - 1.5, 3, 3); });
+  g.globalAlpha = 1; g.fillStyle = css("--text"); g.beginPath(); g.arc(cx - s.alat * sc, cy - s.along * sc, 5, 0, 7); g.fill();
+}
+
+const MX = (i) => XS[Math.max(0, Math.min(N, Math.round(i / STEP)))], MY = (i) => YS[Math.max(0, Math.min(N, Math.round(i / STEP)))];
+function mapFrame(w, h, pad) {
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+  for (let i = 0; i <= L; i += STEP) { x0 = Math.min(x0, MX(i)); x1 = Math.max(x1, MX(i)); y0 = Math.min(y0, MY(i)); y1 = Math.max(y1, MY(i)); }
+  const sc = Math.min((w - 2 * pad) / Math.max(1, x1 - x0), (h - 2 * pad) / Math.max(1, y1 - y0)), ox = (w - (x1 - x0) * sc) / 2, oy = (h - (y1 - y0) * sc) / 2;
+  return (i) => [ox + (MX(i) - x0) * sc, h - (oy + (MY(i) - y0) * sc)];
+}
+function drawMini(d) {
+  const cv = $("c-minimap"), size = Math.min(cv.clientWidth || 150, 170);
+  const {g, w, h} = sized(cv, size), P = mapFrame(w, h, 8), pts = [];
+  for (let i = 0; i <= L; i += STEP) pts.push(P(i));
+  line(g, pts, css("--line"), 4);
+  const done = []; for (let i = 0; i <= d; i += STEP) done.push(P(i));
+  line(g, done, css("--dim"), 2);
+  const [x, y] = P(Math.round(d)); g.fillStyle = css("--text"); g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill();
+  g.strokeStyle = css("--bg"); g.lineWidth = 2; g.stroke();
+}
+
+let onDone = null;
+function tick(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  if (state === "live" && !$("tab-telemetry").hidden && !document.hidden) {   // the replay waits while Coaching (or another app) is shown
+    clockT += dt * rate;
+    if (clockT >= LAST.t[L]) { setState("done"); if (onDone) onDone(); }
+    else {
+      const k = Math.floor(clockT * 10);
+      if (k !== lastSample) {                           // 10 Hz, as the trace and the proposed /api/v1/live?since= deliver it
+        lastSample = k; const s = sampleAt(k / 10); hist.push(s); while (hist.length && hist[0].t < s.t - 12.5) hist.shift();
+        if ($("live").classList.contains("on")) drawLive(s);
+      }
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+function restartLive() { clockT = 0; hist.length = 0; lastSample = -1; }
+function setState(s) {
+  state = s;
+  document.querySelectorAll("#d-state button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === s)));
+  const conn = $("conn"), banner = $("banner"), dash = $("dashpanel");
+  conn.className = "conn" + (s === "stale" ? " stale" : s === "down" ? " down" : s === "done" ? " idle" : "");
+  $("conn-t").textContent = {live: "ACR · live", stale: "ACR · paused 6 s", down: "Oversteer not answering", done: "ACR · between stages"}[s];
+  banner.className = "banner" + (s === "stale" ? " show" : s === "down" ? " show bad" : "");
+  banner.innerHTML = s === "stale" ? "<b>No telemetry for 6 s</b><span>Game paused or in a menu. Last values shown.</span>" :
+    s === "down" ? "<b>Oversteer is not answering</b><span>Retrying every 2 s · last values shown</span>" : "";
+  dash.classList.toggle("dimmed", s === "stale" || s === "down");
+  dash.style.display = s === "done" ? "none" : "";
+  $("done").classList.toggle("show", s === "done");
+  if (s === "done") {
+    $("done-l").textContent = "Run " + LAST.n + " finished";
+    $("done-t").textContent = clock(LAST.time);
+    const d = $("done-d"); d.textContent = alone ? "" : signed(LAST.time - cmp.time) + " vs " + cmpLabel();
+    d.className = "d num " + (!alone && LAST.time > cmp.time ? "pos-slower" : "pos-faster");
+    const golds = S.filter((_, k) => isGold(k, LAST)).length;
+    $("done-s").textContent = `SoB ${clock(SOB)} · ${golds} gold splits · ${ST.tips.length} calls in the debrief`;
+    ribbonUpTo(S.length, LAST);
+    $("sp-now").innerHTML = alone ? `<span>Run ${LAST.n} ${clock(LAST.time)}</span>` : `<span class="${LAST.time > cmp.time ? "pos-slower" : "pos-faster"}">Run ${LAST.n} ${clock(LAST.time)} ${signed(LAST.time - cmp.time)}</span>`;
+  }
+  if (s === "live" && clockT >= LAST.t[L] - 0.2) restartLive();
+}
+
+// ======================================================================
+// RUN: distance-aligned strips with a shared cursor
+// ======================================================================
+let cursor = 0, view = [0, 1], zoomSec = -1;
+const STRIPS = [
+  {key: "delta", label: "Δ s", h: 56},
+  {key: "v", label: "km/h", h: 84},
+  {key: "pedals", label: "PEDAL", h: 56},
+  {key: "steer", label: "STEER", h: 44},
+  {key: "gear", label: "GEAR", h: 40},
+  {key: "rpm", label: "RPM", h: 56},
+];
+const LANE = 16, GAP = 6, GUT = 34;
+function drawStrips() {
+  const cv = $("c-strips"), total = LANE + STRIPS.reduce((a, s) => a + s.h + GAP, 0);
+  const {g, w} = sized(cv, total), W = w - GUT - 6, [a, z] = view, ref = alone ? null : cmp;
+  const X = (d) => GUT + (d - a) / (z - a) * W;
+  const step = Math.max(1, Math.floor((z - a) / W / 1.5));
+  g.font = "600 9.5px " + css("--mono");
+  S.forEach((s, k) => {
+    if (s.end < a || s.start > z) return;
+    const x0 = Math.max(GUT, X(s.start)), x1 = Math.min(GUT + W, X(s.end));
+    if (k % 2) { g.fillStyle = css("--grid"); g.globalAlpha = .55; g.fillRect(x0, LANE, x1 - x0, total - LANE); g.globalAlpha = 1; }
+    g.fillStyle = k === secAt(cursor) ? css("--text") : css("--faint");
+    if (x1 - x0 > 14) g.fillText(String(k + 1), x0 + 2, 11);
+  });
+  let y = LANE;
+  for (const st of STRIPS) {
+    const H = st.h, top = y, bot = y + H;
+    g.strokeStyle = css("--line"); g.lineWidth = 1; g.beginPath(); g.moveTo(GUT, bot + 0.5); g.lineTo(GUT + W, bot + 0.5); g.stroke();
+    g.fillStyle = css("--dim"); g.font = "600 9.5px " + css("--sans"); g.fillText(st.label, 4, top + 11);
+    const series = (run, f) => { const p = []; for (let d = Math.floor(a); d <= Math.min(L, Math.ceil(z)); d += step) p.push([X(d), f(run, d)]); return p; };
+    const refLine = (f, col, wd, al) => { if (ref) line(g, series(ref, f), col, wd, al); };
+    if (st.key === "delta") {
+      let mx = 0.2; if (ref) for (let d = Math.floor(a); d <= z; d += step) mx = Math.max(mx, Math.abs(LAST.t[d] - ref.t[d]));
+      mx = Math.ceil(mx * 5) / 5;
+      const Y = (v) => top + H / 2 - v / mx * (H / 2 - 3);
+      g.strokeStyle = css("--dim"); g.beginPath(); g.moveTo(GUT, Y(0)); g.lineTo(GUT + W, Y(0)); g.stroke();
+      if (ref) {
+        const pts = series(LAST, (r, d) => Y(r.t[d] - ref.t[d]));
+        for (const [sign, col] of [[1, "--slower"], [-1, "--faster"]]) {
+          g.save(); g.beginPath(); g.rect(GUT, sign > 0 ? top : Y(0), W, sign > 0 ? Y(0) - top : bot - Y(0)); g.clip();
+          g.globalAlpha = .22; g.fillStyle = css(col); g.beginPath(); g.moveTo(pts[0][0], Y(0)); pts.forEach(([x, yy]) => g.lineTo(x, yy));
+          g.lineTo(pts[pts.length - 1][0], Y(0)); g.fill(); g.globalAlpha = 1; line(g, pts, css(col), 1.75); g.restore();
+        }
+      }
+      g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono"); g.fillText("+" + mx.toFixed(1), 4, top + 24); g.fillText(MINUS + mx.toFixed(1), 4, bot - 3);
+    } else if (st.key === "v") {
+      const Y = (v) => bot - 2 - v / 200 * (H - 4);
+      g.strokeStyle = css("--grid"); for (const v of [50, 100, 150]) { g.beginPath(); g.moveTo(GUT, Y(v)); g.lineTo(GUT + W, Y(v)); g.stroke(); }
+      g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono"); g.fillText("100", 6, Y(100) + 3);
+      refLine((r, d) => Y(r.v[d] * 3.6), css("--ref"), 1.25, .9);
+      line(g, series(LAST, (r, d) => Y(r.v[d] * 3.6)), css("--speed"), 1.75);
+    } else if (st.key === "pedals") {
+      const Y = (v) => bot - 2 - v * (H - 4);
+      refLine((r, d) => Y(r.thr[d]), css("--ref"), 1, .8);
+      refLine((r, d) => Y(r.brk[d]), css("--ref"), 1, .8);
+      line(g, series(LAST, (r, d) => Y(r.thr[d])), css("--thr"), 1.75);
+      line(g, series(LAST, (r, d) => Y(r.brk[d])), css("--brk"), 1.75);
+    } else if (st.key === "steer") {
+      const Y = (v) => top + H / 2 - v * (H / 2 - 3);
+      g.strokeStyle = css("--grid"); g.beginPath(); g.moveTo(GUT, Y(0)); g.lineTo(GUT + W, Y(0)); g.stroke();
+      g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono"); g.fillText("L", 24, top + 10); g.fillText("R", 24, bot - 3);
+      refLine((r, d) => Y(r.steer[d]), css("--ref"), 1, .8);
+      line(g, series(LAST, (r, d) => Y(r.steer[d])), css("--steer"), 1.75);
+    } else if (st.key === "gear") {
+      const Y = (v) => bot - 4 - (Math.max(1, v) - 1) / Math.max(1, CAR.gears - 1) * (H - 8);
+      const stepPts = (run) => { const p = []; let prev = null; for (let d = Math.floor(a); d <= Math.min(L, z); d += step) { const yy = Y(run.gear[d]); if (prev !== null && yy !== prev) p.push([X(d), prev]); p.push([X(d), yy]); prev = yy; } return p; };
+      if (ref) line(g, stepPts(ref), css("--ref"), 1, .8);
+      line(g, stepPts(LAST), css("--gear"), 1.75);
+    } else if (st.key === "rpm") {
+      const Y = (v) => bot - 2 - (v - 2000) / (CAR.limiter - 2000) * (H - 4);
+      g.fillStyle = css("--rpm"); g.globalAlpha = .1; g.fillRect(GUT, Y(CAR.limiter), W, Y(CAR.lights.shift) - Y(CAR.limiter)); g.globalAlpha = 1;
+      g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono"); g.fillText((CAR.limiter / 1000).toFixed(1) + "k", 4, Y(CAR.limiter) + 9);
+      refLine((r, d) => Y(r.rpm[d]), css("--ref"), 1, .8);
+      line(g, series(LAST, (r, d) => Y(r.rpm[d])), css("--rpm"), 1.75);
+    }
+    y = bot + GAP;
+  }
+  if (cursor >= a && cursor <= z) {
+    g.strokeStyle = css("--text"); g.lineWidth = 1; g.beginPath(); g.moveTo(X(cursor) + .5, LANE); g.lineTo(X(cursor) + .5, total); g.stroke();
+  }
+  cv._map = (px) => a + (px - GUT) / W * (z - a);
+  readout();
+}
+function readout() {
+  const d = Math.max(0, Math.min(L, Math.round(cursor))), k = secAt(d), ref = alone ? null : cmp;
+  $("ro-d").textContent = km(d) + " km";
+  $("ro-sec").textContent = "split " + (k + 1) + " · " + S[k].name;
+  const el = $("ro-dt");
+  if (ref) { const dt = LAST.t[d] - ref.t[d]; el.textContent = "Δ " + signed(dt, 2) + " s"; el.className = "num " + (dt > 0 ? "pos-slower" : "pos-faster"); }
+  else { el.textContent = "Run " + LAST.n; el.className = "num"; }
+  const cell = (lab, col, a, b) => `<div><span><i class="sw" style="background:var(${col})"></i>${lab}</span><span class="num">${a}${ref ? `<span style="color:var(--ref)"> ${b}</span>` : ""}</span></div>`;
+  const R = ref || LAST;
+  $("rgrid").innerHTML =
+    cell("km/h", "--speed", Math.round(LAST.v[d] * 3.6), Math.round(R.v[d] * 3.6)) +
+    cell("thr", "--thr", Math.round(LAST.thr[d] * 100), Math.round(R.thr[d] * 100)) +
+    cell("brk", "--brk", Math.round(LAST.brk[d] * 100), Math.round(R.brk[d] * 100)) +
+    cell("gear", "--gear", gearText(LAST.gear[d]), gearText(R.gear[d])) +
+    cell("rpm", "--rpm", (LAST.rpm[d] / 1000).toFixed(1) + "k", (R.rpm[d] / 1000).toFixed(1) + "k") +
+    cell("steer", "--steer", Math.round(LAST.steer[d] * 100), Math.round(R.steer[d] * 100));
+}
+function zoomTo(k) {
+  zoomSec = k;
+  if (k < 0) { view = [0, L]; $("z-name").textContent = "Whole stage"; }
+  else { const s = S[k]; view = [Math.max(0, s.start - 60), Math.min(L, s.end + 60)]; cursor = Math.max(view[0], Math.min(view[1], s.apex));
+    $("z-name").textContent = "Split " + (k + 1) + " · " + s.name + " · " + km(s.apex) + " km"; }
+  drawStrips(); drawMap(); markRow();
+}
+(function bindStrips() {
+  const cv = $("c-strips");
+  const move = (e) => { const r = cv.getBoundingClientRect(); cursor = Math.max(view[0], Math.min(view[1], cv._map(e.clientX - r.left))); drawStrips(); drawMap(); };
+  let down = false, lastTap = 0;
+  cv.addEventListener("pointerdown", (e) => { down = true; move(e);
+    const now = Date.now(); if (now - lastTap < 300) zoomTo(zoomSec === secAt(cursor) ? -1 : secAt(cursor)); lastTap = now; });
+  cv.addEventListener("pointermove", (e) => { if (down || e.pointerType === "mouse") move(e); });
+  window.addEventListener("pointerup", () => { down = false; });
+  $("z-all").onclick = () => zoomTo(-1);
+  $("z-prev").onclick = () => zoomTo(Math.max(0, (zoomSec < 0 ? secAt(cursor) : zoomSec) - 1));
+  $("z-next").onclick = () => zoomTo(Math.min(S.length - 1, (zoomSec < 0 ? secAt(cursor) : zoomSec) + 1));
+})();
+
+function lossOf(k) {            // seconds lost in section k against the comparison, null where it is not compared
+  if (alone || !ST.cmps[cmpIdx] || !ST.cmps[cmpIdx].cm[k] || LAST.sec[k] == null || cmp.sec[k] == null) return null;
+  return LAST.sec[k] - cmp.sec[k];
+}
+function drawMap() {
+  const cv = $("c-map"), {g, w, h} = sized(cv, Math.round(Math.min(340, (cv.clientWidth || 340) * 0.72))), P = mapFrame(w, h, 14);
+  const all = []; for (let i = 0; i <= L; i += STEP) all.push(P(i));
+  line(g, all, css("--bg"), 9);
+  S.forEach((s, k) => {
+    const loss = lossOf(k), f = loss == null ? 0 : Math.min(1, Math.abs(loss) / 0.6);
+    const col = alone ? css(k % 2 ? "--dim" : "--faint") : loss == null || Math.abs(loss) < 0.05 ? css("--neutral") : css(loss > 0 ? "--slower" : "--faster");
+    const pts = []; for (let i = Math.round(s.start); i <= Math.round(s.end); i += STEP) pts.push(P(i));
+    line(g, pts, col, 5, alone || loss == null || Math.abs(loss) < 0.05 ? 1 : 0.35 + 0.65 * f);
+    if (loss != null && Math.abs(loss) >= 0.25) {
+      const [x, y] = P(Math.round(s.apex)); g.fillStyle = css("--text"); g.font = "600 10.5px " + css("--mono");
+      g.fillText((k + 1) + " " + signed(loss), x + 7, y - 6);
+    }
+  });
+  const [sx, sy] = P(0), [fx, fy] = P(L);
+  g.font = "700 10px " + css("--sans");
+  const lab = (t, x, y) => g.fillText(t, x + 6 + g.measureText(t).width > w - 2 ? x - 6 - g.measureText(t).width : x + 6, y);
+  g.fillStyle = css("--faster"); g.fillRect(sx - 3, sy - 3, 6, 6); lab("START", sx, sy + 12);
+  g.fillStyle = css("--text"); g.fillRect(fx - 3, fy - 3, 6, 6); lab("FINISH", fx, fy + 12);
+  const [cx, cy] = P(Math.round(cursor)); g.fillStyle = css("--text"); g.beginPath(); g.arc(cx, cy, 5.5, 0, 7); g.fill();
+  g.strokeStyle = css("--panel"); g.lineWidth = 2; g.stroke();
+  drawElev();
+}
+function drawElev() {       // the stage's height from the game's positions; the traces' window shaded, the cursor linked to the map and traces
+  const box = $("elev-box"); box.hidden = !ELEV; if (!ELEV) return;
+  const cv = $("c-elev"), {g, w, h} = sized(cv, 78), L0 = 34, R0 = 8, T0 = 8, B0 = 16, W = w - L0 - R0, H = h - T0 - B0;
+  let lo = 1e9, hi = -1e9; ELEV.forEach((v) => { lo = Math.min(lo, v); hi = Math.max(hi, v); });
+  const span = Math.max(20, hi - lo), X = (d) => L0 + d / L * W, Y = (v) => T0 + H - (v - lo) / span * H;
+  const at = (d) => { const f = Math.max(0, Math.min(N, d / STEP)), j = Math.min(N - 1, Math.floor(f)); return ELEV[j] + (ELEV[j + 1] - ELEV[j]) * (f - j); };
+  g.strokeStyle = css("--grid"); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(L0, T0 + .5); g.lineTo(L0 + W, T0 + .5); g.moveTo(L0, T0 + H + .5); g.lineTo(L0 + W, T0 + H + .5); g.stroke();
+  g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono");
+  g.fillText(Math.round(hi) + " m", 2, T0 + 9); g.fillText(Math.round(lo) + " m", 2, T0 + H);
+  g.fillText("0", L0, h - 3); g.fillText((L / 1000).toFixed(1) + " km", L0 + W - 36, h - 3);
+  if (view[1] - view[0] < L - 1) { g.fillStyle = css("--line"); g.globalAlpha = .6; g.fillRect(X(view[0]), T0, X(view[1]) - X(view[0]), H); g.globalAlpha = 1; }
+  const pts = ELEV.map((v, i) => [X(i * STEP), Y(v)]);
+  g.save(); g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.lineTo(L0 + W, T0 + H); g.lineTo(L0, T0 + H); g.closePath();
+  g.fillStyle = css("--dim"); g.globalAlpha = .16; g.fill(); g.restore();
+  line(g, pts, css("--dim"), 1.75);
+  const c = Math.max(0, Math.min(L, cursor)), cx = X(c), cy = Y(at(c));
+  g.strokeStyle = css("--text"); g.lineWidth = 1; g.beginPath(); g.moveTo(cx + .5, T0); g.lineTo(cx + .5, T0 + H); g.stroke();
+  g.fillStyle = css("--text"); g.beginPath(); g.arc(cx, cy, 4, 0, 7); g.fill(); g.strokeStyle = css("--panel"); g.lineWidth = 2; g.stroke();
+  $("elev-k").textContent = Math.round(at(c)) + " m · " + (Math.round(at(c) - ELEV[0]) >= 0 ? "+" : MINUS) + Math.abs(Math.round(at(c) - ELEV[0])) + " from the start";
+  cv._d = (px) => Math.max(0, Math.min(L, (px - L0) / W * L));
+}
+(function bindElev() {
+  const cv = $("c-elev");
+  const move = (e) => { if (!cv._d) return; const r = cv.getBoundingClientRect(); cursor = Math.max(view[0], Math.min(view[1], cv._d(e.clientX - r.left))); drawStrips(); drawMap(); };
+  let down = false;
+  cv.addEventListener("pointerdown", (e) => { down = true; move(e); });
+  cv.addEventListener("pointermove", (e) => { if (down || e.pointerType === "mouse") move(e); });
+  window.addEventListener("pointerup", () => { down = false; });
+})();
+
+function cornerRows() {
+  const cm = alone ? null : ST.cmps[cmpIdx].cm;
+  return S.map((s, k) => ({k, s, loss: lossOf(k), cm: cm ? cm[k] : null})).filter((r) => r.loss != null);
+}
+function cornerTable() {
+  const tb = $("corners");
+  if (alone) {
+    $("tw-h").textContent = "Sections";
+    let html = "<tr><th>Split</th><th>Time</th><th>Min</th><th>Exit</th></tr>";
+    S.forEach((s, k) => { const ab = ST.ab[k];
+      html += `<tr class="tap" data-k="${k}"><td class="name">${k + 1}. ${esc(s.name)}<small>${km(s.apex)} km</small></td><td>${LAST.sec[k] == null ? "–" : LAST.sec[k].toFixed(1)}</td><td>${ab ? ab[0] : "–"}</td><td>${ab ? ab[1] : "–"}</td></tr>`; });
+    tb.innerHTML = html;
+    $("corners-foot").textContent = "The only run of this car on this stage so far: nothing to compare it with. Min, exit: km/h.";
+  } else {
+    $("tw-h").textContent = "Where the time went";
+    const rows = cornerRows().sort((p, q) => q.loss - p.loss), max = Math.max(0.05, ...rows.map((r) => Math.abs(r.loss)));
+    const fmt = (x) => x == null || Math.abs(x) < 1 ? "–" : signed(x, 0);
+    let html = "<tr><th>Split</th><th>Loss</th><th>Min</th><th>Exit</th><th>Brake</th></tr>";
+    rows.slice(0, 8).forEach((r) => {
+      html += `<tr class="tap" data-k="${r.k}"><td class="name">${r.k + 1}. ${esc(r.s.name)}<small>${km(r.s.apex)} km</small></td>` +
+        `<td class="${r.loss > 0 ? "pos-slower" : "pos-faster"}"><span class="lossbar" style="width:${Math.round(Math.abs(r.loss) / max * 22)}px;background:var(${r.loss > 0 ? "--slower" : "--faster"})"></span>${signed(r.loss)}</td>` +
+        `<td>${fmt(r.cm[0])}</td><td>${fmt(r.cm[1])}</td><td>${fmt(r.cm[2])}</td></tr>`;
+    });
+    tb.innerHTML = html;
+    $("corners-foot").textContent = `Min, exit: km/h against Run ${cmp.n}. Brake: metres earlier (+) or later (−) than Run ${cmp.n}'s strongest braking. The launch section and sections next to an off are not compared.`;
+  }
+  tb.querySelectorAll("tr.tap").forEach((tr) => tr.onclick = () => { zoomTo(Number(tr.dataset.k)); $("readout").scrollIntoView({behavior: "smooth", block: "start"}); });
+  markRow();
+}
+function markRow() { document.querySelectorAll("#corners tr.tap").forEach((tr) => tr.classList.toggle("sel", Number(tr.dataset.k) === zoomSec)); }
+
+function runHead() {
+  $("rh-t").textContent = clock(LAST.time);
+  const el = $("rh-d");
+  if (alone) { el.textContent = "–"; el.className = "d num"; }
+  else { const d = LAST.time - cmp.time; el.textContent = signed(d); el.className = "d num " + (d > 0 ? "pos-slower" : "pos-faster"); }
+  const golds = S.filter((_, k) => isGold(k, LAST)).length;
+  $("rh-s").textContent = `Run ${LAST.n} · ${nameOf(LAST.cls)}${ST.multi ? ` · ${golds} gold split${golds === 1 ? "" : "s"}` : ""}`;
+  $("rh-ref").textContent = alone ? "no other run to compare" : `vs Run ${cmp.n} ${clock(cmp.time)}`;
+  $("lg-run").textContent = "Run " + LAST.n;
+  $("lg-refw").style.display = alone ? "none" : "";
+  if (!alone) $("lg-ref").textContent = `Run ${cmp.n} · ${ST.cmps[cmpIdx].label}`;
+  $("map-h").textContent = alone ? "Stage map" : `Stage map · time per section vs Run ${cmp.n}`;
+  $("map-k").style.display = alone ? "none" : "";
+  $("ggk").innerHTML = `<span style="color:var(--speed)">Run ${LAST.n}</span>${alone ? "" : ` · <span style="color:var(--ref)">Run ${cmp.n}</span>`}`;
+  $("map-foot").textContent = ST.pos ? "Stage map from the game's positions." + (ST.elev ? " Height from the same positions." : "") : ST.xy ? "Shape from speed and yaw (approximate): this run has no positions." : "Distance bar: this run has no yaw channel to draw a shape from.";
+}
+function buildCmpChips() {
+  const box = $("cmp-chips"); box.innerHTML = ""; box.style.display = alone ? "none" : "";
+  ST.cmps.forEach((c, i) => {
+    const b = document.createElement("button"); b.className = "chip"; b.setAttribute("aria-pressed", String(i === cmpIdx));
+    b.textContent = `vs ${c.label} · Run ${RUNS[c.id].n}`;
+    b.onclick = () => { cmpIdx = i; cmp = RUNS[c.id]; [...box.children].forEach((x) => x.setAttribute("aria-pressed", String(x === b))); headerTexts(); drawRun(); };
+    box.appendChild(b);
+  });
+}
+let runOpened = false;
+function worstSection() {
+  const rows = cornerRows(); if (!rows.length) return 1;
+  return rows.reduce((b, r) => r.loss > b.loss ? r : b).k;
+}
+function drawRun() {
+  if (!runOpened) { runOpened = true; zoomTo(alone ? Math.min(1, S.length - 1) : worstSection()); }
+  runHead(); drawStrips(); drawMap(); cornerTable(); drawGG($("c-ggrun"), null, true);
+}
+
+// ======================================================================
+// Debrief: the coach's own tips for the car, text unchanged
+// ======================================================================
+function calls() {
+  $("calls-car").textContent = ST.car;
+  $("calls").innerHTML = ST.tips.length ? ST.tips.map((t) => `<div class="call"><span class="kind ${esc(t.kind)}">${esc(t.kind)}</span><p>${esc(t.text)}</p></div>`).join("") :
+    `<p class="placeholder">The coach has nothing to say about this car yet: it needs a few more runs on the stage first.</p>`;
+}
+
+// ======================================================================
+// Navigation, theme, speed, stage picker, autoplay
+// ======================================================================
+function curView() { return $("run").classList.contains("on") ? "run" : "live"; }
+function showView(v) {
+  $("live").classList.toggle("on", v === "live");
+  $("run").classList.toggle("on", v === "run");
+  $("seg-live").setAttribute("aria-selected", String(v === "live"));
+  $("seg-run").setAttribute("aria-selected", String(v === "run"));
+  if (v === "run") drawRun(); else if (hist.length) drawLive(hist[hist.length - 1]);
+}
+function showTab(t) {
+  $("tab-telemetry").hidden = t !== "telemetry";
+  $("tab-coaching").hidden = t !== "coaching";
+  $("nav-telemetry").setAttribute("aria-selected", String(t === "telemetry"));
+  $("nav-coaching").setAttribute("aria-selected", String(t === "coaching"));
+  $("title").textContent = t === "telemetry" ? "Telemetry" : "Coaching";
+  if (t === "coaching") { calls(); $("nav-badge").hidden = true; }
+  else if (curView() === "live" && hist.length) drawLive(hist[hist.length - 1]);
+}
+function curTab() { return $("tab-coaching").hidden ? "telemetry" : "coaching"; }
+function selectStage(i) {
+  loadStage(i); runOpened = false; zoomSec = -1; view = [0, L]; cursor = 0;
+  buildRibbon(); buildCmpChips(); headerTexts();
+  [...$("stages").children].forEach((b, j) => b.setAttribute("aria-pressed", String(j === i)));
+  $("nav-badge").textContent = ST.tips.length; $("nav-badge").hidden = !ST.tips.length || curTab() === "coaching";
+  restartLive(); setState("live");
+  if (curTab() === "coaching") calls();
+  showView(curView());
+  if (curView() === "live") { const s = sampleAt(0); hist.push(s); lastSample = 0; drawLive(s); }
+}
+STAGES.forEach((s, i) => {
+  const b = document.createElement("button"); b.className = "chip"; b.setAttribute("aria-pressed", "false");
+  b.textContent = `${s.name} · ${(s.length / 1000).toFixed(1)} km`; b.onclick = () => selectStage(i);
+  $("stages").appendChild(b);
+});
+
+$("seg-live").onclick = () => showView("live");
+$("seg-run").onclick = () => showView("run");
+$("open-run").onclick = () => showView("run");
+$("open-debrief").onclick = () => showTab("coaching");
+$("replay").onclick = () => { restartLive(); setState("live"); };
+$("nav-telemetry").onclick = () => showTab("telemetry");
+$("nav-coaching").onclick = () => showTab("coaching");
+$("theme").onclick = () => {
+  const r = document.documentElement, t = r.dataset.theme === "dark" ? "light" : "dark"; r.dataset.theme = t;
+  try { localStorage.setItem("rr-theme", t); } catch (e) {}
+  document.querySelector('meta[name="theme-color"]').content = css("--bg");
+  if (curView() === "run") drawRun(); else if (hist.length) drawLive(hist[hist.length - 1]);
+};
+try { const t = localStorage.getItem("rr-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("demo-btn").onclick = () => $("demo").classList.toggle("open");
+document.querySelectorAll("#d-state button").forEach((b) => b.onclick = () => setState(b.dataset.s));
+
+// the replay speed: part of the page, remembered, and changing it never stops the autoplay
+function setRate(x, persist) {
+  rate = x; document.querySelectorAll("#speed button").forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.x) === x)));
+  if (persist) { try { localStorage.setItem("rr-speed", String(x)); } catch (e) {} }
+}
+document.querySelectorAll("#speed button").forEach((b) => b.onclick = () => setRate(Number(b.dataset.x), true));
+
+const HASH = {};
+location.hash.slice(1).split(/[&:]/).forEach((p) => { const [k, v] = p.split("="); if (k) HASH[k] = v === undefined ? true : v; });
+let stored = null; try { stored = Number(localStorage.getItem("rr-speed")) || null; } catch (e) {}
+const wanted = Number(HASH.speed) || stored;
+setRate(wanted === 1 || wanted === 4 ? wanted : HASH.autoplay ? 4 : 1, false);
+
+const AP = {on: false, timers: []};
+function apLater(fn, ms) { AP.timers.push(setTimeout(() => { if (AP.on) fn(); }, ms)); }
+function apStop() { AP.on = false; AP.timers.forEach(clearTimeout); AP.timers = []; onDone = null; document.body.classList.remove("ap"); }
+function apStage(i) {
+  if (!AP.on) return;
+  window.scrollTo(0, 0); showTab("telemetry"); selectStage(i % STAGES.length); showView("live");
+  onDone = () => { onDone = null; apLater(() => apRun(i), 3000); };
+}
+function apSections() {
+  const rows = cornerRows().sort((p, q) => q.loss - p.loss);
+  if (rows.length >= 2) return [rows[0].k, rows[rows.length > 3 ? 1 : rows.length - 1].k];
+  const byMin = S.map((_, k) => k).filter((k) => ST.ab[k] && k > 0).sort((p, q) => ST.ab[p][0] - ST.ab[q][0]);
+  return byMin.slice(0, 2).concat([1, 2]).slice(0, 2);
+}
+function apRun(i) {
+  window.scrollTo(0, 0); showView("run");
+  const [a, b] = apSections();
+  zoomTo(a); apLater(() => { window.scrollTo(0, 0); zoomTo(b);
+    apLater(() => { window.scrollTo(0, 0); showTab("coaching");
+      apLater(() => apStage(i + 1), 8000); }, 10000); }, 10000);
+}
+function apStart(i) { AP.on = true; document.body.classList.add("ap"); apStage(i); }
+const apIgnore = (e) => e.target.closest && e.target.closest("#speed");
+["pointerdown", "keydown", "wheel", "touchstart"].forEach((ev) => window.addEventListener(ev, (e) => { if (AP.on && !apIgnore(e)) apStop(); }, true));
+
+let resizeT = null;
+window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTimeout(() => showView(curView()), 120); });
+// startup
+selectStage(Math.max(0, Math.min(STAGES.length - 1, Number(HASH.s) || 0)));
+if (HASH.run) showView("run");
+if (HASH.coaching) showTab("coaching");
+if (HASH.autoplay) apStart(HASH.s !== undefined ? stageIdx : Math.max(0, STAGES.findIndex((s) => s.cmps.length)));   // open on a stage with a comparison
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
