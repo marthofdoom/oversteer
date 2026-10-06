@@ -422,7 +422,9 @@ def stage_map(cr, w, h, data, cursor):
     last = next((p for p in reversed(pts) if p), None)
     if first:
         _rect(cr, first[0] - 3, first[1] - 3, 6, 6, FASTER)
-        text(cr, 'START', first[0] + 6, first[1] + 12, 10, FASTER, True)
+        edge = first[0] > w - 44                         # a label this wide would run off the map's right edge
+        text(cr, 'START', first[0] - 6 if edge else first[0] + 6, first[1] + 12, 10, FASTER, True,
+             'right' if edge else 'left')
     if last:
         _rect(cr, last[0] - 3, last[1] - 3, 6, 6, TEXT)
         text(cr, 'FINISH', last[0] - 44 if last[0] > w - 60 else last[0] + 6, last[1] + 12, 10, TEXT, True)

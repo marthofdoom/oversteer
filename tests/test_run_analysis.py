@@ -271,3 +271,20 @@ def test_the_map_with_a_position_gives_the_road(tmp_path):
     got = {}
     surface_of(lambda cr: got.setdefault('pts', plot.stage_map(cr, 300, 200, data, 500.0)), 300, 200)
     assert got['pts'] is not None
+
+
+def test_the_start_label_stays_on_the_map_when_the_road_starts_at_its_right_edge(monkeypatch):
+    from oversteer import telemetry_plot as plot
+    n = 40
+    data = {'step': 10.0, 'length': 390.0, 'this': {'t': list(range(n))}, 'sections': [],
+            'x': [400.0 - 10.0 * i for i in range(n)], 'z': [0.0] * n}            # from the right edge to the left
+    said = []
+    real = plot.text
+    monkeypatch.setattr(plot, 'text', lambda cr, s, x, y, *a: (said.append((s, x) + a[2:]), real(cr, s, x, y, *a))[1])
+    surface_of(lambda cr: plot.stage_map(cr, 300, 200, data, 0.0), 300, 200)
+    start = next(c for c in said if c[0] == 'START')
+    assert start[2:] == (True, 'right') and start[1] <= 300 - 30 - 5              # right-aligned to the left of the marker
+    data['x'] = list(reversed(data['x']))                                         # and from the left: as before
+    said.clear()
+    surface_of(lambda cr: plot.stage_map(cr, 300, 200, data, 0.0), 300, 200)
+    assert next(c for c in said if c[0] == 'START')[2:] == (True, 'left')
