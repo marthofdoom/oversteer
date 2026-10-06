@@ -9,7 +9,7 @@ the stage's key, as two stages share a name); a stage without new evidence
 keeps its `finish_m`, so a run with fewer captures does not erase what an
 earlier one found. `--reset` recomputes everything from these captures.
 
-The game's pace-note tables carry no finish marker, and `pacenote_last_m`
+The game's pace-note tables do carry a Finish note (the clock stops 19-28 m past it), and `pacenote_last_m`
 is the stop control: marth's runs are at 120-160 km/h 200 m before it and
 at 20-40 km/h on it. From bridge version 4 a capture carries the game's
 stage clock, which stops at the finish while the car rolls on: the place the
@@ -116,7 +116,7 @@ def apply_finish(table, found, reset=False, exact=None):
             entry['finish_spread_m'] = round(max(stops) - min(stops), 1)
             entry['finish_confidence'] = 'high' if len(stops) >= 2 else 'medium'
             entry['finish_source'] = ("marth's runs: where the game's own stage clock stopped (median of {}); "
-                                      "the game's pace notes have no finish marker".format(len(stops)))
+                                      "the pace notes' Finish note is not used (the clock stops 19-28 m past it)".format(len(stops)))
             print('{:28} finish_m {} (the game clock, {} runs, spread {})'.format(
                 entry['stage'], entry['finish_m'], len(stops), entry['finish_spread_m']))
             continue
@@ -138,7 +138,7 @@ def apply_finish(table, found, reset=False, exact=None):
         entry['finish_spread_m'] = round(max(offsets) - min(offsets), 1)
         entry['finish_confidence'] = 'medium'
         entry['finish_source'] = ("marth's runs: where the final slowdown to the stop control starts "
-                                  "(median of {}), the game's pace notes have no finish marker".format(len(offsets)))
+                                  "(median of {}), the pace notes' Finish note is not used (the clock stops 19-28 m past it)".format(len(offsets)))
         print('{:28} finish_m {} ({} runs, spread {})'.format(
             entry['stage'], entry['finish_m'], len(offsets), entry['finish_spread_m']))
 

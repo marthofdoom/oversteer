@@ -63,7 +63,10 @@ decoder's channel list (`docs/coaching-derivations.md`) is all there is.
   (spline distance), stage_length, vel (3), accel (3, kinematic; spikes to
   −4090 m/s² at impacts, so clip at about 25–40), wheel_rot (4), susp (4,
   m: −0.024..0.30).
-- **Present in the packet but not decoded by the app**:
+- **Present in the packet, decoded since 2026-10-05** (`Sample.tyre_load`,
+  `tyre_fx`, `tyre_fy`, `tyre_slip`, `brake_bias`, `ang_vel`; not yet in the
+  trace, so not in a run's stored data): grip per tyre is now decodable
+  (peak μ 1.5–1.7 on gravel, §4.4):
   - `wheel_load` (N, 4): Σ/g = 1250–1460 kg by car at speed.
   - `fx` and `fy` (N, 4). Σfx = m·a_x with r 0.97–0.99 and Σfy = m·a_y with
     r 0.98–0.995, in the car frame: fx forward, fy positive left.
@@ -95,7 +98,9 @@ decoder's channel list (`docs/coaching-derivations.md`) is all there is.
   stage_time, game_time, pos (z is the height here), the two direction
   vectors, wheel_speed (4; their median is 0.92–0.97 of the speed),
   susp (4) and susp_vel (4).
-- **Problems found** (for the decoder review; none fixed here):
+- **Problems found** (all fixed in the decoder, 2026-10-05: forward negated, steer positive left,
+  susp in metres and negated for compression, floats 34/35 dropped, so `accel` is None; the 2D
+  maps use `telemetry_formats.plan_xy`):
   1. The decoder's `forward` vector points **backwards**: its median
      cosine with the direction of motion is −0.99, so `vel` comes out with
      x ≈ −speed. Heading has to come from the positions.
@@ -429,8 +434,8 @@ From positions, the curvature agrees with the yaw-based one: lap sim
 r 0.998 and 0.857 (§2.3). In `acr_positions.py` the raw per-run
 correlation is lower (0.44–0.88), because it is unsmoothed at 5 m.
 
-Finding: the stage table's `finish_source` says "the game's pace notes
-have no finish marker". The extraction does have a `Finish` note on 45
+Finding (fixed in the stage table and docs, 2026-10-05): the stage table's
+`finish_source` said "the game's pace notes have no finish marker". The extraction does have a `Finish` note on 45
 stages (Afon Bidno at 5277 m), and the game clock stops 19–28 m after it
 (§4.9).
 

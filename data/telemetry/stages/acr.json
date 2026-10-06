@@ -340,7 +340,7 @@
    "finish_runs": 10,
    "finish_spread_m": 34.9,
    "finish_confidence": "medium",
-   "finish_source": "marth's runs: where the final slowdown to the stop control starts (median of 10), the game's pace notes have no finish marker"
+   "finish_source": "marth's runs: where the final slowdown to the stop control starts (median of 10), the pace notes' Finish note is not used (the clock stops 19-28 m past it)"
   },
   {
    "location": "Wales",

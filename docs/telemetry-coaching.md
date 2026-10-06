@@ -1929,8 +1929,10 @@ Added (`data/telemetry/stages/`, `oversteer/stage_tables.py`, §5.4, §8.6):
   Biga, 12077.95 m) is 156 m past its last note (11921.5 m). `track`
   `pacenote_last_m` is the stop control, not the finish: on marth's runs
   the car is at 120-160 km/h 200 m before it and at 20-40 km/h on it. The
-  game's pace-note tables have no finish marker and the bridge sends no
-  stage clock, so `finish_m` (the flying finish, ~225 m before the stop
+  game's pace-note tables do have a `Finish` note (45 stages; Afon Bidno
+  at 5277 m: the game clock stops 19-28 m after it, extrapolation §4.9), but
+  it is not where the run is timed from; before the bridge sent a stage
+  clock `finish_m` (the flying finish, ~225 m before the stop
   control on Afon Bidno) is derived by `scripts/acr-finish.py` from where
   the final slowdown starts, over at least two consistent runs (Afon
   Bidno - Severn: 10 runs, spread 35 m, medium); other stages keep the
