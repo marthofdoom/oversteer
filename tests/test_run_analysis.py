@@ -191,3 +191,11 @@ def test_a_failing_splits_never_takes_the_tips_down(runs, web, monkeypatch):
     monkeypatch.setattr(coach, 'splits', boom)
     status, body = fetch(web, '/api/v1/coach?car={}'.format(h.car))
     assert status == 200 and body['splits'] is None and isinstance(body['tips'], list)
+
+
+def test_the_page_has_the_run_view_and_stays_inside_its_csp():
+    from oversteer.telemetry_web import find_page, _hashes
+    text = open(find_page(), encoding='utf-8').read()
+    for needle in ('id="tele-run"', 'id="c-strips"', 'id="loss"', '/api/v1/runs/', 'data-cmp="prev"'):
+        assert needle in text, needle
+    assert len(_hashes(text, 'script')) >= 2 and len(_hashes(text, 'style')) >= 2     # the Run view's own blocks are hashed
