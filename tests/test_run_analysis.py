@@ -115,7 +115,7 @@ def test_the_position_comes_through_when_the_run_has_one(tmp_path):
     drive(h, positions=True)
     run = drive(h, positions=True, corners=corners_with())
     found = ra.analysis(h.store, run, 'pb')
-    assert found['x'][100] == pytest.approx(100.0, abs=0.5) and found['z'][100] == pytest.approx(120.0, abs=0.5)
+    assert found['x'][100] == pytest.approx(100.0, abs=0.5) and found['z'][100] == pytest.approx(-120.0, abs=0.5)    # ACR's plan is (x, -z)
 
 
 def test_the_result_is_kept_per_run(runs):

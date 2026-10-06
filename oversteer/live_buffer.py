@@ -31,6 +31,7 @@ import math
 import time
 
 from . import coach_context, stage_tables
+from .telemetry_formats import plan_xyz
 from .telemetry_store import TRACE_CHANNELS
 
 RATE = 10.0                      # rows per second (drive_log.TRACE_EVERY)
@@ -46,6 +47,7 @@ CHANNELS = ('t', 'distance', 'speed', 'rpm', 'gear', 'throttle', 'brake', 'clutc
             'a_lat', 'yaw_rate', 'x', 'y', 'z', 'delta')
 _PICK = tuple(TRACE_CHANNELS.index(c) for c in CHANNELS[:-1])
 _T, _D = TRACE_CHANNELS.index('t'), TRACE_CHANNELS.index('distance')
+_X = CHANNELS.index('x')                          # x, y, z follow each other in CHANNELS
 
 
 ERROR_EVERY = 60.0               # s between two logs of a failing writer
@@ -254,7 +256,10 @@ class LiveBuffer:
             run['last'] = (t, d)
         run['delta'] = delta
         self._seq += 1
-        values = tuple(row[i] for i in _PICK) + (delta,)
+        values = list(row[i] for i in _PICK)
+        # The map's axes, not the game's (x, z across the plan, y the height): telemetry_formats.plan_xyz
+        values[_X:_X + 3] = plan_xyz(run['game'], values[_X:_X + 3])
+        values = tuple(values) + (delta,)
         self._slots[self._seq % self.capacity] = (self._seq, values)
         self._publish(now)
 

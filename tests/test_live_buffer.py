@@ -377,3 +377,22 @@ def test_sector_bounds_are_placed_from_where_the_run_began():
     _, later = sectors_of(600.0)
     assert [(a, b) for _, a, b in from_line] == [(0.0, 1000.0), (1000.0, 2000.0)]
     assert [(a, b) for _, a, b in later] == [(-500.0, 500.0), (500.0, 1500.0)]
+
+
+def test_the_live_position_is_the_plan_of_the_game():
+    """x, z are the map's axes whatever the game's world (telemetry_formats.plan_xyz): ACR's z is turned over,
+    WRC Generations' height is its z, so its y is the plan's second axis."""
+    from oversteer.telemetry_store import TRACE_CHANNELS as T
+
+    def position(game, pos):
+        buffer = LiveBuffer()
+        buffer.start_run(1, 100.0, game, None, 'Somewhere', 6500.0)
+        values = list(row(0.0, 1.0))
+        for name, v in zip('xyz', pos):
+            values[T.index(name)] = v
+        buffer.push(1, 100.0, tuple(values))
+        sample = buffer.read(0, now=100.0)['samples'][0]
+        return tuple(col(sample, n) for n in 'xyz')
+
+    assert position('acr', (10.0, 700.0, -30.0)) == (10.0, 700.0, 30.0)
+    assert position('wrcg', (10.0, 20.0, 5.0)) == (10.0, 5.0, 20.0)

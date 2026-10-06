@@ -16,6 +16,7 @@ import time
 from collections import OrderedDict
 
 from . import coach, coach_context as cc, potential, stage_tables
+from .telemetry_formats import plan_xy
 
 SLACK = 5.0                      # m a run may stop short of the grid's end, or start past its start, and still be drawn there
 STEP = 2.0                       # m between the grid's points
@@ -282,8 +283,9 @@ def _short(section):
     return '-'.join(parts)
 
 
-def _positions(rows, grid):
-    """(x, z) lists on the grid, or (None, None) where the run has no position."""
+def _positions(rows, grid, game=None):
+    """(x, z) lists on the grid, or (None, None) where the run has no position. They are the plan's axes whatever
+    the game's world (telemetry_formats.plan_xy): ACR's z is turned over, WRC Generations' height is z."""
     if not any(_fin(r[cc.CH['x']]) and _fin(r[cc.CH['z']]) for r in rows):
         return None, None
     track = cc.along(rows)
@@ -299,9 +301,10 @@ def _positions(rows, grid):
         a, b = track[i0], track[i]
         w = 0.0 if i == i0 or b == a or a == float('-inf') else (g - a) / (b - a)
         pts = []
-        for name in ('x', 'z'):
+        for name in ('x', 'y', 'z'):
             v0, v1 = rows[i0][cc.CH[name]], rows[i][cc.CH[name]]
             pts.append(v0 + (v1 - v0) * w if _fin(v0) and _fin(v1) else None)
+        pts = plan_xy(game, pts) if None not in pts else (None, None)
         xs.append(None if pts[0] is None or pts[1] is None else round(pts[0], 1))
         zs.append(None if pts[0] is None or pts[1] is None else round(pts[1], 1))
     return xs, zs
@@ -424,7 +427,7 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
             if pb is not None and pb_rows else None
         this = _rounded(resample(rows, grid))
         ref = _rounded(resample(other_rows, grid)) if other_rows else None
-        xs, zs = _positions(rows, grid)
+        xs, zs = _positions(rows, grid, run['stage'].partition(':')[0])
         numbers = {}
         info = None
         if other_rows:
