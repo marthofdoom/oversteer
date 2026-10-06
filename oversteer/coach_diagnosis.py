@@ -453,7 +453,10 @@ def diagnose(m, loss=None):
     f = _facts(m)
 
     def out(code, confidence, fix, evidence):
-        return dict(code=code, confidence=confidence, facts=_pick(code, f), fix=fix, evidence=evidence)
+        facts = f
+        if code == 'OVERSHOT' and not (m['counter_d'] is not None and m['counter_d'] > 0):
+            facts = {k: v for k, v in f.items() if k != 'counter'}      # steering against it less is no fact for this
+        return dict(code=code, confidence=confidence, facts=_pick(code, facts), fix=fix, evidence=evidence)
     if abs(loss) < LOSS_MIN:
         return out('SAME', 'high', None, ['|loss| < {}'.format(LOSS_MIN)])
     if loss < 0:
@@ -480,9 +483,9 @@ def diagnose(m, loss=None):
         return out('SLOW-ARRIVAL', 'medium',
                    'The time here was lost before the braking: look at the exit of the corner before.',
                    ['pre-braking {:.0f} km/h'.format(m['pre_dv']), 'entry share {:.0%}'.format(entry_share)])
-    # 2. OVERSHOT: in faster, and it showed (at the grip limit, a slide or the slowest point pushed later), with
-    # the speed then lost
-    if fast_in and (low_min or low_exit or late_apex) and (at_limit or slide or late_apex):
+    # 2. OVERSHOT: in faster, and it showed (at the grip limit, a slide, or the slowest point pushed later with the
+    # grip not left over: with grip to spare a later slowest point is no overshoot), with the speed then lost
+    if fast_in and (low_min or low_exit or late_apex) and (at_limit or slide or (late_apex and not grip_left)):
         ev = [x for x, c in (('turn-in +{:.0f} km/h'.format(m['turnin_dv']), m['turnin_dv'] >= SPEED_SAME),
                              ('braked {:.0f} m later'.format(onset or 0), later),
                              ('grip {:.2f}'.format(grip or 0), at_limit),

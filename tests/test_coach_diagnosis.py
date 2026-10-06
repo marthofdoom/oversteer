@@ -85,14 +85,14 @@ def test_slower_before_the_braking_is_the_run_up_and_points_at_the_corner_before
 
 
 def test_in_too_fast_is_overshot_and_says_brake_earlier_only_when_it_braked_later():
-    later = run([(450.0, 28.0), (520.0, 8.0), (620.0, 28.0)], peak=1.3)      # braked 20 m later, at the grip limit
+    later = run([(450.0, 28.0), (520.0, 8.0), (620.0, 28.0)], peak=2.4)      # braked 20 m later, at the grip limit
     m, d = check(later, 'OVERSHOT')
     assert d['confidence'] == 'high' and m['onset_dd'] == pytest.approx(20.0, abs=1.5)
     assert d['fix'] == 'Brake 20 m earlier, where your best run did, and turn in at its speed.'
     # the same braking point with more speed left at the turn-in (it braked less hard before it): get the speed off
     ref = run([(430.0, 28.0), (500.0, 10.0), (600.0, 28.0)], brake=braking(430, 490, 0.7))
     fast = run([(430.0, 28.0), (460.0, 24.0), (530.0, 8.0), (600.0, 12.0), (640.0, 28.0)], peak=1.3,
-               brake=braking(430, 520, 0.7))
+               corner=(480.0, 560.0), brake=braking(430, 520, 0.7))
     m, d = check(fast, 'OVERSHOT', ref=ref)
     assert abs(m['onset_dd']) < dg.BRAKE_SAME and m['turnin_dv'] >= dg.SPEED_SAME
     assert d['fix'].startswith('Get the speed off before the turn-in: arrive ') and 'earlier' not in d['fix']
@@ -250,6 +250,36 @@ def test_the_owners_case_brake_later_then_over_slowed_the_last_corner_of_a_compl
     assert 'Brake less there, or not at all' in d['fix'] and 'earlier' not in wording(d)
     assert d['facts'][0].startswith('braked where your best run did not (')
     assert [p[2] for p in d['parts']] == ['GAIN', 'SAME', 'OVER-SLOWED']
+
+
+def _replayed(name):
+    """measures_section + diagnose_section of a fixture of marth's replayed runs (tests/data/<name>.json.gz)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', name + '.json.gz')
+    with gzip.open(path, 'rt') as fh:
+        fx = json.load(fh)
+    names = fx['channels']
+
+    def arrays(rows):
+        out = []
+        for r in rows:
+            row = [float('nan')] * len(cc.TRACE_CHANNELS)
+            for n, v in zip(names, r):
+                row[C[n]] = float('nan') if v is None else v
+            out.append(tuple(row))
+        return potential.arrays(out)
+    env = {'bins': np.asarray(fx['env']['bins']), 'lat': np.asarray(fx['env']['lat'])}
+    parts = dg.measures_section(arrays(fx['run']), arrays(fx['ref']), {
+        'a': fx['a'], 'b': fx['b'], 'lo': fx['lo'], 'floor': fx['floor'], 'corners': fx['corners'], 'game': None}, env)
+    return dg.diagnose_section(parts, fx['loss'])
+
+
+def test_the_right_left_right_at_1200_with_little_grip_used_is_not_overshot():
+    """Afon Bidno - Severn, the i20N's run 60 against its best: in 10 km/h faster, the slowest point 17 m later, but
+    44 % of the grip used (the best run 79 %) and no more steering against the slide: the car was not at its limit,
+    so it did not overshoot, and no sentence says it steered against a slide it did not."""
+    d = _replayed('afon-bidno-1200')
+    assert d['code'] != 'OVERSHOT', (d['code'], d['facts'], d['fix'])
+    assert not any('steered against the slide' in f for f in d['facts'])
 
 
 def test_the_owners_case_replayed_from_the_captures():
