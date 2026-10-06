@@ -161,6 +161,22 @@ def time_at(trace, track, distance):
     return trace[i - 1][t] + (trace[i][t] - trace[i - 1][t]) * (distance - a) / (b - a)
 
 
+def elapsed_at(trace, distance, track=None):
+    """Seconds from the run's first row to the first time it passed `distance` (the last row's, for a run that
+    stopped END_SLACK m short at most), or None where it never got there. `track` is along(trace)."""
+    track = along(trace) if track is None else track
+    if not trace or not track:
+        return None
+    if distance > track[-1]:
+        if distance > track[-1] + END_SLACK:
+            return None
+        distance = track[-1]
+    if distance <= track[0]:
+        return 0.0
+    t = time_at(trace, track, distance)
+    return None if t is None else t - trace[0][CH['t']]
+
+
 def distance_at(trace, t):
     """The distance along the run at trace time `t` (interpolated); None
     outside the trace."""
@@ -374,6 +390,8 @@ def run_class(finished, course, stage_length, events, started=None, last_started
         if length is None:
             return 'restart' if (course or 0.0) < NO_LENGTH_RESTART else 'partial'
         return 'restart' if (course or 0.0) < RESTART_SHARE * length else 'partial'
+    if finished == 1 and road and stage_length and (course or 0.0) < FINISH_SHARE * stage_length:
+        return 'partial'
     if any(e['kind'] == 'off' for e in events):
         return 'off'
     if started is not None and last_started is not None and started - last_started > AWAY:
@@ -390,8 +408,6 @@ def _grid_time(r):
 
 
 def reference_run(candidates, result_time=None, wet=None):
-    if finished == 1 and road and stage_length and (course or 0.0) < FINISH_SHARE * stage_length:
-        return 'partial'
     """The fastest finished run among `candidates` (Store.stage_runs rows
     of the same car and stage, class clean or learning; by stage time less the
     first section's, _grid_time) with the same

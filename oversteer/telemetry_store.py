@@ -764,6 +764,14 @@ class Reader:
         rows = self._rows('SELECT version, data FROM traces WHERE run = ?', (run_id,))
         return unpack_trace(rows[0][1]) if rows and rows[0][0] == TRACE_VERSION else None
 
+    def trace_runs(self, run_ids):
+        """The run ids among `run_ids` that have a trace of the current version, as a set."""
+        run_ids = list(run_ids)
+        if not run_ids:
+            return set()
+        return {r[0] for r in self._rows('SELECT run FROM traces WHERE version = ? AND run IN ({})'.format(
+            ', '.join('?' * len(run_ids))), (TRACE_VERSION,) + tuple(run_ids))}
+
     def shifts(self, session_id):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle',
                  'method', 'neutral_time', 'engage_rpm', 'flat_out', 'slip', 'flags', 'run')

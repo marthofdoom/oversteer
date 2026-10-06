@@ -32,7 +32,7 @@ import socket
 import threading
 import urllib.parse
 
-from . import coach, tuning
+from . import coach, run_analysis, tuning
 from .telemetry_store import open_reader
 
 DEFAULT_PORT = 5301
@@ -352,6 +352,33 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             tips = coach.Coach(reader).tips(profile, car['id'] if car else None)
             return 200, {'tips': [t.to_dict() for t in tips],
                          'splits': coach.splits(reader, profile, car['id']) if car else None}
+        if parts[0] == 'runs':
+            return self._runs(reader, profile, parts, query)
+        return 404, {'error': 'not found'}
+
+    def _runs(self, reader, profile, parts, query):
+        """The Run view (oversteer/run_analysis.py): `runs?car=<id>` the car's recent runs on its latest stage,
+        `runs/<id>` one run's header, its comparison candidates and the coach's advice about it,
+        `runs/<id>/trace?vs=pb|prev|<run id>&step=<m>` the run and the comparison on a distance grid with the
+        coach's sections."""
+        if len(parts) == 1:
+            car = self._car(reader, profile, query.get('car'))
+            if car is None:
+                return 404, {'error': 'no such car'}
+            return 200, run_analysis.recent_runs(reader, car['id'], max(1, min(60, _int(query.get('limit'), 12))))
+        run = reader.run(_int(parts[1], -1))
+        if run is None or self._car(reader, profile, run['car']) is None:
+            return 404, {'error': 'no such run'}
+        if len(parts) == 2:
+            tips = run_analysis.car_tips(reader, profile, run['car'], self.reader_path)
+            return 200, run_analysis.head(reader, run['id'], tips)
+        if parts[2:] == ['trace']:
+            try:
+                step = max(1.0, min(20.0, float(query.get('step') or run_analysis.STEP)))
+            except ValueError:
+                step = run_analysis.STEP
+            found = run_analysis.analysis(reader, run['id'], query.get('vs') or 'pb', step, self.reader_path)
+            return (200, found) if found is not None else (404, {'error': 'this run has no trace'})
         return 404, {'error': 'not found'}
 
     @staticmethod
