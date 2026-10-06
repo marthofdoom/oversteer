@@ -319,3 +319,26 @@ def test_the_last_section_of_a_stage_with_no_flying_finish_is_no_place_for_time(
     assert pot['sections'][-1].get('tail') is True and not pot['sections'][0].get('tail')
     rows = [row(1.0, 0), row(0.9, 1), row(2.0, 2, tail=True)]
     assert [r['available'] for r in potential.top3(rows)] == [0.9]
+
+
+def test_a_stage_with_runs_and_no_potential_gets_one_on_the_backfill_tick(tmp_path):
+    """Stages driven before the potential existed (or re-classed since) get theirs from the backfill, one pair a tick,
+    without waiting for the next finished run."""
+    from oversteer.shift_learner import ShiftLearner
+    from oversteer.telemetry_capture import read_capture, replay
+    from oversteer.telemetry_store import open_reader
+
+    path = str(tmp_path / 'telemetry.db')
+    learner = ShiftLearner(path)
+    for n in range(3):
+        meta, records = read_capture(CAPTURE)
+        replay(records, learner, started=meta['started'] + 3600.0 * n)
+    learner.backfill()
+    store = learner.log.store
+    car = store.potentials_missing() == [] and store._rows('SELECT id FROM cars')[0][0]
+    store.db.execute('DELETE FROM stage_potential')
+    store.commit()
+    assert [(s, c) for s, c, _r in store.potentials_missing()] == [('acr:greece:elatia', car)]
+    assert learner.backfill() == 1 and learner.backfill() == 0                 # built once, not tried over and over
+    assert open_reader(path).potential('acr:greece:elatia', car) is not None and not store.potentials_missing()
+    learner.close()

@@ -18,7 +18,7 @@ import queue
 import threading
 import time
 
-from . import car_data, coach, coach_context, drive_detect, live_buffer, stage_tables
+from . import car_data, coach, coach_context, drive_detect, live_buffer, potential, stage_tables
 from .telemetry_formats import plan_xy
 from .shift_learner import DRIVEN, SURFACES, CarModel, drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
@@ -1284,7 +1284,24 @@ def backfill_step(learner, limit=3):
             store.rollback_savepoint('backfill')
             failed.add(run)
         done += 1
+    if done < limit:
+        done += _potentials_step(learner, store)
     return done
+
+
+def _potentials_step(learner, store):
+    """Where no run is left to work over: the potential of one stage and car that has finished ranked runs and none
+    stored (a stage driven before the potential existed, or whose runs were re-classed since), the newest first. One
+    per call, so a batch stays short; a pair that came to nothing (too few runs) is not tried again until the app
+    next starts. Returns 1 when a potential was built, else 0."""
+    tried = learner.__dict__.setdefault('_potential_tried', set())
+    for stage, car, run in store.potentials_missing():
+        if (stage, car) in tried:
+            continue
+        tried.add((stage, car))
+        if potential.after_run(store, run) is not None:
+            return 1
+    return 0
 
 
 def _backfill_run(learner, store, run):

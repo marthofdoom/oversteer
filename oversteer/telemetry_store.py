@@ -1051,6 +1051,15 @@ class Reader:
 
     # -- potential time (oversteer/potential.py): the block this feature added; see POTENTIAL_DDL --
 
+    def potentials_missing(self):
+        """[(stage, car, newest run)] of the stages and cars with a finished run of a ranked class (clean, learning,
+        off) and no stored potential (stage_potential), the newest first."""
+        return self._rows("SELECT r.stage, s.car, MAX(r.id) FROM runs r JOIN sessions s ON r.session = s.id "
+                          "WHERE r.finished = 1 AND r.stage IS NOT NULL AND s.car IS NOT NULL "
+                          "AND r.run_class IN ('clean', 'learning', 'off') AND NOT EXISTS (SELECT 1 FROM "
+                          "stage_potential p WHERE p.stage = r.stage AND p.car = s.car) "
+                          "GROUP BY r.stage, s.car ORDER BY MAX(r.id) DESC")
+
     def potential(self, stage, car):
         """The stored potential of a stage and car: potential.stage()'s dict (`sections`, `profile`, the layers'
         totals) plus `version` and `built`; None where there is none (or the file has no table yet)."""
