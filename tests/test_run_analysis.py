@@ -181,3 +181,13 @@ def test_the_splits_carry_the_pb_and_the_bounds(runs):
     splits = coach.splits(h.store, h.profile, h.car)
     for r in splits['splits']:
         assert r['pb'] is not None and r['d0'] < r['d1'] and r['cum'] is not None
+
+
+def test_a_failing_splits_never_takes_the_tips_down(runs, web, monkeypatch):
+    h = runs[0]
+
+    def boom(*args):
+        raise ValueError('no')
+    monkeypatch.setattr(coach, 'splits', boom)
+    status, body = fetch(web, '/api/v1/coach?car={}'.format(h.car))
+    assert status == 200 and body['splits'] is None and isinstance(body['tips'], list)

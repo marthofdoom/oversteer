@@ -751,13 +751,17 @@ def test_the_best_of_the_runs_is_found_section_by_section():
     reference = dict(reference_from(ref_tr, ref_corners), run=1)
     best = cc.stitched(reference, [{'run': 2, 'trace': quick_tr, 'corners': quick_corners},
                                    {'run': 3, 'trace': slow_tr, 'corners': slow_corners}])
-    assert set(best['base']) == {1}                                            # the first section is the launch's: left out
+    assert set(best['base']) == {0, 1}                                         # every section, the launch's included
     assert best['who'][1] == 2 and best['gain'][1] > 0.1
-    assert abs(best['total'] - best['gain'][1]) < 1e-9
+    assert abs(best['total'] - best['gain'][0] - best['gain'][1]) < 1e-9
+    # the sum of best is the quickest run's time less what the best sections take off it: never over it
+    possible, gain = cc.sum_of_best(best, 1, 100.0)
+    assert possible == 100.0 - gain and gain == best['gain'][0] + best['gain'][1] and gain >= 0.1
+    assert cc.sum_of_best(best, 2, 100.0)[0] <= 100.0 and cc.sum_of_best(best, 77, 90.0) == (90.0, 0.0)
     assert cc.stitched(dict(reference, corners=[]), []) is None
     # a run that did not cover the section from end to end, or went off in it, has no time for it
     short = [row for row in quick_tr if row[C['distance']] < 1050.0]
-    assert cc.grid_times(short, quick_corners, *cc.grid_of(reference)) == {}
+    assert set(cc.grid_times(short, quick_corners, *cc.grid_of(reference))) == {0}
     off = [dict(k, off=1) for k in quick_corners]
     assert cc.grid_times(quick_tr, off, *cc.grid_of(reference)) == {}
 

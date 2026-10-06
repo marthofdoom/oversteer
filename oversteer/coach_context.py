@@ -914,6 +914,7 @@ SPEED_DELTA = 3.0 / 3.6          # m/s (3 km/h): a speed this far from the refer
 THROTTLE_DELTA = 0.2             # s: the throttle this much later than the reference's (calibrate)
 COUNTER_DELTA = 0.15             # share of a corner steered against the yaw, more than the reference's: over-rotated
 SECTION_MIN = 0.1                # s a section must lose, or gain, to be named
+START_SLACK = 5.0                # m a run may start past the grid's first section's start and still be timed through it
 END_SLACK = 15.0                 # m a run may stop short of the grid's last section and still be timed through it
 EXIT_REACH = 150.0               # m past a section's yaw window that its exit is timed to at most (the rest is a straight)
 
@@ -1042,43 +1043,42 @@ def grid_of(reference):
 
 
 def grid_times(trace, corners, grid, bounds):
-    """{grid index: seconds} this run took through each section of the
-    reference's grid that its own sections match, over the grid's distances,
-    so the times of any two runs compare. The first section (it holds the
-    launch), a section an off touched (in the run or the reference), one the
-    run did not cover from end to end (a run may stop END_SLACK m short of
-    the stage's end), or one the trace cannot time is left out."""
+    """{grid index: seconds} this run took through each section of the reference's grid, over the grid's
+    distances, so the times of any two runs compare: every section the run covered end to end, whether or not
+    its own corner detection matched one to it (the first section, which holds the launch, and the last
+    included). A section an off touched (one of the run's own corners with `off` whose window is in the
+    section), one the run did not cover from end to end (it may start START_SLACK m late or stop END_SLACK m
+    short of the stage's end) or one the trace cannot time is left out."""
     track = along(trace)
     if not track:
         return {}
-    sections = sections_of(corners)
+    offs = [(k['d0'], k['d1']) for k in corners if k.get('off') and k.get('d0') is not None]
     out = {}
-    for i, j in match_sections(sections, grid).items():
-        if j == 0 or sections[i]['off'] or grid[j]['off']:
+    for j, (a, b) in enumerate(bounds):
+        if track[0] > a + START_SLACK or any(lo < b and hi > a for lo, hi in offs):
             continue
-        a, b = bounds[j]
-        if a < track[0] or b > track[-1] + END_SLACK:
-            continue
-        start, end = time_at(trace, track, a), time_at(trace, track, min(b, track[-1]))
-        if start is not None and end is not None:
+        start, end = elapsed_at(trace, a, track), elapsed_at(trace, b, track)
+        if start is not None and end is not None and end > start:
             out[j] = end - start
     return out
 
 
 def stitched(reference, runs):
-    """The best time through each section of the reference's grid over the
-    reference and `runs` ([{'run', 'trace', 'corners'}]): `base` (the
-    reference's), `best`, `who` (the run id that set it), `gain` (base less
-    best, per section) and `total` (what the best sections together beat the
-    reference by: the stage's "possible" time is the reference's less it).
-    None without a grid."""
+    """The best time through each section of the reference's grid over the reference and `runs`
+    ([{'run', 'trace', 'corners'}]), by grid_times: `base` (the reference's), `best`, `who` (the run id that set
+    it), `runner_up` (the next best time, None with one run's), `gain` (base less best, per section), `total`
+    (what the best sections together beat the reference by), and `per_run` ({run id: {section: seconds}}). None
+    without a grid. sum_of_best() puts them against the quickest run."""
     grid, bounds = grid_of(reference)
     if not grid:
         return None
     base = grid_times(reference['trace'], reference['corners'], grid, bounds)
+    per_run = {reference.get('run'): base}
     times = {j: [(t, reference.get('run'))] for j, t in base.items()}
     for run in runs:
-        for j, t in grid_times(run['trace'], run['corners'], grid, bounds).items():
+        found = grid_times(run['trace'], run['corners'], grid, bounds)
+        per_run[run['run']] = found
+        for j, t in found.items():
             if j in times:
                 times[j].append((t, run['run']))
     best, who, runner_up = {}, {}, {}
@@ -1088,7 +1088,17 @@ def stitched(reference, runs):
         runner_up[j] = ts[1][0] if len(ts) > 1 else None
     gain = {j: base[j] - best[j] for j in base}
     return {'grid': grid, 'bounds': bounds, 'base': base, 'best': best, 'who': who, 'gain': gain,
-            'runner_up': runner_up, 'total': sum(gain.values())}
+            'runner_up': runner_up, 'total': sum(gain.values()), 'per_run': per_run}
+
+
+def sum_of_best(found, pb_run, pb_time):
+    """(possible time, gain): the quickest run's (`pb_run`, whose stage time is `pb_time`) less what the best
+    sections of `found` (stitched()) take off it, section by section: pb_time less the sum over the sections
+    both timed of max(0, the PB run's time less the best). Never over `pb_time`; the same number wherever it is
+    shown. (pb_time, 0.0) where the PB run has no section times."""
+    mine = found['per_run'].get(pb_run) or {}
+    gain = sum(max(0.0, t - found['best'][j]) for j, t in mine.items() if j in found['best'])
+    return pb_time - gain, gain
 
 
 def held_vs_reference(trace, reference_trace, d0):

@@ -351,10 +351,19 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             # The page only reads: tips are not marked as seen here
             tips = coach.Coach(reader).tips(profile, car['id'] if car else None)
             return 200, {'tips': [t.to_dict() for t in tips],
-                         'splits': coach.splits(reader, profile, car['id']) if car else None}
+                         'splits': self._splits(reader, profile, car['id']) if car else None}
         if parts[0] == 'runs':
             return self._runs(reader, profile, parts, query)
         return 404, {'error': 'not found'}
+
+    @staticmethod
+    def _splits(reader, profile, car_id):
+        """coach.splits(), or None when it fails: the tips are served either way."""
+        try:
+            return coach.splits(reader, profile, car_id)
+        except Exception:
+            logging.exception("telemetry web page: splits")
+            return None
 
     def _runs(self, reader, profile, parts, query):
         """The Run view (oversteer/run_analysis.py): `runs?car=<id>` the car's recent runs on its latest stage,

@@ -761,8 +761,11 @@ def test_the_splits_of_the_latest_run_against_the_best_of_each_section(tmp_path)
     assert second['gold'] and second['delta'] == 0.0 and second['last'] == second['best']
     third = next(r for r in rows if r['name'].endswith('at 1.7 km'))
     assert not third['gold'] and third['delta'] > 0 and third['last'] == third['best'] + third['delta']
-    # the first section holds the launch and is no split
-    assert all(not r['name'].endswith('at 0.5 km') for r in rows)
+    # the splits partition the whole stage: the first section (the launch's, from the trace's start) is the first
+    assert rows[0]['name'].endswith('at 0.5 km') and rows[0]['last'] is not None and rows[0]['d0'] < 1.0
+    assert rows[-1]['d1'] > rows[-2]['d1'] and all(a['d1'] == b['d0'] for a, b in zip(rows, rows[1:]))
+    assert found['last_class'] == 'clean' and isinstance(found['new_pb'], bool)
+    assert second['margin'] is not None and second['margin'] > 0 and third['margin'] is None
 
 
 def test_the_games_sectors_beside_the_splits(tmp_path):
