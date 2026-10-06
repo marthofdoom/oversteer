@@ -682,3 +682,40 @@ def test_a_circuit_lap_is_not_a_finish_and_its_wrapping_distance_is_not_the_runs
     assert run['finished'] != 1
     distance = [row[1] for row in reader.trace(run['id'])]
     assert all(b >= a for a, b in zip(distance, distance[1:])) and distance[-1] > 4000.0
+
+
+def test_a_run_past_the_progress_finish_ends_when_the_car_rests_though_the_game_repeats_its_packets(tmp_path):
+    """DiRT repeats its last packet after the finish (the stage clock frozen, the car at rest): that is still
+    the car standing, not 60 s to wait."""
+    import copy
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples = course_samples(Course(STAGE))
+    t_last, last, throttle = samples[-1]
+    assert last.progress >= 0.99
+    frozen = []
+    for i in range(1, 400):                                   # 6.6 s of the same packet, the car at rest
+        s = copy.copy(last)
+        s.speed = 0.0
+        frozen.append((t_last + i / 60, s, 0.0))
+    feed_course(learner, samples + frozen)
+    assert learner.runs.run is None
+
+
+def test_a_lap_of_a_multi_lap_race_is_not_the_runs_end_whatever_the_game(tmp_path):
+    """Rallycross: progress is the lap's, near 1 at the end of every lap, with laps above 1."""
+    from oversteer.telemetry import Sample
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples, t = [], 0.0
+    for lap in range(3):
+        for i in range(400):
+            s = Sample(6000.0, 7500.0, gear=3, speed=40.0, car='dirt/test', game='dirt', throttle=0.8)
+            s.track, s.stage_length, s.laps, s.lap = 'rx', 1600.0, 3, lap
+            s.progress = i / 399.0
+            s.lap_distance = s.progress * 1600.0
+            samples.append((t, s, 0.8))
+            t += 0.1
+    feed_course(learner, samples[:420])
+    run = learner.runs.run
+    assert run is not None
+    feed_course(learner, samples[420:])                       # 80 s past the first lap's end
+    assert learner.runs.run == run

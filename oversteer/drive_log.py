@@ -291,7 +291,7 @@ class RunTracker:
         self._track(now, sample, throttle, dt, speed)
         self._remember(now, sample)
         if self.run is not None and self._finished == 1 and sample.game not in LAP_SPLINE_GAMES \
-                and self._post_over(now):
+                and not (sample.laps and sample.laps > 1) and self._post_over(now):
             self.end(now, 'finish')
             return
         if sample.packet == 'end':
@@ -510,6 +510,9 @@ class RunTracker:
                 self._still += dt
                 if self._still - dt < STOP <= self._still:
                     self._stops += 1
+        elif frozen and self._finish_counts:
+            # Past the finish the game repeats its last packet (DiRT): the car is at rest all the same
+            self._still += dt
         if sample.laps is not None:
             summary['laps'] = max(summary['laps'] or 0, sample.laps)
         if sample.stage_length and not summary['stage_length']:
