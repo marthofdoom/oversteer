@@ -312,6 +312,7 @@ def test_the_web_endpoint():
 
 
 @pytest.mark.skipif(not os.path.exists(CAPTURE), reason='no capture')
+@pytest.mark.usefixtures('without_real_lines')
 def test_a_real_acr_run_against_itself(tmp_path):
     """An ACR run (Greece Elatia, 243 s, clean) replayed twice into one
     database: the second time its reference is the first, the same run, so

@@ -1552,3 +1552,28 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     return {'corners': corners, 'sections': sections, 'events': all_events, 'run_class': klass,
             'episodes': episodes, 'launch': launch, 'slip': slip, 'shifts': out_shifts, 'loss': loss,
             'spreads': spreads}
+
+
+def sector_times(trace, bounds, shift=0.0, game_clock=False):
+    """{sector index: seconds} of the sectors `bounds` ([(d0, d1)] m driven from the stage's start line) a run
+    covered end to end (it may stop END_SLACK m short of the last bound), from where its distance crosses each
+    line (time_at). `shift`: how much further along the road the run's trace began than the start line (its
+    distance 0 is the line's `shift` m on). A run on the game's own clock (`game_clock`: its trace's t is the stage
+    clock) times its first sector from the clock's start (0), not from its first row, so the sectors add up to the
+    stage time; otherwise the first sector starts with the trace."""
+    track = along(trace)
+    if not track:
+        return {}
+    out = {}
+    for i, (a, b) in enumerate(bounds):
+        a, b = a - shift, b - shift
+        if b > track[-1] + END_SLACK or a < track[0] - END_SLACK:
+            continue
+        if i == 0 and a <= track[0] + END_SLACK:
+            start = 0.0 if game_clock else trace[0][CH['t']]
+        else:
+            start = time_at(trace, track, a)
+        end = time_at(trace, track, min(b, track[-1]))
+        if start is not None and end is not None and end > start:
+            out[i] = end - start
+    return out

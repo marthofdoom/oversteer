@@ -2092,37 +2092,30 @@ def splits(reader, profile, car_id):
             'gain': None if best_time is None else best_time - found['possible'], 'runs': len(loaded) + 1,
             'splits': out,
             'sectors': _sectors(stage, run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
-                                {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded})}
+                                {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
+                                {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded})}
 
 
-def _sectors(stage, run, ref_rows, loaded, classes, starts=None):
+def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None):
     """The game's sectors of `stage` timed from the traces (`ref_rows` and `loaded`, as splits reads them), or None.
     Each sector's bounds are on the road spline; a trace's distance is driven from the run's start, which
     is the start line, so a bound is taken less it. A run is timed through a sector it covered end to end
     (it may stop END_SLACK m short of the finish); the first sector starts with the trace. A run that did
-    not begin at the start line (`starts`: run id to where along the spline it began) is placed from where it did."""
-    placed = stage_tables.sector_bounds(stage_tables.entry(stage))
+    not begin at the start line (`starts`: run id to where along the spline it began) is placed from where it did.
+    A run on the game's own clock (`clocks`: run id to 'game') is timed by it where its distance crosses each line
+    (coach_context.sector_times), so its sectors add up to the stage time."""
+    entry = stage_tables.entry(stage)
+    placed = stage_tables.sector_bounds(entry)
     if placed is None:
         return None
     bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
 
     def times(trace, run_id=None):
         origin = (starts or {}).get(run_id)
+        if origin is None:
+            origin = stage_tables.run_origin(entry)
         shift = 0.0 if origin is None else origin - placed['start_m']
-        track = coach_context.along(trace)
-        if not track:
-            return {}
-        out = {}
-        for i, (a, b) in enumerate(bounds):
-            a, b = a - shift, b - shift
-            if b > track[-1] + coach_context.END_SLACK or a < track[0] - coach_context.END_SLACK:
-                continue
-            start = trace[0][coach_context.CH['t']] if i == 0 and a <= track[0] + coach_context.END_SLACK \
-                else coach_context.time_at(trace, track, a)
-            end = coach_context.time_at(trace, track, min(b, track[-1]))
-            if start is not None and end is not None and end > start:
-                out[i] = end - start
-        return out
+        return coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game')
 
     mine = next((x for x in loaded if x['run'] == run['id']), None)
     last = times(mine['trace'], run['id']) if mine else {}
@@ -2133,7 +2126,7 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None):
         for i, t in times(x['trace'], x['run']).items():
             if i not in best or t < best[i]:
                 best[i], who[i] = t, x['run']
-    pbs = times(ref_rows['trace'])
+    pbs = times(ref_rows['trace'], ref_rows['run'])
     out = []
     for i in range(len(bounds)):
         t = last.get(i)

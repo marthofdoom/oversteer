@@ -1148,10 +1148,10 @@ FINISH_MOVED = 0.5              # m: a finish line that moved less than this sin
 
 
 def _run_start_m(store, run, entry):
-    """Where along the road a run's trace distance began: where the run was recorded to start, else the stage's
-    start line, else None."""
+    """Where along the road a run's trace distance began: where the run was recorded to start, else where the
+    stage's runs are measured to (stage_tables.run_origin), else None."""
     start = store.run_start(run)
-    return start if start is not None else stage_tables.start_line(entry)
+    return start if start is not None else stage_tables.run_origin(entry)
 
 
 def learn_missing_stops(store):

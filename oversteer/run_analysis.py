@@ -318,22 +318,28 @@ def _positions(rows, grid, game=None):
     return xs, zs
 
 
-def _sector_rows(stage, mine, other):
-    """The game's sectors timed on both runs, [{name, d0, d1, time, ref_time, delta}], or None."""
-    placed = stage_tables.sector_bounds(stage_tables.entry(stage)) if stage else None
+def _sector_rows(stage, mine, other, reader=None, runs=(None, None)):
+    """The game's sectors timed on both runs, [{name, d0, d1, time, ref_time, delta}], or None. Each run (`runs`:
+    this one's and the other's rows from the store) is placed from where it began and, on the game's own clock,
+    timed by it where its distance crosses each line (coach_context.sector_times)."""
+    entry = stage_tables.entry(stage) if stage else None
+    placed = stage_tables.sector_bounds(entry) if stage else None
     if placed is None:
         return None
-    tracks = [cc.along(rows) if rows else None for rows in (mine, other)]
+    bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
+    found = []
+    for rows, run in zip((mine, other), runs):
+        if not rows:
+            found.append({})
+            continue
+        origin = reader.run_start(run['id']) if reader is not None and run else None
+        if origin is None:
+            origin = stage_tables.run_origin(entry)
+        found.append(cc.sector_times(rows, bounds, 0.0 if origin is None else origin - placed['start_m'],
+                                     reader is not None and run is not None and reader.run_clock(run['id']) == 'game'))
     out = []
-    for i, (a, b) in enumerate((a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']):
-        times = []
-        for rows, track in zip((mine, other), tracks):
-            if not rows:
-                times.append(None)
-                continue
-            end = cc.elapsed_at(rows, b, track)
-            begin = 0.0 if i == 0 else cc.elapsed_at(rows, a, track)
-            times.append(end - begin if end is not None and begin is not None and end > begin else None)
+    for i, (a, b) in enumerate(bounds):
+        times = [f.get(i) for f in found]
         out.append({'name': 'S{}'.format(i + 1), 'd0': a, 'd1': b, 'time': times[0], 'ref_time': times[1],
                     'delta': None if None in times else times[0] - times[1], 'confidence': placed['confidence']})
     return out if any(r['time'] is not None for r in out) else None
@@ -449,7 +455,7 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,
                 'potential': potential.layers(pot, _sum_of_best(reader, run['stage'], run['car'], pot)) if pot else None,
                 'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot),
-                'sectors': _sector_rows(run['stage'], rows, other_rows)}
+                'sectors': _sector_rows(run['stage'], rows, other_rows, reader, (run, other))}
     return _remember(key, build)
 
 

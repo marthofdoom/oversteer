@@ -21,6 +21,19 @@
   exit of that place. Nothing is said about the line, a flick or the handbrake
   unless it was measured.
 
+### Assetto Corsa Rally
+- **The stages' real start, split and finish lines**, read from the game's
+  level data, for all 46 stages (`sector_lines_m` in the stage table). The
+  sector times (S1..) are now exact where the run is on the game's stage clock:
+  the clock interpolated where the car's distance along the road crosses each
+  line, so the sectors add up to the stage time. They no longer show the
+  approximate mark. Runs without the game's clock are timed by their own trace
+  at the same lines. The live view's sector delta uses the lines too.
+- Three cut stages (Hafren Forest, Zeli Reverse, Aghii Theodori Reverse) had
+  their start line placed 51 to 274 m too early; it is now the game's.
+- Afon Bidno's finish line is corrected (5294.1 m, was an estimate of 5287.4);
+  runs timed at the old line are moved to it.
+
 ## 0.15.0 — 2026-10-06
 
 ### Read this first
