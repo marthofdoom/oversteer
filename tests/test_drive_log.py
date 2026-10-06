@@ -822,7 +822,7 @@ def test_the_game_clock_is_the_result_and_the_traces_clock_through_a_pause(tmp_p
     assert run['finished'] == 1
     # The game's own time, where its clock stopped: the go to its line, no pause in it
     assert abs(run['result_time'] - at_line) < 1e-3 and abs(at_line - (0.5 + (5295.4 - 238.0) / 22.0)) < 0.11
-    assert run['duration'] < at_line                           # the run's own clock: from 3 m/s
+    assert run['duration'] < at_line + 0.5                      # the run's own clock, the 30 s pause not in it
     trace = reader.trace(run['id'])
     t, wall = coach_context.CH['t'], coach_context.CH['wall']
     steps = [b[t] - a[t] for a, b in zip(trace, trace[1:])]
@@ -937,6 +937,21 @@ def test_run_clock_frozen_at_the_first_packet_is_not_a_clock_that_stopped():
     c.tick(58.1, 0.1)                                                  # then it moves: the game's clock from here
     c.tick(58.2, 0.1)
     assert abs(c.t - (58.0 + 1.5 + 0.2)) < 1e-6 and not c.exact
+
+
+def test_the_clock_must_stand_still_for_a_quarter_second_to_be_stopped(tmp_path):
+    """A clock repeated for a fifth of a second with the car moving (a hitch) is not the game's finish."""
+    from oversteer.drive_log import CLOCK_SETTLE
+    assert CLOCK_SETTLE >= 0.25
+    drive, at_line = acr_clock_drive(0.0, 5530.0, game_line=5330.0)
+    hitch = [i for i, (_, s, _) in enumerate(drive) if s.lap_distance > 5290.0][0]
+    repeat = drive[hitch][1].stage_time
+    for _, s, _ in drive[hitch:hitch + 2]:
+        s.stage_time = repeat                                         # two packets (0.2 s) at 22 m/s
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert abs(run['result_time'] - at_line) < 0.11               # the stop at the game's line, not the hitch
+    learner.close()
 
 
 def test_a_stage_that_ends_by_its_clock_stopping_finishes_the_live_run(tmp_path, monkeypatch):

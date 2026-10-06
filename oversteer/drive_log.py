@@ -203,7 +203,7 @@ DISTANCE_BACK = 100.0            # m the distance along a stage goes back: the s
 SENT_LENGTH_TOLERANCE = 0.5      # m: a length the game sends against its own in the table
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
-CLOCK_SETTLE = 0.1               # s of the run's own time the game's clock stands still, moving: it stopped (not a frame repeated)
+CLOCK_SETTLE = 0.25              # s of the run's own time the game's clock stands still, moving: it stopped (not a few frames repeated)
 FINISH_CLOCK_PAST = 100.0        # m past the table's finish line the game's clock may still stop at its own
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
 # The game keeps sending after the finish (the results screen, the car rolling
