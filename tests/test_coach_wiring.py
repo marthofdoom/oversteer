@@ -586,6 +586,53 @@ def test_a_stage_whose_lines_changed_since_the_last_start_is_worked_over_again(t
     learner.close()
 
 
+@pytest.mark.usefixtures('without_real_lines')
+def test_a_run_marked_as_not_re_timable_is_tried_again_when_its_stages_lines_change(tmp_path):
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    run = _timed_run(store, stage, course=100.0)                  # too short to re-time: marked, kept as it was
+    repair_shipped(store)
+    assert store.finish_unknown(run)
+    rows = [tuple(i / 10.0 if name == 't' else float(i) if name == 'distance' else 0.0 for name in TRACE_CHANNELS)
+            for i in range(0, 5400)]                              # the trace turns out to span the lines (a later import)
+    store.db.execute('DELETE FROM traces WHERE run = ?', (run,))
+    store.add_trace(run, rows)
+    store.update_run(run, course=5278.0)
+    repair_shipped(store)                                         # the same lines: not tried again
+    assert store.finish_unknown(run)
+    stage_tables.set_learnt({stage: {'finish_m': entry['finish_m'] - 30.0, 'finish_runs': 3, 'finish_spread_m': 0.5}})
+    try:
+        repair_shipped(store)                                     # the lines changed: tried once more
+    finally:
+        stage_tables.set_learnt({})
+    assert not store.finish_unknown(run) and store.run(run)['course'] < 5278.0 - 100.0
+    learner.close()
+
+
+def test_a_run_that_ends_at_speed_is_not_given_a_newer_finish_than_the_line_it_was_timed_at(tmp_path):
+    """It ends at speed, so it was timed at the flying finish of its day: that line, where the table's is well away
+    from the trace's end, is the line recorded (the old code recorded the table's), and the run is moved to the table's
+    finish from it."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    origin = stage_tables.run_origin(entry)
+    flying = entry['finish_m']
+    on_time = _timed_run(store, stage, result=196.0, course=flying - origin, end_speed=40.0)
+    older = _timed_run(store, stage, result=202.0, course=flying - origin + 60.0, end_speed=40.0)     # timed 60 m on
+    assert retime_finishes(store) == 1
+    assert dict(store.db.execute('SELECT run, finish_m FROM run_finish').fetchall()) == {on_time: flying, older: flying}
+    row = store.run(older)
+    assert abs(row['course'] - (flying - origin)) < 1e-6 and abs(row['result_time'] - 196.0) < 0.1       # moved to the finish
+    assert store.run(on_time)['result_time'] == 196.0 and store.run(on_time)['run_class'] == 'clean'
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))

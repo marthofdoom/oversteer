@@ -1105,8 +1105,8 @@ def repair_shipped(store):
             store.set_car_drivetrain(car, shipped)         # the game's files beat a learnt vote
             changed += 1
     changed += learn_missing_stops(store)
+    changed += requeue_moved_stages(store)       # before the re-timing: it forgets the marks of stages that moved
     changed += retime_finishes(store)
-    changed += requeue_moved_stages(store)
     if changed:
         store.commit()
     return changed
@@ -1172,6 +1172,7 @@ def _trace_speed_at(trace, value):
 # A run that ends this fast was already timed at the flying finish (marth's
 # Afon Bidno runs: 120-160 km/h there, 20-40 km/h at the stop control)
 AT_SPEED = 20.0                 # m/s
+TIMED_AT_TOLERANCE = 15.0          # m: a run that ends at speed within this of the table's finish was timed at it (a row's distance, TRACE_TAIL)
 FINISH_MOVED = 0.5              # m: a finish line that moved less than this since a run was timed leaves it as it is
 
 
@@ -1220,9 +1221,10 @@ def _lines_fingerprint(entry):
 def requeue_moved_stages(store):
     """A stage whose start line, finish or road length is not what the last start saw (the shipped table or a learnt
     line moved: STAGE_LINES) has all its finished runs, the game-clock ones too, queued for the backfill (run_class
-    cleared), their classes, sectors and potentials worked out on the new lines, and its stored potentials dropped to
-    be built again. A stage not seen before counts as moved (a database from before the fingerprints). Returns the
-    number of stages queued."""
+    cleared), their classes, sectors and potentials worked out on the new lines, its stored potentials dropped to
+    be built again, and the runs marked as not re-timable (retime_finishes) marked no more, to be tried once more. A
+    stage not seen before counts as moved (a database from before the fingerprints). Returns the number of stages
+    queued."""
     moved = 0
     for stage in store.stage_keys():
         if not stage.startswith('acr:'):
@@ -1231,6 +1233,7 @@ def requeue_moved_stages(store):
         if now is None or store.stage_fingerprint(stage) == now:
             continue
         store.queue_stage_runs(stage)
+        store.forget_unknown_finishes(stage)
         store.drop_stage_potentials(stage)
         store.set_stage_fingerprint(stage, now)
         moved += 1
@@ -1263,7 +1266,15 @@ def retime_finishes(store):
                 course = trace[-1][T['distance']]        # a database migrated from version 2 has no course
             end_speed = _trace_speed_at(trace, course) if trace and course is not None else None
             if end_speed is not None and end_speed > AT_SPEED:
-                store.set_run_finish(run, flying)        # it ends at speed: timed at the flying finish already
+                # It ends at speed: timed at a flying finish already, the one of its day. That is the table's where
+                # the trace's end is within a row or two of it, else the line it was timed at (where its course
+                # ends), and the loop below moves it from there to the table's
+                began = store.run_start(run)
+                if began is None:
+                    began = stage_tables.run_origin(entry)
+                timed_at = began + course if began is not None and course is not None else None
+                store.set_run_finish(run, timed_at if timed_at is not None and abs(timed_at - flying) > TIMED_AT_TOLERANCE
+                                     else flying)
                 continue
             # The trace's distance is measured from where the run began; the course is where the car finally
             # stopped, seconds after the stop control: the lines are anchored on the road, not on the course

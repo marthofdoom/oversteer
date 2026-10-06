@@ -1630,6 +1630,15 @@ class Store(Reader):
             self._do('UPDATE runs SET run_class = NULL WHERE id = ?', (run,))
         return len(runs)
 
+    def forget_unknown_finishes(self, stage):
+        """A run of `stage` marked as not re-timable (a run_finish row with no finish) is marked no more, so
+        drive_log.retime_finishes tries it again (its class is left to the backfill). Returns the number of runs."""
+        runs = [r[0] for r in self._do('SELECT f.run FROM run_finish f JOIN runs r ON r.id = f.run '
+                                       'WHERE f.finish_m IS NULL AND r.stage = ?', (stage,)).fetchall()]
+        for run in runs:
+            self._do('DELETE FROM run_finish WHERE run = ?', (run,))
+        return len(runs)
+
     def queue_stage_runs(self, stage):
         """Queue the finished runs of a stage for the backfill (run_class cleared)."""
         self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))
