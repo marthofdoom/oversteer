@@ -89,7 +89,7 @@ class Reference:
         self.track = tuple(coach_context.along(self.trace))
         self.splits = tuple(splits)                 # ((name, d0, d1), ...): the coach's grid
         self.sectors = tuple(sectors)               # ((name, d0, d1), ...): the game's sectors
-        self.sector_start = sector_start            # m along the road spline where the sectors' d is 0 (the start line)
+        self.sector_start = sector_start            # m along the road spline where the sectors' d is 0 (where the reference began)
         self.view = {'run': self.run, 'time': self.result_time, 'course': self.course,       # never changed
                      'splits': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.splits],
                      'sectors': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.sectors]}
@@ -110,7 +110,7 @@ def load_reference(store, stage, car, exclude=None):
     run compares). Its trace is cut as the coach cuts it (stage_rows), its
     splits are the sections of its grid (coach_context.grid_of: the bounds
     coach.splits() times), its sectors the stage's own
-    (stage_tables.sector_bounds, from the start line). Reads the database:
+    (stage_tables.sector_bounds, from where the reference began). Reads the database:
     the drive-log thread only."""
     if not stage or car is None:
         return None
@@ -130,9 +130,14 @@ def load_reference(store, stage, car, exclude=None):
         grid, bounds = coach_context.grid_of({'trace': rows, 'corners': corners, 'course': ref['course']})
         splits = tuple((coach_context.section_name(s), a, b) for s, (a, b) in zip(grid, bounds))
     sectors, sector_start = (), None
-    placed = stage_tables.sector_bounds(stage_tables.entry(stage))
+    entry = stage_tables.entry(stage)
+    placed = stage_tables.sector_bounds(entry)
     if placed is not None:
-        start = sector_start = placed['start_m']
+        # from where the reference began (its trace's distance 0), as coach._sectors places a run's lines
+        start = store.run_start(ref['id'])
+        if start is None:
+            start = stage_tables.run_origin(entry)
+        start = sector_start = placed['start_m'] if start is None else start
         sectors = tuple(('S{}'.format(i + 1), a - start, b - start) for i, (a, b) in enumerate(placed['bounds']))
     return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors, sector_start)
 

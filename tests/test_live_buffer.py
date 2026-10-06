@@ -363,6 +363,26 @@ def test_load_reference_without_runs(tmp_path):
     assert live_buffer.load_reference(store, None, 1) is None
 
 
+def test_the_references_sector_lines_are_placed_from_where_it_began_not_from_the_start_line(tmp_path):
+    from oversteer import stage_tables
+    from oversteer.telemetry_store import open_store
+    from tests.test_coach_wiring import _timed_run
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    lines = stage_tables.sector_lines(entry)
+    run = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
+    car = store.run(run)['car']
+    ref = live_buffer.load_reference(store, stage, car)
+    origin = stage_tables.run_origin(entry)                       # no start recorded: where the stage's runs begin
+    assert origin != lines[0] and ref.sector_start == origin
+    assert ref.sectors[0][1] == pytest.approx(lines[0] - origin) and ref.sectors[-1][2] == pytest.approx(lines[-1] - origin)
+    store.set_run_start(run, 251.0)                              # recorded: that is the origin
+    ref = live_buffer.load_reference(store, stage, car)
+    assert ref.sector_start == 251.0 and ref.sectors[0][1] == pytest.approx(lines[0] - 251.0)
+    store.close()
+
+
 def test_sector_bounds_are_placed_from_where_the_run_began():
     """As coach._sectors: a bound is less where along the spline the run began, past the line or not."""
     def sectors_of(start_d):
