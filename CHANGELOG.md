@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.1 — 2026-10-06
 
 ### Coaching
 - The coach diagnoses each corner from the braking, the speeds and the grip
