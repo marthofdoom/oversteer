@@ -10,6 +10,9 @@
   coach's corner sections stay in the Run view's "where the time went" and in
   the top 3. Stages without sector lines (other games, Livigno) keep corner
   sections, labelled as sections.
+- Comparison labels say what the comparison is: viewing your PB compares with
+  "next best", the Live view names its reference "Run N" unless it is the PB, and
+  the stage map's START label sits away from the route.
 
 ## 0.15.1 — 2026-10-06
 

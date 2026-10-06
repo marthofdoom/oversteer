@@ -666,6 +666,13 @@ def live_ribbon(body, track, bounds):
     return tones, live_cursor(body, bounds)
 
 
+def ref_name(ref):
+    """What the live reference is called: 'PB' only when it is the stage's PB, else 'Run n'."""
+    if ref.get('pb') is False:
+        return _("Run {}").format(ref['n']) if ref.get('n') is not None else _("best run")
+    return _("PB")
+
+
 def live_delta_view(body, bounds=None, unit='sections'):
     """The dict telemetry_plot.live_delta draws, or None while there is nothing to say: the delta only with a
     reference that is ready and a delta; 'no PB yet' as a note; 'vs PB · split n ±x.xx · finish ≈' ('S2 ±0.42' where the splits are `unit` 'sectors')."""
@@ -684,7 +691,7 @@ def live_delta_view(body, bounds=None, unit='sections'):
             label = '{}{} {}'.format('S' if unit == 'sectors' else '', cur + 1, signed2(split['delta'])) if cur is not None else '–'
         else:
             label = signed2(split['delta'])
-    return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'split': label,
+    return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'ref_name': ref_name(ref), 'split': label,
             'finish': clock(body['predicted']), 'dim': body['state'] == 'stale'}
 
 
@@ -693,7 +700,7 @@ def live_done_view(body, found=None, calls=None):
     · SoB 3:04.0 · 3 gold splits · 3 calls in the debrief', from the splits row `found` and the debrief's count)."""
     final = body.get('final') or {}
     ref = body.get('ref')
-    parts = ['PB ' + clock(ref['time'])] if ref else [_("No PB to compare with yet")]
+    parts = [ref_name(ref) + ' ' + clock(ref['time'])] if ref else [_("No PB to compare with yet")]
     if found:
         if found.get('sob') is not None:
             parts.append(_("SoB") + ' ' + clock(found['sob']))

@@ -440,6 +440,13 @@ def _grid_time(r):
     return r['result_time'] - (r.get('first_section') or 0.0)
 
 
+def stage_pb_id(reader, stage, car_id):
+    """The id of the PB: the quickest finished clean run of the car on the stage among those that rank, or None."""
+    ranked = reader.stage_runs(stage, car=car_id, limit=60, ranked=True)
+    finished = [r for r in ranked if r['finished'] == 1 and r['result_time'] and r['run_class'] == 'clean']
+    return min(finished, key=lambda r: r['result_time'])['id'] if finished else None
+
+
 def reference_run(candidates, result_time=None, wet=None):
     """The fastest finished run among `candidates` (Store.stage_runs rows
     of the same car and stage, class clean or learning; by stage time less the

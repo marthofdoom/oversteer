@@ -204,7 +204,7 @@ def test_a_failing_splits_never_takes_the_tips_down(runs, web, monkeypatch):
 def test_the_page_has_the_run_view_and_stays_inside_its_csp():
     from oversteer.telemetry_web import find_page, _hashes
     text = open(find_page(), encoding='utf-8').read()
-    for needle in ('id="tele-run"', 'id="c-strips"', 'id="loss"', '/api/v1/runs/', 'data-cmp="prev"'):
+    for needle in ('id="tele-run"', 'id="c-strips"', 'id="loss"', '/api/v1/runs/', 'data-cmp="prev"', 'next best', 'liveRefName', 'rvStartLabel'):
         assert needle in text, needle
     assert len(_hashes(text, 'script')) >= 2 and len(_hashes(text, 'style')) >= 2     # the Run view's own blocks are hashed
 
@@ -254,7 +254,7 @@ def test_the_cairo_strips_map_and_gg_draw_the_analysis(runs, tmp_path):
     assert plot.loss_tone(0.02) == plot.NEUTRAL and plot.loss_tone(0.3) == plot.SLOWER and plot.loss_tone(-0.3) == plot.FASTER
     surface_of(lambda cr: plot.gg(cr, 200, 200, data), 200, 200)
     # no comparison: no delta strip, nothing breaks
-    alone = ra.analysis(h.store, first, 'pb')
+    alone = ra.analysis(h.store, first, '99999')              # the PB has a next best now: a stranger's run id is none
     assert alone['cmp'] is None and plot.strips_height(alone) < plot.strips_height(data)
     surface_of(lambda cr: plot.strips(cr, 400, 300, alone, (0.0, alone['length']), 0.0), 400, 300)
     surface_of(lambda cr: plot.stage_map(cr, 300, 44, alone, 0.0), 300, 44)
@@ -311,3 +311,30 @@ def test_the_brake_column_is_where_the_pedal_went_down_against_the_comparison(tm
     coast = h.drive(corners_with(), trace=stage([(0.0, 25.0), (600.0, 20.0)] + tail), result_time=90.0, course=LENGTH)
     row = [s for s in ra.analysis(h.store, coast, 'pb')['sections'] if s['d0'] < 600.0 < s['d1']][0]
     assert row.get('dbrake') is None
+
+
+def test_the_pb_is_never_compared_with_itself_and_the_comparison_is_named_by_what_it_is(runs):
+    """Viewing the PB, the comparison is the next best run ('vs next best'); viewing another run it is the PB only when it
+    is the PB (else 'best earlier'): the label never says PB over a run that is not."""
+    h, first, second, third = runs
+    pb = ra.head(h.store, first)['compare'][0]
+    assert pb['run'] == second and pb['role'] == 'next' and pb['n'] is not None          # not None, not itself
+    assert ra.analysis(h.store, first, 'pb')['ref']['role'] == 'next'
+    assert ra.analysis(h.store, first, 'pb')['ref']['id'] == second
+    assert ra.head(h.store, third)['compare'][0]['role'] == 'pb'
+    assert ra.analysis(h.store, third, 'pb')['ref']['role'] == 'pb'
+    assert ra.analysis(h.store, third, 'prev')['ref']['role'] == 'previous'
+    assert ra.analysis(h.store, third, str(first))['ref']['role'] == 'run'
+
+
+def test_the_start_label_is_placed_away_from_the_road():
+    from oversteer import telemetry_plot as plot
+    road = [(100.0 + 3.0 * i, 100.0) for i in range(30)]               # leaves the start to the right along y=100
+    x, y, align = plot.start_label(road, road[0], 300, 200)
+    assert not 91 <= y <= 103                                          # above or below the road, not on it
+    down = [(100.0, 100.0 + 3.0 * i) for i in range(30)]               # leaves it downward: not under the start
+    x, y, align = plot.start_label(down, down[0], 300, 200)
+    left, right = (x, x + 34.0) if align == 'left' else (x - 34.0, x)
+    assert y < 100 or right < 100 or left > 100                        # clear of the road's column
+    x, y, align = plot.start_label(road, (5.0, 5.0), 300, 200)
+    assert (x if align == 'left' else x - 34.0) >= 0 and y - 9 >= 0    # kept on the map in a corner

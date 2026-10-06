@@ -378,6 +378,26 @@ def map_points(data, w, h, pad=30.0):
     return [None if xs[i] is None else (ox + (xs[i] - x0) * sc, h - (oy + (zs[i] - z0) * sc)) for i in range(len(xs))]
 
 
+def start_label(pts, first, w, h, width=34.0):
+    """(x, y, align) for the START label: the spot beside the marker (right or left of it, above or below) that is
+    furthest from the road, kept on the map; the old below-right spot wins a tie."""
+    road = [p for p in pts[::2] if p]
+    best = None
+    for dx, align in ((6, 'left'), (-6, 'right')):
+        for dy in (14, -8, 26, -20):
+            x0 = first[0] + dx - (width if align == 'right' else 0)
+            y1 = first[1] + dy
+            if x0 < 0 or x0 + width > w or y1 - 9 < 0 or y1 + 3 > h:
+                continue
+            gap = min((max(x0 - p[0], 0, p[0] - x0 - width) ** 2 + max(y1 - 9 - p[1], 0, p[1] - y1 - 3) ** 2
+                       for p in road), default=1e9)
+            if best is None or gap > best[0] + 1e-6:
+                best = (gap, first[0] + dx, y1, align)
+    if best is None:
+        return first[0] + 6, first[1] + 12, 'left'
+    return best[1], best[2], best[3]
+
+
 def stage_map_size(data, w):
     return int(min(340, w * 0.8)) if map_points(data, 100, 100) is not None else 44
 
@@ -431,9 +451,8 @@ def stage_map(cr, w, h, data, cursor):
     last = next((p for p in reversed(pts) if p), None)
     if first:
         _rect(cr, first[0] - 3, first[1] - 3, 6, 6, FASTER)
-        edge = first[0] > w - 44                         # a label this wide would run off the map's right edge
-        text(cr, 'START', first[0] - 6 if edge else first[0] + 6, first[1] + 12, 10, FASTER, True,
-             'right' if edge else 'left')
+        sx, sy, align = start_label(pts, first, w, h)
+        text(cr, 'START', sx, sy, 10, FASTER, True, align)
     if last:
         _rect(cr, last[0] - 3, last[1] - 3, 6, 6, TEXT)
         text(cr, 'FINISH', last[0] - 44 if last[0] > w - 60 else last[0] + 6, last[1] + 12, 10, TEXT, True)
@@ -542,7 +561,7 @@ def live_delta(cr, w, h, d):
         cr.rectangle(bx + bw / 2.0 - 0.75, by - 2, 1.5, bh + 4)
         cr.fill()
     y = pad + 34 + 22
-    text(cr, 'vs PB {} · split {}'.format(d.get('pb', '–'), d.get('split', '–')), pad, y, 12, DIM, False, 'left', alpha)
+    text(cr, 'vs {} {} · split {}'.format(d.get('ref_name', 'PB'), d.get('pb', '–'), d.get('split', '–')), pad, y, 12, DIM, False, 'left', alpha)
     text(cr, 'finish ≈ {}'.format(d.get('finish', '–')), w - pad, y, 12, DIM, False, 'right', alpha)
 
 

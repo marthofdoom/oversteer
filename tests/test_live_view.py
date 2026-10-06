@@ -158,3 +158,11 @@ def test_the_ribbon_lights_the_current_split():
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 300, 10)
     plot.ribbon(cairo.Context(surface), 300, 10, ['ahead-gain', 'none', 'none'], current=1)
     assert pixel(surface, 150, 5) == colour(plot.TEXT) and pixel(surface, 30, 5) == colour(plot.TONES['ahead-gain'])
+
+
+def test_the_live_reference_is_named_by_what_it_is():
+    """'vs PB' only over the PB: over any other run the delta block and the done card name its number."""
+    assert view.ref_name({'pb': True, 'n': 3}) == 'PB' and view.ref_name({'time': 100.0}) == 'PB'      # the old shape
+    assert view.ref_name({'pb': False, 'n': 4}) == 'Run 4' and view.ref_name({'pb': False, 'n': None}) == 'best run'
+    buffer, end = buffer_with_run(until=750.0)
+    assert view.live_delta_view(buffer.read(0, now=end), [(0.0, 500.0), (500.0, 2000.0)])['ref_name'] == 'PB'

@@ -80,7 +80,8 @@ class Reference:
 
     __slots__ = ('run', 'stage', 'result_time', 'course', 'trace', 'track', 'splits', 'sectors', 'sector_start', 'origin', 'view')
 
-    def __init__(self, run, stage, result_time, course, trace, splits=(), sectors=(), sector_start=None, origin=None):
+    def __init__(self, run, stage, result_time, course, trace, splits=(), sectors=(), sector_start=None, origin=None,
+                 n=None, pb=True):
         self.run = run                              # runs.id
         self.stage = stage
         self.result_time = result_time              # s, the run's own clock to the finish
@@ -92,6 +93,7 @@ class Reference:
         self.sector_start = sector_start            # m along the road spline where the sectors' d is 0 (where the reference began)
         self.origin = origin if origin is not None else sector_start      # m along the road spline where its distance 0 is
         self.view = {'run': self.run, 'time': self.result_time, 'course': self.course,       # never changed
+                     'n': n, 'pb': pb,        # its number in its session; whether it is the stage's PB (else named by its number)
                      'splits': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.splits],
                      'sectors': [{'name': n, 'd0': a, 'd1': b} for n, a, b in self.sectors]}
 
@@ -140,7 +142,9 @@ def load_reference(store, stage, car, exclude=None):
         # from where the reference began (its trace's distance 0), as coach._sectors places a run's lines
         start = sector_start = placed['start_m'] if origin is None else origin
         sectors = tuple(('S{}'.format(i + 1), a - start, b - start) for i, (a, b) in enumerate(placed['bounds']))
-    return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors, sector_start, origin)
+    n = {r['id']: r['n'] for r in store.runs(ref['session'])}.get(ref['id'])
+    return Reference(ref['id'], stage, ref['result_time'], ref['course'], rows, splits, sectors, sector_start, origin,
+                     n, coach_context.stage_pb_id(store, stage, car) == ref['id'])
 
 
 JOIN_SLACK = 30.0                # m: a first row this far into split 0 or less is the run leaving the line

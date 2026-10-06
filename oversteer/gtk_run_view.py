@@ -286,7 +286,10 @@ class RunView(Gtk.Box):
         self._combo.set_active_id(str(run_id))
         self._pb.set_active(vs == 'pb')
         self._prev.set_active(vs == 'prev')
-        self._pb.set_sensitive(head['compare'][0]['run'] is not None)
+        pb = head['compare'][0]
+        self._pb.set_label(_("vs {}").format(_(run_analysis.ROLE_NAMES.get(pb['role'], 'PB'))) +
+                           ('' if pb['n'] is None else ' · ' + _("Run {}").format(pb['n'])))
+        self._pb.set_sensitive(pb['run'] is not None)
         self._prev.set_sensitive(head['compare'][1]['run'] is not None)
         self._quiet = False
         self._show_state(None)
@@ -323,7 +326,7 @@ class RunView(Gtk.Box):
             _("vs {} {}").format(ref['label'], clock(ref['time'])) if ref else _("No run to compare with yet")) if x))
         self._legend.set_markup('<span foreground="{}">—</span> {}   <span foreground="{}">—</span> {}'.format(
             plot.SPEED, _("Run {}").format(head['n']), plot.REF,
-            GLib.markup_escape_text((ref['label'] + (' · PB' if data['vs'] == 'pb' else ' · ' + _("previous"))) if ref
+            GLib.markup_escape_text((ref['label'] + (' · ' + _(run_analysis.ROLE_NAMES[ref['role']]) if ref['role'] in run_analysis.ROLE_NAMES else '')) if ref
                                     else _("no comparison"))))
         self._store.clear()
         top = max([0.1] + [abs(s['loss']) for s in data['sections'] if s['loss'] is not None and not s['off']])
