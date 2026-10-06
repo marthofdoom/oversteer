@@ -305,6 +305,9 @@ def test_a_real_acr_run_through_the_whole_path(tmp_path):
     every = coach.Coach(reader).tips(profile, car, show_all=True)
     inside = [(t.place['d0'], t.place['d1']) for t in top]
     assert not [t for t in every if t.id.startswith('corner.section') and any(a <= t.place['d'] < b for a, b in inside)]
+    # and nothing is said about the line, a flick or the handbrake: none of it is measured in this run
+    import re
+    assert not [t.text for t in every if re.search(r'\bline\b|flick|handbrake', t.text)]
     latest = reader.run(max(r['id'] for r in reader.stage_runs('acr:greece:elatia', car=car)))
     assert run_analysis.stage_potential(reader, latest)['user'] == pytest.approx(found['possible'])
     # recomputing with the same runs changes nothing (the version holds), and a forced one gives the same numbers

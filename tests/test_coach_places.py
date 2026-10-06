@@ -340,12 +340,15 @@ def test_a_spin_or_a_near_stop_is_a_corner_fault_and_an_off_is_named(tmp_path):
     h.drive(corners_with(), events=[event('spin', 580.0, 620.0, value=230.0), event('stall', 1190.0, 1215.0),
                                     event('off', 2100.0, 2130.0, 'reverse', 4.0)])
     spin, = h.by_id('corner.spin')
-    assert spin.text == ('On Test Stage, you spun in the 3 right at 0.6 km. Rotate the car less on the way in (a smaller '
-                         'flick, a shorter handbrake pull) and get the throttle on sooner.')
+    assert spin.kind == 'tip' and spin.text == (
+        'On Test Stage, you spun in the 3 right at 0.6 km: the car turned 230 degrees and you came in at 90 km/h and '
+        'were down to 36 km/h at the slowest point. Catch it with opposite lock as soon as the rear steps out (you '
+        'steered against it for 0 % of it).')
+    # a near stop with no rotation and nothing against the quickest pass is said, not coached
     stall, = h.by_id('corner.stall')
-    assert stall.text == ('On Test Stage, the car nearly stopped in the 3 left at 1.2 km. Look at what slowed it there, '
-                          'the braking point, the line or the gear, and get the throttle on sooner.')
-    assert spin.cost > stall.cost
+    assert stall.kind == 'note' and stall.text == (
+        'On Test Stage, the car nearly stopped in the 3 left at 1.2 km: it was nearly stopped for 1.0 s and you came '
+        'in at 90 km/h and were down to 36 km/h at the slowest point.')
     off, = h.by_id('corner.off')
     assert off.kind == 'note' and off.text == ('On Test Stage, off at 2.1 km: the corners within 100 m of it are left '
                                                'out of the comparisons. It was in the 3 right.')
@@ -353,12 +356,54 @@ def test_a_spin_or_a_near_stop_is_a_corner_fault_and_an_off_is_named(tmp_path):
     h = Stage(tmp_path / 'u.db', game='wrcg')
     h.drive(corners_with(), events=[event('spin', 580.0, 620.0, value=230.0), event('off', 2100.0, 2130.0, 'long')])
     assert not h.by_id('corner.spin') and len(h.by_id('corner.off')) == 1
-    # with steering against the yaw in that corner it is the rotation
+    # with steering against the yaw in that corner it is the rotation: and the steering was there, so nothing is
+    # said about it that was not measured
     h = Stage(tmp_path / 'r.db')
     h.drive([start(), stored(600.0, complex_=1, direction=-1), stored(1200.0, complex_=2, direction=1, counter_steer=0.4)],
             events=[event('stall', 1190.0, 1215.0)])
-    assert h.by_id('corner.stall')[0].text.endswith('Rotate the car less on the way in (a smaller flick, a shorter '
-                                                    'handbrake pull) and get the throttle on sooner.')
+    [stall] = h.by_id('corner.stall')
+    assert stall.kind == 'note' and not re.search(r'flick|handbrake|\bline\b', stall.text)
+
+
+def test_a_spin_or_stall_names_the_speed_the_quickest_pass_came_in_at_and_the_handbrake_only_when_measured(tmp_path):
+    spun = [event('spin', 580.0, 620.0, value=230.0)]
+    # the quickest pass came in slower: arrive at its speed
+    h = Stage(tmp_path / 't.db')
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=22.0), stored(1200.0, complex_=2)],
+            result_time=200.0)
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=26.0, counter_steer=0.5),
+             stored(1200.0, complex_=2)], events=spun, result_time=203.0)
+    [spin] = h.by_id('corner.spin')
+    assert spin.kind == 'tip' and spin.text.endswith('Arrive at 79 km/h, as your quickest pass did (you came in at 94).')
+    assert not re.search(r'flick|handbrake|\bline\b', spin.text)
+    # not faster than the quickest pass and steering against it less than COUNTER_DELTA of the corner
+    h = Stage(tmp_path / 'u.db')
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=26.0), stored(1200.0, complex_=2)],
+            result_time=200.0)
+    h.drive([start(), stored(600.0, complex_=1, direction=-1, entry_speed=26.0, counter_steer=0.05),
+             stored(1200.0, complex_=2)], events=spun, result_time=203.0)
+    [spin] = h.by_id('corner.spin')
+    assert spin.text.endswith('Catch it with opposite lock as soon as the rear steps out (you steered against it '
+                              'for 5 % of it).')
+    # steered against it for a good part of it: nothing the numbers point at (a note), but with the handbrake
+    # measured on the trace, the pull is named
+    from tests.test_coach_context import stage
+    held = 0.0
+    trace = []
+    for r in stage([(0.0, 20.0), (2100.0, 20.0)]):
+        down = 580.0 <= r[C['distance']] <= 620.0
+        trace.append(r[:C['handbrake']] + (1.0 if down else 0.0,) + r[C['handbrake'] + 1:])
+        held += 0.1 if down else 0.0
+    corner = dict(stored(600.0, complex_=1, direction=-1, entry_speed=26.0, counter_steer=0.4), handbrake=1)
+    h = Stage(tmp_path / 'v.db')
+    h.drive([start(), dict(corner, handbrake=0), stored(1200.0, complex_=2)], events=spun)
+    [spin] = h.by_id('corner.spin')
+    assert spin.kind == 'note' and not re.search(r'flick|handbrake|\bline\b', spin.text)
+    h = Stage(tmp_path / 'w.db')
+    h.drive([start(), corner, stored(1200.0, complex_=2)], events=spun, trace=trace, course=2100.0)
+    [spin] = h.by_id('corner.spin')
+    assert spin.kind == 'tip' and 'the handbrake was on for {:.1f} s'.format(held) in spin.text
+    assert spin.text.endswith('A shorter handbrake pull: on for {:.1f} s.'.format(held))
 
 
 def spread_event(apex, sd_kmh, median_kmh, runs=6):

@@ -1569,18 +1569,82 @@ class Coach:
                 notes.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'note',
                                  'On {}, {}.'.format(name, what), place=place(stage, run, e['d0'], e['d0'], e['d1'])))
                 continue
-            # "Rotate less" only where the corner shows rotation: a spin, steering against the yaw, the handbrake.
-            # A stop with none of them is told neutrally (it may be a wall, a rock or a line that ran wide)
-            rotated = e['kind'] == 'spin' or (corner is not None and (
-                (corner.get('counter_steer') or 0.0) >= coach_context.COUNTER_DELTA or corner.get('handbrake')))
-            action = ('Rotate the car less on the way in (a smaller flick, a shorter handbrake pull) and get the '
-                      'throttle on sooner.' if rotated else
-                      'Look at what slowed it there, the braking point, the line or the gear, and get the '
-                      'throttle on sooner.')
-            candidates.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'tip',
-                                  'On {}, {}. {}'.format(name, what, action),
+            facts, fix = self._incident_says(stage, run, e, corner)
+            text = 'On {}, {}{}.{}'.format(name, what, ': ' + facts if facts else '', ' ' + fix if fix else '')
+            if not fix:                     # nothing the run shows to change: said, not coached
+                notes.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'note', text,
+                                 place=place(stage, run, e['d0'], e['d0'], e['d1'])))
+                continue
+            candidates.append(Tip('corner.{}:{}:{:.0f}'.format(e['kind'], stage, e['d0']), 'tip', text,
                                   [], 1.0, cost=COST_SPIN if e['kind'] == 'spin' else COST_STALL, count=1, rough=True,
                                   place=place(stage, run, e['d0'], e['d0'], e['d1'])))
+
+    def _incident_says(self, stage, run, e, corner):
+        """(what was measured, the one thing to do or None) for a spin or a near stop in `corner` (None: no
+        corner of the run near it). Measured: the heading change (a spin), how long the car was nearly stopped (a
+        stall), the speed it came in at and slowed to, the handbrake only where the corner says it was used.
+        The fix, in order: arrive at the speed of the quickest pass's corner where that was slower; catch it with
+        opposite lock where the run steered against the slide less than COUNTER_DELTA of it; a shorter handbrake
+        pull where it was measured; a near stop with no rotation: the diagnosis's fix against the quickest pass.
+        Nothing is said about the line, a flick or the handbrake that was not measured."""
+        facts = []
+        entry = corner.get('entry_speed') if corner is not None else None
+        low = corner.get('min_speed') if corner is not None else None
+        if e['kind'] == 'spin' and e.get('value'):
+            facts.append('the car turned {:.0f} degrees'.format(e['value']))
+        elif e['kind'] == 'stall' and e.get('value'):
+            facts.append('it was nearly stopped for {:.1f} s'.format(e['value']))
+        if entry is not None and low is not None:
+            facts.append('you came in at {:.0f} km/h and were down to {:.0f} km/h at the slowest point'.format(
+                entry * 3.6, low * 3.6))
+        hold = self._handbrake_s(run, corner) if corner is not None and corner.get('handbrake') else None
+        if hold:
+            facts.append('the handbrake was on for {:.1f} s'.format(hold))
+        said = ' and '.join(facts) if len(facts) < 3 else ', '.join(facts[:-1]) + ' and ' + facts[-1]
+        counter = corner.get('counter_steer') if corner is not None else None
+        rotated = e['kind'] == 'spin' or (corner is not None and (
+            (counter or 0.0) >= coach_context.COUNTER_DELTA or corner.get('handbrake')))
+        quick = self._quick_corner(stage, run, corner) if corner is not None else None
+        if entry is not None and quick is not None and quick.get('entry_speed') is not None \
+                and entry - quick['entry_speed'] >= coach_context.SPEED_DELTA:
+            return said, 'Arrive at {:.0f} km/h, as your quickest pass did (you came in at {:.0f}).'.format(
+                quick['entry_speed'] * 3.6, entry * 3.6)
+        if rotated and counter is not None and counter < coach_context.COUNTER_DELTA:
+            return said, ('Catch it with opposite lock as soon as the rear steps out (you steered against it for '
+                          '{:.0f} % of it).'.format(100.0 * counter))
+        if rotated and hold:
+            return said, 'A shorter handbrake pull: on for {:.1f} s.'.format(hold)
+        if not rotated and e['kind'] == 'stall' and corner is not None:
+            diag = self._diagnose_place(stage, run, {'d0': corner['d0'], 'd1': corner['d1'], 'split': None}, None)
+            if diag is not None and diag['fix']:
+                return said, diag['fix']
+        return said, None
+
+    def _handbrake_s(self, run, corner):
+        """Seconds the handbrake was on (past half) through a corner's yaw window, from the run's trace; None where it
+        was not on or there is no trace."""
+        loaded = self._arrays(run)
+        if loaded is None or corner.get('d0') is None:
+            return None
+        rows = loaded['rows']
+        track = coach_context.along(rows)
+        hb, t = coach_context.CH['handbrake'], coach_context.CH['t']
+        held = sum(rows[i][t] - rows[i - 1][t] for i in range(1, len(rows))
+                   if corner['d0'] <= track[i] <= corner['d1'] and rows[i][hb] is not None and rows[i][hb] > 0.5)
+        return held if held > 0.0 else None
+
+    def _quick_corner(self, stage, run, corner):
+        """The stored corner of the car's quickest pass of the stage (the coach's reference run before `run`) that is
+        the same bend as `corner` (the nearest within SECTION_REACH m), or None."""
+        reader = self.reader
+        before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
+                  if r['started'] <= run['started'] and r['run_class'] in ('clean', 'learning')]
+        ref = coach_context.reference_run(before, wet=run['wet'])
+        if ref is None:
+            return None
+        near = [k for k in reader.corners(ref['id']) if k.get('d') is not None
+                and abs(k['d'] - corner['d']) <= coach_context.SECTION_REACH]
+        return min(near, key=lambda k: abs(k['d'] - corner['d'])) if near else None
 
     def _spread(self, stage, name, run, events, sections, report, candidates, praise):
         """R7: the speed through the same section from run to run (corner.spread events). A section that
