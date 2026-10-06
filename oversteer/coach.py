@@ -1639,6 +1639,14 @@ class Coach:
                                       bands, needed), value=0.0, cost=0.0))
 
 
+def _began_mid_stage(reader, run):
+    """Whether an ACR run began further along the road than the start line (run_start more than
+    stage_tables.START_LINE_PAST past it): its trace's distances are not the reference grid's."""
+    line = stage_tables.start_line(stage_tables.entry(run.get('stage')))
+    start = reader.run_start(run['id'])
+    return line is not None and start is not None and start > line + stage_tables.START_LINE_PAST
+
+
 def stitch(reader, run, ref, ref_corners, before):
     """The best of the car's runs on the stage section by section, for both the coach's "possible" note and
     splits(), so they agree: {best (coach_context.stitched on the reference's grid), loaded (the runs read),
@@ -1663,8 +1671,11 @@ def stitch(reader, run, ref, ref_corners, before):
         trace, found = reader.trace(r['id']), reader.corners(r['id'])
         if trace and found:
             loaded.append({'run': r['id'], 'trace': coach_context.stage_rows(
-                trace, r['course'], r['finished'] == 1, r['result_time']), 'corners': found})
-    best = coach_context.stitched(ref_rows, loaded)
+                trace, r['course'], r['finished'] == 1, r['result_time']), 'corners': found,
+                'mid_stage': _began_mid_stage(reader, r)})
+    # a run that began mid-stage keeps to `loaded` (the game's sectors place it from where it began) but is
+    # not on the grid: its distance 0 is not the line
+    best = coach_context.stitched(ref_rows, [x for x in loaded if not x['mid_stage']])
     if best is None:
         return None
     possible = gain = None
@@ -1698,7 +1709,7 @@ def splits(reader, profile, car_id):
     latest run set the best), `delta` (last less best), `pb` (the reference run's time through it: the PB the
     LiveSplit colours are against), `margin` (a gold split: how much it beat the previous best by), `cum` (the last run's elapsed time at the split's end less the PB's: ahead
     when negative), `d0` and `d1` (m, the split's bounds on the stage) and `finish` (the last section holds
-    the slow-down to the stop where the finish is not a line). `ref_run` is the reference (PB) run's id. Sections an off touched are left out (grid_times).
+    the slow-down to the stop where the finish is not a line). `ref_run` is the reference (PB) run's id. Every grid section has a row: `last`, `best` and `pb` are None where a run did not time it (an off touched it, grid_times).
     `sectors` is the game's own sectors of the stage (stage_tables.sector_bounds; S1.., `last`, `best`,
     `gold`, `delta` as above, `confidence`), None where the stage's cannot be placed. The best is over the
     clean and learning runs read; a sector a run did not drive from end to end is not timed."""
@@ -1731,15 +1742,15 @@ def splits(reader, profile, car_id):
     best_time = found['pb']['result_time'] if found['pb'] is not None else None
     last = len(best['grid']) - 1
     out = []
-    for j in sorted(best['best']):
+    for j in range(len(best['grid'])):                   # every section: '–' where the PB run did not time it
         t = last_times.get(j)
         d1 = best['bounds'][j][1]
         mine_at = coach_context.elapsed_at(mine['trace'], d1) if mine else None
         ref_at = coach_context.elapsed_at(ref_rows['trace'], d1)
         gold = t is not None and best['who'].get(j) == run['id']
-        out.append({'name': coach_context.section_name(best['grid'][j]), 'last': t, 'best': best['best'][j],
+        out.append({'name': coach_context.section_name(best['grid'][j]), 'last': t, 'best': best['best'].get(j),
                     'gold': gold, 'margin': best['runner_up'][j] - t if gold and best['runner_up'].get(j) else None,
-                    'delta': None if t is None else t - best['best'][j], 'finish': j == last,
+                    'delta': None if t is None or j not in best['best'] else t - best['best'][j], 'finish': j == last,
                     'pb': best['base'].get(j), 'cum': None if mine_at is None or ref_at is None else mine_at - ref_at,
                     'd0': best['bounds'][j][0], 'd1': d1})
     if not out:

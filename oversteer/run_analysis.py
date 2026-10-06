@@ -141,7 +141,7 @@ def resolve(reader, run, vs):
 def head(reader, run_id, tips=None, namespace=None):
     """One run's header: id, n, started, time, finished, run_class, stage, stage_name, car, car_name, wet,
     compare (the PB and the previous run as {id, run, n, time, label, delta}: delta is this run's time less
-    theirs), `delta_pb`, and `advice` (the coach's tips about this run, as Tip.to_dict() gives them, when
+    theirs), `delta_pb`, `limiter` (rpm, from the car's model), `game`, and `advice` (the coach's tips about this run, as Tip.to_dict() gives them, when
     `tips` -- all of the car's tips -- is given). None for a run that does not exist."""
     run = reader.run(run_id)
     if run is None:
@@ -165,6 +165,7 @@ def head(reader, run_id, tips=None, namespace=None):
             'time': mine, 'finished': run['finished'], 'run_class': run['run_class'], 'stage': run['stage'],
             'stage_name': coach._stage_name(run['stage'], stage_row) if run['stage'] else None,
             'car': run['car'], 'car_name': (car or {}).get('name') or (car or {}).get('key'), 'wet': run['wet'],
+            'limiter': ((car or {}).get('model') or {}).get('limiter'), 'game': (car or {}).get('game'),
             'compare': compare, 'delta_pb': compare[0]['delta'], 'advice': advice}
 
 

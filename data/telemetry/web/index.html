@@ -802,20 +802,39 @@ function clock(t) {
   const m = Math.floor(t / 60), s = t - m * 60;
   return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
 }
-function signed(d) { return d == null ? "–" : (d > 0.05 ? "+" : d < -0.05 ? MINUS : "±") + Math.abs(d).toFixed(1); }
+function signed(d, dp) {                 // a difference that rounds to nothing is ±0.0, never +0.0 or −0.0
+  if (d == null) return "–";
+  const k = Math.pow(10, dp == null ? 1 : dp), r = Math.round(Math.abs(d) * k) / k * (d < 0 ? -1 : 1);
+  return (r > 0 ? "+" : r < 0 ? MINUS : "±") + Math.abs(r).toFixed(dp == null ? 1 : dp);
+}
 function seconds(t) { return t == null ? "–" : t.toFixed(1); }
 
 // -- the splits row and its sheet --
-// LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when level
-// with or ahead of the comparison and red behind it, the darker shade when the split gained time and the
-// lighter when it lost time. The comparison here is each split's best (coach.splits() gives no PB per split
-// yet), so "behind" is by how much the split lost: the lighter red under half a second, the darker over.
+// LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when ahead of
+// the PB (cum: this run's elapsed time at the split's end less the PB's) and red when behind it, the darker
+// shade when the split itself gained time on the PB's and the lighter when it lost time. Without the PB's
+// times (older server) the split's best stands in for both.
 function splitTone(r) {
   if (r.last == null || r.delta == null) return "none";
   if (r.gold) return "gold";
-  if (r.delta <= 0.05) return "ahead-gain";
-  return r.delta > 0.5 ? "behind-lose" : "behind-gain";
+  const pb = r.cum != null && r.pb != null, cum = pb ? r.cum : r.delta, seg = pb ? r.last - r.pb : r.delta;
+  return (Math.round(cum * 10) <= 0 ? "ahead" : "behind") + "-" + (Math.round(seg * 10) <= 0 ? "gain" : "lose");
 }
+// A gold split shows how far it beat the previous best; others the split against the PB's.
+function splitDelta(r) {
+  if (r.last == null) return "–";
+  if (r.gold) return "★" + (r.margin ? " " + signed(-r.margin) : "");
+  return signed(r.pb != null ? r.last - r.pb : r.delta);
+}
+// "PB" is said for a clean run that is the best, never for a learning or off run that was merely quick
+function lastBadge(sp) {
+  if (sp.last == null || sp.best == null) return null;
+  if (sp.new_pb) return {text: "PB", cls: "t-gold"};
+  const d = sp.last - sp.best;
+  return {text: signed(d), cls: Math.round(d * 10) <= 0 ? "t-ahead-gain" : "pos-slower"};
+}
+// The times end at the stage's flying finish where the stage table has one
+function finishNote(sp) { return sp.finish_m != null ? "Times run to the estimated flying finish of the stage." : ""; }
 
 let splitsOpen = false;
 try { splitsOpen = localStorage.getItem("splitsOpen") === "1"; } catch (e) {}
@@ -832,7 +851,7 @@ function splitsTable(sp) {
   const box = el("div");
   const table = el("table");
   const head = el("tr");
-  for (const h of ["Split", "Last", "Δ best", "Best"]) head.appendChild(el("th", h));
+  for (const h of ["Split", "Last", "Δ PB", "Best", "Save"]) head.appendChild(el("th", h));
   table.appendChild(head);
   sp.splits.forEach((r, i) => {
     const tr = el("tr", null, r.finish ? "fin" : "");
@@ -840,22 +859,25 @@ function splitsTable(sp) {
     name.textContent = (i + 1) + ". " + r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "");
     tr.appendChild(name);
     tr.appendChild(el("td", seconds(r.last)));
-    tr.appendChild(el("td", (r.gold ? "★ " : "") + (r.last == null ? "–" : signed(r.delta)), "t-" + splitTone(r)));
+    tr.appendChild(el("td", splitDelta(r), "t-" + splitTone(r)));
     tr.appendChild(el("td", seconds(r.best)));
+    tr.appendChild(el("td", r.delta != null && Math.round(r.delta * 10) > 0 ? r.delta.toFixed(1) : "–", "dim"));
     table.appendChild(tr);
   });
   const sum = el("tr", null, "sum");
   sum.appendChild(el("td", "Stage", "name"));
   sum.appendChild(el("td", clock(sp.last)));
-  sum.appendChild(el("td", sp.last != null && sp.best != null ? signed(sp.last - sp.best) : "–",
-    sp.last != null && sp.best != null && sp.last - sp.best <= 0.05 ? "t-ahead-gain" : "t-behind-lose"));
+  const badge = lastBadge(sp);
+  sum.appendChild(el("td", badge ? (sp.new_pb ? "★ " : "") + signed(sp.last - sp.best) : "–", badge ? badge.cls : "dim"));
   sum.appendChild(el("td", clock(sp.best)));
+  sum.appendChild(el("td", badge && !sp.new_pb && Math.round((sp.last - sp.best) * 10) > 0 ? (sp.last - sp.best).toFixed(1) : "–", "dim"));
   table.appendChild(sum);
   const sob = el("tr");
   sob.appendChild(el("td", "Sum of best", "name"));
   sob.appendChild(el("td", ""));
   sob.appendChild(el("td", sp.gain != null ? MINUS + sp.gain.toFixed(1) : "", "t-gold"));
   sob.appendChild(el("td", clock(sp.possible)));
+  sob.appendChild(el("td", ""));
   table.appendChild(sob);
   box.appendChild(table);
   if (sp.sectors && sp.sectors.length) {
@@ -865,13 +887,14 @@ function splitsTable(sp) {
       cell.appendChild(el("span", r.name || "S" + (i + 1), "lbl"));
       const est = r.confidence === "low" ? "≈" : "";
       cell.appendChild(el("b", r.last == null ? "–" : est + seconds(r.last), "num"));
-      cell.appendChild(el("span", (r.gold ? "★ " : "") + (r.last == null ? "best " + est + seconds(r.best) : signed(r.delta)), "d t-" + splitTone(r)));
+      cell.appendChild(el("span", r.last == null ? "best " + est + seconds(r.best) : splitDelta(r), "d t-" + splitTone(r)));
       grid.appendChild(cell);
     });
     box.appendChild(grid);
     if (sp.sectors.some((r) => r.confidence === "low")) box.appendChild(el("p", "≈ Sector positions estimated from the game's sector lengths.", "foot"));
   }
-  box.appendChild(el("p", "Gold ★: your last run set that split's best. Green: level with the best; red: behind it, the darker the more it lost. Sum of best: every split's best put together. The finish split includes the slow-down to the stop.", "foot"));
+  box.appendChild(el("p", "Gold ★: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what the split could still gain against its best. Sum of best: every split's best put together. "
+    + (sp.finish_m != null ? finishNote(sp) : "The finish split includes the slow-down to the stop."), "foot"));
   return box;
 }
 
@@ -887,16 +910,22 @@ function showSplits(sp) {
   $("sp-sob").textContent = clock(sp.possible);
   const now = $("sp-now");
   clear(now);
-  if (sp.last != null && sp.best != null) {
-    const d = sp.last - sp.best;
+  const badge = lastBadge(sp);
+  if (badge) {
     now.appendChild(el("i", "Last"));
     now.appendChild(document.createTextNode(clock(sp.last) + " "));
-    now.appendChild(el("span", d <= 0.05 ? "PB" : signed(d), d <= 0.05 ? "t-gold" : "pos-slower"));
+    now.appendChild(el("span", badge.text, badge.cls));
   }
-  row.title = sp.name + ": PB " + clock(sp.best) + ", sum of best " + clock(sp.possible);
+  row.title = sp.name + ": PB " + clock(sp.best) + ", sum of best " + clock(sp.possible) + (finishNote(sp) ? " (" + finishNote(sp) + ")" : "");
   const ribbon = $("ribbon");
   clear(ribbon);
-  for (const r of sp.splits) { const c = el("i", null, "ls-" + splitTone(r)); ribbon.appendChild(c); }
+  const long = sp.splits.every((r) => r.d0 != null && r.d1 != null);           // cells as long as the splits are
+  sp.splits.forEach((r, i) => {
+    const c = el("i", null, "ls-" + splitTone(r));
+    if (long) c.style.flexGrow = String(Math.max(1, r.d1 - r.d0));
+    c.title = (i + 1) + ". " + r.name.replace(/^the /, "") + " " + seconds(r.last) + " " + splitDelta(r);
+    ribbon.appendChild(c);
+  });
   if (sp.sectors && sp.sectors.length) {
     ribbon.appendChild(el("s"));
     sp.sectors.forEach((r, i) => { const c = el("i", null, "sec ls-" + splitTone(r)); c.title = (r.name || "S" + (i + 1)) + " " + (r.confidence === "low" ? "≈" : "") + seconds(r.last); ribbon.appendChild(c); });
@@ -927,11 +956,9 @@ function lastRun(sp, sessionList) {
   const facts = [sp.name, sp.runs + " runs", golds + (golds === 1 ? " gold split" : " gold splits")];
   if (sp.last == null) facts.unshift("Last run not finished");
   $("lr-s").textContent = facts.join(" · ");
-  if (sp.last != null && sp.best != null) {
-    const d = sp.last - sp.best;
-    $("lr-d").textContent = d <= 0.05 ? "PB" : signed(d);
-    $("lr-d").classList.add(d <= 0.05 ? "t-gold" : "pos-slower");
-  }
+  const badge = lastBadge(sp);
+  if (badge) { $("lr-d").textContent = badge.text; $("lr-d").classList.add(badge.cls); }
+  $("lr-d").title = finishNote(sp);
   $("lr-pb").textContent = clock(sp.best);
   $("lr-sob").textContent = clock(sp.possible);
   $("lr-gain").textContent = sp.gain == null ? "–" : MINUS + sp.gain.toFixed(1);
