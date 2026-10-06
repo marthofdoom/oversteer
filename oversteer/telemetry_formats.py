@@ -48,6 +48,7 @@ OVST2_SIZE = 96                                      # + throttle, brake, car an
 OVST3_FORMAT = '<BBH' + 'f' * 2 + 'f' * 9 + 'f' * 16 + 'f' * 2 + 'f' * 16 + 'f' * 2 + 'f' * 4 + 'ii' + 'fff'
 OVST3_SIZE = OVST2_SIZE + struct.calcsize(OVST3_FORMAT)   # + wheels, suspension, the stage (324)
 OVST3_GAMES = {1: 'ac', 2: 'acc', 3: 'acr'}
+OVST_LATEST = 4                                      # the newest version decoded in full
 OVST4_SIZE = OVST3_SIZE + 4                          # + the graphics page's clock, in seconds (328)
 
 # EA SPORTS WRC: the game sends whatever a packet structure file (JSON, in
@@ -257,12 +258,19 @@ def _ascii(raw):
     return text if text and all(0x20 <= ord(c) < 0x7f for c in text) else None
 
 
+_ovst_future_said = set()                            # versions past ours already logged
+
+
 def _ovst(data, n):
     """Oversteer's own datagram from oversteer-shm-bridge (AC, ACC, ACR)."""
     version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
     exact = {1: OVST_SIZE, 2: OVST2_SIZE, 3: OVST3_SIZE}
     if not (exact.get(version) == n or (version >= 4 and n >= OVST4_SIZE)):
         return None
+    if version > OVST_LATEST and version not in _ovst_future_said:
+        _ovst_future_said.add(version)
+        logging.warning("OVST v%d: the bridge is newer than Oversteer (read as version %d): update Oversteer",
+                        version, OVST_LATEST)
     if not (_plausible(rpm) and _plausible(max_rpm)):
         return None
     sample = Sample(max(0.0, rpm), max_rpm if max_rpm > 0 else None, bool(flags & 1),

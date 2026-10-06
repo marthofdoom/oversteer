@@ -451,6 +451,21 @@ def test_ovst_v4_the_games_clock():
     assert decode_sample(bytes(long3)) is None                              # version 3 is 324 bytes exactly
 
 
+def test_an_unknown_future_ovst_version_is_said_once(caplog):
+    import logging
+    from oversteer import telemetry_formats
+    from oversteer.telemetry_formats import decode_sample
+    telemetry_formats._ovst_future_said.clear()
+    future = bytearray(_ovst4(12.5, extra=b'\0' * 12))
+    future[4] = 5
+    with caplog.at_level(logging.WARNING):
+        assert abs(decode_sample(bytes(future)).stage_time - 12.5) < 1e-6    # still read as far as known
+        decode_sample(bytes(future))
+        decode_sample(_ovst4(1.0))                                           # a known version says nothing
+    said = [r for r in caplog.records if 'OVST v5' in r.getMessage()]
+    assert len(said) == 1 and 'update Oversteer' in said[0].getMessage()
+
+
 def test_ovst_v3_from_an_unnamed_game_stays_acpmf():
     from oversteer.telemetry_formats import decode_sample
     sample = decode_sample(_ovst3(game=0))
