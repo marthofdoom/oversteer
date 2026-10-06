@@ -112,7 +112,7 @@ def load_reference(store, stage, car, exclude=None):
     the drive-log thread only."""
     if not stage or car is None:
         return None
-    before = store.stage_runs(stage, exclude=exclude, limit=60, car=car)
+    before = store.stage_runs(stage, exclude=exclude, limit=60, car=car, ranked=True)
     ref = coach_context.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')])
     if ref is None:
         return None

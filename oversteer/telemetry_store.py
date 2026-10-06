@@ -909,13 +909,23 @@ class Reader:
         rows = self._rows('SELECT session FROM runs WHERE id = ?', (run_id,))
         return rows[0][0] if rows else None
 
-    def stage_runs(self, key, exclude=None, limit=20, car=None, run_class=None):
+    # Runs on the game's own clock (run_clock) start their time at the game's go, 0.3-0.9 s before an older run's
+    # own clock does (the car reaching 3 m/s): the two are not on one scale
+    ON_CLOCK = '(r.id IN (SELECT run FROM run_clock) OR NOT EXISTS (SELECT 1 FROM run_clock c ' \
+               'JOIN runs r2 ON r2.id = c.run JOIN sessions s2 ON s2.id = r2.session ' \
+               'WHERE r2.stage = r.stage AND s2.car = s.car))'
+
+    def stage_runs(self, key, exclude=None, limit=20, car=None, run_class=None, ranked=False):
         """The stage's recent runs that ended, newest first. `car` (a
         cars.id) keeps the runs of that car, `run_class` (a class or a
-        tuple of them) the runs of those classes. Each run: id, started,
-        distance, duration, finished, result_time, course, run_class, wet,
-        car, session, first_section (s through the stage's first section,
-        which holds the launch; None where the run has no corners)."""
+        tuple of them) the runs of those classes. `ranked`: the runs to
+        rank (the PB, the reference, the live delta) rather than to list:
+        once a car has a run on the game's own clock on the stage, only its
+        clock runs. Each run: id, started, distance, duration, finished,
+        result_time, course, run_class, wet, car, session, first_section
+        (s through the stage's first section, which holds the launch; None
+        where the run has no corners) and clock ('game' for a run on the
+        game's clock, else None)."""
         names = ('id', 'started', 'distance', 'duration', 'finished', 'result_time', 'course', 'run_class', 'wet')
         where, args = ['r.stage = ?', 'r.id IS NOT ?', 'r.ended IS NOT NULL'], [key, exclude]
         if car is not None:
@@ -925,12 +935,19 @@ class Reader:
             classes = (run_class,) if isinstance(run_class, str) else tuple(run_class)
             where.append('r.run_class IN ({})'.format(', '.join('?' * len(classes))))
             args.extend(classes)
-        return [dict(zip(names + ('car', 'session', 'first_section'), r)) for r in self._rows(
-            'SELECT {}, s.car, r.session, (SELECT c.section_t FROM corners c WHERE c.run = r.id '
-            'AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1) FROM runs r JOIN sessions s ON r.session = s.id '
-            'WHERE {} ORDER BY r.started DESC, r.id DESC LIMIT ?'.format(
-                ', '.join('r.' + n for n in names), ' AND '.join(where)),
-            tuple(args) + (limit,))]
+        if ranked:
+            where.append(self.ON_CLOCK)
+        sql = ('SELECT {}, s.car, r.session, (SELECT c.section_t FROM corners c WHERE c.run = r.id '
+               'AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1), (SELECT k.clock FROM run_clock k WHERE k.run = r.id) '
+               'FROM runs r JOIN sessions s ON r.session = s.id WHERE {} ORDER BY r.started DESC, r.id DESC LIMIT ?')
+        try:
+            rows = self._rows(sql.format(', '.join('r.' + n for n in names), ' AND '.join(where)),
+                              tuple(args) + (limit,))
+        except sqlite3.OperationalError:                      # a file the writer has not opened since run_clock
+            where = [w for w in where if w is not self.ON_CLOCK]
+            rows = self._rows(sql.replace(', (SELECT k.clock FROM run_clock k WHERE k.run = r.id) ', ', NULL ').format(
+                ', '.join('r.' + n for n in names), ' AND '.join(where)), tuple(args) + (limit,))
+        return [dict(zip(names + ('car', 'session', 'first_section', 'clock'), r)) for r in rows]
 
     def run(self, run_id):
         """One run's row: id, session, car (cars.id), stage, started, ended, distance, duration, moving_time,

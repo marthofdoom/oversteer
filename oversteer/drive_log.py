@@ -1006,7 +1006,7 @@ class RunTracker:
         reference = history = None
         others, last_started = [], None
         if stage:
-            before = [r for r in store.stage_runs(stage, exclude=run, limit=60, car=row['car'])
+            before = [r for r in store.stage_runs(stage, exclude=run, limit=60, car=row['car'], ranked=True)
                       if started is None or r['started'] <= started]
             last_started = before[0]['started'] if before else None
             ref = coach_context.reference_run(

@@ -453,6 +453,33 @@ def test_runs_timed_to_the_stop_control_move_to_the_learnt_finish(tmp_path):
     learner.close()
 
 
+# -- the start offset: a game-clock run starts timing at the game's clock, an older one at 3 m/s --
+
+def test_once_a_stage_and_car_have_a_clock_run_only_clock_runs_rank(tmp_path):
+    """A run on the game's clock starts its time 0.3-0.9 s before the run's own clock does (the go against the
+    car reaching 3 m/s), so the two are never compared: from the first clock run on the PB, the coach's reference and
+    the live reference are among the clock runs of that stage and car. The run list still shows every run."""
+    from oversteer import run_analysis
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    old = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)         # quicker, but the older clock
+    store.set_run_finish(old, stage_tables.entry(stage)['finish_m'])
+    assert {r['id'] for r in store.stage_runs(stage, ranked=True)} == {old}              # no clock run yet: all rank
+    new = _timed_run(store, stage, result=200.8, course=5000.0, end_speed=40.0)
+    store.set_run_clock(new, 'game')
+    third = _timed_run(store, stage, result=205.0, course=5000.0, end_speed=40.0)
+    store.set_run_clock(third, 'game')
+    car = store.run(new)['car']
+    ranked = store.stage_runs(stage, car=car, ranked=True)
+    assert {r['id'] for r in ranked} == {new, third} and all(r['clock'] == 'game' for r in ranked)
+    assert {r['id'] for r in store.stage_runs(stage, car=car)} == {old, new, third}        # unranked: every run
+    assert run_analysis.pb_run(store, store.run(third))['id'] == new                      # not the old, quicker run
+    shown = run_analysis.recent_runs(store, car)
+    assert {r['id'] for r in shown} == {old, new, third} and [r['id'] for r in shown if r['pb']] == [new]
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))

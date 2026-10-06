@@ -402,6 +402,10 @@ def stage_metrics(store, run, stage, trace, channels, corners, finished, analysi
     stage's rows."""
     if not stage or not trace:
         return []
+    if finished == 1 and car is not None and hasattr(store, 'save_potential'):
+        # The post-run hook of the potential time (oversteer/potential.py): this is the coach's one path after a
+        # run is written that is not in drive_log, on the drive-log thread. It stores, it adds no metric.
+        potential.after_run(store, run)
     c = {name: i for i, name in enumerate(channels)}
     analysis = analysis or {}
     klass = analysis.get('run_class')
@@ -1245,7 +1249,7 @@ class Coach:
         self._left_foot(run, corners, model, techniques)
         self._incidents(stage, name, run, events, sections, corners, candidates, notes)
         self._held_corner(stage, name, run, techniques)
-        before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'])
+        before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
                   if r['started'] <= run['started']]
         ref = coach_context.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')],
                                           wet=run['wet'])
@@ -1728,7 +1732,7 @@ def splits(reader, profile, car_id):
     if run is None:
         return None
     stage = run['stage']
-    before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'])
+    before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
               if r['started'] <= run['started']]
     ref = coach_context.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')], wet=run['wet'])
     if ref is None:

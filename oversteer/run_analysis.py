@@ -84,7 +84,8 @@ def recent_runs(reader, car_id, limit=12, namespace=None):
         return []
     rows = reader.stage_runs(stage, car=car_id, limit=60)
     classes = {r['id']: r['run_class'] for r in rows}
-    finished = [r for r in rows if r['finished'] == 1 and r['result_time'] and r['run_class'] == 'clean']
+    ranked = reader.stage_runs(stage, car=car_id, limit=60, ranked=True)           # the PB among the runs that rank
+    finished = [r for r in ranked if r['finished'] == 1 and r['result_time'] and r['run_class'] == 'clean']
     pb = min(finished, key=lambda r: r['result_time'])['id'] if finished else None
     shown = [r for r in rows if r['run_class'] in RUN_CLASSES][:limit]
     have = reader.trace_runs(r['id'] for r in shown)
@@ -101,7 +102,7 @@ def recent_runs(reader, car_id, limit=12, namespace=None):
 
 def _before(reader, run):
     """The stage's earlier runs of this car, newest first (as the coach's reference is picked from)."""
-    return [r for r in reader.stage_runs(run['stage'], exclude=run['id'], limit=60, car=run['car'])
+    return [r for r in reader.stage_runs(run['stage'], exclude=run['id'], limit=60, car=run['car'], ranked=True)
             if r['started'] <= run['started']]
 
 
