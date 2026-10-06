@@ -1554,13 +1554,15 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
             'spreads': spreads}
 
 
-def sector_times(trace, bounds, shift=0.0, game_clock=False):
+def sector_times(trace, bounds, shift=0.0, game_clock=False, result_time=None):
     """{sector index: seconds} of the sectors `bounds` ([(d0, d1)] m driven from the stage's start line) a run
     covered end to end (it may stop END_SLACK m short of the last bound), from where its distance crosses each
     line (time_at). `shift`: how much further along the road the run's trace began than the start line (its
-    distance 0 is the line's `shift` m on). A run on the game's own clock (`game_clock`: its trace's t is the stage
-    clock) times its first sector from the clock's start (0), not from its first row, so the sectors add up to the
-    stage time; otherwise the first sector starts with the trace."""
+    distance 0 is the line's `shift` m on). The first sector starts at the clock's start (0), not at the trace's first
+    row, and the last, where the trace stops short of its line (END_SLACK m at most: a 10 Hz row is up to a row's
+    distance short), ends at the run's `result_time` where given, else where the last row's speed would have taken it
+    there, so the sectors add up to the run's time on either clock (`game_clock`: the trace's t is the game's own
+    stage clock, which starts at the first sector's start too)."""
     track = along(trace)
     if not track:
         return {}
@@ -1570,10 +1572,16 @@ def sector_times(trace, bounds, shift=0.0, game_clock=False):
         if b > track[-1] + END_SLACK or a < track[0] - END_SLACK:
             continue
         if i == 0 and a <= track[0] + END_SLACK:
-            start = 0.0 if game_clock else trace[0][CH['t']]
+            start = 0.0
         else:
             start = time_at(trace, track, a)
         end = time_at(trace, track, min(b, track[-1]))
+        if i == len(bounds) - 1 and b > track[-1] and end is not None:
+            speed = trace[-1][CH['speed']]
+            if result_time is not None and result_time >= end:
+                end = result_time
+            elif _fin(speed) and speed > 1.0:
+                end += (b - track[-1]) / speed
         if start is not None and end is not None and end > start:
             out[i] = end - start
     return out

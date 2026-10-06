@@ -338,7 +338,8 @@ def _sector_rows(stage, mine, other, reader=None, runs=(None, None)):
         if origin is None:
             origin = stage_tables.run_origin(entry)
         found.append(cc.sector_times(rows, bounds, 0.0 if origin is None else origin - placed['start_m'],
-                                     reader is not None and run is not None and reader.run_clock(run['id']) == 'game'))
+                                     reader is not None and run is not None and reader.run_clock(run['id']) == 'game',
+                                     run.get('result_time') if run is not None and run.get('finished') == 1 else None))
     out = []
     for i, (a, b) in enumerate(bounds):
         times = [f.get(i) for f in found]

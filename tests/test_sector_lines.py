@@ -147,12 +147,28 @@ def test_a_game_clock_run_is_timed_where_its_distance_crosses_each_line():
     assert times[0] == pytest.approx(0.5 + 1003 / 20.0)               # S1 from the clock's start (0), the standing included
     assert times[1] == pytest.approx(50.0) and times[2] == pytest.approx(50.0)
     assert sum(times.values()) == pytest.approx(0.5 + 3003 / 20.0)    # the clock at the finish line
-    # the same run on the run's own clock (no game clock): the first sector starts with the trace
+    # the same run on the run's own clock (no game clock): the first sector starts at the clock's start too, so the
+    # sectors add up to the run's time
     own = cc.sector_times(rows, bounds, shift=origin - LINES[0], game_clock=False)
-    assert own[0] == pytest.approx(1003 / 20.0) and own[1] == pytest.approx(50.0)
+    assert own[0] == pytest.approx(0.5 + 1003 / 20.0) and own[1] == pytest.approx(50.0)
+    assert sum(own.values()) == pytest.approx(sum(times.values()))
     # a run that began 400 m on (a restart) did not cover the first sector: not timed through it
     late = cc.sector_times(_trace(497.0, 0.5), bounds, shift=497.0 - LINES[0], game_clock=True)
     assert 0 not in late and late[1] == pytest.approx(50.0)
+
+
+def test_the_sectors_add_up_to_the_result_where_the_trace_stops_a_row_short_of_the_line():
+    origin = 100.0
+    rows = _trace(origin, first_t=0.0)
+    rows = [r for r in rows if r[cc.CH['distance']] <= 3000.0 - 3.0]            # the last row 3 m short of the finish
+    bounds = [(a - LINES[0], b - LINES[0]) for a, b in zip(LINES, LINES[1:])]
+    result = 3000.0 / 20.0                                                      # the clock at the finish: 150 s
+    exact = cc.sector_times(rows, bounds, shift=0.0, result_time=result)
+    assert sum(exact.values()) == pytest.approx(result)
+    near = cc.sector_times(rows, bounds, shift=0.0)                             # no result: the last row's speed
+    assert sum(near.values()) == pytest.approx(result, abs=0.01)
+    # a run that stops more than END_SLACK short did not time its last sector
+    assert 2 not in cc.sector_times([r for r in rows if r[cc.CH['distance']] <= 2900.0], bounds, shift=0.0, result_time=result)
 
 
 class _Reader:

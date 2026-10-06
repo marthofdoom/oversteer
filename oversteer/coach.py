@@ -2196,14 +2196,16 @@ def splits(reader, profile, car_id):
             'splits': out,
             'sectors': _sectors(stage, run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
                                 {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
-                                {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded})}
+                                {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded},
+                                {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded})}
 
 
-def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None):
+def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None):
     """The game's sectors of `stage` timed from the traces (`ref_rows` and `loaded`, as splits reads them), or None.
     Each sector's bounds are on the road spline; a trace's distance is driven from the run's start, which
     is the start line, so a bound is taken less it. A run is timed through a sector it covered end to end
-    (it may stop END_SLACK m short of the finish); the first sector starts with the trace. A run that did
+    (it may stop END_SLACK m short of the finish: its last sector then ends at its result); the first sector
+    starts at the clock's start. A run that did
     not begin at the start line (`starts`: run id to where along the spline it began) is placed from where it did.
     A run on the game's own clock (`clocks`: run id to 'game') is timed by it where its distance crosses each line
     (coach_context.sector_times), so its sectors add up to the stage time."""
@@ -2218,7 +2220,8 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None):
         if origin is None:
             origin = stage_tables.run_origin(entry)
         shift = 0.0 if origin is None else origin - placed['start_m']
-        return coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game')
+        return coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
+                                          (results or {}).get(run_id))
 
     mine = next((x for x in loaded if x['run'] == run['id']), None)
     last = times(mine['trace'], run['id']) if mine else {}
