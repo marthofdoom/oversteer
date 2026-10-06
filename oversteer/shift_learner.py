@@ -1058,6 +1058,8 @@ class ShiftLearner:
         self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
         self._wheels = DrivenWheels()
         from .drive_log import RunTracker
+        from .live_buffer import LiveBuffer
+        self.live_run = LiveBuffer()        # the run going on, for the live view: written by the listener only
         self.runs = RunTracker(self)
         self._session_moving = 0.0          # s on the move this session, for the re-tune window
         self._session_distance = 0.0        # m

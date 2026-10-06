@@ -18,7 +18,7 @@ import queue
 import threading
 import time
 
-from . import car_data, coach, coach_context, drive_detect, stage_tables
+from . import car_data, coach, coach_context, drive_detect, live_buffer, stage_tables
 from .shift_learner import DRIVEN, SURFACES, CarModel, drive_slip
 from .telemetry_store import open_store, TRACE_CHANNELS
 
@@ -241,6 +241,7 @@ class RunTracker:
         self._runs = 0
         self.run_rows = {}               # run number -> runs.id; drive-log thread only
         self.run_batch = {}              # run number -> the drive log's batch its row was written in
+        self._live_loaded = set()        # run numbers whose live reference was looked up; drive-log thread only
         self._n_in_session = {}          # session number -> runs started in it
         self._reset()
         self._waiting()
@@ -470,9 +471,14 @@ class RunTracker:
         self._from_line = True
         self._start_d = sample.lap_distance
         self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
+        learner.live_run.start_run(self.run, now, sample.game, sample.stage, sample.track, sample.stage_length)
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
                          sample.stage_length, list(sample.pos) if sample.pos is not None else None, sample.track,
                          self._acr_start, sample.lap_distance)
+        # The live delta's reference, read once off the listener (posted after
+        # the run's row, which names the stage)
+        learner.log.post(self._live_reference, self.run, session, sample.game, sample.track, sample.stage_length,
+                         self._acr_start)
 
     def _clock(self, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
@@ -558,6 +564,7 @@ class RunTracker:
                 self._finished, self._result_time = 1, sample.stage_time
                 self._finish_d = d
                 self._finish_counts = True
+                self.learner.live_run.finish(self.run, now, self._result_time)
             self._progress = sample.progress
         self._clock(sample, d, dt, speed)
         if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
@@ -568,6 +575,10 @@ class RunTracker:
             # A run that began mid-stage (a restart after a silence, the second half of a run split by one) that
             # crosses the finish did not run the stage: its time is not the stage's
             self._from_line = line is None or self._start_d is None or self._start_d <= line + START_LINE_PAST
+            # The track's name came after the run's first packet: the live
+            # reference may have had no stage to look up (a no-op once it had)
+            self.learner.log.post(self._live_reference, self.run, self._session, sample.game, sample.track,
+                                  sample.stage_length, self._acr_start)
             surface = stage_tables.surface_of(stage)[0] if stage else None
             if surface is not None and self.learner.run_surface.get(self.run) is None:
                 self.learner.run_surface[self.run] = surface       # the learner's best points are per surface
@@ -577,6 +588,7 @@ class RunTracker:
             # The run's own clock: ACR's stage clock isn't in what the bridge reads
             self._finished, self._result_time = 1, self._duration
             self._finish_d = d
+            self.learner.live_run.finish(self.run, now, self._result_time)
         if sample.puddle is not None:
             self._samples += 1
             if any(p > 0 for p in sample.puddle):
@@ -610,9 +622,11 @@ class RunTracker:
             pos = sample.pos or (None, None, None)
             rms = math.sqrt(self._susp_sq / self._susp_n) if self._susp_n else None
             self._susp_sq, self._susp_n = 0.0, 0
-            self._trace.append(tuple(_nan(v) for v in (
+            row = tuple(_nan(v) for v in (
                 now - self._t0, d, speed, sample.rpm, sample.gear, throttle, sample.brake, sample.clutch,
-                sample.handbrake, sample.steer, a_long, a_lat, sample.yaw_rate, slip, rms, pos[0], pos[1], pos[2])))
+                sample.handbrake, sample.steer, a_long, a_lat, sample.yaw_rate, slip, rms, pos[0], pos[1], pos[2]))
+            self._trace.append(row)
+            self.learner.live_run.push(self.run, now, row)
         if d - self._seg_d0 >= SEGMENT or len(self._rows) >= SEGMENT_ROWS:
             self._close_segment(now, d)
 
@@ -647,6 +661,7 @@ class RunTracker:
                        progress=self._progress,
                        course=self._finish_d if self._finish_d is not None else last_d)
         self.learner.log.post(self._write_end, self.run, self.learner.wall(self._last_t or now), summary, self._trace)
+        self.learner.live_run.end_run(self.run, now, reason)
         guard = None
         if reason == 'finish':
             guard = {'session': self._session, 'track': self._last_track, 'ld': self._last_lap_distance,
@@ -685,6 +700,36 @@ class RunTracker:
         surface = stage_surface(store, game, stage)
         if surface is not None and learner.run_surface.get(number) is None:
             learner.run_surface[number] = surface
+
+    def _live_reference(self, number, session, game, track, stage_length, start_d):
+        """Drive-log thread: hand the live buffer run `number`'s reference
+        (live_buffer.load_reference) once a stage is known for it; posted at
+        the run's start and again when ACR's track name arrives."""
+        if number in self._live_loaded:
+            return
+        run = self.run_rows.get(number)
+        store = self.learner.log.store
+        live = self.learner.live_run
+        stage = store.run_stage(run) if run is not None else None
+        if stage is None and game == 'acr' and track:
+            stage = store.match_track(track, stage_length, start=start_d)
+        if stage is None and game == 'acr' and not track:
+            return                                       # its track's name is still to come
+        self._live_loaded.add(number)
+        while len(self._live_loaded) > 8:
+            self._live_loaded.discard(min(self._live_loaded))
+        if stage is None:
+            live.offer_reference(number, None, None, run)
+            return
+        row = self.learner._session_rows.get(session)
+        try:
+            reference = live_buffer.load_reference(store, stage, row[1] if row is not None else None, exclude=run)
+        except Exception:
+            logging.exception("live reference")
+            reference = None
+        known = store.stage(stage) or {}
+        live.offer_reference(number, reference, {'key': stage, 'name': known.get('name') or track,
+                                                 'length': known.get('length') or stage_length}, run)
 
     def _write_lap(self, number, n, lap_time, distance):
         run = self.run_rows.get(number)

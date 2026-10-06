@@ -920,3 +920,116 @@ each view. It is CSS grid over the same components, not a separate page.
 
 - **Where the time went → coach advice.** Tapping a row in the "where the time went" table (and, with a mouse, hovering it) shows the coach's advice for that section next to the row: the place-tied tips (`corner.section:*`, `corner.entry:*`, `corner.best*`), praise and technique notes whose place falls in the section, in the debrief style (time · place · fix). The same on the stage map and on the strips: the section under the cursor shows its advice in the readout. Needs the structured tip fields from phase 4 (`place` with section/distance, `cost`, `call`) brought forward into phase 2, so the UI matches tips to sections without parsing tip ids. GTK: the same on row selection and pointer motion over the table/strips.
 - Decisions: compare against PB by default; S1–S3 sectors shown alongside the corner sections; big ±0.00 live delta plus bar; GTK built together with web in every phase.
+
+## Phase 3 live API (built; tier A backend, 2026-10-05)
+
+The backend of §9.1 as built. The UI (web and GTK) is written on this and
+nothing else; it never reads the database for the live view.
+
+### Where it lives
+
+- `oversteer/live_buffer.py`: `LiveBuffer` (the ring and the delta),
+  `Reference`, `load_reference()`.
+- One buffer per app: `ShiftLearner.live_run`. Fed by `drive_log.RunTracker`
+  (start of a run, each 10 Hz trace row, the finish, the end); the reference
+  is loaded by `RunTracker._live_reference` on the drive-log thread.
+- Web: `GET /api/v1/live?since=<seq>[&limit=<rows>]`. **Without `since` the
+  endpoint answers exactly as before** (the dash dict or `null`), so the
+  current page keeps working until it moves over.
+- GTK: `self.shift_learner.live_run.read(since)` from the main thread, in the
+  existing once-a-second refresh or a faster `GLib.timeout_add` of its own
+  (250 ms is fine). `read()` is lock-free and cheap; no `GLib.idle_add`
+  hand-off is needed because nothing is pushed to GTK. Never call GTK from
+  the listener.
+
+### Response
+
+```json
+{ "seq": 18342, "first": 17001, "reset": false,
+  "state": "live",
+  "run": {"n": 12, "id": 4188},
+  "game": "acr",
+  "stage": {"key": "acr:greece:elatia", "name": "Elatia", "length": 4900.0},
+  "t": 38.2, "distance": 812.4, "age": 0.04,
+  "delta": 1.03, "predicted": 244.25,
+  "split":  {"index": 2, "n": 21, "name": "the 1 right at 0.2 km", "delta": 0.05,
+             "prev": {"index": 1, "name": "the 4 right at 0.0 km", "delta": 0.31}},
+  "sector": {"index": 0, "n": 3, "name": "S1", "delta": 0.4, "prev": null},
+  "final": null,
+  "ref_status": "ready",
+  "ref": {"run": 4123, "time": 243.22, "course": 6498.6,
+          "splits": [{"name": "the 4 right at 0.0 km", "d0": 0.35, "d1": 102.2}, ...],
+          "sectors": [{"name": "S1", "d0": 0.0, "d1": 1650.0}, ...]},
+  "channels": ["t", "distance", "speed", "rpm", "gear", "throttle", "brake", "clutch", "handbrake", "steer",
+               "a_long", "a_lat", "yaw_rate", "x", "y", "z", "delta"],
+  "samples": [[38.1, 810.4, 36.0, 6170.0, 4, 0.97, 0.0, 1.0, null, 0.04, 0.12, 0.2, 0.05, null, null, null, 1.02], ...],
+  "dash": { ...live_dict as before: gear, rpm, speed, shift_rpm, learnt, limiter, ... } }
+```
+
+Field by field:
+
+| Field | Meaning |
+|---|---|
+| `seq` | The last row's sequence number. Counts from 1 for the life of the Oversteer process, across runs; never goes back. Poll with `since=<the seq you last got>`. |
+| `first` | The first seq of the run shown. Rows before it belong to an earlier run and are never returned. |
+| `reset` | `true` when `since` was greater than `seq` (Oversteer restarted under an open page): the client must drop what it holds; the response carries the rows from the start of the run. |
+| `state` | `idle` (no run: menus, standing at the start, after a restart or a non-finish end), `live` (a run, a row within the last 2 s), `stale` (a run, no row for over 2 s: the game paused or stopped sending, a loading screen), `finished` (the run crossed the finish; kept until the next run starts, never stale). |
+| `run` | `{n, id}`: `n` is the run's number in this process (changes on every new run: **clear the strips when it changes**), `id` the database `runs.id` once the drive-log thread wrote it (else `null`). `null` when idle. |
+| `stage` | `{key, name, length}`; before the drive-log thread matched the stage: the game's own key/track name. `null` when idle or unknown. `length` is the stage table's published length, not the course along the trace. |
+| `t`, `distance` | The run's clock (s from the start, as the trace's `t`) and distance along the stage (m from the start line, as the trace's `distance`) at the last row. |
+| `age` | s since the last row (the stale timer); `null` when idle. |
+| `delta` | s behind (+) or ahead (−) of the reference at the car's distance: `t_now − t_ref(d)`, `t_ref` interpolated on the reference's trace exactly as the coach times sections (`coach_context.time_at`). `null` with no reference, before the reference's first row, or past its finish. At `finished` it is the final delta. |
+| `predicted` | `ref.time + delta`; `null` when `delta` is. |
+| `split` | Where the car is among the reference's grid sections (the bounds `coach.splits()` times: `grid_of(reference)`; §9.2's `d0`/`d1` are the same numbers), or `null` with no reference or no corners on it. `index` is in **grid order** (0 = the launch section). Note `coach.splits()['splits']` leaves out the launch and off sections, so match the ribbon by distance (`ref.splits[i].d0/d1`) or by name, not by list position. `delta` is what this split has lost so far (s, + = slower); `null` for a split the car joined part way (the reference arrived late, a reset along the road). `prev` is the split last completed, with its loss: flash it on change. `index` is `null` before the first split and past the last. |
+| `sector` | The same over the game's sectors (S1…), from `stage_tables.sector_bounds` (from the start line); `null` where the stage has none placed (e.g. Greece Elatia today). |
+| `final` | `{time, delta}` once the run crossed the finish: the run's own clock to the line (ACR: the flying finish `finish_m`, else the last pace note; other games: progress ≥ 0.99 with the game's stage clock) and that less `ref.time`. `delta` is `null` with no reference. |
+| `ref_status` | `pending` (looking it up, or ACR's track name not here yet), `ready`, `none` (no clean or learning finished run of this car on this stage, no trace, or no stage known). **Hide the delta unless `ready`.** |
+| `ref` | `{run, time, course, splits, sectors}` of the reference (`runs.id`, its result time, where it finished along its trace, and the bounds). Constant for the run: cache it by `ref.run`. |
+| `channels`, `samples` | Rows after `since` (at most `limit`, default and max 300 = the 30 s ring; the newest are kept), oldest first, of the current run only. One row per 10 Hz trace row RunTracker keeps (so none while the game is paused and the tracker drops rows). Values are rounded to 3 decimals; unknown is `null` (ACR: `handbrake`, and `x/y/z` before the bridge fix). The last column is that row's `delta` (the delta strip). |
+| `dash` | `live_dict()` as the endpoint without `since` returns it (or `null`): the gear, rpm, shift point and lights for the dash at packet rate. |
+
+### Client loop (web)
+
+1. `since = 0`. Poll every 250 ms while `state` is `live`, 1 s otherwise.
+2. On a response: if `reset` or `run.n` differs from the one held, clear the
+   strips. Append `samples`; keep the last 300. `since = seq`.
+3. Show the delta block only when `ref_status == 'ready'` and `delta` is not
+   null. `finished`: show the finished card from `final`.
+4. The first poll may return up to 300 rows (~37 KB); later ones 2–3 rows.
+
+### Threads and guarantees (tier A)
+
+- **One writer.** Only RunTracker writes the buffer, from the listener
+  thread, under the learner's lock (the same lock that already serialises
+  RunTracker). Each write is constant time plus a bisect into the reference
+  trace (O(log n) at 10 Hz). Writers are guarded: a fault in the live view is
+  logged once a minute and never breaks run tracking.
+- **The reference is read off the hot path.** `RunTracker._start` posts
+  `_live_reference` to the drive-log queue right after `_write_start` (FIFO,
+  so the run's row and stage exist); for ACR it is posted again when the
+  track name first arrives (a no-op once looked up). It reads the database
+  once per run (`stage_runs`, `trace`, `corners`, `stage`), builds an
+  immutable `Reference` and hands it over with a single attribute store
+  (`offer_reference`). The listener adopts it on its next row; an offer for
+  another run number is ignored. If the drive-log queue is full the offer
+  never comes and the run stays `pending` (no delta): never a block.
+- **Readers take no lock.** The listener publishes a fresh state dict per
+  row with one attribute store and never mutates a published one; ring slots
+  are immutable `(seq, row)` tuples stored with one list-item assignment.
+  `read()` takes the state once, then the slots up to that state's `seq`,
+  skipping any slot whose seq no longer matches (overwritten: the reader was
+  a whole ring behind). So a reader never sees a torn row, rows out of order,
+  rows of another run, or a state that disagrees with its rows. Both
+  assignments are atomic in CPython with and without the GIL. Tested with
+  one writer at full speed and four polling readers.
+- **Per request:** no database, no lock, O(rows returned).
+- **Selection** is the coach's: `coach_context.reference_run` over the car's
+  `clean` and `learning` runs of the stage (excluding the run itself), so the
+  live delta, `coach.splits()` and the drive log's section losses all use the
+  same run. The run's wetness isn't known at its start, so any run compares
+  (the post-run coach filters by wetness).
+- **Known limits.** ACR sends no pause flag: in a pause that keeps sending,
+  rows go on with speed 0 (`live`, delta growing) as RunTracker's clock does;
+  only a pause that stops the packets reads `stale`. A run that starts part
+  way along a stage has no meaningful delta (its distance is from where it
+  started), as in the coach.

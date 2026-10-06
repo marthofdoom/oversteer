@@ -32,7 +32,7 @@ import socket
 import threading
 import urllib.parse
 
-from . import coach, run_analysis, tuning
+from . import coach, live_buffer, run_analysis, tuning
 from .telemetry_store import open_reader
 
 DEFAULT_PORT = 5301
@@ -185,8 +185,9 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
     the Oversteer profile whose data is shown, `status()` extra status
     fields (the UDP port, the current car and session); `learner` (a
     ShiftLearner, optional) gives the car being driven its live shift
-    table. start() binds and serves from a daemon thread; stop() shuts it
-    down."""
+    table, and its `live_run` (a live_buffer.LiveBuffer) the run going on
+    for `live?since=`. start() binds and serves from a daemon thread;
+    stop() shuts it down."""
 
     daemon_threads = True
     allow_reuse_address = True
@@ -303,7 +304,9 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                     reader.close()
             return 200, body
         if path == 'live':
-            return 200, self.live()
+            if 'since' not in query:
+                return 200, self.live()                  # the dash alone, as before phase 3
+            return 200, self.live_run(query.get('since'), query.get('limit'))
         reader = self.reader()
         if reader is None:
             return (200, []) if path in ('cars',) else (404, {'error': 'no telemetry database yet'})
@@ -311,6 +314,19 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
             return self._query(reader, profile, path, query)
         finally:
             reader.close()
+
+    def live_run(self, since, limit=None):
+        """`live?since=<seq>[&limit=<rows>]` (docs/telemetry-ui-design.md,
+        "Phase 3 live API"): the live run's rows after `since` and its delta,
+        with the dash (live_dict) under `dash`. Lock-free and without the
+        database: it reads the snapshots the listener published."""
+        buffer = getattr(self.learner, 'live_run', None)
+        if buffer is not None:
+            body = buffer.read(since, limit=max(1, min(live_buffer.CAPACITY, _int(limit, live_buffer.CAPACITY))))
+        else:
+            body = live_buffer.LiveBuffer().read(since)
+        body['dash'] = self.live()
+        return body
 
     def _query(self, reader, profile, path, query):
         parts = path.split('/')
