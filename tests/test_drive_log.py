@@ -741,3 +741,160 @@ def test_history_changed_is_said_after_the_commit_not_before(tmp_path):
     feed_course(learner, course_samples(Course(STAGE)))
     learner.save()
     assert states and not any(states) and learner.history_changed >= 1
+
+
+# -- the game's clock (bridge version 4) --
+
+def acr_clock_drive(t0, until, react=0.5, pause_at=None, pause=30.0, game_line=5295.4, speed=22.0,
+                    track='Wales Afon Bidno', car='acr/Skoda Fabia RS Rally2'):
+    """ACR as bridge version 4 sends it: the stage's clock runs from the go
+    (`react` s before the car moves), stops at the game's own finish line
+    (`game_line`, a little past the table's flying finish) and goes on
+    sending the frozen time; while the game is paused (at `pause_at` m, for
+    `pause` s) nothing is sent and the clock stands. The position is sent,
+    as ACR does (a pause is then no silence). Returns (samples, the game's
+    time at its line)."""
+    from oversteer.telemetry import Sample
+    samples, t, d, clock = [], t0, 238.0, None
+    for i in range(20):                                        # standing at the line, then the go
+        s = Sample(1500.0, 7500.0, gear=1, speed=0.0, car=car, game='acr', throttle=0.0)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        s.stage_time = max(0.0, (i - 19) * 0.1 + react)
+        s.pos = (d, 0.0, 0.0)
+        samples.append((t, s, 0.0))
+        t += 0.1
+    game = samples[-1][1].stage_time
+    paused = False
+    while d < until:
+        s = Sample(6000.0, 7500.0, gear=3, speed=speed, car=car, game='acr', throttle=0.8)
+        s.track, s.lap_distance, s.stage_length = track, d, 5599.8
+        s.stage_time = game if clock is None else clock
+        s.pos = (d, 0.0, 0.0)
+        samples.append((t, s, 0.8))
+        if pause_at is not None and not paused and d >= pause_at:
+            paused = True
+            t += pause                                         # nothing sent, nothing moves
+        t += 0.1
+        d_next = d + speed * 0.1
+        if clock is None:
+            if d_next >= game_line:
+                clock = game + (game_line - d) / speed         # the clock stops at the game's line
+            else:
+                game += 0.1
+        d = d_next
+    return samples, clock
+
+
+def test_the_game_clock_is_the_result_and_the_traces_clock_through_a_pause(tmp_path):
+    from oversteer import coach_context
+    drive, at_line = acr_clock_drive(0.0, 5530.0, pause_at=2000.0)
+    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=5.0)
+    for _, s, _ in after:
+        s.stage_time = at_line
+    learner, reader, session = drive_runs(tmp_path, drive + after)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+    # The game's own time, where its clock stopped: the go to its line, no pause in it
+    assert abs(run['result_time'] - at_line) < 1e-3 and abs(at_line - (0.5 + (5295.4 - 238.0) / 22.0)) < 0.11
+    assert run['duration'] < at_line                           # the run's own clock: from 3 m/s
+    trace = reader.trace(run['id'])
+    t, wall = coach_context.CH['t'], coach_context.CH['wall']
+    steps = [b[t] - a[t] for a, b in zip(trace, trace[1:])]
+    assert min(steps) >= 0.0 and max(steps) < 0.5               # the pause is not in t...
+    assert max(b[wall] - a[wall] for a, b in zip(trace, trace[1:])) > 29.0    # ...it is in the wall clock
+    assert abs(trace[0][t] - 0.5) < 0.11                        # t is the game's clock from the first row
+    course = reader.run(run['id'])['course']
+    rows = coach_context.stage_rows(trace, course, True, run['result_time'])
+    end = coach_context.time_at(rows, coach_context.along(rows), course)
+    assert abs(end - run['result_time']) < 0.11                 # the trace's clock at the finish is the result
+    assert store_clock(learner, run['id']) == 'game'
+    learner.close()
+
+
+def store_clock(learner, run):
+    rows = learner.log.store.db.execute('SELECT clock FROM run_clock WHERE run = ?', (run,)).fetchall()
+    return rows[0][0] if rows else None
+
+
+def test_the_game_clock_stopped_before_the_tables_line(tmp_path):
+    """The game's line short of the table's: its time, where its clock stopped."""
+    drive, at_line = acr_clock_drive(0.0, 5530.0, game_line=5250.0)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and abs(run['result_time'] - at_line) < 1e-3
+    assert abs(at_line - (0.5 + (5250.0 - 238.0) / 22.0)) < 0.11
+    learner.close()
+
+
+def test_a_game_clock_that_does_not_stop_near_the_line_is_read_at_it(tmp_path):
+    """No stop within FINISH_CLOCK_PAST of the table's line: the game's clock interpolated at the line."""
+    from oversteer import stage_tables
+    finish = stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['finish_m']
+    drive, _ = acr_clock_drive(0.0, 5530.0, game_line=9999.0)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+    assert abs(run['result_time'] - (0.5 + (finish - 238.0) / 22.0)) < 0.11
+    learner.close()
+
+
+def test_a_restart_starts_the_game_clock_again(tmp_path):
+    first, _ = acr_clock_drive(0.0, 1500.0)
+    second, at_line = acr_clock_drive(first[-1][0] + 0.1, 5530.0, react=0.3)
+    learner, reader, session = drive_runs(tmp_path, first + second)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert [r['finished'] for r in runs] == [0, 1]
+    assert abs(runs[1]['result_time'] - at_line) < 1e-3        # its own clock, from its own go
+    assert reader.trace(runs[1]['id'])[0][0] < 1.0
+    learner.close()
+
+
+def test_the_clock_alone_restarts_a_run(tmp_path):
+    """The clock back to 0 where the distance does not jump back (a timing line on a loop): a new run."""
+    drive, _ = acr_clock_drive(0.0, 3000.0)
+    for _, s, _ in drive[200:]:
+        s.stage_time -= drive[200][1].stage_time
+    learner, reader, session = drive_runs(tmp_path, drive)
+    runs = [r for r in session['runs'] if r['distance'] > 300]
+    assert len(runs) == 2 and runs[0]['finished'] == 0
+    learner.close()
+
+
+def test_an_old_bridge_still_times_the_run_on_its_own_clock(tmp_path):
+    """No clock (bridge version 3): the run's own clock, as before, and no run_clock row."""
+    drive, _ = acr_clock_drive(0.0, 5530.0, pause_at=2000.0)
+    for _, s, _ in drive:
+        s.stage_time = None
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1 and 225 < run['result_time'] < 235
+    trace = reader.trace(run['id'])
+    assert max(b[0] - a[0] for a, b in zip(trace, trace[1:])) < 0.5     # the pause is not in t either
+    assert store_clock(learner, run['id']) is None
+    learner.close()
+
+
+def test_run_clock():
+    from oversteer.drive_log import RunClock, CLOCK_STOPPED
+    c = RunClock(0.4)                                          # running at the first packet: the game's own
+    for st in (0.5, 0.6, 0.7):
+        c.tick(st, 0.1)
+    assert abs(c.t - 0.7) < 1e-9 and c.exact
+    c.tick(None, 0.1)                                          # a packet without it: on by the run's own time
+    c.tick(0.9, 0.1)
+    assert abs(c.t - 0.9) < 1e-9 and c.exact                   # and back on the game's
+    c.tick(0.2, 0.1)                                           # it went back without the run ending (a lap)
+    assert abs(c.t - 1.0) < 1e-9 and not c.exact
+    c.tick(0.3, 0.1)
+    assert abs(c.t - 1.1) < 1e-9                               # never back, following on
+    for _ in range(int(CLOCK_STOPPED / 0.1) + 5):
+        c.tick(0.3, 0.1)                                       # stopped (past the finish)
+    assert c.t > 1.1 + 0.3 and c.still > CLOCK_STOPPED
+    late = RunClock(0.0)                                       # the run began before the game's clock started
+    late.tick(0.0, 0.1)
+    late.tick(0.05, 0.1)
+    assert abs(late.t - 0.15) < 1e-9 and not late.exact
+    own = RunClock(None)
+    own.tick(None, 0.1)
+    own.tick(None, 0.2)
+    assert abs(own.t - 0.3) < 1e-9

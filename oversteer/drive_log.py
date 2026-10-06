@@ -203,6 +203,8 @@ DISTANCE_BACK = 100.0            # m the distance along a stage goes back: the s
 SENT_LENGTH_TOLERANCE = 0.5      # m: a length the game sends against its own in the table
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
+CLOCK_SETTLE = 0.1               # s of the run's own time the game's clock stands still, moving: it stopped (not a frame repeated)
+FINISH_CLOCK_PAST = 100.0        # m past the table's finish line the game's clock may still stop at its own
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
 # The game keeps sending after the finish (the results screen, the car rolling
 # out or parked), so a finished run is ended by what follows rather than by
@@ -225,6 +227,68 @@ T = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 
 def _nan(x):
     return float('nan') if x is None else x
+
+
+class RunClock:
+    """The run's clock, which the trace's `t` and the segments' times are
+    on (trace version 2): the game's stage clock where the game sends one
+    that runs, else the run's own time (the packets' gaps capped, as
+    `duration` adds them up). Ticked only for the packets that count (not
+    paused, not frozen), so a pause is in neither.
+
+    `t` follows the game's clock as `stage_time + offset`. `offset` is 0
+    when the game's clock was running at the run's first packet (a standing
+    start: the trace's t is then the game's own time, and t at the finish
+    is the result) and `exact` stays True while it stays 0. A clock that
+    starts after the run did (a run-up to a timing line), one that went
+    back without the run ending (a lap's clock) or one that was missing
+    sets `offset` where t takes it up, so t never goes back. Where the
+    game's clock stands still for over CLOCK_STOPPED (past its finish) t
+    goes on by the run's own time until it moves again."""
+
+    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved')
+
+    def __init__(self, stage_time):
+        running = stage_time is not None and stage_time > 0.0
+        self.t = stage_time if running else 0.0
+        self.offset = 0.0 if running else None       # None: on the run's own time
+        self.exact = running
+        self.last = stage_time                       # the game's clock at the last packet
+        self.still = 0.0                             # s of the run's own time the game's clock has stood still
+        self.moved = running                         # it moved at the last packet
+
+    def tick(self, stage_time, dt):
+        last, self.last = self.last, stage_time
+        self.moved = False
+        if stage_time is None:
+            self.t += dt
+            self.still = 0.0
+            return
+        forward = last is not None and stage_time > last
+        if self.offset is None:
+            if forward:
+                # The game's clock has started: t takes it up from here
+                self.t += stage_time - last
+                self.offset = self.t - stage_time
+                self.moved = True
+            else:
+                self.t += dt
+            return
+        if last is not None and stage_time == last:
+            self.still += dt
+            if self.still > CLOCK_STOPPED:
+                self.t += dt                         # stopped (past the finish): the run's own time goes on
+            return
+        self.moved = True
+        self.still = 0.0
+        candidate = stage_time + self.offset
+        if candidate >= self.t and (forward or last is None):
+            self.t = candidate
+        else:
+            # It went back (a lap's clock), or the run's own time ran ahead of it while it stood
+            self.t += stage_time - last if forward else dt
+            self.offset = self.t - stage_time
+            self.exact = False
 
 
 class RunTracker:
@@ -429,7 +493,10 @@ class RunTracker:
         self._moving = self._duration = 0.0
         self._stops = 0
         self._still = 0.0
-        self._seg_d0, self._seg_t0 = 0.0, now
+        self._clock_run = RunClock(sample.stage_time)
+        self._clock_moved_d = None                   # d at the last packet the game's clock moved
+        self._line_clock = None                      # (d, the game's clock) where the run crossed the table's finish line
+        self._seg_d0, self._seg_t0 = 0.0, self._clock_run.t
         self._rows = []
         self._trace = []
         self._trace_at = None
@@ -441,6 +508,7 @@ class RunTracker:
         self._progress = sample.progress
         self._finished = None
         self._result_time = None
+        self._result_clock = None                    # 'game' where the result is the game's own clock
         self._finish_d = None                        # where the run crossed the finish, as far as it can tell
         self._finish_counts = False                  # progress said finished (before the line): the rest is driven in the run
         self._finish_t = None                        # when the run's end was first seen to be due (after the finish)
@@ -527,6 +595,7 @@ class RunTracker:
                 self._post_d += speed * dt
             return
         if not self._paused and not frozen:
+            self._clock_run.tick(sample.stage_time, dt)
             self._duration += dt
             self._distance += speed * dt
             if speed > MOVING:
@@ -550,6 +619,8 @@ class RunTracker:
             # as long as the pause lasts and swamp the next segment's features
             return
         d = self._d(sample)
+        if self._clock_run.moved:
+            self._clock_moved_d = d
         lap = sample.lap
         if lap is not None and self._last_lap is not None and lap > self._last_lap:
             self._laps_done += 1
@@ -585,10 +656,7 @@ class RunTracker:
         if self._finish_line and self._finished is None and sample.lap_distance is not None \
                 and sample.lap_distance >= self._finish_line \
                 and self._from_line and (self._start_d is None or self._start_d < self._finish_line):
-            # The run's own clock: ACR's stage clock isn't in what the bridge reads
-            self._finished, self._result_time = 1, self._duration
-            self._finish_d = d
-            self.learner.live_run.finish(self.run, now, self._result_time)
+            self._line_finish(now, sample, d, speed)
         if sample.puddle is not None:
             self._samples += 1
             if any(p > 0 for p in sample.puddle):
@@ -623,19 +691,51 @@ class RunTracker:
             rms = math.sqrt(self._susp_sq / self._susp_n) if self._susp_n else None
             self._susp_sq, self._susp_n = 0.0, 0
             row = tuple(_nan(v) for v in (
-                now - self._t0, d, speed, sample.rpm, sample.gear, throttle, sample.brake, sample.clutch,
-                sample.handbrake, sample.steer, a_long, a_lat, sample.yaw_rate, slip, rms, pos[0], pos[1], pos[2]))
+                self._clock_run.t, d, speed, sample.rpm, sample.gear, throttle, sample.brake, sample.clutch,
+                sample.handbrake, sample.steer, a_long, a_lat, sample.yaw_rate, slip, rms, pos[0], pos[1], pos[2],
+                now - self._t0))
             self._trace.append(row)
             self.learner.live_run.push(self.run, now, row)
         if d - self._seg_d0 >= SEGMENT or len(self._rows) >= SEGMENT_ROWS:
-            self._close_segment(now, d)
+            self._close_segment(d)
 
-    def _close_segment(self, now, d):
+    def _line_finish(self, now, sample, d, speed):
+        """ACR: the run is at or past the table's finish line (the flying
+        finish, else the last pace note). With the game's clock (bridge
+        version 4) the result is the game's own time: where its clock stops
+        at its own line (CLOCK_SETTLE standing still with the car moving),
+        which may be a little before or after the table's; failing that
+        within FINISH_CLOCK_PAST m, the clock interpolated at the table's
+        line. Until then the run goes on (its rows are kept: the course cuts
+        them). Without it, the run's own clock at the line."""
+        clock = self._clock_run
+        if self._line_clock is None:
+            at = sample.stage_time
+            last_t, last_ld = self._last_stage_time, self._last_lap_distance
+            if at is not None and last_t is not None and last_ld is not None and last_t <= at \
+                    and last_ld < self._finish_line < sample.lap_distance:
+                at = last_t + (at - last_t) * (self._finish_line - last_ld) / (sample.lap_distance - last_ld)
+            self._line_clock = (d, at)
+        if sample.stage_time is None or clock.offset is None:
+            self._finish_at(now, d, self._duration, None)    # no clock from the game: the run's own
+        elif clock.still >= CLOCK_SETTLE and speed > MOVING:
+            self._finish_at(now, self._clock_moved_d if self._clock_moved_d is not None else d,
+                            sample.stage_time, 'game')
+        elif sample.lap_distance > self._finish_line + FINISH_CLOCK_PAST:
+            line_d, at = self._line_clock
+            self._finish_at(now, line_d, at if at is not None else sample.stage_time, 'game')
+
+    def _finish_at(self, now, d, result, clock):
+        self._finished, self._result_time, self._result_clock = 1, result, clock
+        self._finish_d = d
+        self.learner.live_run.finish(self.run, now, self._result_time)
+
+    def _close_segment(self, d):
         rows, self._rows = self._rows, []
+        t = self._clock_run.t
         if d - self._seg_d0 >= SEGMENT_MIN and rows:
-            self.learner.log.post(self._write_segment, self.run, self._seg_d0, d, self._seg_t0 - self._t0,
-                                  now - self._t0, rows)
-        self._seg_d0, self._seg_t0 = d, now
+            self.learner.log.post(self._write_segment, self.run, self._seg_d0, d, self._seg_t0, t, rows)
+        self._seg_d0, self._seg_t0 = d, t
 
     def end(self, now, reason):
         """The run is over (`reason`: 'session', 'restart', 'teleport',
@@ -647,7 +747,7 @@ class RunTracker:
         if self.learner.car is not None:
             self.learner._flush_shifts_locked(self.learner.car)
         last_d = self._trace[-1][T['distance']] if self._trace else 0.0
-        self._close_segment(self._last_t or now, last_d)
+        self._close_segment(last_d)
         summary = dict(self._summary)
         finished = self._finished
         if reason == 'end':
@@ -656,6 +756,7 @@ class RunTracker:
             finished = 0
         summary.update(distance=self._distance, duration=self._duration, moving_time=self._moving,
                        stops=self._stops, finished=finished, result_time=self._result_time, laps_done=self._laps_done,
+                       clock=self._result_clock,
                        packets=sorted(self._packets), end=reason,
                        puddles=self._puddles / self._samples if self._samples else None,
                        progress=self._progress,
@@ -791,6 +892,8 @@ class RunTracker:
         flying = (stage_tables.entry(fields.get('stage') or stage) or {}).get('finish_m')
         if summary['finished'] == 1 and game == 'acr' and flying:
             store.set_run_finish(run, flying)            # timed at the flying finish: never re-timed
+        if summary['finished'] == 1 and summary.get('clock') == 'game':
+            store.set_run_clock(run, 'game')             # the game's own time: no finish line of ours moves it
         store.add_trace(run, trace)
         self._work_over(run, summary, trace, fields)
         # The coach's tips for this run are there to read: said once they are committed, as a reader that
@@ -966,7 +1069,9 @@ def retime_finishes(store):
     recompute its corners, sections, losses and metrics with the new course.
     A run timed by the new code, or handled here, has a run_finish row. Runs
     without a trace or whose trace does not span the new line are marked
-    (finish NULL) and left as they were. Returns the number re-timed."""
+    (finish NULL) and left as they were. A run timed by the game's own clock
+    (run_clock) is never re-timed: the game stopped it at its own line,
+    wherever the tables put theirs. Returns the number re-timed."""
     done = 0
     for run, stage, result, course in store.finished_untimed('acr'):
         entry = stage_tables.entry(stage) or {}

@@ -348,6 +348,24 @@ def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_p
     learner.close()
 
 
+def test_a_run_on_the_games_clock_is_never_re_timed(tmp_path):
+    """The game stopped its clock at its own line: where the tables put theirs does not move the time."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    flying = stage_tables.entry(stage)['finish_m']
+    moved = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
+    store.set_run_finish(moved, flying + 50.0)
+    store.set_run_clock(moved, 'game')
+    untimed = _timed_run(store, stage)                      # no run_finish row: it would be re-timed to the flying finish
+    store.set_run_clock(untimed, 'game')
+    assert retime_finishes(store) == 0
+    assert store.run(moved)['result_time'] == 200.0 and store.run(untimed)['result_time'] == 230.0
+    assert store.finished_untimed('acr') == [] and store.finished_timed('acr') == []
+    learner.close()
+
+
 def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
     from oversteer.drive_log import repair_shipped, retime_finishes
     learner = ShiftLearner(str(tmp_path / 't.db'))

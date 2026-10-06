@@ -235,6 +235,18 @@ CREATE TABLE IF NOT EXISTS run_start (
     start_m REAL
 )"""
 
+# Which clock a finished run's result_time is on where it is the game's own
+# ('game': ACR's stage clock from bridge version 4, read where the game
+# stopped it at its finish). Such a time does not depend on where the stage
+# tables put the finish, so drive_log.retime_finishes leaves it alone. No
+# row: the run's own clock, or a game whose result never depended on our
+# tables. A table of its own for the reason run_finish is one.
+RUN_CLOCK_DDL = """
+CREATE TABLE IF NOT EXISTS run_clock (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    clock TEXT NOT NULL
+)"""
+
 # The first schema, as development builds after Oversteer 0.13.1 created it
 # (no release had a database): kept to migrate from, and for the tests that
 # build such a file
@@ -275,9 +287,21 @@ CREATE INDEX IF NOT EXISTS shifts_session ON shifts (session);
 # The 10 Hz trace of a run: one row of these per sample, NaN where the game
 # does not send it. Position is in it (not in the design's first list)
 # because topology and elevation re-run from it.
+# Version 2: `t` is the run's clock (drive_log.RunClock): the game's stage
+# clock where it sends one (ACR from bridge version 4, DiRT, EA WRC...),
+# else the run's own time; a pause is in neither, so t through a stretch is
+# the time it took, and for a standing start t at the finish is the result.
+# `wall` is the seconds since the run's first row on the wall clock (version
+# 1's `t`, pauses and all): it puts what is timed by the wall clock (the
+# changes of gear) on t.
+# Version 1 had `t` as the wall clock (a pause in it) and no `wall`; it is
+# read as version 2 with `wall` its t (unpack_trace) and its t left as it
+# was, so what was stored from it (events, sections) still lines up.
 TRACE_CHANNELS = ('t', 'distance', 'speed', 'rpm', 'gear', 'throttle', 'brake', 'clutch', 'handbrake', 'steer',
-                  'a_long', 'a_lat', 'yaw_rate', 'slip_drive', 'susp_rms', 'x', 'y', 'z')
-TRACE_VERSION = 1
+                  'a_long', 'a_lat', 'yaw_rate', 'slip_drive', 'susp_rms', 'x', 'y', 'z', 'wall')
+TRACE_VERSION = 2
+TRACE_VERSIONS = (1, 2)              # the versions read
+TRACE_V1_CHANNELS = 18
 TRACES_CAP = 200 * 1024 * 1024       # bytes of traces kept; the oldest go first (their runs stay)
 
 # The corners table's columns, as a corner dict has them (find_corners and
@@ -587,6 +611,7 @@ def open_store(path):
             raise sqlite3.DatabaseError("{} is from a newer Oversteer (version {})".format(path, version))
     db.execute(RUN_FINISH_DDL)
     db.execute(RUN_START_DDL)
+    db.execute(RUN_CLOCK_DDL)
     return Store(db, path)
 
 
@@ -602,19 +627,27 @@ def open_reader(path):
 # -- traces --
 
 def pack_trace(rows):
-    """zlib(array('f')) of the rows (tuples of TRACE_CHANNELS)."""
+    """zlib(array('f')) of the rows (tuples of TRACE_CHANNELS; a shorter
+    row is padded with NaN)."""
     data = array('f')
+    n = len(TRACE_CHANNELS)
     for row in rows:
         data.extend(float('nan') if v is None else v for v in row)
+        if len(row) < n:
+            data.extend([float('nan')] * (n - len(row)))
     return zlib.compress(data.tobytes(), 6)
 
 
-def unpack_trace(blob):
-    """The rows back, as tuples of floats (NaN where not sent)."""
+def unpack_trace(blob, version=TRACE_VERSION):
+    """The rows back, as tuples of floats (NaN where not sent), as the
+    current version has them (see TRACE_CHANNELS for version 1)."""
     data = array('f')
     data.frombytes(zlib.decompress(blob))
-    n = len(TRACE_CHANNELS)
-    return [tuple(data[i:i + n]) for i in range(0, len(data) - n + 1, n)]
+    n = TRACE_V1_CHANNELS if version == 1 else len(TRACE_CHANNELS)
+    rows = [tuple(data[i:i + n]) for i in range(0, len(data) - n + 1, n)]
+    if version == 1:
+        rows = [row + (row[0],) for row in rows]     # its t was the wall clock
+    return rows
 
 
 def _json(value):
@@ -769,16 +802,17 @@ class Reader:
         return out
 
     def trace(self, run_id):
+        """The run's trace as the current version has it (an older version is converted), or None."""
         rows = self._rows('SELECT version, data FROM traces WHERE run = ?', (run_id,))
-        return unpack_trace(rows[0][1]) if rows and rows[0][0] == TRACE_VERSION else None
+        return unpack_trace(rows[0][1], rows[0][0]) if rows and rows[0][0] in TRACE_VERSIONS else None
 
     def trace_runs(self, run_ids):
-        """The run ids among `run_ids` that have a trace of the current version, as a set."""
+        """The run ids among `run_ids` that have a trace of a version read (TRACE_VERSIONS), as a set."""
         run_ids = list(run_ids)
         if not run_ids:
             return set()
-        return {r[0] for r in self._rows('SELECT run FROM traces WHERE version = ? AND run IN ({})'.format(
-            ', '.join('?' * len(run_ids))), (TRACE_VERSION,) + tuple(run_ids))}
+        return {r[0] for r in self._rows('SELECT run FROM traces WHERE version IN ({}) AND run IN ({})'.format(
+            ', '.join('?' * len(TRACE_VERSIONS)), ', '.join('?' * len(run_ids))), TRACE_VERSIONS + tuple(run_ids))}
 
     def shifts(self, session_id):
         names = ('at', 'gear', 'gear_to', 'direction', 'rpm', 'best', 'best_low', 'best_high', 'throttle',
@@ -1434,20 +1468,25 @@ class Store(Reader):
 
     def finished_untimed(self, game='acr'):
         """[(run, stage, result_time, course)] of the finished runs of a game
-        with no recorded finish line (run_finish), oldest first."""
+        with no recorded finish line (run_finish) and not on the game's own clock (run_clock), oldest first."""
         return self._do("SELECT id, stage, result_time, course FROM runs WHERE finished = 1 AND stage LIKE ? "
-                        "AND id NOT IN (SELECT run FROM run_finish) ORDER BY id", (game + ':%',)).fetchall()
+                        "AND id NOT IN (SELECT run FROM run_finish) AND id NOT IN (SELECT run FROM run_clock) "
+                        "ORDER BY id", (game + ':%',)).fetchall()
 
     def finished_timed(self, game='acr'):
         """[(run, stage, result_time, course, finish_m)] of the finished runs of a game timed at a recorded
-        finish line (run_finish), oldest first."""
+        finish line (run_finish), leaving out those on the game's own clock (run_clock), oldest first."""
         return self._do("SELECT r.id, r.stage, r.result_time, r.course, f.finish_m FROM runs r JOIN run_finish f "
                         "ON f.run = r.id WHERE r.finished = 1 AND r.stage LIKE ? AND f.finish_m IS NOT NULL "
-                        "ORDER BY r.id", (game + ':%',)).fetchall()
+                        "AND r.id NOT IN (SELECT run FROM run_clock) ORDER BY r.id", (game + ':%',)).fetchall()
 
     def set_run_finish(self, run, finish_m):
         """Record the finish line a run was timed at (None: it was not re-timed)."""
         self._do('INSERT OR REPLACE INTO run_finish (run, finish_m) VALUES (?, ?)', (run, finish_m))
+
+    def set_run_clock(self, run, clock):
+        """Record that a run's result_time is on `clock` ('game': the game's own; see RUN_CLOCK_DDL)."""
+        self._do('INSERT OR REPLACE INTO run_clock (run, clock) VALUES (?, ?)', (run, clock))
 
     def set_run_start(self, run, start_m):
         """Record where along the road spline a run began."""

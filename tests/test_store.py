@@ -152,6 +152,33 @@ def test_traces_and_their_cap(tmp_path):
     assert len(store.runs(session)) == 3                                    # its run stays
 
 
+def test_a_version_1_trace_reads_as_version_2(tmp_path):
+    """Version 1 had no wall channel and its t was the wall clock: read with wall = t, its t as it was."""
+    import zlib
+    from array import array
+    from oversteer.telemetry_store import TRACE_VERSION, TRACE_V1_CHANNELS, pack_trace
+    assert TRACE_VERSION == 2 and TRACE_CHANNELS[-1] == 'wall' and len(TRACE_CHANNELS) == TRACE_V1_CHANNELS + 1
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'acr/x', 'acr')
+    session = store.start_session('p', car, 'acr', 1.0)
+    old, new, none = (store.start_run(session, n, float(n)) for n in (1, 2, 3))
+    v1 = [tuple(float(i * 10 + c) for c in range(TRACE_V1_CHANNELS)) for i in range(5)]
+    blob = zlib.compress(array('f', [v for row in v1 for v in row]).tobytes(), 6)
+    store.db.execute('INSERT INTO traces (run, version, data) VALUES (?, 1, ?)', (old, blob))
+    back = store.trace(old)
+    assert [row[:TRACE_V1_CHANNELS] for row in back] == v1 and all(row[-1] == row[0] for row in back)
+    store.add_trace(new, [tuple(range(len(TRACE_CHANNELS)))] * 2)
+    assert store.trace(new)[0][-1] == len(TRACE_CHANNELS) - 1
+    assert store.trace_runs([old, new, none]) == {old, new}
+    # a version this build does not know is not read
+    store.db.execute('UPDATE traces SET version = 9 WHERE run = ?', (old,))
+    assert store.trace(old) is None and store.trace_runs([old, new]) == {new}
+    # a row without the wall channel (built by hand) is padded with NaN
+    store.db.execute('DELETE FROM traces WHERE run = ?', (new,))
+    store.db.execute('INSERT INTO traces (run, version, data) VALUES (?, 2, ?)', (new, pack_trace([v1[0]])))
+    assert math.isnan(store.trace(new)[0][-1])
+
+
 def test_session_shifter(tmp_path):
     store = open_store(str(tmp_path / 'telemetry.db'))
     car = store.car_id('p', 'lfs/XRG', 'lfs')

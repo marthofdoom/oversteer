@@ -657,6 +657,11 @@ CREATE TABLE traces (               -- kept apart so list queries on runs never 
     version INTEGER NOT NULL,
     data BLOB NOT NULL              -- zlib(array('f')) at 10 Hz, see TRACE_CHANNELS
 );
+-- Trace version 2: t is the run's clock (drive_log.RunClock: the game's stage
+-- clock where it sends one, else the run's own, no pause in either); a 19th
+-- channel `wall` is the wall clock since the first row (version 1's t), which
+-- puts the changes of gear (timed by the wall clock) on t. Version 1 (t the
+-- wall clock, a pause in it) is read as version 2 with wall = t.
 CREATE TABLE laps (
     id INTEGER PRIMARY KEY,
     run INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
@@ -1044,7 +1049,23 @@ limiter, and marth's 2→3 to 4→5 are within 200 rpm of them.
   exit speeds 2 s either side; counter-steer fraction = time with steer sign
   opposite to yaw rate (both positive left, §5.2; a test drives a simulated
   left-hand corner with and without a slide).
-- **Trace** at 10 Hz (§7.2).
+- **Trace** at 10 Hz (§7.2). Its `t` (version 2) is the run's clock
+  (`RunClock`): the game's stage clock where it sends one that runs, else
+  the run's own (the packets' gaps capped at 0.2 s, pauses out); for a
+  standing start t at the finish is the result. Segment times are on it
+  too.
+- **ACR's finish with the game's clock** (bridge v4): past the table's
+  line (flying finish, else the last pace note) the run waits for the
+  game's clock to stop (0.1 s standing, the car moving) within 100 m and
+  takes that time and the place it last moved as the result and the
+  course; failing that, the clock interpolated at the table's line. The
+  run is marked in `run_clock` and `retime_finishes` never moves it. Old
+  ACR runs keep the run's own clock (from 3 m/s, so without the reaction
+  and the first metres the game's time has): their results cannot be put
+  on the game's clock afterwards (nothing recorded the game's time at
+  their start), so they read quicker than a new run of the same pace by
+  the game's time to 3 m/s: 0.26 to 2.8 s over 35 starts in marth's dump,
+  about 0.5 s typically.
 - **Start-cell stage key** for games that name no stage (Forza Horizon,
   BeamNG, AC practice): `cell:<game>:<x/50>:<z/50>:<heading/45°>` of the
   run's start, completed by the run length rounded to 100 m once it ends.
@@ -1634,7 +1655,7 @@ checklist below.
   damper balance (per-wheel suspension travel, verified units), open
   differential and brake balance (per-wheel speeds). The trace carries
   one drive-slip channel and a suspension RMS; adding the per-wheel
-  channels means a trace version 2 (old traces stay readable as v1).
+  channels means a trace version 3 (older traces stay readable).
 - A QR code for the web URL (no stdlib encoder; would need ~300 lines).
 - Every **calibrate** threshold stays a default until labelled captures
   exist; the first calibration pass needs the captures of §6.3.

@@ -177,6 +177,36 @@ def elapsed_at(trace, distance, track=None):
     return None if t is None else t - trace[0][CH['t']]
 
 
+def wall_track(trace):
+    """The trace's wall channel as a list for clock_at_wall, or None where a row lacks it."""
+    w_col, t_col = CH['wall'], CH['t']
+    walls = [row[w_col] for row in trace if _fin(row[w_col]) and _fin(row[t_col])]
+    return walls if walls and len(walls) == len(trace) else None
+
+
+def clock_at_wall(trace, wall, walls=False):
+    """The trace's t (the run's clock) at `wall` s after its first row on
+    the wall clock (its `wall` channel; linear between rows, at the run's
+    own pace beyond them): what was timed by the wall clock (a change of
+    gear) put on t. `wall` itself where the trace has no wall channel (rows
+    built without it). `walls` is wall_track(trace), when the caller has it."""
+    t_col = CH['t']
+    walls = wall_track(trace) if walls is False else walls
+    if walls is None:
+        return wall
+    i = bisect.bisect_left(walls, wall)
+    if i == 0:
+        return trace[0][t_col] + (wall - walls[0])
+    if i >= len(trace):
+        return trace[-1][t_col] + (wall - walls[-1])
+    a, b = trace[i - 1], trace[i]
+    span = walls[i] - walls[i - 1]
+    if span <= 0:
+        return b[t_col]
+    # Over a pause the wall clock runs and t does not: t rises by no more than the rows' own step
+    return a[t_col] + (b[t_col] - a[t_col]) * min(1.0, (wall - walls[i - 1]) / span)
+
+
 def distance_at(trace, t):
     """The distance along the run at trace time `t` (interpolated); None
     outside the trace."""
@@ -199,10 +229,12 @@ def stage_rows(trace, course=None, finished=False, result_time=None):
     """The rows that are the stage: up to the first row at or past
     `course` (where the run crossed the finish, or the last distance). Where
     the course is not known (or the trace never reaches it), for a finished
-    run no row past the result time (the trace's clock, from the run's start)
-    plus FINISH_SLACK: a car parked after the line is not the stage. The
-    course cuts when it can: the trace's clock is wall time, a pause is in it,
-    and the game's result time (ACR's run clock) has none of the pause."""
+    run no row past the result time plus FINISH_SLACK: a car parked after
+    the line is not the stage. The trace's t is the run's clock, the one the
+    result is on (telemetry_store.TRACE_CHANNELS: no pause in either); the
+    course cuts when it can all the same: a version 1 trace's t is the wall
+    clock, a pause in it, and a run that began before the game's clock
+    started has its t ahead of the result."""
     rows = trace
     by_course = False
     if course is not None and _fin(course):
@@ -1235,7 +1267,7 @@ def launch_outcome(summary, trace, slip=None, history=(), limiter=None, surface=
         out['dropped'] = True
         return out
     release = summary.get('release') or 0.0
-    reached = next((row[t] for row in trace if row[speed] >= 50 / 3.6), None)
+    reached = next((row[t] - first[t] for row in trace if row[speed] >= 50 / 3.6), None)
     if reached is not None and reached <= 20.0:
         out['t50'] = release + reached
     window = [i for i, row in enumerate(trace) if row[t] - first[t] <= LAUNCH_WINDOW
@@ -1404,8 +1436,8 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     for the database: the caller (drive_log._write_end, the backfill) has
     cut `rows` to the stage (stage_rows) and found `corners`
     (drive_log.find_corners). `shifts` are the run's changes of gear (store
-    rows: at, id, flags...) and `started` its wall start, which puts them on
-    the trace's clock. `reference` ({'trace', 'corners', 'course'}), `history`
+    rows: at, id, flags...) and `started` its wall start, which with the
+    trace's wall channel puts them on its clock (clock_at_wall). `reference` ({'trace', 'corners', 'course'}), `history`
     (the last launches' time to 50 km/h on this surface), `others` (the car's
     other runs on the stage as [(run row, stored corners)]) and
     `last_started` (when the car last drove the stage) come from the store.
@@ -1422,9 +1454,11 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
     slip = slip_rpm(rows, context.get('ratio'))
     sections = build_sections(rows, corners)
     out_shifts = []
+    walls = wall_track(rows) if shifts else None
     for s in shifts:
         s = dict(s)
-        s['t'] = (s['at'] - started) if started is not None and s.get('at') is not None else None
+        s['t'] = clock_at_wall(rows, s['at'] - started, walls) \
+            if started is not None and s.get('at') is not None else None
         out_shifts.append(s)
     downs = [s['t'] for s in out_shifts if s.get('method') == 'h-pattern' and s.get('direction') == 'down'
              and s['t'] is not None]
@@ -1461,7 +1495,7 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
                 flags.remove('skip')                     # a block change down under braking
         episode = _episode_for(episodes, s['gear'], t) if t is not None and s.get('direction') == 'up' else None
         if (s.get('direction') == 'up' and s.get('gear_to') == s['gear'] + 1 and t is not None and first_up
-                and launch is not None and t <= LAUNCH_SHIFT):
+                and launch is not None and t - rows[0][t_col] <= LAUNCH_SHIFT):
             flags.append('launch')
         if s.get('direction') == 'up':
             first_up = False

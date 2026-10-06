@@ -175,7 +175,7 @@ def trace_metrics(summary, trace, channels, corners, context, analysis=None):
             out.append({'name': 'launch.g', 'value': launch['g'], 'count': 1})
         if launch['cut'] is not None and not launch['game']:
             out.append({'name': 'launch.cut', 'value': launch['cut'], 'count': 1})
-        first = [row for row in trace if row[t] <= LAUNCH_WINDOW]
+        first = [row for row in trace if row[t] - trace[0][t] <= LAUNCH_WINDOW]
         slips = [row[c['slip_drive']] for row in first if _finite(row[c['slip_drive']])]
         if slips:
             out.append({'name': 'launch.slip', 'value': max(slips), 'count': 1})
@@ -372,7 +372,7 @@ def split_sd(traces, c, length):
     splits = []
     for trace in traces:
         along = _along(trace, c)
-        times = [0.0] + [_time_at(trace, c, m, along) for m in marks]
+        times = [trace[0][c['t']]] + [_time_at(trace, c, m, along) for m in marks]
         if times[-1] is None and trace[-1][c['distance']] >= 0.98 * length:
             times[-1] = trace[-1][c['t']]
         if all(x is not None for x in times):

@@ -64,6 +64,20 @@ def stage(points, corners=(), dt=0.1, gear=3.0, rpm=None, throttle=None, brake=N
 
 # -- the stage's rows --
 
+def test_a_wall_clock_time_on_the_runs_clock():
+    """A change of gear is timed by the wall clock: the wall channel puts it on t, which a pause is not in."""
+    tr = rows(40, speed=20.0, t=lambda i, t: 2.0 + t,                       # the game's clock: 2 s at the first row
+              wall=lambda i, t: t + (30.0 if i >= 20 else 0.0))             # 30 s paused after the 20th row
+    walls = cc.wall_track(tr)
+    assert abs(cc.clock_at_wall(tr, 0.55, walls) - 2.55) < 1e-6
+    assert abs(cc.clock_at_wall(tr, 32.55, walls) - 4.55) < 1e-6           # after the pause: none of it in t
+    assert 2.0 + 1.9 <= cc.clock_at_wall(tr, 15.0, walls) <= 2.0 + 2.0       # during it: t barely moves
+    assert abs(cc.clock_at_wall(tr, -0.2, walls) - 1.8) < 1e-6             # beyond the rows: at the run's own pace
+    assert abs(cc.clock_at_wall(tr, 40.0, walls) - (2.0 + 3.9 + 40.0 - 33.9)) < 1e-6
+    bare = rows(10, speed=20.0)                                             # no wall channel: the wall time itself
+    assert cc.wall_track(bare) is None and cc.clock_at_wall(bare, 0.37) == 0.37
+
+
 def test_stage_rows_stop_at_the_finish():
     tr = rows(300, speed=20.0)                                # 600 m in 30 s
     cut = cc.stage_rows(tr, course=500.0)
