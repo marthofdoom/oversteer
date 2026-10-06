@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Coaching and telemetry pages
+- The splits row, its table, the ribbon and the live view's split are the game's
+  own sectors (S1, S2, S3 …) wherever a stage has real sector lines (every
+  Assetto Corsa Rally stage), timed on the game's clock and coloured LiveSplit's
+  way against your PB; the sum of best is the sum of your best sectors. The
+  coach's corner sections stay in the Run view's "where the time went" and in
+  the top 3. Stages without sector lines (other games, Livigno) keep corner
+  sections, labelled as sections.
+
 ## 0.15.1 — 2026-10-06
 
 ### Coaching
