@@ -13,7 +13,7 @@ from gi.repository import GLib, Gtk
 from locale import gettext as _
 
 from . import telemetry_plot as plot
-from .telemetry_view import LiveTrack, clock, live_delta_view, live_done_view, live_phase, live_ribbon, signed2
+from .telemetry_view import LiveTrack, clock, live_delta_view, live_done_view, live_phase, live_ribbon, live_unit, signed2
 
 INTERVAL = 100                       # ms between two reads while shown
 
@@ -122,6 +122,8 @@ class LiveView(Gtk.Paned):
             return True
         try:
             body = self._read(self.track.since)
+            found = self._found()
+            self.track.set_unit(found['unit'] if found else 'sections')     # sectors where the splits row has them
             self.track.ingest(body)
             self.refresh(body)
         except Exception:
@@ -135,10 +137,12 @@ class LiveView(Gtk.Paned):
         body = body or self.track.body
         if body is None:
             return
-        phase = live_phase(body, self.track)
         found = self._found()
+        self.track.set_unit(found['unit'] if found else 'sections')
+        body = live_unit(body, self.track.unit)
+        phase = live_phase(body, self.track)
         bounds = found['bounds'] if found else None
-        self._delta = live_delta_view(body, bounds)
+        self._delta = live_delta_view(body, bounds, self.track.unit)
         finished = phase == 'finished'
         self.dash_area.set_visible(not finished)
         self.delta_area.set_visible(self._delta is not None and not finished)
@@ -202,7 +206,7 @@ class LiveView(Gtk.Paned):
         return False
 
     def _draw_map(self, area, cr):
-        body = self.track.body or {}
+        body = live_unit(self.track.body or {}, self.track.unit)
         ref = body.get('ref')
         stage = body.get('stage') or {}
         length = (ref or {}).get('course') or stage.get('length')      # the reference's metres: the run's distance is in them

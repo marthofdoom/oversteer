@@ -254,20 +254,22 @@ def splits_row(found):
     run finished), `new_pb` (the last run is the PB, and clean: the only time the row says PB), `finish_m` and
     `finish_confidence` (the times end at the stage's flying finish), `tones` (one per split, for the ribbon),
     `bounds` ((d0, d1) per split, for cells as long as the splits), `rows` ((name, last, Δ PB, best, tone, save)
-    per split, the stage total and the sum of best at the end), `sectors` ((name, last, delta, tone) per game
-    sector, the last time marked with a leading '≈' where the position is estimated; [] without) and
+    per split, the stage total and the sum of best at the end), `unit` ('sectors': the splits are the game's own sectors; 'sections': the corner
+    sections), `sectors` ((name, last, delta, tone) per game sector beside corner-section splits, the last time marked
+    with a leading '≈' where the position is estimated; [] where the sectors are the splits or there are none) and
     `estimated`, `potential` (the three layers, user / grip / car seconds) with `potential_line` (its words) and
     `avail` (the time available against the grip layer per row of `rows`, as text; '' where there is none)."""
     if not found:
         return None
     pb, last = found.get('best'), found.get('last')
+    unit = found.get('unit') or 'sections'
     tones, rows, bounds = [], [], []
     for n, r in enumerate(found['splits'], 1):
         text, save, tone = _split_cells(r)
         tones.append(tone)
         bounds.append((r.get('d0'), r.get('d1')))
         name = r['name'][4:] if r['name'].startswith('the ') else r['name']
-        rows.append(('{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
+        rows.append((name if unit == 'sectors' else '{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
                      '–' if r['last'] is None else '{:.1f}'.format(r['last']), text,
                      '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone, save))
     delta = None if last is None or pb is None else last - pb
@@ -287,7 +289,7 @@ def splits_row(found):
     avail.append('\u2013' if last is None or grip is None or round(last - grip, 1) <= 0 else '{:.1f}'.format(last - grip))
     avail.append('')
     sectors, estimated = [], False
-    for r in found.get('sectors') or []:
+    for r in [] if unit == 'sectors' else found.get('sectors') or []:      # the sectors are the splits: not shown twice
         low = r.get('confidence') == 'low'
         estimated = estimated or low
         mark = '\u2248' if low else ''
@@ -298,7 +300,7 @@ def splits_row(found):
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
             'gain': gain, 'last': last, 'delta': delta, 'new_pb': new_pb, 'finish_m': found.get('finish_m'),
             'finish_confidence': found.get('finish_confidence'), 'tones': tones, 'bounds': bounds, 'rows': rows,
-            'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs'), 'potential': pot,
+            'unit': unit, 'sectors': sectors, 'estimated': estimated, 'runs': found.get('runs'), 'potential': pot,
             'potential_line': potential_line(pot), 'avail': avail}
 
 
@@ -545,7 +547,7 @@ def signed2(delta):
 class LiveTrack:
     """What the tab has seen of the live run: the rows of the last 30 s (dicts: t, d, thr, brk, clu, hb, steer,
     along and alat in g, x, z), every position of the run, the tone of each split as it was completed (by the
-    reference's grid index), and the last body. Rows are told apart by their clock, so a read that repeats rows
+    reference's grid index, or its sector's), and the last body. Rows are told apart by their clock, so a read that repeats rows
     (back on the tab) adds nothing, and rows missed while the tab was hidden leave a gap in the strips. The main
     thread only."""
 
@@ -559,6 +561,11 @@ class LiveTrack:
         self.tones = {}
         self.body = None
         self.dismissed = None                # the run number whose finished card was put away
+        self.unit = 'sections'               # what the splits row's cells are (live_unit): the tones are by their index
+
+    def set_unit(self, unit):
+        if unit != self.unit:
+            self.unit, self.tones = unit, {}
 
     def clear(self):
         self.rows, self.path, self.last_t, self.tones = [], [], -1.0, {}
@@ -601,6 +608,7 @@ class LiveTrack:
             del self.path[:5000]
         # A split's tone as it is completed: ahead or behind the PB by the clock at its end, gaining or losing by the
         # split's own time (LiveSplit's rule; gold needs the best splits, which the live run does not have)
+        body = live_unit(body, self.unit)
         split = body.get('split')
         if body.get('ref') and split and split.get('prev') and body.get('delta') is not None \
                 and split['prev']['index'] not in self.tones:
@@ -608,6 +616,15 @@ class LiveTrack:
             seg = split['prev']['delta']
             self.tones[split['prev']['index']] = ('ahead' if round(cum, 1) <= 0 else 'behind') + '-' + \
                 ('gain' if round(seg, 1) <= 0 else 'lose')
+
+
+def live_unit(body, unit):
+    """`body` (live_buffer's read) with the splits the splits row has: where `unit` is 'sectors' the live run's `sector`
+    view is its `split` and the reference's sectors its `splits`, else `body` itself."""
+    ref = body.get('ref')
+    if unit != 'sectors' or not ref or not ref.get('sectors'):
+        return body
+    return dict(body, split=body.get('sector'), ref=dict(ref, splits=ref['sectors']))
 
 
 def live_phase(body, track):
@@ -649,9 +666,9 @@ def live_ribbon(body, track, bounds):
     return tones, live_cursor(body, bounds)
 
 
-def live_delta_view(body, bounds=None):
+def live_delta_view(body, bounds=None, unit='sections'):
     """The dict telemetry_plot.live_delta draws, or None while there is nothing to say: the delta only with a
-    reference that is ready and a delta; 'no PB yet' as a note; 'vs PB · split n ±x.xx · finish ≈'."""
+    reference that is ready and a delta; 'no PB yet' as a note; 'vs PB · split n ±x.xx · finish ≈' ('S2 ±0.42' where the splits are `unit` 'sectors')."""
     if body['state'] not in ('live', 'stale'):
         return None
     if body.get('ref_status') == 'none':
@@ -664,7 +681,7 @@ def live_delta_view(body, bounds=None):
     label = '–'
     if split and split.get('delta') is not None:
         if bounds:
-            label = '{} {}'.format(cur + 1, signed2(split['delta'])) if cur is not None else '–'
+            label = '{}{} {}'.format('S' if unit == 'sectors' else '', cur + 1, signed2(split['delta'])) if cur is not None else '–'
         else:
             label = signed2(split['delta'])
     return {'text': signed2(body['delta']), 'delta': body['delta'], 'pb': clock(ref['time']), 'split': label,

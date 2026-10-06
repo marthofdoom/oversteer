@@ -395,6 +395,9 @@ def stage_map(cr, w, h, data, cursor):
             _rect(cr, X(s['d0']), 4, max(1.0, X(s['d1']) - X(s['d0']) - 1), 24, loss_tone(loss), _map_alpha(loss))
             if loss is not None and abs(loss) >= 0.25 and X(s['d1']) - X(s['d0']) > 20:
                 text(cr, str(s['i'] + 1), X(s['d0']) + 3, 19, 10, TEXT, True)
+        for s in data.get('sectors') or []:               # the sector lines, labelled
+            _rect(cr, X(s['d0']), 2, 1, 28, ACCENT, 0.8)
+            text(cr, s['name'], X(s['d0']) + 3, 38, 9.5, ACCENT, True)
         x = X(cursor)
         rgb(cr, TEXT)
         cr.move_to(x, 30)
@@ -418,6 +421,12 @@ def stage_map(cr, w, h, data, cursor):
                 label = '{} {}'.format(s['i'] + 1, '{}{:.1f}'.format('+' if loss > 0 else '−', abs(loss)))
                 text(cr, label, p[0] - 7 if p[0] > w - 70 else p[0] + 7, p[1] - 6, 10.5, TEXT, True,
                      'right' if p[0] > w - 70 else 'left')
+    for s in (data.get('sectors') or [])[1:]:             # the game's sector lines (S2 on: S1 starts at START)
+        p = pts[max(0, min(n - 1, int(round(s['d0'] / step))))]
+        if p:
+            _rect(cr, p[0] - 3, p[1] - 3, 6, 6, ACCENT)
+            edge = p[0] > w - 30
+            text(cr, s['name'], p[0] - 6 if edge else p[0] + 6, p[1] - 6, 10, ACCENT, True, 'right' if edge else 'left')
     first = next((p for p in pts if p), None)
     last = next((p for p in reversed(pts) if p), None)
     if first:

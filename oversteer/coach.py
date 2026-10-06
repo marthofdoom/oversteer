@@ -1850,7 +1850,7 @@ class Coach:
         car = reader.car_by_id(run['car']) or {}
         data = car_data.entry(car.get('key'))
         band = potential.power_band(data) if data else None
-        layers = potential.layers(pot, None if found is None else found['possible'])
+        layers = potential.layers(pot, None if found is None else found['splits_possible'])
         rank = 0
         for row in potential.places(rows):
             diag = self._diagnose_place(stage, run, row, found)
@@ -2107,7 +2107,18 @@ def stitch(reader, run, ref, ref_corners, before):
     possible = gain = None
     if pb is not None:
         possible, gain = coach_context.sum_of_best(best, pb['id'], pb['result_time'])
-    return {'best': best, 'loaded': loaded, 'ref_rows': ref_rows, 'pb': pb, 'possible': possible, 'gain': gain}
+    # the game's sectors are the splits where the stage has them (SECTOR_SPLITS, every one with a best): the splits'
+    # sum of best, and so the potential's user layer, is then the sum of the best sectors (`splits_possible`, and
+    # `splits_gain` against the PB), not `possible`, which stays the corner sections' (the "possible" note's)
+    sectors = _sectors(run['stage'], run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
+                       {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
+                       {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded},
+                       {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded})
+    by_sector = bool(sectors) and all(v['confidence'] in SECTOR_SPLITS and v['best'] is not None for v in sectors)
+    splits_possible = sum(v['best'] for v in sectors) if by_sector else possible
+    return {'best': best, 'loaded': loaded, 'ref_rows': ref_rows, 'pb': pb, 'possible': possible, 'gain': gain,
+            'sectors': sectors, 'by_sector': by_sector, 'splits_possible': splits_possible,
+            'splits_gain': None if pb is None or splits_possible is None else pb['result_time'] - splits_possible}
 
 
 def _prior_best(run, before):
@@ -2122,6 +2133,9 @@ def _ref_is_quickest(ref, before):
     (which is ranked by the time after the first section)."""
     return not any(r['id'] != ref['id'] and r['run_class'] in ('clean', 'learning') and r.get('finished')
                    and r.get('result_time') and r['result_time'] < ref['result_time'] for r in before)
+
+
+SECTOR_SPLITS = ('game', 'medium')    # the confidences of a stage's sectors good enough to be its splits
 
 
 def splits(reader, profile, car_id):
@@ -2139,7 +2153,10 @@ def splits(reader, profile, car_id):
     `potential` is the stage's three layers ({user: the sum of best, grip, car: seconds or None, built}, oversteer/
     potential.py; None without one), with each split's `grip_s`, `car_s` and `available` (the last run's time less
     the grip layer's through the split; only where there is a potential). `sectors` is the game's own sectors of the stage (stage_tables.sector_bounds; S1.., `last`, `best`,
-    `gold`, `delta` as above, `confidence`), None where the stage's cannot be placed. The best is over the
+    `gold`, `delta`, `pb`, `cum`, `margin`, `finish`, `d0`, `d1` as above, `confidence`), None where the stage's cannot
+    be placed. `unit` says what `splits` are: 'sectors' where the sectors lie on the game's lines or a measured start
+    and finish (SECTOR_SPLITS) and every one has a best (then `splits` are the sector rows, `possible` is their sum of
+    best and so is the potential's user layer), else 'sections' (the corner sections); `sections` are always those. The best is over the
     clean and learning runs read; a sector a run did not drive from end to end is not timed."""
     rows = reader.metrics(profile, car_id, SESSIONS_READ)
     started = {}
@@ -2191,19 +2208,24 @@ def splits(reader, profile, car_id):
         return None
     entry = stage_tables.entry(stage) or {}
     finished = run['finished'] == 1
+    # the game's own sectors are THE splits where a stage has them placed from real or measured lines (and every one
+    # has a best: stitch); the corner sections are then `sections`. Elsewhere the sections are the splits
+    sectors, unit, rows, possible = found['sectors'], 'sections', out, found['possible']
+    if found['by_sector']:
+        unit, rows, possible = 'sectors', [dict(v) for v in sectors], found['splits_possible']
+        if pot is not None:
+            for v in rows:
+                v['grip_s'], v['car_s'] = potential.span_times(pot, v['d0'], v['d1'])
+                v['available'] = None if v['last'] is None else v['last'] - v['grip_s']
     return {'stage': stage, 'ref_run': ref['id'], 'name': _stage_name(stage, reader.stage(stage)),
             'last': run['result_time'] if finished else None, 'last_class': run['run_class'],
             'new_pb': bool(finished and run['run_class'] == 'clean' and found['pb'] is not None
                            and found['pb']['id'] == run['id']),
             'finish_m': entry.get('finish_m'), 'finish_confidence': entry.get('finish_confidence'),
-            'best': best_time, 'possible': found['possible'],
-            'potential': None if pot is None else dict(potential.layers(pot, found['possible']), built=pot['built']),
-            'gain': None if best_time is None else best_time - found['possible'], 'runs': len(loaded) + 1,
-            'splits': out,
-            'sectors': _sectors(stage, run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
-                                {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
-                                {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded},
-                                {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded})}
+            'best': best_time, 'possible': possible,
+            'potential': None if pot is None else dict(potential.layers(pot, possible), built=pot['built']),
+            'gain': None if best_time is None else best_time - possible, 'runs': len(loaded) + 1,
+            'unit': unit, 'splits': rows, 'sections': out, 'sectors': sectors}
 
 
 def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None):
@@ -2231,21 +2253,26 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
 
     mine = next((x for x in loaded if x['run'] == run['id']), None)
     last = times(mine['trace'], run['id']) if mine else {}
-    best, who = {}, {}
+    best, who, runner = {}, {}, {}
     for x in [{'run': ref_rows['run'], 'trace': ref_rows['trace']}] + loaded:
         if classes.get(x['run']) not in ('clean', 'learning'):
             continue
         for i, t in times(x['trace'], x['run']).items():
             if i not in best or t < best[i]:
+                if i in best:
+                    runner[i] = best[i]
                 best[i], who[i] = t, x['run']
+            elif i not in runner or t < runner[i]:
+                runner[i] = t
     pbs = times(ref_rows['trace'], ref_rows['run'])
     out = []
     for i in range(len(bounds)):
         t = last.get(i)
         mine_at = coach_context.elapsed_at(mine['trace'], bounds[i][1]) if mine else None
         ref_at = coach_context.elapsed_at(ref_rows['trace'], bounds[i][1])
-        out.append({'name': 'S{}'.format(i + 1), 'last': t, 'best': best.get(i),
-                    'gold': t is not None and who.get(i) == run['id'] and best.get(i) == t,
+        gold = t is not None and who.get(i) == run['id'] and best.get(i) == t
+        out.append({'name': 'S{}'.format(i + 1), 'last': t, 'best': best.get(i), 'gold': gold,
+                    'margin': runner[i] - t if gold and i in runner else None, 'finish': i == len(bounds) - 1,
                     'delta': None if t is None or i not in best else t - best[i],
                     'pb': pbs.get(i), 'cum': None if mine_at is None or ref_at is None else mine_at - ref_at,
                     'd0': bounds[i][0], 'd1': bounds[i][1], 'confidence': placed['confidence']})

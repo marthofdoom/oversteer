@@ -1642,12 +1642,12 @@ class GtkUi:
         self.splits_label.set_markup(summary)
         self.splits_potential.set_visible(bool(found.get('potential_line')))
         self.splits_potential.set_text(found.get('potential_line') or '')
-        self.splits_potential.set_tooltip_text(_("What the layers mean: you, the sum of your best splits; grip, a lap simulation at the grip you reach 2 % of the time; car, at the best grip any run of the car reached, with its engine."))
+        self.splits_potential.set_tooltip_text(_("What the layers mean: you, the sum of your best sectors (corner sections on a stage without the game's sector lines); grip, a lap simulation at the grip you reach 2 % of the time; car, at the best grip any run of the car reached, with its engine."))
         self.splits_label.set_tooltip_text(
             _("Times run to the estimated flying finish of the stage.") if found.get('finish_m') else None)
         grid = Gtk.Grid(column_spacing=16, row_spacing=4)
         has_avail = bool(found.get('potential_line'))                 # the stage's potential is known: a time available column
-        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 PB"), _("Best"), _("Save")) + ((_("Avail"),) if has_avail else ())):
+        for col, head in enumerate((_("Sector") if found['unit'] == 'sectors' else _("Section"), _("Last"), _("\u0394 PB"), _("Best"), _("Save")) + ((_("Avail"),) if has_avail else ())):
             label = Gtk.Label(xalign=0 if col == 0 else 1)
             label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(head)))
             label.get_style_context().add_class('telemetry-header')
@@ -1682,7 +1682,9 @@ class GtkUi:
         text = _("Gold \u2605: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: "
                  "behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what "
                  "the split could still gain against its best.")
-        if found.get('finish_m') is None:
+        if found['unit'] == 'sections':
+            text = _("Without the game's sector lines for this stage the splits are corner sections.") + ' ' + text
+        if found.get('finish_m') is None and found['unit'] == 'sections':
             text += ' ' + _("The finish split includes the slow-down to the stop.")
         note = Gtk.Label(label=text, xalign=0)
         note.set_line_wrap(True)

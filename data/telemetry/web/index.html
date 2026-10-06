@@ -831,6 +831,10 @@ function splitDelta(r) {
   if (r.gold) return "★" + (r.margin ? " " + signed(-r.margin) : "");
   return signed(r.pb != null ? r.last - r.pb : r.delta);
 }
+// The splits are the game's own sectors (sp.unit "sectors", where the stage has its lines) or the corner sections (bySector)
+function splitName(sp, r, i) {
+  return bySector(sp) ? r.name : (i + 1) + ". " + r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "");
+}
 // "PB" is said for a clean run that is the best, never for a learning or off run that was merely quick
 function lastBadge(sp) {
   if (sp.last == null || sp.best == null) return null;
@@ -857,12 +861,12 @@ function splitsTable(sp) {
   const table = el("table");
   const head = el("tr");
   const avail = !!(sp.potential && sp.splits.some((r) => r.available != null));          // time available against the grip potential
-  for (const h of ["Split", "Last", "Δ PB", "Best", "Save"].concat(avail ? ["Avail"] : [])) head.appendChild(el("th", h));
+  for (const h of [bySector(sp) ? "Sector" : "Section", "Last", "Δ PB", "Best", "Save"].concat(avail ? ["Avail"] : [])) head.appendChild(el("th", h));
   table.appendChild(head);
   sp.splits.forEach((r, i) => {
     const tr = el("tr", null, r.finish ? "fin" : "");
     const name = el("td", null, "name");
-    name.textContent = (i + 1) + ". " + r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "");
+    name.textContent = splitName(sp, r, i);
     tr.appendChild(name);
     tr.appendChild(el("td", seconds(r.last)));
     tr.appendChild(el("td", splitDelta(r), "t-" + splitTone(r)));
@@ -889,7 +893,7 @@ function splitsTable(sp) {
   if (avail) sob.appendChild(el("td", ""));
   table.appendChild(sob);
   box.appendChild(table);
-  if (sp.sectors && sp.sectors.length) {
+  if (!bySector(sp) && sp.sectors && sp.sectors.length) {          // beside corner sections; where they are the splits the table has them
     const grid = el("div", null, "sectors");
     sp.sectors.forEach((r, i) => {
       const cell = el("div");
@@ -904,7 +908,9 @@ function splitsTable(sp) {
   }
   if (sp.potential && sp.potential.grip != null) box.appendChild(el("p", "Avail: the time your last run had available in that split against the grip potential, a lap simulation at the grip you reach 2 % of the time. Potential, you: the sum of best; grip: the same stage at that grip; car: the best grip any run of the car reached with its engine.", "foot"));
   box.appendChild(el("p", "Gold ★: your last run set that split's best, by the margin shown. Green: ahead of your PB, red: behind it; the darker shade where the split gained time, the lighter where it lost time. Save: what the split could still gain against its best. Sum of best: every split's best put together. "
-    + (sp.finish_m != null ? finishNote(sp) : "The finish split includes the slow-down to the stop."), "foot"));
+    + (bySector(sp) ? "The splits are the game's own sectors (S1 to S" + sp.splits.length + "), timed by the game's clock. "
+      : "No sector lines for this stage: its splits are corner sections. ")
+    + (sp.finish_m != null ? finishNote(sp) : bySector(sp) ? "" : "The finish split includes the slow-down to the stop."), "foot"));
   return box;
 }
 
@@ -947,10 +953,10 @@ function showSplits(sp) {
   sp.splits.forEach((r, i) => {
     const c = el("i", null, "ls-" + splitTone(r));
     if (long) c.style.flexGrow = String(Math.max(1, r.d1 - r.d0));
-    c.title = (i + 1) + ". " + r.name.replace(/^the /, "") + " " + seconds(r.last) + " " + splitDelta(r);
+    c.title = splitName(sp, r, i) + " " + seconds(r.last) + " " + splitDelta(r);
     ribbon.appendChild(c);
   });
-  if (sp.sectors && sp.sectors.length) {
+  if (!bySector(sp) && sp.sectors && sp.sectors.length) {
     ribbon.appendChild(el("s"));
     sp.sectors.forEach((r, i) => { const c = el("i", null, "sec ls-" + splitTone(r)); c.title = (r.name || "S" + (i + 1)) + " " + (r.confidence === "low" ? "≈" : "") + seconds(r.last); ribbon.appendChild(c); });
   }
@@ -977,7 +983,8 @@ function lastRun(sp, sessionList) {
   $("lr-stage").textContent = sp.name.replace(/ - .*/, "");
   $("lr-t").textContent = clock(sp.last);
   const golds = sp.splits.filter((r) => r.gold).length;
-  const facts = [sp.name, sp.runs + " runs", golds + (golds === 1 ? " gold split" : " gold splits")];
+  const unit = bySector(sp) ? "sector" : "section";
+  const facts = [sp.name, sp.runs + " runs", golds + " gold " + unit + (golds === 1 ? "" : "s")];
   if (sp.last == null) facts.unshift("Last run not finished");
   $("lr-s").textContent = facts.join(" · ");
   const badge = lastBadge(sp);
@@ -1152,6 +1159,7 @@ function sessions(list) {
 const lr = {since: 0, n: null, rows: [], path: [], lastT: -1, tones: {}, body: null, dismissed: null, chan: "", idx: {}, ribbon: false, loaded: null};
 const LV_WINDOW = 12, LV_KEEP = 30, GRAV = 9.80665, LV_GAP = 0.5;
 let lastSplits = null;                     // the splits row's data (showSplits): the ribbon's cells and their bounds
+const bySector = (sp) => !!sp && sp.unit === "sectors";
 // A difference to dp decimals (two live): one that rounds to nothing is ±0.00, never +0.00 or −0.00
 function lvSigned(d, dp) {
   if (d == null) return "–";
@@ -1192,6 +1200,12 @@ function lvRuns(xy) {
 
 function liveClear() { lr.rows = []; lr.path = []; lr.lastT = -1; lr.tones = {}; lr.loaded = null; }
 
+// The live run's splits are the splits row's: where it has the game's sectors, the run's `sector` view and the
+// reference's sectors stand for `split` and `splits` (the tones are by their index)
+function liveUnit(b) {
+  const ref = b.ref, sec = bySector(lastSplits) && ref && ref.sectors && ref.sectors.length === lastSplits.splits.length;
+  return sec ? {split: b.sector, refSplits: ref.sectors} : {split: b.split, refSplits: ref ? ref.splits : []};
+}
 function liveIngest(b) {
   if (b.reset || (b.epoch && lr.epoch && b.epoch !== lr.epoch) || (b.run ? b.run.n !== lr.n : lr.n !== null)) liveClear();
   lr.epoch = b.epoch;
@@ -1215,7 +1229,7 @@ function liveIngest(b) {
   if (lr.path.length > 30000) lr.path.splice(0, 5000);
   // The tone of a split as it is completed (LiveSplit's rule against the PB: ahead or behind by the clock at its
   // end, gaining or losing by the split's own time); gold needs the best splits, which the live run does not have
-  const sp = b.split;
+  const sp = liveUnit(b).split;
   if (b.ref && sp && sp.prev && lr.tones[sp.prev.index] === undefined && b.delta != null) {
     const cum = b.delta - (sp.delta != null ? sp.delta : 0), seg = sp.prev.delta;
     lr.tones[sp.prev.index] = (Math.round(cum * 10) <= 0 ? "ahead" : "behind") + "-" + (Math.round(seg * 10) <= 0 ? "gain" : "lose");
@@ -1225,14 +1239,14 @@ function liveIngest(b) {
 // -- the ribbon follows the run: by distance, never by list position (the grid has a launch section the
 // splits list leaves out) --
 function liveRibbon(b) {
-  const sp = lastSplits, ref = b.ref;
+  const sp = lastSplits, ref = b.ref, rs = liveUnit(b).refSplits;
   const cells = [].filter.call($("ribbon").children, (c) => c.tagName === "I" && !c.classList.contains("sec"));
   if (!sp || !sp.splits || !sp.splits.length || cells.length !== sp.splits.length) return null;
   const d = b.distance, fin = b.state === "finished";
   let cur = null;
   sp.splits.forEach((r, j) => { if (!fin && d != null && r.d0 != null && r.d1 != null && d >= r.d0 && d < r.d1) cur = j; });
   sp.splits.forEach((r, j) => {
-    const g = ref && r.d0 != null ? ref.splits.findIndex((x) => Math.abs(x.d0 - r.d0) < 2) : -1;
+    const g = ref && r.d0 != null ? rs.findIndex((x) => Math.abs(x.d0 - r.d0) < 2) : -1;
     cells[j].className = j === cur ? "cur" : lr.tones[g] ? "ls-" + lr.tones[g] : "";
   });
   return cur == null ? -1 : cur;
@@ -1276,7 +1290,7 @@ function liveShow(b, force) {
     clear(now);
     const n = lastSplits && lastSplits.splits ? lastSplits.splits.length : b.split ? b.split.n : 0;
     const at = cur != null && cur >= 0 ? cur + 1 : null;
-    now.appendChild(el("span", (at ? at + "/" + n + " " : "") + lvSigned(b.delta, 2), b.delta > 0.005 ? "pos-slower" : b.delta < -0.005 ? "pos-faster" : ""));
+    now.appendChild(el("span", (at ? (bySector(lastSplits) ? "S" + at : at + "/" + n) + " " : "") + lvSigned(b.delta, 2), b.delta > 0.005 ? "pos-slower" : b.delta < -0.005 ? "pos-faster" : ""));
   } else if (fin && b.final && b.final.time != null) {
     clear(now);
     now.appendChild(document.createTextNode("Run " + clock(b.final.time) + " "));
@@ -1294,9 +1308,9 @@ function liveShow(b, force) {
     bar.style.left = f > 0 ? "50%" : (50 + f * 50) + "%";
     bar.style.width = Math.abs(f) * 50 + "%";
     $("pb2").textContent = clock(b.ref.time);
-    const sp = b.split;
+    const sp = liveUnit(b).split;
     let label = "–";
-    if (sp && sp.delta != null) label = cur != null && cur >= 0 ? (cur + 1) + " " + lvSigned(sp.delta, 2) : lastSplits && lastSplits.splits ? "–" : lvSigned(sp.delta, 2);
+    if (sp && sp.delta != null) label = cur != null && cur >= 0 ? (bySector(lastSplits) ? "S" : "") + (cur + 1) + " " + lvSigned(sp.delta, 2) : lastSplits && lastSplits.splits ? "–" : lvSigned(sp.delta, 2);
     $("dsplit").textContent = label;
     $("pred").textContent = b.predicted != null ? clock(b.predicted) : "–";
   }
@@ -1319,8 +1333,8 @@ function liveFillDone(b) {
   else parts.push("No PB to compare with yet");
   if (lastSplits) {
     if (lastSplits.possible != null) parts.push("SoB " + clock(lastSplits.possible));
-    const golds = (lastSplits.splits || []).filter((r) => r.gold).length;
-    if (golds) parts.push(golds + (golds === 1 ? " gold split" : " gold splits"));
+    const golds = (lastSplits.splits || []).filter((r) => r.gold).length, unit = bySector(lastSplits) ? "sector" : "split";
+    if (golds) parts.push(golds + " gold " + unit + (golds === 1 ? "" : "s"));
   }
   const calls = $("coach-n").textContent;
   if (calls) parts.push(calls + " in the debrief");
@@ -1415,7 +1429,7 @@ function liveDrawMini(b) {
   if (len && b.distance != null) {
     const x = pad + Math.max(0, Math.min(1, b.distance / len)) * span;
     lvLine(g, [[pad, y], [x, y]], lvTok("--dim"), 4);
-    if (b.ref) for (const s of b.ref.splits) {
+    if (b.ref) for (const s of liveUnit(b).refSplits) {
       const tx = pad + Math.max(0, Math.min(1, s.d1 / len)) * span;
       lvLine(g, [[tx, y - 6], [tx, y + 6]], lvTok("--faint"), 1);
     }
@@ -1858,7 +1872,7 @@ function rvDrawStrips() {
 function rvReadout() {
   const D = RV.data, d = Math.max(0, Math.min(D.length, RV.cursor)), i = rvIdx(d), k = rvSecAt(d), s = D.sections[k];
   $("ro-d").textContent = rvKm(d) + " km";
-  $("ro-sec").textContent = s ? "split " + (k + 1) + " · " + s.short : "–";
+  $("ro-sec").textContent = s ? "section " + (k + 1) + " · " + s.short : "–";
   const dt = RV.delta[i], dEl = $("ro-dt");
   dEl.textContent = dt == null ? "" : "Δ " + signed(dt, 2) + " s";
   dEl.className = "num " + (dt == null ? "" : dt > 0.005 ? "pos-slower" : dt < -0.005 ? "pos-faster" : "");
@@ -1918,6 +1932,7 @@ function rvDrawMap() {
       g.fillRect(X(s.d0), 4, Math.max(1, X(s.d1) - X(s.d0) - 1), bar); g.globalAlpha = 1;
       if (s.loss != null && Math.abs(s.loss) >= 0.25 && X(s.d1) - X(s.d0) > 20) { g.fillStyle = C.text; g.font = "600 10px " + C.mono; g.fillText(String(s.i + 1), X(s.d0) + 3, 4 + bar / 2 + 3); }
     }
+    for (const s of D.sectors || []) { g.fillStyle = C.accent; g.fillRect(X(s.d0), 2, 1, 28); g.font = "600 9.5px " + C.mono; g.fillText(s.name, X(s.d0) + 3, 38); }
     g.fillStyle = C.text; g.beginPath(); const cx = X(RV.cursor); g.moveTo(cx, 30); g.lineTo(cx - 5, 40); g.lineTo(cx + 5, 40); g.closePath(); g.fill();
     cv._pick = (px) => (px - 4) / (cv.clientWidth - 8) * D.length;
     return;
@@ -1933,6 +1948,10 @@ function rvDrawMap() {
       const p = P(rvIdx(s.apex));
       if (p) { g.fillStyle = C.text; g.font = "600 10.5px " + C.mono; const t = (s.i + 1) + " " + signed(s.loss); g.fillText(t, p[0] > w - 70 ? p[0] - 7 - g.measureText(t).width : p[0] + 7, p[1] - 6); }
     }
+  }
+  for (const s of (D.sectors || []).slice(1)) {          // the game's sector lines (S2 on: S1 starts at START)
+    const p = P(rvIdx(s.d0));
+    if (p) { g.fillStyle = C.accent; g.fillRect(p[0] - 3, p[1] - 3, 6, 6); g.font = "700 10px " + C.sans; g.fillText(s.name, p[0] > w - 30 ? p[0] - 6 - g.measureText(s.name).width : p[0] + 6, p[1] - 6); }
   }
   const a = P(rvIdx(0)), b = P(D.x.length - 1);
   g.font = "700 10px " + C.sans;
@@ -1976,7 +1995,7 @@ function rvLossTable() {
   const max = Math.max(0.1, ...rows.map((r) => r.off ? 0 : Math.abs(r.loss)));
   const head = el("tr");
   const pot = rows.some((r) => r.avail != null);                  // the stage's potential is known: a Time available column
-  for (const h of pot ? ["Split", "Loss", "Avail", "Min", "Exit", "Brake"] : ["Split", "Loss", "Min", "Exit", "Brake"]) {
+  for (const h of pot ? ["Section", "Loss", "Avail", "Min", "Exit", "Brake"] : ["Section", "Loss", "Min", "Exit", "Brake"]) {
     const th = el("th", h);
     if (h === "Avail") th.title = "Time available: this run's time through the split less the grip potential's (a lap simulation at the grip you reach 2 % of the time)";
     head.appendChild(th);
@@ -2050,7 +2069,7 @@ function rvZoomTo(k, quiet) {
     const s = D.sections[k];
     RV.view = [Math.max(0, s.d0 - 60), Math.min(D.length, s.d1 + 60)];
     if (!(RV.cursor >= s.d0 && RV.cursor <= s.d1)) RV.cursor = Math.max(RV.view[0], Math.min(RV.view[1], s.apex));
-    $("z-name").textContent = "Split " + (k + 1) + " · " + s.name.replace(/^the /, "") + " · " + rvKm(s.apex) + " km";
+    $("z-name").textContent = "Section " + (k + 1) + " · " + s.name.replace(/^the /, "") + " · " + rvKm(s.apex) + " km";
   }
   if (!quiet) { rvRenderCharts(); rvHash(); }
 }

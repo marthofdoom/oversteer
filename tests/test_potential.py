@@ -280,6 +280,14 @@ def test_a_real_acr_run_through_the_whole_path(tmp_path):
     assert reader.envelope(car, 'gravel')['runs'] == 3
     found = coach.splits(reader, profile, car)
     assert found['potential']['grip'] == pytest.approx(layers['grip']) and found['potential']['user'] == found['possible']
+    # the stage has the game's sector lines: the splits are its sectors, the corner sections beside them, and the
+    # sum of best (the potential's user layer too) is the sum of the best sectors
+    assert found['unit'] == 'sectors' and len(found['splits']) == len(found['sectors']) >= 2
+    assert [r['name'] for r in found['splits']] == ['S{}'.format(i + 1) for i in range(len(found['splits']))]
+    assert found['sections'] and found['sections'][0]['name'] != 'S1'
+    assert found['possible'] == pytest.approx(sum(r['best'] for r in found['splits']))
+    assert found['splits'][-1]['finish'] and not found['splits'][0]['finish']
+    assert all(r['pb'] is not None and r['cum'] is not None and r['d1'] > r['d0'] for r in found['splits'])
     assert all(r['grip_s'] > 0 and r['available'] is not None for r in found['splits'] if r['last'] is not None)
     assert sum(r['grip_s'] for r in found['splits']) == pytest.approx(layers['grip'], abs=1.5)
     tips = coach.Coach(reader).tips(profile, car)
@@ -292,7 +300,7 @@ def test_a_real_acr_run_through_the_whole_path(tmp_path):
     # one place, one name and one time wherever it is quoted: the tips say the splits' sections, with the splits
     # sheet's seconds available, and the user layer is the splits' sum of best
     from oversteer import run_analysis
-    by_name = {r['name']: r for r in found['splits']}
+    by_name = {r['name']: r for r in found['sections']}        # the places stay the corner sections where the splits are sectors
     for t in top:
         name = t.text[len('On Elatia, '):].split(': ')[0]
         assert name in by_name and by_name[name]['available'] is not None
