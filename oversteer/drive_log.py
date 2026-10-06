@@ -191,6 +191,9 @@ FINISH_STILL = 2.0               # s the car stands (under MOVING) after the fin
 FINISH_GRACE = 15.0              # s after the finish at most
 FINISH_ROLLOUT = 300.0           # m driven past the finish at most
 FINISH_GRACE_PROGRESS = 60.0     # s: where the finish is progress >= FINISHED, the last of the stage is still to drive
+# Their progress is the position around the lap, near 1 at the end of every
+# lap: a circuit session is not ended there
+LAP_SPLINE_GAMES = ('ac', 'acc', 'acpmf')
 
 # One row per packet of the segment being driven, for its features
 SEGMENT_CHANNELS = ('t', 'speed', 'a_long', 'a_lat', 'yaw_rate', 'throttle', 'gear', 'slip', 'susp_fl', 'susp_fr',
@@ -285,7 +288,8 @@ class RunTracker:
             self._start(now, sample, session, profile)
         self._track(now, sample, throttle, dt, speed)
         self._remember(now, sample)
-        if self.run is not None and self._finished == 1 and self._post_over(now):
+        if self.run is not None and self._finished == 1 and sample.game not in LAP_SPLINE_GAMES \
+                and self._post_over(now):
             self.end(now, 'finish')
             return
         if sample.packet == 'end':

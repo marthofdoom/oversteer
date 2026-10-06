@@ -589,3 +589,24 @@ def test_acr_post_finish_packets_do_not_start_a_run_and_a_restart_does(tmp_path)
     assert 230 < runs[0]['result_time'] < 250
     assert 5200 < runs[0]['distance'] < 5400               # driven to the line, not the roll-out
     assert runs[0]['ended'] < runs[1]['ended']
+
+
+def test_a_circuit_lap_in_acc_does_not_end_the_run(tmp_path):
+    """ACC's progress is the position around the lap: near 1 at the end of
+    every lap, not a finish."""
+    from oversteer.telemetry import Sample
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples, t = [], 0.0
+    for lap in range(3):
+        for i in range(400):
+            s = Sample(6000.0, 7500.0, gear=3, speed=40.0, car='acc/test', game='acc', throttle=0.8)
+            s.track, s.stage_length = 'monza', 1600.0
+            s.progress = i / 399.0
+            s.lap_distance = s.progress * 1600.0
+            samples.append((t, s, 0.8))
+            t += 0.1
+    feed_course(learner, samples[:420])                  # past the end of the first lap
+    run = learner.runs.run
+    assert run is not None
+    feed_course(learner, samples[420:])
+    assert learner.runs.run == run                       # 80 s on, the later laps are the same run
