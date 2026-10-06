@@ -1,7 +1,7 @@
 """The context layer wired into the drive log, the model and the detectors
 (docs/coach-techniques.md, build step 1): what a run writes, the backfill of
 runs from before, the limiter figure, the drivetrain, the ACR discipline."""
-from oversteer import coach, coach_context, drive_detect, telemetry_store
+from oversteer import coach, coach_context, drive_detect, stage_tables, telemetry_store
 from oversteer.shift_learner import CarModel, ShiftLearner
 from oversteer.telemetry import Sample
 from oversteer.telemetry_store import TRACE_CHANNELS
@@ -292,3 +292,49 @@ def test_a_shifts_band_is_stored_with_its_flags(tmp_path):
     [row] = store.run_shifts(run)
     assert (row['best_low'], row['best_high'], row['best']) == (6900.0, 7100.0, 7450.0)
     store.close()
+
+
+# -- ACR runs timed to the old finish line --
+
+def _timed_run(store, stage, result=230.0, course=5278.0, finished=1):
+    """A finished run with a trace of 10 m/s steps every second, 1 m/s^2 of pace: t = d / 10."""
+    car = store.car_id('p', FABIA, 'acr', 'Fabia')
+    session = store.start_session('p', car, 'acr', 1.0, stage=stage)
+    run = store.start_run(session, 1, 1.0, stage)
+    store.update_run(run, finished=finished, result_time=result, course=course, run_class='clean', ended=2.0)
+    rows = [tuple(i / 10.0 if name == 't' else float(i) if name == 'distance' else 0.0 for name in TRACE_CHANNELS)
+            for i in range(0, int(course) + 1)]
+    store.add_trace(run, rows)
+    return run
+
+
+def test_an_acr_run_timed_to_the_old_line_is_timed_again_once_and_queued(tmp_path):
+    from oversteer.drive_log import repair_shipped, retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    stage = 'acr:wales:afon-bidno-severn'
+    entry = stage_tables.entry(stage)
+    gap = entry['pacenote_last_m'] - entry['finish_m']
+    run = _timed_run(store, stage)
+    other = _timed_run(store, 'acr:nowhere:none')
+    repair_shipped(store)
+    row = store.run(run)
+    # the trace takes 0.1 s a metre
+    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and abs(row['course'] - (5278.0 - gap)) < 1e-6
+    assert row['run_class'] is None and run in store.runs_to_backfill(10)
+    assert store.run(other)['result_time'] == 230.0 and store.run(other)['run_class'] == 'clean'
+    store.update_run(run, run_class='clean')
+    assert retime_finishes(store) == 0                   # once
+    assert store.run(run)['result_time'] == row['result_time'] and store.run(run)['run_class'] == 'clean'
+    learner.close()
+
+
+def test_a_run_with_no_trace_to_re_time_is_left_and_not_tried_again(tmp_path):
+    from oversteer.drive_log import repair_shipped, retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    run = _timed_run(store, 'acr:wales:afon-bidno-severn', course=100.0)      # shorter than the gap
+    assert retime_finishes(store) == 0
+    assert store.run(run)['result_time'] == 230.0 and store.run(run)['run_class'] == 'clean'
+    assert store.finished_untimed('acr') == []
+    learner.close()

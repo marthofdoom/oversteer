@@ -212,6 +212,19 @@ CREATE INDEX corners_run ON corners (run);
 CREATE INDEX events_run ON events (run, kind);
 """
 
+# Which finish line a finished ACR run was timed at (metres along the road;
+# NULL: a run that could not be re-timed). Kept in a table of its own, made
+# when a file is opened, rather than a runs column: a column would need a
+# schema version, a migration and the fresh schema above changed for one
+# bookkeeping fact. A finished ACR run on a stage with a flying finish
+# (finish_m) and no row here was timed to the old line, the last pace note
+# (drive_log.retime_finishes).
+RUN_FINISH_DDL = """
+CREATE TABLE IF NOT EXISTS run_finish (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    finish_m REAL
+)"""
+
 # The first schema, as development builds after Oversteer 0.13.1 created it
 # (no release had a database): kept to migrate from, and for the tests that
 # build such a file
@@ -562,6 +575,7 @@ def open_store(path):
         elif version > VERSION:
             db.close()
             raise sqlite3.DatabaseError("{} is from a newer Oversteer (version {})".format(path, version))
+    db.execute(RUN_FINISH_DDL)
     return Store(db, path)
 
 
@@ -1382,6 +1396,16 @@ class Store(Reader):
             self._do('UPDATE cars SET drivetrain = ?, model = ? WHERE id = ?', (value, json.dumps(model), car))
         else:
             self._do('UPDATE cars SET drivetrain = ? WHERE id = ?', (value, car))
+
+    def finished_untimed(self, game='acr'):
+        """[(run, stage, result_time, course)] of the finished runs of a game
+        with no recorded finish line (run_finish), oldest first."""
+        return self._do("SELECT id, stage, result_time, course FROM runs WHERE finished = 1 AND stage LIKE ? "
+                        "AND id NOT IN (SELECT run FROM run_finish) ORDER BY id", (game + ':%',)).fetchall()
+
+    def set_run_finish(self, run, finish_m):
+        """Record the finish line a run was timed at (None: it was not re-timed)."""
+        self._do('INSERT OR REPLACE INTO run_finish (run, finish_m) VALUES (?, ?)', (run, finish_m))
 
     def update_run(self, run, **fields):
         """Set columns of a run (unlike end_run, counts nothing)."""

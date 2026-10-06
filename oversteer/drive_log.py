@@ -705,6 +705,9 @@ class RunTracker:
         fields.update(verdicts)
         fields['course'] = summary['course']
         store.end_run(run, **fields)
+        flying = (stage_tables.entry(fields.get('stage') or stage) or {}).get('finish_m')
+        if summary['finished'] == 1 and game == 'acr' and flying:
+            store.set_run_finish(run, flying)            # timed at the flying finish: never re-timed
         store.add_trace(run, trace)
         self._work_over(run, summary, trace, fields)
         self.learner.history_changed += 1                # the coach's tips for this run are there to read
@@ -806,7 +809,8 @@ def repair_shipped(store):
     wrote: the discipline of every run on a stage the table knows (a profile
     word or a shape said 'rally stage' of the Livigno circuit) and the
     drivetrain of every car the shipped car data knows (a learnt vote said
-    'fwd' of a Fabia), once at start. Returns the number of rows changed."""
+    'fwd' of a Fabia), and the finish line of ACR runs timed to the old one
+    (retime_finishes), once at start. Returns the number of rows changed."""
     changed = 0
     for stage in store.stage_keys():
         found = drive_detect.table_discipline(stage)
@@ -821,9 +825,58 @@ def repair_shipped(store):
         if shipped in DRIVEN and (column != shipped or model != shipped):
             store.set_car_drivetrain(car, shipped)         # the game's files beat a learnt vote
             changed += 1
+    changed += retime_finishes(store)
     if changed:
         store.commit()
     return changed
+
+
+def _trace_t_at(trace, value):
+    """The trace's time at driven distance `value` (linear between rows), or
+    None when the trace does not span it."""
+    previous = None
+    for row in trace:
+        d = row[T['distance']]
+        if previous is not None and previous[T['distance']] <= value <= d:
+            d0, t0 = previous[T['distance']], previous[T['t']]
+            return t0 if d <= d0 else t0 + (row[T['t']] - t0) * (value - d0) / (d - d0)
+        previous = row
+    return None
+
+
+def retime_finishes(store):
+    """A finished ACR run timed to the old line (the last pace note, the stop
+    control: its time holds the slow-down) on a stage that now has a flying
+    finish (finish_m) is timed again to it, once: the driven distance between
+    the lines is pacenote_last_m - finish_m, so the new finish is that much
+    before the run's course, and the time shortens by what the trace took to
+    drive it. The run is queued for the backfill (run_class cleared) to
+    recompute its corners, sections, losses and metrics with the new course.
+    A run timed by the new code, or handled here, has a run_finish row. Runs
+    without a trace or whose trace does not span the new line are marked
+    (finish NULL) and left as they were. Returns the number re-timed."""
+    done = 0
+    for run, stage, result, course in store.finished_untimed('acr'):
+        entry = stage_tables.entry(stage) or {}
+        flying, old = entry.get('finish_m'), entry.get('pacenote_last_m')
+        if not flying or not old or flying >= old:
+            continue                                     # no flying finish known: the run stays as timed
+        try:
+            trace = store.trace(run)
+            new = course - (old - flying) if course is not None else None
+            t_old = _trace_t_at(trace, course) if trace and new is not None else None
+            t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
+            if t_new is None or result is None or t_old - t_new >= result:
+                logging.warning("drive log: run %s cannot be re-timed to the flying finish (no trace or out of range)",
+                                run)
+                store.set_run_finish(run, None)
+                continue
+            store.update_run(run, result_time=result - (t_old - t_new), course=new, run_class=None)
+            store.set_run_finish(run, flying)
+            done += 1
+        except Exception:
+            logging.exception("drive log: re-timing run %s", run)
+    return done
 
 
 def backfill_step(learner, limit=3):
