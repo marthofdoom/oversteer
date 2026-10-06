@@ -2,7 +2,12 @@
 """Add `finish_m` (the flying finish along the road spline) to the Assetto
 Corsa Rally stages of data/telemetry/stages/acr.json, from recorded runs.
 
-    scripts/acr-finish.py [CAPTURE_DIR ...] [--out PATH]
+    scripts/acr-finish.py [CAPTURE_DIR ...] [--out PATH] [--reset]
+
+A stage is rewritten only where the captures give it enough runs (keyed by
+the stage's key, as two stages share a name); a stage without new evidence
+keeps its `finish_m`, so a run with fewer captures does not erase what an
+earlier one found. `--reset` recomputes everything from these captures.
 
 The game's pace-note tables carry no finish marker, and `pacenote_last_m`
 is the stop control: marth's runs are at 120-160 km/h 200 m before it and
@@ -67,10 +72,40 @@ def onset(run, last):
     return after[0][1] - last if after else None
 
 
+def apply_finish(table, found, reset=False):
+    """Set `finish_m` and its fields on the stages of `table` ({'stages': [...]}) that `found` ({stage key: the
+    offsets of its runs from pacenote_last_m}) gives enough runs; the others keep what they have, unless
+    `reset` (then they lose it)."""
+    for entry in table['stages']:
+        key = stage_tables.stage_key('acr', entry)
+        offsets = found.get(key) if entry.get('track') else None
+        if offsets:
+            middle = statistics.median(offsets)
+            kept = [o for o in offsets if abs(o - middle) <= OUTLIER_M]
+            offsets = kept if len(kept) * 3 >= len(offsets) * 2 else offsets
+        if not offsets or len(offsets) < MIN_RUNS or max(offsets) - min(offsets) > SPREAD_M:
+            if reset:
+                entry.pop('finish_m', None)
+                for name in ('finish_runs', 'finish_spread_m', 'finish_confidence', 'finish_source'):
+                    entry.pop(name, None)
+            print('{:28} {} runs, no new finish_m {}'.format(entry['stage'], len(offsets or []),
+                                                             sorted(round(o) for o in offsets or [])))
+            continue
+        entry['finish_m'] = round(entry['pacenote_last_m'] + statistics.median(offsets), 1)
+        entry['finish_runs'] = len(offsets)
+        entry['finish_spread_m'] = round(max(offsets) - min(offsets), 1)
+        entry['finish_confidence'] = 'medium'
+        entry['finish_source'] = ("marth's runs: where the final slowdown to the stop control starts "
+                                  "(median of {}), the game's pace notes have no finish marker".format(len(offsets)))
+        print('{:28} finish_m {} ({} runs, spread {})'.format(
+            entry['stage'], entry['finish_m'], len(offsets), entry['finish_spread_m']))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('dirs', nargs='*')
     parser.add_argument('--out', default=OUT)
+    parser.add_argument('--reset', action='store_true', help='recompute every stage from these captures only')
     args = parser.parse_args()
     found = {}
     for folder in args.dirs or CAPTURES:
@@ -82,31 +117,12 @@ def main():
                         continue
                     o = onset(run, entry['pacenote_last_m'])
                     if o is not None and o >= -WINDOW + 5.0:
-                        found.setdefault(entry['stage'], []).append(o)
+                        found.setdefault(entry['key'], []).append(o)
             except ValueError:
                 continue
     with open(args.out, encoding='utf-8') as f:
         table = json.load(f)
-    for entry in table['stages']:
-        offsets = found.get(entry['stage']) if entry.get('track') else None
-        entry.pop('finish_m', None)
-        for key in ('finish_runs', 'finish_spread_m', 'finish_confidence', 'finish_source'):
-            entry.pop(key, None)
-        if offsets:
-            middle = statistics.median(offsets)
-            kept = [o for o in offsets if abs(o - middle) <= OUTLIER_M]
-            offsets = kept if len(kept) * 3 >= len(offsets) * 2 else offsets
-        if not offsets or len(offsets) < MIN_RUNS or max(offsets) - min(offsets) > SPREAD_M:
-            print('{:28} {} runs, no finish_m {}'.format(entry['stage'], len(offsets or []), sorted(round(o) for o in offsets or [])))
-            continue
-        entry['finish_m'] = round(entry['pacenote_last_m'] + statistics.median(offsets), 1)
-        entry['finish_runs'] = len(offsets)
-        entry['finish_spread_m'] = round(max(offsets) - min(offsets), 1)
-        entry['finish_confidence'] = 'medium'
-        entry['finish_source'] = ("marth's runs: where the final slowdown to the stop control starts "
-                                  "(median of {}), the game's pace notes have no finish marker".format(len(offsets)))
-        print('{:28} finish_m {} ({} runs, spread {})'.format(
-            entry['stage'], entry['finish_m'], len(offsets), entry['finish_spread_m']))
+    apply_finish(table, found, args.reset)
     with open(args.out, 'w', encoding='utf-8') as f:
         json.dump(table, f, indent=1, ensure_ascii=False)
         f.write('\n')
