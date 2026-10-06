@@ -430,3 +430,33 @@ def test_ovst_v3_before_the_game_names_the_car():
     assert sample.car is None and sample.rpm == 6100.0      # the rev lights still work
     stuck = decode_sample(_ovst3(spline=0.0))                 # ACR leaves the spline position at 0
     assert stuck.progress is None and stuck.lap_distance == 2030.0
+
+
+def test_a_game_with_no_max_rpm_lights_to_the_shipped_limiter_and_tells_the_learner_no_inflated_one(monkeypatch):
+    """ACR sends max_rpm 0: the lights use the car's limiter from the game's files, and what the learner hears
+    as the 'seen' ceiling is the highest rpm, never rpm / shift (7500 rpm at 0.85 reads as 8800)."""
+    from oversteer import telemetry as module
+    from oversteer.telemetry import Sample
+    fed = []
+
+    class Learner:
+        def feed(self, now, sample, limiter, *args):
+            fed.append((limiter, args[-1] if args else None))
+
+        def shift_rpm(self, gear):
+            return None
+    car = 'acr/Skoda Fabia RS Rally2'                       # limiter 7500 in the shipped car data
+    current = {}
+    monkeypatch.setattr(module, 'decode_sample', lambda data: current['sample'])
+    leds = FakeLeds()
+    telemetry = Telemetry(leds, shift=0.85, learner=Learner())
+    sample = Sample(6000.0, None, gear=3, speed=30.0, car=car, game='acr')
+    current['sample'] = sample
+    telemetry.handle(0.0, b'x', ('127.0.0.1', 1))
+    assert fed[-1] == (7500.0, 'game')                       # the files' figure, as the game's
+    assert telemetry.learned_max == 0.0                      # the seen-max path was not taken
+    # an unknown car: the highest rpm seen, not rpm / shift
+    sample = Sample(6000.0, None, gear=3, speed=30.0, car='acr/Unknown Car', game='acr')
+    current['sample'] = sample
+    telemetry.handle(0.1, b'x', ('127.0.0.1', 1))
+    assert fed[-1] == (6000.0, 'seen')
