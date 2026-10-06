@@ -198,12 +198,16 @@ def test_the_calls_are_in_the_coachs_words():
 
 def test_the_corner_critique_names_only_what_the_pass_shows_and_costs_enough():
     s = row(1.0, 1, gear=[2, 3], exit_rpm=6000.0, exit_throttle=1.0)
-    terms = potential.critique(s, 3, None)
-    assert len(terms) == 1 and terms[0][0] == pytest.approx(0.17)
+    # the gear term needs the pass measured against the quickest one: the time lost after the slowest point, another gear out
+    lost = {'t_exit': 0.3, 'gear_exit_x': 2, 'gear_exit_r': 3}
+    terms = potential.critique(s, 3, None, measures=lost)
+    assert len(terms) == 1 and terms[0][0] == pytest.approx(0.3)
     assert 'in 2nd at the apex where your fastest pass was in 3rd' in terms[0][1]
-    # the same gear, or a longer one (0.11 s: under the bar): nothing
-    assert potential.critique(row(1.0, 1, gear=[3, 3]), 3, None) == []
-    assert potential.critique(row(1.0, 1, gear=[4, 4]), 3, None) == []
+    assert potential.critique(s, 3, None) == []                       # not measured: the car's average cost is not this pass's
+    assert potential.critique(s, 3, None, measures=dict(lost, t_exit=0.1)) == []
+    # the same gear, or a longer one: nothing
+    assert potential.critique(row(1.0, 1, gear=[3, 3]), 3, None, measures=lost) == []
+    assert potential.critique(row(1.0, 1, gear=[4, 4]), 3, None, measures=lost) == []
     # revs under the band on the exit with the throttle down
     low = row(1.0, 1, gear=[3, 3], exit_rpm=3000.0, exit_throttle=0.95)
     assert 'under the power band on the exit (3000 rpm, it starts at 4000)' in potential.critique(low, 3, (4000, 6500))[0][1]

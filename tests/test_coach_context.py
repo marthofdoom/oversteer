@@ -715,6 +715,30 @@ def compare(**kw):
     return c
 
 
+def test_spans_are_the_bounds_a_section_is_timed_and_its_braking_looked_for_over():
+    """spans(): section_bounds with the exit clipped (exit_end), where the braking is looked for from (never into the
+    section before) and the floor; section_loss times a run over the same bounds."""
+    ref = [stored(150.0, complex_=0), stored(600.0, complex_=1, direction=-1), stored(1000.0, complex_=2)]
+    trace = rows(600, speed=20.0)                                  # 1200 m at 20 m/s, the throttle unknown
+    reference = {'trace': trace, 'corners': ref, 'course': 1200.0}
+    found = cc.spans(reference)
+    grid = cc.sections_of(ref)
+    bounds = cc.section_bounds(grid, 0.0, 1200.0)
+    assert [g['id'] for g, *_ in found] == [0, 1, 2]
+    for j, (g, a, b, lo, floor) in enumerate(found):
+        assert a == bounds[j][0] and b <= bounds[j][1] and b >= g['d1']
+        assert b == min(bounds[j][1], cc.exit_end(trace, cc.along(trace), g))
+        assert 0.0 <= lo <= a and lo >= a - cc.APPROACH
+        assert floor == (lo if j == 0 else grid[j - 1]['apex'] + 5.0) and lo >= floor
+    assert cc.spans({'trace': trace, 'corners': [], 'course': 1200.0}) == []
+    # section_loss times a run over those bounds: a run 1 s slower in the middle section loses it there
+    slow = rows(600, speed=lambda i, t: 20.0 if not 200 <= i < 300 else 10.0)
+    mine = cc.sections_of([stored(150.0, complex_=0), stored(600.0, complex_=1, direction=-1),
+                           stored(1000.0, complex_=2)])
+    assert abs(cc.section_loss(trace, mine, reference)) < 1e-6
+    assert cc.section_loss(slow, mine, reference) is not None
+
+
 def test_a_sections_numbers_name_what_it_lost_or_gained():
     kmh = 1 / 3.6
     pattern = cc.section_pattern
@@ -722,6 +746,9 @@ def test_a_sections_numbers_name_what_it_lost_or_gained():
     assert pattern(compare(brake=3.0, speed=-6 * kmh, exit=-5 * kmh), 0.6) == 'under-committed'
     assert pattern(compare(brake=-20.0, speed=1 * kmh, exit=-6 * kmh), 0.6) == 'overdriven'
     assert pattern(compare(brake=2.0, speed=0.0, exit=-6 * kmh, entry=8 * kmh), 0.6) == 'overdriven'     # entered faster
+    # braked later or entered faster with a LOWER minimum is not overdriven (the minimum says it did not carry the speed)
+    assert pattern(compare(brake=-20.0, speed=-6 * kmh, exit=-6 * kmh), 0.6) == 'slower'
+    assert pattern(compare(brake=-12.0, speed=-6 * kmh, exit=-6 * kmh, entry=8 * kmh), 0.6) == 'slower'
     assert pattern(compare(speed=0.5 * kmh, exit=-4 * kmh, throttle=0.5), 0.4) == 'late-throttle'
     assert pattern(compare(brake=-5.0, speed=-6 * kmh, exit=-1 * kmh, counter=0.3), 0.5) == 'over-rotated'
     assert pattern(compare(brake=None, speed=-9 * kmh, exit=-8 * kmh), 0.5) == 'slower'
@@ -746,7 +773,7 @@ def test_sections_are_named_by_their_corners_and_set_against_the_reference():
     second = report[1]
     assert abs(second['loss'] - 0.8) < 1e-9 and second['entry'] == 0.5 and second['exit'] == 0.3
     c = second['compare']
-    assert c['brake'] == 30.0 and abs(c['speed'] - (-4.0)) < 1e-9              # braked 30 m earlier; 4 m/s slower
+    assert c['brake'] == 25.0 and abs(c['speed'] - (-4.0)) < 1e-9              # onset 825 m against 850 m: 25 m earlier (not 30: its slowest point is 5 m later); 4 m/s slower
     assert second['pattern'] == 'over-slowing'
     assert cc.section_report(mine, [])[1]['ref'] is None                       # no reference: no comparison
     assert cc.section_name({'corners': [stored(1800.0, tightness='hairpin', direction=-1)], 'apex': 1800.0}) == \

@@ -84,6 +84,10 @@ COST_GEAR_LONG = 0.11            # longer
 COST_REVS = 0.19                 # the exit's revs under the band (torque at least 90 % of the peak)
 COST_COUNTER = 0.13              # s per second steered against the yaw
 CRITIQUE_MIN = 0.15              # s: a term costing less is not quoted
+BRAKE_SAME = cc.BRAKE_DELTA      # m: a braking point this much before the grip layer's is early (docs/coach-diagnosis.md)
+SPEED_SAME = 3.0                 # km/h: an apex speed this much under the grip layer's is slow
+THROTTLE_FULL = 0.95             # the exit's median throttle at or over this was full: "sooner" is no fix
+BRAKE_MERGE = 8.0                # m: brake applications closer than this are one braking
 BAND_SHARE = 0.9                 # of the peak torque
 GRIP_QUOTE_MIN = 0.3             # grip used under this at the apex is a kink in a fast section: never quoted
 GRIP_ALL = 0.97
@@ -423,11 +427,34 @@ def _mode(values):
     return max(set(values), key=values.count) if values else None
 
 
+def _braking_vs_layer(brake, v_pot, ap, m, lo, ds):
+    """(braked, early): whether the run braked before its slowest point (grid index `m`, braking looked for back to
+    index `lo`) and how many metres before the grip layer's braking point its braking began (positive: earlier;
+    None where it did not brake or the trace cannot say). The layer's is the last grid point before the apex where
+    v_grip stops rising, going backwards."""
+    on = np.nan_to_num(brake[lo:m + 1]) > cc.BRAKE_ON
+    if not on.any():
+        return (False if np.isfinite(brake[lo:m + 1]).any() else None), None
+    j = int(np.flatnonzero(on)[-1])
+    gap = max(1, int(BRAKE_MERGE / ds))
+    while j > 0 and on[max(0, j - gap):j].any():
+        j -= 1
+    onset = lo + j
+    i = ap
+    while i > lo and abs(v_pot[i - 1] - v_pot[i]) < 1e-9:           # a flat bottom
+        i -= 1
+    while i > lo and v_pot[i - 1] > v_pot[i]:
+        i -= 1
+    return True, float((i - onset) * ds)
+
+
 def analyse_run(pot, arr, bad=(), data=None):
     """One run's sections against the stored potential `pot` (stage()'s dict): a list, one per section, of the
     stored fields plus `time` (s through it, None where the run did not cover it or an off was within OFF_REACH
     of it: `bad` is the off ranges (d0, d1)), `available` (time less the grip layer's), `apex_kmh`, `apex_kmh_pot`,
     `grip_used` (the run's lateral g at its slowest point near the apex over the envelope's at that speed),
+    `braked` and `brake_early` (whether it braked before its slowest point, and by how many metres its braking began
+    before the grip layer's: _braking_vs_layer),
     `loss` (s lost to the grip layer before the apex, at it, and after it), `cause` (the largest) and `gear` (the
     run's gear at the slowest point, and 40 m after it)."""
     prof = pot['profile']
@@ -442,13 +469,14 @@ def analyse_run(pot, arr, bad=(), data=None):
     RPM = resample(arr, 'rpm', grid)
     THR = resample(arr, 'throttle', grid)
     inv = 1 / np.maximum(np.nan_to_num(V), 1.0) - 1 / np.maximum(v_pot, 1.0)
+    BRK = resample(arr, 'brake', grid)
     out = []
     for s in pot['sections']:
         a, b = int(round(s['d0'] / ds)), int(round(s['d1'] / ds))
         b = min(b, len(grid) - 1)
         ap = int(round(s['apex_d'] / ds))
         row = dict(s, time=None, available=None, apex_kmh=None, apex_kmh_pot=None, grip_used=None, loss=None,
-                   cause=None, gear=None, exit_rpm=None, exit_throttle=None)
+                   cause=None, gear=None, exit_rpm=None, exit_throttle=None, brake_early=None, braked=None)
         touched = any(lo - OFF_REACH < s['d1'] and hi + OFF_REACH > s['d0'] for lo, hi in bad)
         if np.isfinite(T[a]) and np.isfinite(T[b]) and T[b] > T[a] and not np.isnan(V[a:b + 1]).any():
             row['time'] = float(T[b] - T[a])
@@ -467,6 +495,7 @@ def analyse_run(pot, arr, bad=(), data=None):
                     'exit': float(np.sum(inv[e1:b]) * ds)}
             row['loss'] = {k2: round(v2, 2) for k2, v2 in loss.items()}
             row['cause'] = max(loss, key=loss.get)
+            row['braked'], row['brake_early'] = _braking_vs_layer(BRK, v_pot, ap, m, max(0, a - int(120.0 / ds)), ds)
             far = min(len(grid) - 1, m + int(round(40.0 / ds)))
             mid = min(len(grid) - 1, m + int(round(20.0 / ds)))
             row['gear'] = [_mode(GEAR[max(a, m - 5):m + 6]), _mode(GEAR[mid:far + 1])]
@@ -510,17 +539,20 @@ def where(s):
     return 'the {} {} at {:.1f} km'.format(s['grade'], s['dir'], km)
 
 
-def critique(s, best_gear, band, data=None):
+def critique(s, best_gear, band, data=None, measures=None):
     """The corner critique's terms that this section's pass shows and that cost at least CRITIQUE_MIN: [(cost s,
     sentence)], the costliest first. `best_gear` is the gear the fastest pass had at the slowest point, `band` the
-    engine's power band (power_band) or None. Only what the data shows: a gear shorter than the fastest pass's,
+    engine's power band (power_band) or None. Only what the data shows: a gear shorter than the fastest pass's
+    that lost time after the slowest point (`measures`: coach_diagnosis.measures of this pass against the quickest
+    one through the place; without them the gear is not quoted: its cost is the car's average, not this pass's),
     the exit's revs under the band, steering against the yaw for over a second (`counter`, set by the caller)."""
     terms = []
     gear = (s.get('gear') or [None, None])[0]
-    if gear is not None and best_gear is not None and gear < best_gear and COST_GEAR_SHORT >= CRITIQUE_MIN:
-        terms.append((COST_GEAR_SHORT, 'You were in {} at the apex where your fastest pass was in {}: a gear shorter '
-                                       'than that costs about {:.1f} s.'.format(_ordinal(gear), _ordinal(best_gear),
-                                                                                COST_GEAR_SHORT)))
+    if gear is not None and best_gear is not None and gear < best_gear and measures is not None:
+        lost = measures.get('t_exit')
+        if lost is not None and lost >= CRITIQUE_MIN and measures.get('gear_exit_x') != measures.get('gear_exit_r'):
+            terms.append((lost, 'You were in {} at the apex where your fastest pass was in {}: you lost {:.1f} s '
+                                'after the slowest point.'.format(_ordinal(gear), _ordinal(best_gear), lost)))
     rpm, thr = s.get('exit_rpm'), s.get('exit_throttle')
     if band and rpm and thr is not None and thr > 0.8 and rpm < band[0] - 100 and COST_REVS >= CRITIQUE_MIN:
         terms.append((COST_REVS, 'The revs were under the power band on the exit ({:.0f} rpm, it starts at {:.0f}): '
@@ -536,29 +568,77 @@ def _ordinal(n):
     return {1: '1st', 2: '2nd', 3: '3rd'}.get(n, '{}th'.format(n))
 
 
-def call(s, term=None):
+def _apex_sentence(s):
+    """What the grip allows at the apex against what the run took, '' where either is not known."""
+    pot, took = s.get('apex_kmh_pot'), s.get('apex_kmh')
+    if not pot or not took:
+        return ''
+    return 'The grip allows about {:.0f} km/h at the apex, you took {:.0f}.'.format(pot, took)
+
+
+def _slow_apex(s):
+    pot, took = s.get('apex_kmh_pot'), s.get('apex_kmh')
+    return bool(pot and took and pot - took >= SPEED_SAME)
+
+
+def _entry_how(s):
+    """What to say about the entry of a place from the run's own braking (no diagnosis against another pass): brake
+    later only where the run began braking BRAKE_SAME m or more before the grip layer needs to; a slow apex with
+    the braking there is braking less; else the apex sentence. Where the trace did not say, the general advice."""
+    early = s.get('brake_early')
+    if (early is None and s.get('braked') is None) or (early is not None and early >= BRAKE_SAME):
+        return 'Brake later and carry the speed to the turn-in.'
+    if _slow_apex(s) and s.get('braked') is not False:
+        return 'Brake less: the grip allows about {:.0f} km/h at the apex, you took {:.0f}.'.format(
+            s['apex_kmh_pot'], s['apex_kmh'])
+    return _apex_sentence(s)
+
+
+def _exit_how(s):
+    """The same for the exit: full throttle sooner unless the exit's throttle was already full."""
+    thr = s.get('exit_throttle')
+    if thr is None or thr < THROTTLE_FULL:
+        return 'Get to full throttle sooner after the apex.'
+    return _apex_sentence(s)
+
+
+def call(s, term=None, diag=None):
     """The fix for one place, in the coach's sentence: where, how much of the grip is used at the apex (not at a
-    kink: GRIP_QUOTE_MIN), how much time is there, then one thing to do. `term` is the critique's costliest
-    sentence, said in place of the general advice where it exists."""
+    kink: GRIP_QUOTE_MIN), how much time is there, then one thing to do. `diag` is the diagnosis of the run against
+    the quickest pass through the place (coach_diagnosis.diagnose_section): its fix is the one thing, else (no
+    fix) the critique's costliest sentence `term` where there is one, else what the grip allows at the apex. Without
+    a diagnosis `term` stands in for the general advice, which is said only where the run's own braking or throttle
+    agrees (_entry_how, _exit_how)."""
     place = where(s)
     place = place[0].upper() + place[1:]
     avail = s['available']
     bend = s['grade'] == 'straight' or s['radius_m'] > CORNER_MAX_RADIUS
     cause = s.get('cause') or 'exit'
+    if diag is not None:
+        how = diag.get('fix') or term or _apex_sentence(s)
+    elif term:
+        how = term
+    elif cause == 'entry':
+        how = _entry_how(s)
+    elif cause == 'exit':
+        how = _exit_how(s)
+    else:
+        how = _apex_sentence(s)
     if bend:
         head = '{}: about {:.1f} s is there, mostly {}'.format(
             place, avail, 'on the exit' if cause == 'exit' else 'into the bend')
-        tail = term or ('full throttle sooner and longer.' if cause == 'exit' else 'brake later.')
-        return head + (': ' if not term else '. ') + tail
+        if how == 'Get to full throttle sooner after the apex.':
+            how = 'full throttle sooner and longer.'
+        elif how == 'Brake later and carry the speed to the turn-in.':
+            how = 'brake later.'
+        if how[:1].islower():
+            return head + ': ' + how
+        return head + ('. ' + how if how else '.')
     used = s.get('grip_used')
     grip = ''
     if used is not None and used >= GRIP_QUOTE_MIN:
         grip = 'you use {} of the grip; '.format('all' if used >= GRIP_ALL else '{:d} %'.format(round(100 * used)))
-    how = term or {'entry': 'Brake later and carry the speed to the turn-in.',
-                   'apex': 'The grip allows about {:.0f} km/h at the apex, you took {:.0f}.'.format(
-                       s.get('apex_kmh_pot') or 0.0, s.get('apex_kmh') or 0.0),
-                   'exit': 'Get to full throttle sooner after the apex.'}[cause]
-    return '{}: {}about {:.1f} s is there. {}'.format(place, grip, avail, how)
+    return '{}: {}about {:.1f} s is there.{}'.format(place, grip, avail, ' ' + how if how else '')
 
 
 def top3(rows, minimum=AVAILABLE_MIN, count=TOP):
