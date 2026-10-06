@@ -75,6 +75,11 @@ def test_stage_rows_stop_at_the_finish():
     # standing after the line is not the stage
     parked = rows(100, speed=lambda i, t: 20.0 if i < 50 else 0.0)
     assert len(cc.stage_rows(parked, course=parked[50][C['distance']])) == 51
+    # A pause: the trace's clock is wall time, the game's result time has none of it. The course cuts the
+    # stage, not the clock (which would chop the end of it)
+    paused = [tuple(v + 30.0 if k == C['t'] and i >= 100 else v for k, v in enumerate(row)) for i, row in enumerate(tr)]
+    cut = cc.stage_rows(paused, course=500.0, finished=True, result_time=25.0)
+    assert len(cut) == 251 and cut[-1][C['distance']] >= 500.0
 
 
 # -- incidents --

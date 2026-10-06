@@ -181,11 +181,14 @@ def distance_at(trace, t):
 
 def stage_rows(trace, course=None, finished=False, result_time=None):
     """The rows that are the stage: up to the first row at or past
-    `course` (where the run crossed the finish, or the last distance), and
-    for a finished run no row past the result time (the trace's clock, from
-    the run's start) plus FINISH_SLACK: a car parked after the line is not
-    the stage."""
+    `course` (where the run crossed the finish, or the last distance). Where
+    the course is not known (or the trace never reaches it), for a finished
+    run no row past the result time (the trace's clock, from the run's start)
+    plus FINISH_SLACK: a car parked after the line is not the stage. The
+    course cuts when it can: the trace's clock is wall time, a pause is in it,
+    and the game's result time (ACR's run clock) has none of the pause."""
     rows = trace
+    by_course = False
     if course is not None and _fin(course):
         top = float('-inf')
         for i, row in enumerate(trace):
@@ -194,8 +197,9 @@ def stage_rows(trace, course=None, finished=False, result_time=None):
                 top = max(top, d)
             if top >= course:
                 rows = trace[:i + 1]
+                by_course = True
                 break
-    if finished and result_time:
+    if finished and result_time and not by_course:
         t = CH['t']
         limit = result_time + FINISH_SLACK
         k = next((i for i, row in enumerate(rows) if row[t] > limit), None)
