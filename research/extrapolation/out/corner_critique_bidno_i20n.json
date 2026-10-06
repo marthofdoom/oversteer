@@ -1,0 +1,129 @@
+{
+ "stage": "Wales Afon Bidno",
+ "car": "Hyundai i20N Rally2",
+ "passes": 183,
+ "sections": 21,
+ "band_low_rpm": 3250.0,
+ "prevalence": {
+  "gear_longer": 0.082,
+  "gear_shorter": 0.208,
+  "exit_below_band": 0.049,
+  "counter_steer_s_median": 0.64
+ },
+ "cost": {
+  "gear_longer_than_best (s)": {
+   "coef": 0.106,
+   "ci90": [
+    -0.019,
+    0.254
+   ]
+  },
+  "gear_shorter_than_best (s)": {
+   "coef": 0.165,
+   "ci90": [
+    0.041,
+    0.293
+   ]
+  },
+  "exit_below_band (s)": {
+   "coef": 0.185,
+   "ci90": [
+    0.069,
+    0.324
+   ]
+  },
+  "counter_steer (s per s)": {
+   "coef": 0.132,
+   "ci90": [
+    -0.152,
+    0.35
+   ]
+  },
+  "body_slip_over_median (s per deg)": {
+   "coef": 0.006,
+   "ci90": [
+    -0.003,
+    0.015
+   ]
+  },
+  "apex_speed_below_best (s per km/h, the control)": {
+   "coef": 0.038,
+   "ci90": [
+    0.029,
+    0.048
+   ]
+  }
+ },
+ "pb_corner_calls": [
+  {
+   "d0": 2824,
+   "d1": 2956,
+   "cost_s": 0.19,
+   "what": "the revs under the band on the exit (2824 rpm)",
+   "excess_s": 0.36
+  },
+  {
+   "d0": 444,
+   "d1": 572,
+   "cost_s": 0.17,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.68
+  },
+  {
+   "d0": 2376,
+   "d1": 2688,
+   "cost_s": 0.17,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 1.66
+  },
+  {
+   "d0": 2688,
+   "d1": 2824,
+   "cost_s": 0.17,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 0.6
+  },
+  {
+   "d0": 3766,
+   "d1": 4116,
+   "cost_s": 0.17,
+   "what": "a gear shorter than your fastest pass",
+   "excess_s": 1.92
+  },
+  {
+   "d0": 1976,
+   "d1": 2114,
+   "cost_s": 0.15,
+   "what": "1.2 s of counter-steer (the rear stepped out)",
+   "excess_s": 1.07
+  },
+  {
+   "d0": 1772,
+   "d1": 1976,
+   "cost_s": 0.14,
+   "what": "1.1 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.87
+  },
+  {
+   "d0": 1440,
+   "d1": 1772,
+   "cost_s": 0.11,
+   "what": "0.8 s of counter-steer (the rear stepped out)",
+   "excess_s": 0.46
+  },
+  {
+   "d0": 2956,
+   "d1": 3124,
+   "cost_s": 0.11,
+   "what": "a gear longer than your fastest pass",
+   "excess_s": 0.61
+  },
+  {
+   "d0": 3124,
+   "d1": 3256,
+   "cost_s": 0.11,
+   "what": "a gear longer than your fastest pass",
+   "excess_s": 0.92
+  }
+ ]
+}

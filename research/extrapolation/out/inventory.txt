@@ -1,0 +1,98 @@
+== acr: 18 captures, 1076389 packets, 295 min; packet interval median 0.0162 s (61.7 /s), p95 0.0167 s, gaps > 0.1 s: 111
+   captures: 20260925-203154.ovcap.gz, 20260925-205207.ovcap.gz, 20260925-212030.ovcap.gz, 20260925-214432.ovcap.gz, 20260925-222302.ovcap.gz, 20260925-223341.ovcap.gz, 20260927-210925.ovcap.gz, 20261002-155356.ovcap.gz, 20261002-160206.ovcap.gz, 20261003-181815.ovcap.gz, 20261003-182343.ovcap.gz, 20261003-193057.ovcap.gz, 20261005-175627.ovcap.gz, 20261005-181716.ovcap.gz, 20261005-182635.ovcap.gz, 20261005-202723.ovcap.gz, 20261005-204823.ovcap.gz, 20261005-213827.ovcap.gz
+   tracks: {'Wales Afon Bidno': 458734, 'Greece Loutraki - Aghii Theodor': 61365, 'Alsace For_t': 79107, 'Greece Elatia': 40278, 'Alsace Steigenbach': 21646, 'Livigno Circuit Main Reverse': 12568, 'Alsace Obersteigen': 141848, 'Alsace Sommet': 136173, 'Greece Aghii Theodori - Loutrak': 124613}
+   cars: {'Skoda Fabia RS Rally2': 196852, 'Peugeot 208 Rally4': 177547, 'Hyundai i20N Rally2': 577320, 'VW Polo GTI R5': 124613}
+   share of consecutive moving packets with identical rpm (duplicates): 0.013
+   channel           pres    nz   k          min          p50          max        res
+   rpm               1.00  1.00   1            0         5014         8189          1
+   max_rpm           1.00  1.00   1         6750         7500         7500        750
+   gear              1.00  1.00   1           -1            3            5          1
+   speed             1.00  1.00   1        2.001        23.91        52.99    4.7e-05
+   throttle          1.00  0.92   1            0       0.6902            1    0.00392
+   brake             1.00  0.50   1            0    0.0002456            1    0.00404
+   clutch            1.00  0.01   1            0            0            1    0.00392
+   handbrake        absent
+   steer             1.00  1.00   1           -1     0.002279            1    2.1e-05
+   yaw_rate          1.00  1.00   1        -7.16     0.007529         7.26      2e-06
+   lap_distance      1.00  1.00   1       0.4194         3134    1.083e+04     0.0109
+   distance         absent
+   progress         absent
+   stage_length      1.00  1.00   1        921.9         9514    1.222e+04        706
+   stage_time        0.25  1.00   1        0.143        85.22        436.2      0.002
+   game_time        absent
+   idle_rpm         absent
+   gears            absent
+   pos               0.25  1.00   3        -5896        727.2         2444      0.005
+   vel               1.00  1.00   3       -24.54       0.3629        52.99      8e-06
+   accel             1.00  1.00   3        -4090       0.2917         1132      7e-06
+   forward          absent
+   up               absent
+   wheel_speed      absent
+   wheel_rot         1.00  1.00   4       -117.1        75.67        178.2    4.2e-05
+   susp              1.00  1.00   4     -0.02379      0.09387       0.2988      1e-06
+   susp_vel         absent
+   susp_norm        absent
+   slip_ratio       absent
+   slip_angle       absent
+   x_wheel_slip      1.00  1.00   4            0      0.09796        22.66      1e-06
+   x_wheel_load      1.00  1.00   4            0         3328      2.5e+04     0.0022
+   x_ride_height    zeros
+   x_tyre_radius    zeros
+   x_susp_max       zeros
+   x_fx              1.00  1.00   4   -1.061e+04          499         9672    0.00183
+   x_fy              1.00  1.00   4   -1.267e+04            0         9876    0.00195
+   x_surface_grip   zeros
+   x_brake_bias      1.00  1.00   1          0.5          0.5          0.6       0.05
+   x_session        zeros
+   x_accg_raw        1.00  1.00   3         -417      0.02975        115.4      1e-06
+   x_ang_raw         1.00  1.00   3       -8.308     0.002067        7.679      1e-06
+
+== wrcg: 3 captures, 80175 packets, 24 min; packet interval median 0.0156 s (64.3 /s), p95 0.0223 s, gaps > 0.1 s: 0
+   captures: 20260925-145356.ovcap.gz, 20261002-153038.ovcap.gz, 20261002-154439.ovcap.gz
+   tracks: {}
+   cars: {'7900 rpm, 6 gears': 80175}
+   share of consecutive moving packets with identical rpm (duplicates): 0.001
+   channel           pres    nz   k          min          p50          max        res
+   rpm               1.00  1.00   1            0         5194         7991     0.0482
+   max_rpm           1.00  1.00   1         7900         7900         7900          0
+   gear              1.00  0.98   1           -1            3            5          1
+   speed             1.00  1.00   1        2.003        21.39         50.4    0.00028
+   throttle          1.00  0.97   1            0       0.8812            1   0.000503
+   brake             1.00  0.35   1            0            0            1      0.002
+   clutch            1.00  0.03   1            0            0            1    0.00203
+   handbrake        absent
+   steer             1.00  0.98   1           -1   -0.0006104            1    3.1e-05
+   yaw_rate         absent
+   lap_distance      1.00  1.00   1           -1         3132    1.321e+04      0.146
+   distance         absent
+   progress          1.00  1.00   1            0        0.515       0.9998    1.3e-05
+   stage_length      1.00  1.00   1         2581    1.321e+04    1.321e+04    1.4e+03
+   stage_time        1.00  1.00   1            0        156.3        636.8    0.00801
+   game_time         1.00  1.00   1        173.3        591.5         1250     0.0126
+   idle_rpm          1.00  1.00   1          800          800          800          0
+   gears             1.00  1.00   1            6            6            6          0
+   pos               1.00  1.00   3        -1473        289.3         1882    0.00547
+   vel               1.00  1.00   3       -49.08      -0.7617         16.2      6e-05
+   accel             1.00  1.00   3       -458.7            0    1.055e+04   0.000129
+   forward           1.00  1.00   3           -1    -0.003049            1      5e-06
+   up                1.00  1.00   3           -1     -0.04956       0.9998      2e-06
+   wheel_speed       1.00  0.99   4       -11.51        20.48        49.09      7e-05
+   wheel_rot        absent
+   susp              1.00  1.00   4      0.00028    0.0004244    0.0005646      1e-06
+   susp_vel          1.00  0.99   4     -0.02678            0      0.02284      1e-06
+   susp_norm        absent
+   slip_ratio       absent
+   slip_angle       absent
+   x_wheel_slip     absent
+   x_wheel_load     absent
+   x_ride_height    absent
+   x_tyre_radius    absent
+   x_susp_max       absent
+   x_fx             absent
+   x_fy             absent
+   x_surface_grip   absent
+   x_brake_bias     absent
+   x_session        absent
+   x_accg_raw       absent
+   x_ang_raw        absent
+

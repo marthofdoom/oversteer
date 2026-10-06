@@ -1,0 +1,1782 @@
+{
+ "incidents": [
+  {
+   "id": "20260925-145356@107",
+   "game": "wrcg",
+   "track": "3980 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790373267.7784288,
+   "place": "1.43 km",
+   "d": 1434,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "clipped",
+   "text": "Hit at 1.43 km with the car straight and at your usual speed: the line touched something (a rock, a bank, the inside). Leave a little more room there.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-145356@143",
+   "game": "wrcg",
+   "track": "3980 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790373267.7784288,
+   "place": "1.91 km",
+   "d": 1906,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 1.91 km: the car ran wide with 100% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-205207@49",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790394744.7043812,
+   "place": "left 1 at 0.93 km",
+   "d": 938,
+   "beta_max": 27.5,
+   "dv_kmh": 18.3,
+   "brake_late_m": 23.5,
+   "cause": "entry_speed",
+   "note": "Dist60, OverCrest",
+   "text": "Off at left 1 at 0.93 km: +18 km/h over your clean runs entering a left 1. You braked 24 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Dist60, OverCrest.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-205207@80",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790394744.7043812,
+   "place": "right 3 at 1.52 km",
+   "d": 1525,
+   "beta_max": 28.8,
+   "dv_kmh": 10.2,
+   "brake_late_m": 58.6,
+   "cause": "entry_speed",
+   "note": "Right2, DontCut",
+   "text": "Off at right 3 at 1.52 km: +10 km/h over your clean runs entering a right 3. You braked 59 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-212030@433",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "hit",
+    "roll"
+   ],
+   "ref_runs": 7,
+   "start": 1790396851.8613532,
+   "place": "left 2 at 0.48 km",
+   "d": 471,
+   "beta_max": 31.4,
+   "dv_kmh": 18.4,
+   "brake_late_m": 25.0,
+   "cause": "entry_speed",
+   "note": "Into, Left2, Long, Tighten1",
+   "text": "Off at left 2 at 0.48 km: +18 km/h over your clean runs entering a left 2. You braked 25 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Into, Left2, Long, Tighten1.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20260925-212030@552",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790396916.2788355,
+   "place": "right 3 at 1.52 km",
+   "d": 1522,
+   "beta_max": 37.9,
+   "dv_kmh": 6.8,
+   "brake_late_m": 75.8,
+   "cause": "entry_speed",
+   "note": "Right2, DontCut",
+   "text": "Off at right 3 at 1.52 km: +7 km/h over your clean runs entering a right 3. You braked 76 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20260925-212030@677",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790397012.5464678,
+   "place": "left 3 at 2.34 km",
+   "d": 2326,
+   "beta_max": 26.5,
+   "dv_kmh": -1.1,
+   "brake_late_m": 3.8,
+   "cause": "counter_late",
+   "note": "Pause0.1s_Reset, Left3, Long, DontCut, TightensLate",
+   "text": "Off at left 3 at 2.34 km: the slide reached 26 degrees and the counter-steer came 0.8 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Pause0.1s_Reset, Left3, Long, DontCut, TightensLate.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-214432@38",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790397890.0819209,
+   "place": "right 3 at 0.77 km",
+   "d": 785,
+   "beta_max": 85.7,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Brake, Right3",
+   "text": "Off at right 3 at 0.77 km: the slide reached 86 degrees and the counter-steer came 2.0 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Brake, Right3.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-214432@138",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790397934.914985,
+   "place": "left 1 at 1.92 km",
+   "d": 1919,
+   "beta_max": 40.1,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Into, Left1, Opens, Long",
+   "text": "Off at left 1 at 1.92 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Into, Left1, Opens, Long.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-214432@179",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "roll"
+   ],
+   "ref_runs": 0,
+   "start": 1790397934.914985,
+   "place": "left 4 at 3.11 km",
+   "d": 3088,
+   "beta_max": 0.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "And, Left4, Tighten3",
+   "text": "Off at left 4 at 3.11 km: the cause is not clear from the data. (The game's note there: And, Left4, Tighten3.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-214432@241",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790397934.914985,
+   "place": "right 2 at 4.34 km",
+   "d": 4358,
+   "beta_max": 45.5,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "power",
+   "note": "Into, Right3, DontCut",
+   "text": "Off at right 2 at 4.34 km: the throttle went to 96% while the car was still turning, and the driven wheels spun (31%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: Into, Right3, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-214432@437",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790397934.914985,
+   "place": "left 2 at 5.08 km",
+   "d": 5100,
+   "beta_max": 23.5,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "power",
+   "note": "And, Right3",
+   "text": "Off at left 2 at 5.08 km: the throttle went to 95% while the car was still turning, and the driven wheels spun (33%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: And, Right3.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-222302@63",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790400198.858992,
+   "place": "left 2 at 1.41 km",
+   "d": 1408,
+   "beta_max": 53.8,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Left2, Opens",
+   "text": "Off at left 2 at 1.41 km: the slide reached 54 degrees and the counter-steer came 1.5 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Left2, Opens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-222302@135",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790400198.858992,
+   "place": "right 2 at 3.22 km",
+   "d": 3222,
+   "beta_max": 23.5,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Right3, Tighten1, Late, Pause0.1s_Reset, Caution, DontCut, KeepOut",
+   "text": "Off at right 2 at 3.22 km: the slide reached 23 degrees and the counter-steer came 0.6 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Right3, Tighten1, Late, Pause0.1s_Reset, Caution, DontCut, KeepOut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20260925-222302@347",
+   "game": "acr",
+   "track": "Greece Loutraki - Aghii Theodor",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "hit",
+    "roll"
+   ],
+   "ref_runs": 0,
+   "start": 1790400198.858992,
+   "place": "left 2 at 8.12 km",
+   "d": 8124,
+   "beta_max": 47.2,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Left3, Tightens",
+   "text": "Off at left 2 at 8.12 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Left3, Tightens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-223341@66",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790400844.102519,
+   "place": "right 4 at 4.64 km",
+   "d": 4668,
+   "beta_max": 6.7,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "note": "Dist100",
+   "text": "Off at right 4 at 4.64 km: the car ran wide with 87% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites. (The game's note there: Dist100.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-223341@159",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790400918.077327,
+   "place": "5.31 km",
+   "d": 5314,
+   "beta_max": 30.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "And, Right4, DontCut",
+   "text": "Off at 5.31 km: the rear let go 0.3 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: And, Right4, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-223341@273",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401000.727271,
+   "place": "right 3 at 6.06 km",
+   "d": 6086,
+   "beta_max": 8.4,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "note": "Into, Right3, Long, OpensLate",
+   "text": "Off at right 3 at 6.06 km: the car ran wide with 93% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites. (The game's note there: Into, Right3, Long, OpensLate.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-223341@357",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll"
+   ],
+   "ref_runs": 0,
+   "start": 1790401000.727271,
+   "place": "right 3 at 8.17 km",
+   "d": 8172,
+   "beta_max": 15.4,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "Dist40",
+   "text": "Off at right 3 at 8.17 km: the cause is not clear from the data. (The game's note there: Dist40.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-223341@370",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401000.727271,
+   "place": "left 1 at 8.35 km",
+   "d": 8473,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "Dist40",
+   "text": "Off at left 1 at 8.35 km: the cause is not clear from the data. (The game's note there: Dist40.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-223341@434",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401242.6354144,
+   "place": "right 4 at 3.95 km",
+   "d": 3979,
+   "beta_max": 32.1,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Dist40, OverCrest",
+   "text": "Off at right 4 at 3.95 km: the rear let go 0.8 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Dist40, OverCrest.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-223341@465",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401242.6354144,
+   "place": "right 4 at 4.64 km",
+   "d": 4669,
+   "beta_max": 85.1,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Dist100",
+   "text": "Off at right 4 at 4.64 km: the rear let go 0.4 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Dist100.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20260925-223341@495",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401303.6763172,
+   "place": "right 4 at 3.95 km",
+   "d": 3971,
+   "beta_max": 84.8,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Sudden, LeftAcuteHP",
+   "text": "Off at right 4 at 3.95 km: the slide reached 85 degrees and the counter-steer came 1.5 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Sudden, LeftAcuteHP.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260925-223341@526",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401303.6763172,
+   "place": "right 4 at 4.64 km",
+   "d": 4667,
+   "beta_max": 8.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "note": "Dist100",
+   "text": "Off at right 4 at 4.64 km: the car ran wide with 100% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites. (The game's note there: Dist100.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20260925-223341@690",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401453.4516795,
+   "place": "5.26 km",
+   "d": 5265,
+   "beta_max": 0.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "note": "And, Right4, DontCut",
+   "text": "Off at 5.26 km: the car ran wide with 52% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites. (The game's note there: And, Right4, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20260925-223341@876",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401534.2252429,
+   "place": "right 3 at 8.17 km",
+   "d": 8174,
+   "beta_max": 16.9,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Dist40",
+   "text": "Off at right 3 at 8.17 km: the rear let go 0.7 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Dist40.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20260925-223341@951",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401727.1932874,
+   "place": "right 4 at 4.64 km",
+   "d": 4695,
+   "beta_max": 68.4,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Dist100",
+   "text": "Off at right 4 at 4.64 km: the slide reached 68 degrees and the counter-steer came 1.4 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Dist100.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20260925-223341@1135",
+   "game": "acr",
+   "track": "Alsace For_t",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790401788.5222337,
+   "place": "left 5 at 8.20 km",
+   "d": 8219,
+   "beta_max": 86.2,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "Right4, Long, Tightens",
+   "text": "Off at left 5 at 8.20 km: the cause is not clear from the data. (The game's note there: Right4, Long, Tightens.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20260927-210925@205",
+   "game": "acr",
+   "track": "Greece Elatia",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790568743.9736137,
+   "place": "left 1 at 0.66 km",
+   "d": 664,
+   "beta_max": 45.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "LeftHP",
+   "text": "Off at left 1 at 0.66 km: the rear let go 0.2 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: LeftHP.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20260927-210925@316",
+   "game": "acr",
+   "track": "Greece Elatia",
+   "car": "Skoda Fabia RS Rally2",
+   "kinds": [
+    "hit"
+   ],
+   "ref_runs": 0,
+   "start": 1790568790.1680481,
+   "place": "right 3 at 2.57 km",
+   "d": 2575,
+   "beta_max": 23.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Right4, Tighten3, VeryLong",
+   "text": "Off at right 3 at 2.57 km: the slide reached 24 degrees and the counter-steer came 2.0 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Right4, Tighten3, VeryLong.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261002-153038@101",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "1.26 km",
+   "d": 1258,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 1.26 km: the car ran wide with 98% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261002-153038@125",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "1.62 km",
+   "d": 1621,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "clipped",
+   "text": "Hit at 1.62 km with the car straight and at your usual speed: the line touched something (a rock, a bank, the inside). Leave a little more room there.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261002-153038@164",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "hit"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "2.40 km",
+   "d": 2399,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 2.40 km: the car ran wide with 87% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261002-153038@251",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "4.41 km",
+   "d": 4411,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 4.41 km: the car ran wide with 59% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20261002-153038@390",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "7.58 km",
+   "d": 7583,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 7.58 km: the car ran wide with 100% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20261002-153038@513",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "10.06 km",
+   "d": 10060,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 10.06 km: the car ran wide with 97% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 4
+  },
+  {
+   "id": "20261002-153038@554",
+   "game": "wrcg",
+   "track": "13208 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790980283.0047884,
+   "place": "10.58 km",
+   "d": 10581,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "understeer",
+   "text": "Off at 10.58 km: the car ran wide with 52% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 5
+  },
+  {
+   "id": "20261002-154439@235",
+   "game": "wrcg",
+   "track": "4132 m",
+   "car": "7900 rpm, 6 gears",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790981144.4194055,
+   "place": "3.94 km",
+   "d": 3939,
+   "beta_max": 0.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "clipped",
+   "text": "Hit at 3.94 km with the car straight and at your usual speed: the line touched something (a rock, a bank, the inside). Leave a little more room there.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261002-155356@279",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790981793.9233484,
+   "place": "right hairpin at 2.78 km",
+   "d": 2779,
+   "beta_max": 62.0,
+   "dv_kmh": 20.3,
+   "brake_late_m": 71.9,
+   "cause": "entry_speed",
+   "note": "Into, RightHP",
+   "text": "Off at right hairpin at 2.78 km: +20 km/h over your clean runs entering a right hairpin. You braked 72 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Into, RightHP.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 4
+  },
+  {
+   "id": "20261002-160206@112",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll"
+   ],
+   "ref_runs": 7,
+   "start": 1790982155.441846,
+   "place": "right 2 at 1.81 km",
+   "d": 1814,
+   "beta_max": 57.3,
+   "dv_kmh": 9.0,
+   "brake_late_m": 8.3,
+   "cause": "entry_speed",
+   "note": "Right2, DontCut",
+   "text": "Off at right 2 at 1.81 km: +9 km/h over your clean runs entering a right 2. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 5
+  },
+  {
+   "id": "20261002-160206@253",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "hit",
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790982155.441846,
+   "place": "5.13 km",
+   "d": 5126,
+   "beta_max": 26.7,
+   "dv_kmh": -13.8,
+   "brake_late_m": -2.8,
+   "cause": "unknown",
+   "note": "Dist100",
+   "text": "Off at 5.13 km: the cause is not clear from the data. (The game's note there: Dist100.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261002-160206@424",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790982453.3660243,
+   "place": "left 3 at 2.34 km",
+   "d": 2318,
+   "beta_max": 39.7,
+   "dv_kmh": 17.3,
+   "brake_late_m": 26.6,
+   "cause": "entry_speed",
+   "note": "Pause0.1s_Reset, Left3, Long, DontCut, TightensLate",
+   "text": "Off at left 3 at 2.34 km: +17 km/h over your clean runs entering a left 3. You braked 27 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Pause0.1s_Reset, Left3, Long, DontCut, TightensLate.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 6
+  },
+  {
+   "id": "20261002-160206@646",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 7,
+   "start": 1790982572.255969,
+   "place": "4.89 km",
+   "d": 4887,
+   "beta_max": 21.5,
+   "dv_kmh": -29.6,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "Dist50",
+   "text": "Off at 4.89 km: the cause is not clear from the data. (The game's note there: Dist50.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261002-160206@1236",
+   "game": "acr",
+   "track": "Alsace Steigenbach",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "hit",
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1790983191.9418766,
+   "place": "right hairpin at 5.48 km",
+   "d": 5453,
+   "beta_max": 26.4,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "Dist70",
+   "text": "Off at right hairpin at 5.48 km: the cause is not clear from the data. (The game's note there: Dist70.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261003-181815@77",
+   "game": "acr",
+   "track": "Livigno Circuit Main Reverse",
+   "car": "Peugeot 208 Rally4",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 1,
+   "start": 1791076745.0084286,
+   "place": "right hairpin at 0.43 km",
+   "d": 415,
+   "beta_max": 28.4,
+   "dv_kmh": -13.3,
+   "brake_late_m": 75.8,
+   "cause": "lift",
+   "text": "Off at right hairpin at 0.43 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear.",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261003-182343@159",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791077127.6868684,
+   "place": "left 4 at 1.34 km",
+   "d": 1397,
+   "beta_max": 14.1,
+   "dv_kmh": 15.5,
+   "brake_late_m": 59.6,
+   "cause": "understeer",
+   "note": "Into, Right2, DontCut",
+   "text": "Off at left 4 at 1.34 km: the car ran wide with 100% lock and little slide (understeer). Enter slower, or keep weight on the front (brake into the turn-in) so the nose bites. (The game's note there: Into, Right2, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261003-182343@506",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791077470.4258094,
+   "place": "right 3 at 1.40 km",
+   "d": 1416,
+   "beta_max": 36.1,
+   "dv_kmh": -4.6,
+   "brake_late_m": 52.0,
+   "cause": "power",
+   "note": "Pause0.1s_Reset, And, Left3, Short",
+   "text": "Off at right 3 at 1.40 km: the throttle went to 100% while the car was still turning, and the driven wheels spun (46%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: Pause0.1s_Reset, And, Left3, Short.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261003-182343@673",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791077614.6893015,
+   "place": "left 3 at 2.07 km",
+   "d": 2060,
+   "beta_max": 77.1,
+   "dv_kmh": 12.6,
+   "brake_late_m": 14.1,
+   "cause": "entry_speed",
+   "note": "Left3, Long, SmallCut",
+   "text": "Off at left 3 at 2.07 km: +13 km/h over your clean runs entering a left 3. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Left3, Long, SmallCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 7
+  },
+  {
+   "id": "20261003-182343@2403",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "hit",
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791079367.0584972,
+   "place": "right 3 at 1.52 km",
+   "d": 1506,
+   "beta_max": 65.5,
+   "dv_kmh": 2.7,
+   "brake_late_m": 7.4,
+   "cause": "power",
+   "note": "Right2, DontCut",
+   "text": "Off at right 3 at 1.52 km: the throttle went to 100% while the car was still turning, and the driven wheels spun (57%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261003-182343@2586",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791079469.6634157,
+   "place": "left 2 at 3.17 km",
+   "d": 3225,
+   "beta_max": 40.1,
+   "dv_kmh": 2.4,
+   "brake_late_m": 55.3,
+   "cause": "power",
+   "note": "And, Left2, Tightens, Caution, ThroughGate",
+   "text": "Off at left 2 at 3.17 km: the throttle went to 62% while the car was still turning, and the driven wheels spun (31%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: And, Left2, Tightens, Caution, ThroughGate.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20261003-182343@2663",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791079663.1720445,
+   "place": "left 4 at 0.59 km",
+   "d": 671,
+   "beta_max": 80.8,
+   "dv_kmh": -6.6,
+   "brake_late_m": -77.3,
+   "cause": "lift",
+   "note": "Into, Right3, Long",
+   "text": "Off at left 4 at 0.59 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Into, Right3, Long.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261003-182343@2740",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791079702.9186962,
+   "place": "right 3 at 1.52 km",
+   "d": 1515,
+   "beta_max": 42.2,
+   "dv_kmh": 4.1,
+   "brake_late_m": 61.8,
+   "cause": "counter_late",
+   "note": "Right2, DontCut",
+   "text": "Off at right 3 at 1.52 km: the slide reached 42 degrees and the counter-steer came 0.6 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261003-182343@3179",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791080140.700034,
+   "place": "right 3 at 1.52 km",
+   "d": 1525,
+   "beta_max": 35.3,
+   "dv_kmh": 10.2,
+   "brake_late_m": 60.2,
+   "cause": "entry_speed",
+   "note": "Right2, DontCut",
+   "text": "Off at right 3 at 1.52 km: +10 km/h over your clean runs entering a right 3. You braked 60 m later than in them. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 2,
+   "same_cause_before": 8
+  },
+  {
+   "id": "20261003-182343@3250",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791080250.1322992,
+   "place": "left 4 at 0.59 km",
+   "d": 658,
+   "beta_max": 61.5,
+   "dv_kmh": -3.8,
+   "brake_late_m": -77.0,
+   "cause": "counter_late",
+   "note": "Into, Right3, Long",
+   "text": "Off at left 4 at 0.59 km: the slide reached 61 degrees and the counter-steer came 1.8 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Right3, Long.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20261003-182343@3593",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll"
+   ],
+   "ref_runs": 5,
+   "start": 1791080535.753434,
+   "place": "left 3 at 2.07 km",
+   "d": 2068,
+   "beta_max": 42.4,
+   "dv_kmh": 6.1,
+   "brake_late_m": 1.8,
+   "cause": "entry_speed",
+   "note": "Left3, Long, SmallCut",
+   "text": "Off at left 3 at 2.07 km: +6 km/h over your clean runs entering a left 3. Brake to your clean-run speed there; the time is made on the exit. (The game's note there: Left3, Long, SmallCut.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 9
+  },
+  {
+   "id": "20261003-193057@75",
+   "game": "acr",
+   "track": "Wales Afon Bidno",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 5,
+   "start": 1791081069.233365,
+   "place": "right 3 at 1.52 km",
+   "d": 1523,
+   "beta_max": 34.8,
+   "dv_kmh": 3.1,
+   "brake_late_m": 58.0,
+   "cause": "counter_late",
+   "note": "Right2, DontCut",
+   "text": "Off at right 3 at 1.52 km: the slide reached 35 degrees and the counter-steer came 0.8 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Right2, DontCut.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20261005-175627@56",
+   "game": "acr",
+   "track": "Alsace Obersteigen",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791248213.1371553,
+   "place": "right 4 at 5.38 km",
+   "d": 5394,
+   "beta_max": 55.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Caution, Brake, RightChicane, Narrows",
+   "text": "Off at right 4 at 5.38 km: the slide reached 56 degrees and the counter-steer came 1.1 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Caution, Brake, RightChicane, Narrows.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261005-175627@183",
+   "game": "acr",
+   "track": "Alsace Obersteigen",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791248305.9450576,
+   "place": "left 1 at 6.59 km",
+   "d": 6580,
+   "beta_max": 3.1,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "clipped",
+   "note": "Pause0.5s, Into, Right3, Tightens",
+   "text": "Hit at left 1 at 6.59 km with the car straight and at your usual speed: the line touched something (a rock, a bank, the inside). Leave a little more room there. (The game's note there: Pause0.5s, Into, Right3, Tightens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261005-175627@307",
+   "game": "acr",
+   "track": "Alsace Obersteigen",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "roll"
+   ],
+   "ref_runs": 0,
+   "start": 1791248305.9450576,
+   "place": "right 2 at 9.09 km",
+   "d": 9091,
+   "beta_max": 27.2,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Right3, Tightens",
+   "text": "Off at right 2 at 9.09 km: the slide reached 27 degrees and the counter-steer came 0.5 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Right3, Tightens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261005-204823@1025",
+   "game": "acr",
+   "track": "Alsace Sommet",
+   "car": "Hyundai i20N Rally2",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 3,
+   "start": 1791259433.5494435,
+   "place": "left 1 at 8.03 km",
+   "d": 8005,
+   "beta_max": 86.0,
+   "dv_kmh": 0.9,
+   "brake_late_m": 34.0,
+   "cause": "unknown",
+   "note": "LeftHP, Opens, UpHill",
+   "text": "Off at left 1 at 8.03 km: the cause is not clear from the data. (The game's note there: LeftHP, Opens, UpHill.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261005-213827@101",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791261557.570867,
+   "place": "right 2 at 1.24 km",
+   "d": 1219,
+   "beta_max": 40.8,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Right3, Tighten2",
+   "text": "Off at right 2 at 1.24 km: the slide reached 41 degrees and the counter-steer came 2.0 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Right3, Tighten2.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261005-213827@170",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791261624.7756596,
+   "place": "right 2 at 1.24 km",
+   "d": 1242,
+   "beta_max": 85.7,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Into, Right3, Tighten2",
+   "text": "Off at right 2 at 1.24 km: the rear let go 0.3 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Into, Right3, Tighten2.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261005-213827@190",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791261624.7756596,
+   "place": "left 2 at 1.44 km",
+   "d": 1448,
+   "beta_max": 38.1,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Left2, Opens",
+   "text": "Off at left 2 at 1.44 km: the slide reached 38 degrees and the counter-steer came 0.8 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Left2, Opens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261005-213827@327",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791261787.2723336,
+   "place": "right 2 at 1.24 km",
+   "d": 1235,
+   "beta_max": 60.2,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Into, Right3, Tighten2",
+   "text": "Off at right 2 at 1.24 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Into, Right3, Tighten2.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261005-213827@365",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791261853.0548816,
+   "place": "left 2 at 0.51 km",
+   "d": 529,
+   "beta_max": 24.6,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "power",
+   "note": "Into, Right3, Tightens",
+   "text": "Off at left 2 at 0.51 km: the throttle went to 86% while the car was still turning, and the driven wheels spun (25%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: Into, Right3, Tightens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  },
+  {
+   "id": "20261005-213827@455",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791261853.0548816,
+   "place": "left 1 at 2.58 km",
+   "d": 2585,
+   "beta_max": 37.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Caution, Left3, Tighten1, Late",
+   "text": "Off at left 1 at 2.58 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Caution, Left3, Tighten1, Late.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20261005-213827@537",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "roll"
+   ],
+   "ref_runs": 0,
+   "start": 1791261853.0548816,
+   "place": "left 2 at 4.59 km",
+   "d": 4584,
+   "beta_max": 45.7,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Left3, Tightens, KeepIn",
+   "text": "Off at left 2 at 4.59 km: the rear let go 0.0 s after the brake (still on with the lock on). Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Left3, Tightens, KeepIn.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20261005-213827@591",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "roll"
+   ],
+   "ref_runs": 0,
+   "start": 1791261853.0548816,
+   "place": "left 3 at 5.72 km",
+   "d": 5728,
+   "beta_max": 72.0,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "power",
+   "note": "And, Left3, Short, KeepIn",
+   "text": "Off at left 3 at 5.72 km: the throttle went to 93% while the car was still turning, and the driven wheels spun (26%). Wait for the car to point down the exit, then squeeze it on. (The game's note there: And, Left3, Short, KeepIn.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 1
+  },
+  {
+   "id": "20261005-213827@951",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262399.6468453,
+   "place": "left 2 at 1.44 km",
+   "d": 1446,
+   "beta_max": 40.4,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Left2, Opens",
+   "text": "Off at left 2 at 1.44 km: the slide reached 40 degrees and the counter-steer came 0.8 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Left2, Opens.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 2
+  },
+  {
+   "id": "20261005-213827@1036",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262475.511127,
+   "place": "left 2 at 1.76 km",
+   "d": 1752,
+   "beta_max": 86.9,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Left3, Tightens",
+   "text": "Off at left 2 at 1.76 km: the slide reached 87 degrees and the counter-steer came 2.0 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Left3, Tightens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 3
+  },
+  {
+   "id": "20261005-213827@1164",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262567.214756,
+   "place": "left 1 at 2.58 km",
+   "d": 2582,
+   "beta_max": 49.5,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Caution, Left3, Tighten1, Late",
+   "text": "Off at left 1 at 2.58 km: the slide reached 49 degrees and the counter-steer came 2.0 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Caution, Left3, Tighten1, Late.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 4
+  },
+  {
+   "id": "20261005-213827@1181",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262567.214756,
+   "place": "right 1 at 2.80 km",
+   "d": 2810,
+   "beta_max": 84.4,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Sudden, Right2, Tightens",
+   "text": "Off at right 1 at 2.80 km: the slide reached 84 degrees and the counter-steer came 1.5 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Sudden, Right2, Tightens.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 5
+  },
+  {
+   "id": "20261005-213827@1259",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262719.151988,
+   "place": "right 2 at 1.24 km",
+   "d": 1234,
+   "beta_max": 55.5,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Right3, Tighten2",
+   "text": "Off at right 2 at 1.24 km: the slide reached 56 degrees and the counter-steer came 0.9 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Right3, Tighten2.)",
+   "same_cause_same_place_before": 1,
+   "same_cause_before": 6
+  },
+  {
+   "id": "20261005-213827@1362",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262813.9973388,
+   "place": "left 2 at 1.44 km",
+   "d": 1448,
+   "beta_max": 40.9,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "counter_late",
+   "note": "Into, Left2, Opens",
+   "text": "Off at left 2 at 1.44 km: the slide reached 41 degrees and the counter-steer came 0.6 s after it started. Catch it earlier: steer into the slide as soon as the rear moves. (The game's note there: Into, Left2, Opens.)",
+   "same_cause_same_place_before": 2,
+   "same_cause_before": 7
+  },
+  {
+   "id": "20261005-213827@1547",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791262904.776787,
+   "place": "left 3 at 3.56 km",
+   "d": 3576,
+   "beta_max": 27.9,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Dist60",
+   "text": "Off at left 3 at 3.56 km: the rear let go 0.0 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Dist60.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 4
+  },
+  {
+   "id": "20261005-213827@1793",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "hit",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791263078.3497326,
+   "place": "left 3 at 5.64 km",
+   "d": 5642,
+   "beta_max": 37.2,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "lift",
+   "note": "Left3",
+   "text": "Off at left 3 at 5.64 km: the rear let go 0.2 s after the brake. Get the braking done before the turn-in, or release it progressively as you turn, so the load stays on the rear. (The game's note there: Left3.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 5
+  },
+  {
+   "id": "20261005-213827@1808",
+   "game": "acr",
+   "track": "Greece Aghii Theodori - Loutrak",
+   "car": "VW Polo GTI R5",
+   "kinds": [
+    "roll",
+    "stop"
+   ],
+   "ref_runs": 0,
+   "start": 1791263078.3497326,
+   "place": "left 1 at 5.86 km",
+   "d": 5850,
+   "beta_max": 42.1,
+   "dv_kmh": null,
+   "brake_late_m": null,
+   "cause": "unknown",
+   "note": "Left2, Tighten1",
+   "text": "Off at left 1 at 5.86 km: the cause is not clear from the data. (The game's note there: Left2, Tighten1.)",
+   "same_cause_same_place_before": 0,
+   "same_cause_before": 0
+  }
+ ],
+ "by_cause": {
+  "clipped": 4,
+  "understeer": 12,
+  "entry_speed": 10,
+  "counter_late": 20,
+  "lift": 15,
+  "unknown": 9,
+  "power": 7
+ },
+ "validation": {
+  "detections": 59,
+  "unlabelled": 18,
+  "not_an_off": 0,
+  "not_an_off_ids": [],
+  "detection_precision": 1.0,
+  "clear_labels": 44,
+  "cause_accuracy_strict": 0.591,
+  "cause_accuracy_with_alt": 0.659,
+  "unclear_labels": 15,
+  "unclear_said_unknown": 3,
+  "per_cause": {
+   "clipped": {
+    "labelled": 4,
+    "recall": 0.75,
+    "precision": 1.0
+   },
+   "entry_speed": {
+    "labelled": 12,
+    "recall": 0.75,
+    "precision": 1.0
+   },
+   "landing": {
+    "labelled": 2,
+    "recall": 0.0,
+    "precision": null
+   },
+   "lift": {
+    "labelled": 9,
+    "recall": 0.56,
+    "precision": 0.56
+   },
+   "power": {
+    "labelled": 4,
+    "recall": 1.0,
+    "precision": 1.0
+   },
+   "understeer": {
+    "labelled": 13,
+    "recall": 0.38,
+    "precision": 0.83
+   }
+  },
+  "confusion_label_to_predicted": {
+   "clipped": {
+    "clipped": 3,
+    "understeer": 1
+   },
+   "entry_speed": {
+    "entry_speed": 9,
+    "counter_late": 3
+   },
+   "lift": {
+    "lift": 5,
+    "counter_late": 3,
+    "unknown": 1
+   },
+   "power": {
+    "power": 4
+   },
+   "understeer": {
+    "counter_late": 3,
+    "understeer": 5,
+    "lift": 4,
+    "unknown": 1
+   },
+   "landing": {
+    "unknown": 2
+   }
+  }
+ },
+ "validation_held_out": {
+  "detections": 18,
+  "unlabelled": 59,
+  "not_an_off": 0,
+  "not_an_off_ids": [],
+  "detection_precision": 1.0,
+  "clear_labels": 15,
+  "cause_accuracy_strict": 0.2,
+  "cause_accuracy_with_alt": 0.333,
+  "unclear_labels": 3,
+  "unclear_said_unknown": 2,
+  "per_cause": {
+   "lift": {
+    "labelled": 11,
+    "recall": 0.27,
+    "precision": 0.6
+   },
+   "power": {
+    "labelled": 3,
+    "recall": 0.0,
+    "precision": 0.0
+   },
+   "understeer": {
+    "labelled": 1,
+    "recall": 0.0,
+    "precision": null
+   }
+  },
+  "confusion_label_to_predicted": {
+   "lift": {
+    "counter_late": 7,
+    "lift": 3,
+    "power": 1
+   },
+   "power": {
+    "lift": 2,
+    "counter_late": 1
+   },
+   "understeer": {
+    "power": 1
+   }
+  }
+ }
+}

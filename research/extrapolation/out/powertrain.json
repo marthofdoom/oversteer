@@ -1,0 +1,245 @@
+{
+ "Hyundai i20N Rally2": {
+  "overall_ratio_measured_vs_shipped": {
+   "1": [
+    12.817,
+    12.443
+   ],
+   "2": [
+    9.241,
+    9.068
+   ],
+   "3": [
+    7.0,
+    6.935
+   ],
+   "4": [
+    5.764,
+    5.583
+   ],
+   "5": [
+    4.71,
+    4.613
+   ]
+  },
+  "gear_set_per_run": {
+   "Hyundaii20Rally2Set0": {
+    "runs": 6,
+    "mean_err_pct": 0.06
+   },
+   "Hyundaii20Rally2Set1": {
+    "runs": 13,
+    "mean_err_pct": 0.17
+   }
+  },
+  "gear_sets_offered": [
+   "Hyundaii20Rally2Set0",
+   "Hyundaii20Rally2Set1"
+  ],
+  "free_rolling_radius_m": 0.3259,
+  "shipped_radius_m": {
+   "tarmac": [
+    0.324,
+    0.324
+   ],
+   "gravel": [
+    0.323,
+    0.323
+   ],
+   "snow": [
+    0.325,
+    0.325
+   ]
+  },
+  "torque_forces_vs_shipped": {
+   "bins": 20,
+   "r": 0.988,
+   "mean_ratio": 0.868,
+   "mean_abs_err_pct": 13.2,
+   "mean_abs_err_pct_3500_7000": 12.2
+  },
+  "torque_accel_only_shape": {
+   "bins": 19,
+   "r": 0.955,
+   "mean_abs_err_pct_after_scaling": 2.6,
+   "implied_mass_kg": 1371.0,
+   "peak_rpm_est": 3625.0,
+   "peak_rpm_shipped": 3875.0
+  },
+  "shipped_mass_kg": 1100.3
+ },
+ "Skoda Fabia RS Rally2": {
+  "overall_ratio_measured_vs_shipped": {
+   "1": [
+    15.244,
+    15.16
+   ],
+   "2": [
+    10.76,
+    10.738
+   ],
+   "3": [
+    7.908,
+    7.899
+   ],
+   "4": [
+    5.976,
+    5.974
+   ],
+   "5": [
+    4.807,
+    4.806
+   ]
+  },
+  "gear_set_per_run": {
+   "SkodaFabiaRSRally2Set0": {
+    "runs": 8,
+    "mean_err_pct": 0.19
+   }
+  },
+  "gear_sets_offered": [
+   "SkodaFabiaRSRally2Set0"
+  ],
+  "free_rolling_radius_m": 0.33,
+  "shipped_radius_m": {
+   "tarmac": [
+    0.325,
+    0.325
+   ],
+   "gravel": [
+    0.325,
+    0.325
+   ],
+   "snow": [
+    0.325,
+    0.325
+   ]
+  },
+  "torque_forces_vs_shipped": {
+   "bins": 20,
+   "r": 0.969,
+   "mean_ratio": 0.826,
+   "mean_abs_err_pct": 17.4,
+   "mean_abs_err_pct_3500_7000": 17.4
+  },
+  "torque_accel_only_shape": {
+   "bins": 17,
+   "r": 0.211,
+   "mean_abs_err_pct_after_scaling": 45.2,
+   "implied_mass_kg": 5793.0,
+   "peak_rpm_est": 3875.0,
+   "peak_rpm_shipped": 3625.0
+  },
+  "shipped_mass_kg": 1097.4
+ },
+ "Peugeot 208 Rally4": {
+  "overall_ratio_measured_vs_shipped": {
+   "1": [
+    12.463,
+    12.447
+   ],
+   "2": [
+    9.009,
+    9.003
+   ],
+   "3": [
+    6.868,
+    6.865
+   ],
+   "4": [
+    5.517,
+    5.516
+   ],
+   "5": [
+    4.443,
+    4.443
+   ]
+  },
+  "gear_set_per_run": {
+   "Peugeot208Rally4Set0": {
+    "runs": 17,
+    "mean_err_pct": 0.11
+   }
+  },
+  "gear_sets_offered": [
+   "Peugeot208Rally4Set0"
+  ],
+  "free_rolling_radius_m": 0.317,
+  "shipped_radius_m": {
+   "tarmac": [
+    0.3155,
+    0.3155
+   ],
+   "gravel": [
+    0.323,
+    0.323
+   ],
+   "snow": [
+    0.32,
+    0.32
+   ]
+  },
+  "torque_forces_vs_shipped": {
+   "bins": 15,
+   "r": 0.967,
+   "mean_ratio": 0.788,
+   "mean_abs_err_pct": 21.2,
+   "mean_abs_err_pct_3500_7000": 21.3
+  },
+  "torque_accel_only_shape": {
+   "bins": 13,
+   "r": -0.834,
+   "mean_abs_err_pct_after_scaling": 1123.2,
+   "implied_mass_kg": 75738.0,
+   "peak_rpm_est": 6375.0,
+   "peak_rpm_shipped": 3125.0
+  },
+  "shipped_mass_kg": 984.6
+ },
+ "wrcg (7900 rpm, 6 gears)": {
+  "rpm_per_kmh": {
+   "1": 139.19,
+   "2": 89.47,
+   "3": 66.07,
+   "4": 50.58,
+   "5": 38.6
+  },
+  "gear_steps": {
+   "1": 1.556,
+   "2": 1.354,
+   "3": 1.306,
+   "4": 1.31
+  },
+  "wheel_speed_over_speed_median": 0.92,
+  "torque_shape_bins": 20,
+  "torque_peak_rpm": 4375.0,
+  "shape_over_peak": {
+   "2875": 0.33,
+   "3125": 0.18,
+   "3375": 0.44,
+   "3625": 0.83,
+   "3875": 0.63,
+   "4125": 0.94,
+   "4375": 1.0,
+   "4625": 1.0,
+   "4875": 0.97,
+   "5125": 0.83,
+   "5375": 0.71,
+   "5625": 0.71,
+   "5875": 0.66,
+   "6125": 0.54,
+   "6375": 0.46,
+   "6625": 0.37,
+   "6875": 0.36,
+   "7125": 0.01,
+   "7375": -0.34,
+   "7625": -0.75
+  },
+  "crossover_upshift_rpm": {
+   "1": 6264,
+   "2": 5717,
+   "3": 5411,
+   "4": 5418
+  }
+ }
+}

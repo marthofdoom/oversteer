@@ -1,0 +1,334 @@
+{
+ "_about": "Hand labels of every incident offs.py found on marth's captures (2026-09-25..10-05), made by the research session from the traces (out/offs_review contact sheets: speed against the clean runs, pedals, steer, body slip, yaw, air, hit, roll, driven slip) and the game's pace note at the place. 'cause' is the primary cause; 'alt' a cause that is also defensible from the same data. 'unclear' = the traces do not show a cause (scored separately); 'not_an_off' = a false detection (the finish, or the aftermath of the incident before). The labeller also wrote the classifier, so these are not blind: treat the score as an upper bound. Entries with held_out were labelled blind (sheets drawn without the prediction) after v2 was frozen, on the 2026-10-05 evening captures (Sommet de Munster, Aghii Theodori - Loutraki): the honest test.",
+ "20260925-145356@107": {
+  "cause": "clipped"
+ },
+ "20260925-145356@116": {
+  "cause": "unclear"
+ },
+ "20260925-145356@143": {
+  "cause": "unclear"
+ },
+ "20260925-205207@49": {
+  "cause": "entry_speed",
+  "note": "+18 km/h, wheels locked under braking"
+ },
+ "20260925-205207@80": {
+  "cause": "entry_speed",
+  "note": "Right2 DontCut at 1.52 km: 6 incidents there in all"
+ },
+ "20260925-212030@433": {
+  "cause": "entry_speed"
+ },
+ "20260925-212030@552": {
+  "cause": "entry_speed"
+ },
+ "20260925-212030@677": {
+  "cause": "entry_speed",
+  "alt": "counter_late",
+  "note": "Left3 tightens late"
+ },
+ "20260925-212030@682": {
+  "cause": "not_an_off",
+  "note": "aftermath of @677"
+ },
+ "20260925-214432@38": {
+  "cause": "entry_speed",
+  "note": "151 km/h with a light brake into a Brake, Right3: no clean run to compare"
+ },
+ "20260925-214432@138": {
+  "cause": "lift",
+  "alt": "counter_late",
+  "note": "braking while turning in; no counter-steer"
+ },
+ "20260925-214432@179": {
+  "cause": "unclear"
+ },
+ "20260925-214432@241": {
+  "cause": "power"
+ },
+ "20260925-214432@437": {
+  "cause": "unclear"
+ },
+ "20260925-222302@63": {
+  "cause": "lift",
+  "alt": "counter_late"
+ },
+ "20260925-222302@135": {
+  "cause": "understeer",
+  "note": "Right3 tighten1 late: full lock, little slide"
+ },
+ "20260925-222302@347": {
+  "cause": "lift",
+  "alt": "counter_late"
+ },
+ "20260925-222302@454": {
+  "cause": "lift",
+  "alt": "counter_late"
+ },
+ "20260925-222302@471": {
+  "cause": "not_an_off",
+  "note": "stop at the marshals (finish)"
+ },
+ "20260925-223341@66": {
+  "cause": "understeer",
+  "note": "BadCamber Right3"
+ },
+ "20260925-223341@159": {
+  "cause": "understeer",
+  "alt": "entry_speed"
+ },
+ "20260925-223341@273": {
+  "cause": "understeer"
+ },
+ "20260925-223341@357": {
+  "cause": "understeer",
+  "alt": "entry_speed",
+  "note": "Caution, Brake, Right2"
+ },
+ "20260925-223341@370": {
+  "cause": "unclear"
+ },
+ "20260925-223341@434": {
+  "cause": "lift"
+ },
+ "20260925-223341@465": {
+  "cause": "understeer",
+  "note": "BadCamber Right3"
+ },
+ "20260925-223341@495": {
+  "cause": "lift",
+  "alt": "counter_late"
+ },
+ "20260925-223341@526": {
+  "cause": "understeer",
+  "note": "BadCamber Right3"
+ },
+ "20260925-223341@690": {
+  "cause": "understeer",
+  "alt": "entry_speed"
+ },
+ "20260925-223341@876": {
+  "cause": "understeer",
+  "alt": "entry_speed",
+  "note": "Caution, Brake, Right2"
+ },
+ "20260925-223341@951": {
+  "cause": "understeer",
+  "note": "BadCamber Right3"
+ },
+ "20260925-223341@1135": {
+  "cause": "unclear"
+ },
+ "20260925-223341@1142": {
+  "cause": "not_an_off",
+  "note": "aftermath of @1135"
+ },
+ "20260925-223341@1277": {
+  "cause": "not_an_off",
+  "note": "stop at the marshals (finish)"
+ },
+ "20260927-210925@205": {
+  "cause": "lift"
+ },
+ "20260927-210925@316": {
+  "cause": "understeer",
+  "note": "Right4 tighten3"
+ },
+ "20260927-210925@471": {
+  "cause": "not_an_off",
+  "note": "stop at the marshals (finish)"
+ },
+ "20261002-153038@101": {
+  "cause": "unclear"
+ },
+ "20261002-153038@106": {
+  "cause": "not_an_off",
+  "note": "aftermath of @101"
+ },
+ "20261002-153038@125": {
+  "cause": "clipped"
+ },
+ "20261002-153038@164": {
+  "cause": "clipped"
+ },
+ "20261002-153038@251": {
+  "cause": "unclear"
+ },
+ "20261002-153038@390": {
+  "cause": "unclear"
+ },
+ "20261002-153038@396": {
+  "cause": "not_an_off",
+  "note": "aftermath of @390"
+ },
+ "20261002-153038@513": {
+  "cause": "unclear"
+ },
+ "20261002-153038@554": {
+  "cause": "unclear"
+ },
+ "20261002-154439@235": {
+  "cause": "unclear"
+ },
+ "20261002-155356@279": {
+  "cause": "entry_speed"
+ },
+ "20261002-155356@294": {
+  "cause": "unclear"
+ },
+ "20261002-160206@112": {
+  "cause": "entry_speed"
+ },
+ "20261002-160206@253": {
+  "cause": "landing"
+ },
+ "20261002-160206@424": {
+  "cause": "entry_speed"
+ },
+ "20261002-160206@646": {
+  "cause": "landing"
+ },
+ "20261002-160206@1236": {
+  "cause": "lift"
+ },
+ "20261003-181815@77": {
+  "cause": "understeer"
+ },
+ "20261003-182343@159": {
+  "cause": "understeer",
+  "alt": "entry_speed"
+ },
+ "20261003-182343@506": {
+  "cause": "power"
+ },
+ "20261003-182343@514": {
+  "cause": "not_an_off",
+  "note": "the car still on its roof after @506"
+ },
+ "20261003-182343@673": {
+  "cause": "entry_speed"
+ },
+ "20261003-182343@2403": {
+  "cause": "power"
+ },
+ "20261003-182343@2586": {
+  "cause": "power"
+ },
+ "20261003-182343@2663": {
+  "cause": "lift",
+  "note": "brake applied mid-corner, the rear let go"
+ },
+ "20261003-182343@2740": {
+  "cause": "unclear"
+ },
+ "20261003-182343@3179": {
+  "cause": "entry_speed"
+ },
+ "20261003-182343@3250": {
+  "cause": "lift",
+  "note": "brake applied mid-corner"
+ },
+ "20261003-182343@3593": {
+  "cause": "unclear"
+ },
+ "20261003-193057@75": {
+  "cause": "unclear"
+ },
+ "20261005-175627@56": {
+  "cause": "entry_speed",
+  "note": "wheels locked into Caution, Brake, RightChicane"
+ },
+ "20261005-175627@183": {
+  "cause": "clipped"
+ },
+ "20261005-175627@191": {
+  "cause": "not_an_off",
+  "note": "aftermath of @183"
+ },
+ "20261005-175627@307": {
+  "cause": "unclear"
+ },
+ "20261005-175627@321": {
+  "cause": "not_an_off",
+  "note": "stop at the marshals (finish)"
+ },
+ "20261005-204823@1025": {
+  "cause": "unclear",
+  "held_out": true
+ },
+ "20261005-213827@101": {
+  "cause": "lift",
+  "alt": "power",
+  "held_out": true
+ },
+ "20261005-213827@170": {
+  "cause": "power",
+  "alt": "lift",
+  "held_out": true
+ },
+ "20261005-213827@190": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@327": {
+  "cause": "lift",
+  "alt": "power",
+  "held_out": true
+ },
+ "20261005-213827@365": {
+  "cause": "understeer",
+  "held_out": true
+ },
+ "20261005-213827@455": {
+  "cause": "power",
+  "held_out": true
+ },
+ "20261005-213827@537": {
+  "cause": "lift",
+  "alt": "entry_speed",
+  "held_out": true
+ },
+ "20261005-213827@591": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@951": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@1036": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@1164": {
+  "cause": "power",
+  "alt": "counter_late",
+  "held_out": true
+ },
+ "20261005-213827@1181": {
+  "cause": "lift",
+  "alt": "entry_speed",
+  "held_out": true
+ },
+ "20261005-213827@1259": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@1362": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@1547": {
+  "cause": "unclear",
+  "held_out": true
+ },
+ "20261005-213827@1793": {
+  "cause": "lift",
+  "held_out": true
+ },
+ "20261005-213827@1808": {
+  "cause": "unclear",
+  "held_out": true
+ }
+}
