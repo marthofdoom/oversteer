@@ -1583,6 +1583,19 @@ class Store(Reader):
         """Record the finish line a run was timed at (None: it was not re-timed)."""
         self._do('INSERT OR REPLACE INTO run_finish (run, finish_m) VALUES (?, ?)', (run, finish_m))
 
+    def clock_runs_without_stop(self, game='acr'):
+        """[(run, stage, start_m, course)] of the finished runs of a game on the game's own clock (run_clock) that
+        began at a recorded place (run_start) and have no recorded clock stop (run_stop): recorded by a build between
+        the two."""
+        return self._do("SELECT r.id, r.stage, s.start_m, r.course FROM runs r JOIN run_clock k ON k.run = r.id "
+                        "AND k.clock = 'game' JOIN run_start s ON s.run = r.id WHERE r.finished = 1 "
+                        "AND r.stage LIKE ? AND r.course IS NOT NULL AND r.id NOT IN (SELECT run FROM run_stop) "
+                        "ORDER BY r.id", (game + ':%',)).fetchall()
+
+    def queue_stage_runs(self, stage):
+        """Queue the finished runs of a stage for the backfill (run_class cleared)."""
+        self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))
+
     def set_run_clock(self, run, clock):
         """Record that a run's result_time is on `clock` ('game': the game's own; see RUN_CLOCK_DDL)."""
         self._do('INSERT OR REPLACE INTO run_clock (run, clock) VALUES (?, ?)', (run, clock))

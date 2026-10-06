@@ -523,3 +523,30 @@ def test_a_run_that_ends_at_speed_was_timed_at_the_flying_finish_already(tmp_pat
     assert store.run(run)['result_time'] == 196.0 and store.run(run)['run_class'] == 'clean'
     assert store.finished_untimed('acr') == []
     learner.close()
+
+
+# -- DBs recorded between the game-clock commit and the run_stop commit: a clock run with no recorded stop --
+
+def test_game_clock_runs_with_no_recorded_stop_teach_the_finish_and_are_re_classed(tmp_path):
+    from oversteer.drive_log import repair_shipped
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    entry = stage_tables.entry(PETIT_BALLON)
+    start = stage_tables.start_line(entry)
+    stage_tables.set_learnt({})
+    runs = []
+    for stop in (5739.0, 5741.0, 5740.0):
+        run = _timed_run(store, PETIT_BALLON, result=200.0, course=stop - start, end_speed=40.0)
+        store.set_run_clock(run, 'game')
+        store.set_run_start(run, start)
+        runs.append(run)
+    far = _timed_run(store, PETIT_BALLON, result=200.0, course=entry['pacenote_last_m'] + 500.0 - start, end_speed=40.0)
+    store.set_run_clock(far, 'game')
+    store.set_run_start(far, start)
+    repair_shipped(store)
+    stops = dict(store.db.execute('SELECT run, stop_m FROM run_stop').fetchall())
+    assert set(stops) == set(runs) and abs(stops[runs[2]] - 5740.0) < 1e-6      # the gate leaves the far one out
+    assert abs(stage_tables.entry(PETIT_BALLON)['finish_m'] - 5740.0) < 1e-6
+    assert all(store.run(r)['run_class'] is None for r in runs + [far])          # queued for the backfill
+    learner.close()
+    stage_tables.set_learnt({})

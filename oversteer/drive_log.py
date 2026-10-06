@@ -1103,6 +1103,7 @@ def repair_shipped(store):
         if shipped in DRIVEN and (column != shipped or model != shipped):
             store.set_car_drivetrain(car, shipped)         # the game's files beat a learnt vote
             changed += 1
+    changed += learn_missing_stops(store)
     changed += retime_finishes(store)
     if changed:
         store.commit()
@@ -1150,6 +1151,32 @@ def _run_start_m(store, run, entry):
     start line, else None."""
     start = store.run_start(run)
     return start if start is not None else stage_tables.start_line(entry)
+
+
+def learn_missing_stops(store):
+    """A run on the game's clock recorded by a build that kept run_clock but not run_stop has no clock stop: the
+    stop is where it began plus its course, taken when that is within the clock's range of the table's line
+    (FINISH_CLOCK_BEFORE, FINISH_CLOCK_PAST). The stages' finish lines are learnt again (Store.learn_finishes) and the
+    finished runs of a stage whose line was newly learnt or moved are queued for the backfill (run_class cleared), so
+    their classes and potentials are worked out with the finish. Returns the number of stops added."""
+    added, stages = 0, set()
+    for run, stage, start, course in store.clock_runs_without_stop('acr'):
+        entry = stage_tables.entry(stage) or {}
+        line = entry.get('finish_m') or entry.get('pacenote_last_m')
+        stop = start + course
+        if line and line - FINISH_CLOCK_BEFORE <= stop <= line + FINISH_CLOCK_PAST:
+            store.set_run_stop(run, stop)
+            stages.add(stage)
+            added += 1
+    if not added:
+        return 0
+    before = {s: (stage_tables.entry(s) or {}).get('finish_m') for s in stages}
+    store.learn_finishes()
+    for stage in stages:
+        after = (stage_tables.entry(stage) or {}).get('finish_m')
+        if after is not None and (before[stage] is None or abs(after - before[stage]) >= FINISH_MOVED):
+            store.queue_stage_runs(stage)
+    return added
 
 
 def retime_finishes(store):
