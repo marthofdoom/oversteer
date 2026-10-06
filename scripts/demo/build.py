@@ -23,7 +23,7 @@ REPO = os.environ.get('OVERSTEER_REPO', os.path.dirname(os.path.dirname(HERE)))
 WORK = os.path.expanduser(os.environ.get('OVERSTEER_DEMO_WORK', '~/.cache/oversteer-demo'))
 sys.path.insert(0, REPO)
 
-from oversteer import coach, coach_context as cc, telemetry_store as ts  # noqa: E402
+from oversteer import coach, coach_context as cc, stage_tables, telemetry_store as ts  # noqa: E402
 
 SOURCES = [  # (copy, live database, profile the coach reads)
     ('flat.db', os.path.expanduser('~/.var/app/io.github.berarma.Oversteer/data/oversteer/telemetry.db'), 'AC Rally'),
@@ -182,6 +182,45 @@ def section_time(rows, a, b):
     return None if x is None or y is None else y - x
 
 
+def sector_data(g, runs, rsets, L):
+    """The game's own sectors of the stage as the splits of the page, or None where it has none good enough
+    (coach.SECTOR_SPLITS) or a sector no run timed: ([{'name', 'start', 'end', 'conf'}], {run id: [seconds or None]},
+    [best seconds]). The times are coach._sectors's: on the game's clock where the run has it, from where each
+    distance crosses the line; the best is over the clean and learning runs of the stage."""
+    entry = stage_tables.entry(g.stage)
+    placed = stage_tables.sector_bounds(entry)
+    if placed is None or placed['confidence'] not in coach.SECTOR_SPLITS:
+        return None
+    bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
+
+    def times(r, trace):
+        origin = g.reader.run_start(r['id'])
+        if origin is None:
+            origin = stage_tables.run_origin(entry)
+        shift = 0.0 if origin is None else origin - placed['start_m']
+        got = cc.sector_times(trace, bounds, shift, g.reader.run_clock(r['id']) == 'game', r['result_time'])
+        return [got.get(i) for i in range(len(bounds))]
+
+    per, best = {}, [None] * len(bounds)
+    # (a stage driven only with offs, as the demo's are, has its best over those: they are the demo's runs)
+    pool = {r['id'] for r in g.done if r['run_class'] in ('clean', 'learning')} or {r['id'] for r in g.done}
+    for r in g.done:
+        rs = rsets.get(r['id']) or rows_of(g.reader, r)
+        if rs is None:
+            continue
+        per[r['id']] = times(r, rs['trace'])
+        if r['id'] in pool:
+            for i, t in enumerate(per[r['id']]):
+                if t is not None and (best[i] is None or t < best[i]):
+                    best[i] = t
+    if any(b is None for b in best):
+        return None
+    sectors = [{'name': 'S{}'.format(i + 1), 'start': round(min(a, L), 1), 'end': round(min(b, L), 1),
+                'conf': placed['confidence']} for i, (a, b) in enumerate(bounds)]
+    return sectors, {i: [None if t is None else round(t, 2) for t in v] for i, v in per.items()}, \
+        [round(t, 2) for t in best]
+
+
 def build_stage(g):
     reader = g.reader
     good = [r for r in g.done if r['run_class'] in ('clean', 'learning')]
@@ -230,6 +269,12 @@ def build_stage(g):
         d.update(sample(rs['trace'], nmin))
         runs[str(r['id'])], rsets[r['id']] = d, rs
 
+    found = sector_data(g, runs, rsets, L)
+    if found:
+        for rid, v in found[1].items():
+            if str(rid) in runs:
+                runs[str(rid)]['sc'] = v
+
     def corner_cmp(r, ref_r):
         """Per grid section [dmin km/h, dexit km/h, dbrake m (+ earlier)] of r against ref_r; None where not compared."""
         a, b = rsets[r['id']], rsets[ref_r['id']]
@@ -269,6 +314,7 @@ def build_stage(g):
         print('tips failed for', cname, e, file=sys.stderr)
     return {'name': (reader.stage(g.stage) or {}).get('name') or g.stage, 'length': L, 'car': cname,
             'feat': str(feat['id']), 'cmps': cmps, 'sections': sections, 'best': best, 'ab': ab,
+            'sectors': found[0] if found else None, 'sbest': found[2] if found else None,
             'multi': len(ranked) > 1, 'runs': runs, 'xy': xy, 'pos': bool(real), 'elev': elev, 'tips': tips}
 
 
@@ -322,7 +368,7 @@ def main():
     print('site/ {} bytes'.format(size))
     for s in stages:
         print(' ', s['name'], s['car'], s['length'], 'm', 'runs', {k: (v['n'], v['time'], v['cls']) for k, v in s['runs'].items()},
-              'feat', s['feat'], 'tips', len(s['tips']), 'sections', len(s['sections']))
+              'feat', s['feat'], 'tips', len(s['tips']), 'sections', len(s['sections']), 'sectors', len(s['sectors'] or ()))
 
 
 if __name__ == '__main__':

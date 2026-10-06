@@ -884,12 +884,33 @@ def test_the_games_sectors_beside_the_splits(tmp_path):
         assert not sectors[2]['gold'] and sectors[2]['delta'] > 0
         assert abs(sum(s['last'] for s in sectors) - found['last']) < 0.5  # the sectors are the stage
         assert {'name', 'last', 'best', 'gold', 'delta', 'finish'} <= set(found['splits'][0])
+        # the sectors are the splits (medium: placed from a measured start and finish), the corner sections beside them
+        assert found['unit'] == 'sectors' and [r['name'] for r in found['splits']] == ['S1', 'S2', 'S3']
+        assert found['sections'] and found['sections'][0]['name'] != 'S1'
+        assert found['possible'] == sum(r['best'] for r in found['splits']) and found['possible'] <= found['best']
+        assert found['gain'] == found['best'] - found['possible']
+        rows = found['splits']
+        assert [r['finish'] for r in rows] == [False, False, True] and rows[1]['margin'] > 0 and rows[2]['margin'] is None
+        assert all(r['pb'] is not None and r['cum'] is not None for r in rows)    # the LiveSplit colours' data, vs the PB run
+        assert all(a['d1'] == b['d0'] for a, b in zip(rows, rows[1:])) and rows[0]['d0'] == 0.0
+        # the cumulative lead at a line is the sum of the sector differences against the PB's up to it
+        for i, r in enumerate(rows):
+            assert r['cum'] == pytest.approx(sum(x['last'] - x['pb'] for x in rows[:i + 1]), abs=0.3)
     finally:
         stage_tables.set_tables(None)
     h = Stage(tmp_path / 'u.db')                                           # a stage without sectors
     a = drive_traced(h, v2=14.0, v3=10.0)
     drive_traced(h, v2=10.0, v3=13.0, reference=a)
-    assert coach.splits(h.store, h.profile, h.car)['sectors'] is None
+    plain = coach.splits(h.store, h.profile, h.car)                       # no sector lines: the sections are the splits
+    assert plain['sectors'] is None and plain['unit'] == 'sections' and plain['splits'] is plain['sections']
+    stage_tables.set_tables({'acr': {STAGE_KEY: {'sectors_km': [0.8, 0.8, 0.7], 'pacenote_first_m': 135.0,
+                                                 'length_m': 2300}}})      # estimated lines ('low'): not good enough
+    try:
+        low = coach.splits(h.store, h.profile, h.car)
+        assert low['sectors'] and {s['confidence'] for s in low['sectors']} == {'low'}
+        assert low['unit'] == 'sections' and low['splits'] is low['sections'] and low['possible'] == plain['possible']
+    finally:
+        stage_tables.set_tables(None)
 
 
 def test_a_run_that_began_mid_stage_has_its_sectors_placed_from_where_it_began(tmp_path):

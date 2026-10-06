@@ -904,9 +904,10 @@ def stitched(store, run):
 
 def sum_of_best(store, run):
     """The splits' sum of best for `run`'s stage and car as coach.splits() has it with `run` the latest, or None
-    where there is no reference run or grid."""
+    where there is no reference run or grid: the sum of the best sectors where the stage's splits are the game's
+    sectors (coach.stitch), else of the corner sections."""
     found = stitched(store, run)
-    return None if found is None else found['possible']
+    return None if found is None else found['splits_possible']
 
 
 def stage_sob(store, stage_key, car_id):

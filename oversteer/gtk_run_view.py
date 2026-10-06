@@ -142,7 +142,7 @@ class RunView(Gtk.Box):
         self._store = Gtk.ListStore(int, str, str, float, str, str, str, str, float, str)
         self._table = Gtk.TreeView(model=self._store)
         self._table.set_headers_clickable(True)
-        for n, (title, col) in enumerate(((_("Split"), 1), (_("Loss"), 2), (_("Avail"), 9), (_("Min"), 4), (_("Exit"), 5), (_("Brake"), 6))):
+        for n, (title, col) in enumerate(((_("Section"), 1), (_("Loss"), 2), (_("Avail"), 9), (_("Min"), 4), (_("Exit"), 5), (_("Brake"), 6))):
             renderer = Gtk.CellRendererText()
             if n == 0:
                 renderer.set_property('ellipsize', 3)
@@ -486,7 +486,7 @@ class RunView(Gtk.Box):
             self._zoom, self._view = k, (max(0.0, s['d0'] - 60), min(data['length'], s['d1'] + 60))
             if not s['d0'] <= self._cursor <= s['d1']:
                 self._cursor = max(self._view[0], min(self._view[1], s['apex']))
-            self._zoom_name.set_text(_("Split {} · {} · {:.2f} km").format(
+            self._zoom_name.set_text(_("Section {} · {} · {:.2f} km").format(
                 k + 1, s['name'].replace('the ', '', 1), s['apex'] / 1000.0))
         if redraw:
             self._redraw()

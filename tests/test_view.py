@@ -255,6 +255,54 @@ def test_the_splits_row_tones_rows_and_sectors():
     assert view.signed(-1.04) == '−1.0' and view.signed(None) == '–'
 
 
+def _sector_found(unit='sectors'):
+    # PB 3:00.0 over three sectors; the last run is level with it (cum 0) in S1, ahead in S2, behind in S3
+    return {'name': 'Afon Bidno - Severn', 'best': 180.0, 'possible': 178.9, 'gain': 1.1, 'last': 180.4, 'runs': 3,
+            'new_pb': False, 'unit': unit, 'sectors': [
+                {'name': 'S1', 'last': 60.0, 'best': 59.8, 'gold': False, 'delta': 0.2, 'finish': False, 'pb': 60.0,
+                 'cum': 0.0, 'margin': None, 'd0': 0.0, 'd1': 1700.0, 'confidence': 'game'}],
+            'splits': [
+                {'name': 'S1', 'last': 60.0, 'best': 59.8, 'gold': False, 'delta': 0.2, 'finish': False, 'pb': 60.0,
+                 'cum': 0.0, 'margin': None, 'd0': 0.0, 'd1': 1700.0, 'confidence': 'game'},
+                {'name': 'S2', 'last': 59.0, 'best': 59.0, 'gold': True, 'delta': 0.0, 'finish': False, 'pb': 60.0,
+                 'cum': -1.0, 'margin': 0.5, 'd0': 1700.0, 'd1': 3300.0, 'confidence': 'game'},
+                {'name': 'S3', 'last': 61.4, 'best': 60.1, 'gold': False, 'delta': 1.3, 'finish': True, 'pb': 60.0,
+                 'cum': 0.4, 'margin': None, 'd0': 3300.0, 'd1': 5000.0, 'confidence': 'game'}]}
+
+
+def test_the_splits_row_is_the_sectors_where_the_stage_has_them():
+    row = view.splits_row(_sector_found())
+    assert row['unit'] == 'sectors' and row['sectors'] == [] and not row['estimated']    # not shown twice
+    assert [r[0] for r in row['rows'][:3]] == ['S1', 'S2', 'S3']                         # no "1." numbering, no "(finish)"
+    assert row['bounds'] == [(0.0, 1700.0), (1700.0, 3300.0), (3300.0, 5000.0)]          # a cell as long as its sector
+    # LiveSplit against the PB's sector times: level at the line (cum 0) and lost 0 in it is ahead-gain; a gold
+    # sector; behind at the line (cum +0.4) having lost 1.4 s in it is behind-lose
+    assert row['tones'] == ['ahead-gain', 'gold', 'behind-lose']
+    assert row['rows'][0][2] == '±0.0' and row['rows'][1][2] == '★ −0.5' and row['rows'][2][2] == '+1.4'   # Δ PB
+    assert row['rows'][2][5] == '1.3'                                                    # Save: what is left against the best
+    assert row['rows'][-1][3] == '2:58.9' and row['rows'][-1][2] == '−1.1'               # sum of best, from the sectors
+    # beside corner sections the same data labels them as sections and the sectors stay below, as before
+    sections = view.splits_row(dict(_sector_found('sections'), splits=[
+        dict(r, name='the {} right at {}.0 km'.format(n, n)) for n, r in enumerate(_sector_found()['splits'], 1)]))
+    assert sections['unit'] == 'sections' and sections['rows'][0][0] == '1. 1 right at 1.0 km'
+    assert sections['rows'][2][0].endswith('(finish)') and [s[0] for s in sections['sectors']] == ['S1']
+
+
+def test_the_live_delta_block_says_the_sector_where_the_splits_are_sectors():
+    body = {'state': 'live', 'ref_status': 'ready', 'delta': 0.8, 'predicted': 181.0, 'distance': 2000.0,
+            'ref': {'time': 180.0, 'splits': [{'name': 'a', 'd0': 0.0, 'd1': 2500.0}],
+                    'sectors': [{'name': 'S1', 'd0': 0.0, 'd1': 1700.0}, {'name': 'S2', 'd0': 1700.0, 'd1': 3300.0}]},
+            'split': {'index': 0, 'n': 1, 'name': 'a', 'delta': 0.1, 'prev': None},
+            'sector': {'index': 1, 'n': 2, 'name': 'S2', 'delta': 0.42, 'prev': {'index': 0, 'name': 'S1', 'delta': 0.38}}}
+    assert view.live_unit(body, 'sections') is body
+    sectors = view.live_unit(body, 'sectors')
+    assert sectors['split']['name'] == 'S2' and [s['name'] for s in sectors['ref']['splits']] == ['S1', 'S2']
+    bounds = [(0.0, 1700.0), (1700.0, 3300.0)]
+    assert view.live_delta_view(sectors, bounds, 'sectors')['split'] == 'S2 +0.42'
+    assert view.live_delta_view(body, [(0.0, 2500.0)])['split'] == '1 +0.10'
+    assert view.live_ribbon(sectors, view.LiveTrack(), bounds)[1] == 1                    # the car is in S2
+
+
 def test_split_tone_is_livesplits_rule_against_the_pb():
     tone = view.split_tone
     assert tone(None, None, False) == 'none' and tone(5.0, 0.0, True, -1.0, 5.5) == 'gold'
@@ -280,3 +328,11 @@ def test_gather_survives_a_failing_splits(monkeypatch):
     from oversteer import coach, telemetry_view as tv
     monkeypatch.setattr(coach, 'splits', lambda *a: 1 / 0)
     assert tv._splits(None, 'p', 1) is None
+
+
+def test_the_web_page_labels_its_splits_by_what_they_are():
+    root = Path(__file__).resolve().parents[1]
+    page = (root / 'data/telemetry/web/index.html').read_text()
+    assert 'bySector(sp) ? "Sector" : "Section"' in page and 'return bySector(sp) ? r.name' in page
+    assert 'liveUnit(b).split' in page and '"S" + at' in page                       # the live split is the sector: "S2 ±0.42"
+    assert 'if (!bySector(sp) && sp.sectors' in page                               # sectors that are the splits are not drawn twice
