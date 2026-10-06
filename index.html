@@ -250,7 +250,7 @@ body.ap .demo { display: none; }
     </div>
     <div class="ribbon" id="ribbon" aria-hidden="true"></div>
   </button>
-  <div class="sheet" id="sheet"><table id="splits-table"></table><p class="foot">Gold: the best you have done in that split. Colours as LiveSplit: green ahead of the comparison run, red behind; dark gaining time in the split, light losing it. SoB: every split's best put together.</p></div>
+  <div class="sheet" id="sheet"><table id="splits-table"></table><p class="foot" id="sheet-foot">Gold: the best you have done in that split. Colours as LiveSplit: green ahead of the comparison run, red behind; dark gaining time in the split, light losing it. SoB: every split's best put together.</p></div>
 </div>
 
 <main>
@@ -389,10 +389,10 @@ body.ap .demo { display: none; }
 // grid and the coach's tips). Samples are every 5 m of stage distance; expanded to 1 m here.
 // ======================================================================
 const STEP = 5, STAGES = DATA.stages;
-let ST, CAR, LAST, cmp, alone, S, L, N, SOB, bestSec, XS, YS, ELEV, cmpIdx = 0, stageIdx = -1, RUNS = {};
+let ST, CAR, LAST, cmp, alone, S, P, U, L, N, SOB, bestSec, XS, YS, ELEV, cmpIdx = 0, stageIdx = -1, RUNS = {};
 
 function expand(r) {
-  const o = {n: r.n, time: r.time, cls: r.cls, sec: r.sec, ok: r.ok};
+  const o = {n: r.n, time: r.time, cls: r.cls, sec: r.sec, ok: r.ok, sc: r.sc};
   const mk = (arr, scale, nearest) => {
     const a = new Float32Array(L + 1);
     for (let i = 0; i <= L; i++) {
@@ -413,12 +413,16 @@ function loadStage(i) {
   RUNS = {}; for (const id in ST.runs) RUNS[id] = expand(ST.runs[id]);
   LAST = RUNS[ST.feat];
   S = ST.sections.map((s, k) => Object.assign({n: k + 1}, s));
-  bestSec = ST.best;
+  // The splits (the row, its ribbon and sheet, the live split) are the game's own sectors where the stage has them,
+  // else the corner sections (S, which the Run view keeps either way)
+  U = ST.sectors && ST.sbest ? "sectors" : "sections";
+  P = U === "sectors" ? ST.sectors.map((s, k) => ({n: k + 1, name: s.name, start: s.start, end: s.end})) : S;
+  bestSec = U === "sectors" ? ST.sbest : ST.best;
   alone = ST.cmps.length === 0;
   cmpIdx = 0; cmp = alone ? LAST : RUNS[ST.cmps[0].id];
   const multi = ST.multi;
   SOB = null;
-  if (multi) { let t = LAST.time; S.forEach((_, k) => { if (bestSec[k] != null && LAST.sec[k] != null) t -= LAST.sec[k] - bestSec[k]; }); SOB = Math.min(t, LAST.time); }
+  if (multi) { let t = LAST.time; P.forEach((_, k) => { if (bestSec[k] != null && pTime(LAST, k) != null) t -= pTime(LAST, k) - bestSec[k]; }); SOB = Math.min(t, LAST.time); }
   ELEV = ST.elev || null;
   if (ST.xy) { XS = ST.xy[0]; YS = ST.xy[1]; } else { XS = Array.from({length: N + 1}, (_, k) => k * STEP); YS = new Array(N + 1).fill(0); }
 }
@@ -436,11 +440,14 @@ const $ = (id) => document.getElementById(id);
 
 // LiveSplit's colour rule: gold for a best section, else green when ahead of the comparison, red behind;
 // the darker shade when this section gained time, the lighter when it lost
-function isGold(k, run) { return ST.multi && run === LAST && run.ok[k] && bestSec[k] != null && run.sec[k] != null && run.sec[k] <= bestSec[k] + 1e-6; }
+const pTime = (run, k) => U === "sectors" ? run.sc[k] : run.sec[k];                  // a run's time through split k
+const pWord = () => U === "sectors" ? "sector" : "section";
+function pAt(d) { let k = 0; while (k < P.length - 1 && d >= P[k].end) k++; return k; }
+function isGold(k, run) { return ST.multi && run === LAST && (U === "sectors" || run.ok[k]) && bestSec[k] != null && pTime(run, k) != null && pTime(run, k) <= bestSec[k] + 1e-6; }
 function splitColour(k, run, ref) {
   if (isGold(k, run)) return css("--ls-gold");
-  if (alone || run.sec[k] == null || ref.sec[k] == null) return css("--ls-none");
-  const e = Math.min(L, Math.round(S[k].end)), cum = run.t[e] - ref.t[e], seg = run.sec[k] - ref.sec[k];
+  if (alone || pTime(run, k) == null || pTime(ref, k) == null) return css("--ls-none");
+  const e = Math.min(L, Math.round(P[k].end)), cum = run.t[e] - ref.t[e], seg = pTime(run, k) - pTime(ref, k);
   return cum <= 0 ? css(seg <= 0 ? "--ls-ahead-gain" : "--ls-ahead-lose") : css(seg <= 0 ? "--ls-behind-gain" : "--ls-behind-lose");
 }
 
@@ -466,7 +473,7 @@ function line(g, pts, colour, width = 1.5, alpha = 1) {
 const ribbon = $("ribbon");
 function buildRibbon() {
   ribbon.innerHTML = "";
-  S.forEach((s) => { const i = document.createElement("i"); i.style.flexGrow = String(Math.max(1, s.end - s.start)); ribbon.appendChild(i); });
+  P.forEach((s) => { const i = document.createElement("i"); i.title = s.name; i.style.flexGrow = String(Math.max(1, s.end - s.start)); ribbon.appendChild(i); });
 }
 function ribbonUpTo(k, run) {
   [...ribbon.children].forEach((c, j) => {
@@ -476,11 +483,11 @@ function ribbonUpTo(k, run) {
 }
 function splitsTable() {
   const tb = $("splits-table");
-  let html = `<tr><th>Split</th><th>Run ${LAST.n}</th><th>Δ ${alone ? "–" : "Run " + cmp.n}</th><th>Best</th><th>Save</th></tr>`;
-  S.forEach((s, k) => {
-    const mine = LAST.sec[k], d = alone || mine == null || cmp.sec[k] == null ? null : mine - cmp.sec[k];
+  let html = `<tr><th>${U === "sectors" ? "Sector" : "Section"}</th><th>Run ${LAST.n}</th><th>Δ ${alone ? "–" : "Run " + cmp.n}</th><th>Best</th><th>Save</th></tr>`;
+  P.forEach((s, k) => {
+    const mine = pTime(LAST, k), d = alone || mine == null || pTime(cmp, k) == null ? null : mine - pTime(cmp, k);
     const save = ST.multi && bestSec[k] != null && mine != null ? mine - bestSec[k] : null;
-    html += `<tr><td class="name">${s.n}. ${esc(s.name)}<small>${km(s.start)}–${km(s.end)} km</small></td><td>${mine == null ? "–" : mine.toFixed(1)}</td>` +
+    html += `<tr><td class="name">${U === "sectors" ? "" : s.n + ". "}${esc(s.name)}<small>${km(s.start)}–${km(s.end)} km</small></td><td>${mine == null ? "–" : mine.toFixed(1)}</td>` +
       `<td style="color:${splitColour(k, LAST, cmp)}">${isGold(k, LAST) ? "★ " : ""}${signed(d)}</td><td>${bestSec[k] == null ? "–" : bestSec[k].toFixed(1)}</td>` +
       `<td style="color:var(--dim)">${save == null || save < 0.05 ? "–" : save.toFixed(1)}</td></tr>`;
   });
@@ -496,7 +503,9 @@ function headerTexts() {
   $("sp-stage").textContent = ST.name; $("sp-pb").textContent = clock(LAST.time); $("sp-sob").textContent = clock(SOB);
   $("pb2").textContent = alone ? "–" : "Run " + cmp.n + " " + clock(cmp.time);
   $("dm-l").firstChild.textContent = alone ? "one run, " : "vs ";
-  $("stage-sub").textContent = `${ST.car} · ${(L / 1000).toFixed(1)} km · ${S.length} sections`;
+  $("stage-sub").textContent = `${ST.car} · ${(L / 1000).toFixed(1)} km · ${P.length} ${pWord()}s`;
+  $("sheet-foot").textContent = U === "sectors" ? "Gold: the best you have done in that sector. The splits are the game's own sectors, timed by its clock. Colours as LiveSplit: green ahead of the comparison run, red behind; dark gaining time in the sector, light losing it. SoB: every sector's best put together."
+    : "Gold: the best you have done in that section. No sector lines for this stage: its splits are corner sections. Colours as LiveSplit: green ahead of the comparison run, red behind; dark gaining time in the section, light losing it. SoB: every section's best put together.";
   $("seg-run").textContent = "RUN " + LAST.n;
 }
 
@@ -531,10 +540,10 @@ function drawLive(s) {
   $("rpm").textContent = Math.round(s.rpm / 10) * 10;
   $("shiftat").textContent = s.gear >= CAR.gears ? "–" : CAR.lights.shift;
   lights(s.rpm);
-  const dv = $("dv"), k = secAt(s.d), segStart = Math.round(S[k].start), bar = $("dbar-i");
+  const dv = $("dv"), k = pAt(s.d), segStart = Math.round(P[k].start), bar = $("dbar-i"), tag = (U === "sectors" ? "S" : "") + (k + 1);
   if (alone) {
-    dv.textContent = "–"; dv.className = "dv num"; bar.style.width = "0"; $("dsplit").textContent = k + 1 + " –";
-    $("sp-now").innerHTML = `<span>${k + 1}/${S.length}</span>`;
+    dv.textContent = "–"; dv.className = "dv num"; bar.style.width = "0"; $("dsplit").textContent = tag + " –";
+    $("sp-now").innerHTML = `<span>${U === "sectors" ? tag : tag + "/" + P.length}</span>`;
   } else {
     dv.textContent = signed(s.delta, 2);
     dv.className = "dv num " + (s.delta > 0.005 ? "pos-slower" : s.delta < -0.005 ? "pos-faster" : "");
@@ -542,8 +551,8 @@ function drawLive(s) {
     bar.style.background = f > 0 ? css("--slower") : css("--faster");
     bar.style.left = f > 0 ? "50%" : (50 + f * 50) + "%"; bar.style.width = Math.abs(f) * 50 + "%";
     const segDelta = (at(LAST.t, s.d) - LAST.t[segStart]) - (at(cmp.t, s.d) - cmp.t[segStart]);
-    $("dsplit").textContent = k + 1 + " " + signed(segDelta, 2);
-    $("sp-now").innerHTML = `<span class="${s.delta > 0 ? "pos-slower" : "pos-faster"}">${k + 1}/${S.length} ${signed(s.delta, 2)}</span>`;
+    $("dsplit").textContent = tag + " " + signed(segDelta, 2);
+    $("sp-now").innerHTML = `<span class="${s.delta > 0 ? "pos-slower" : "pos-faster"}">${U === "sectors" ? tag : tag + "/" + P.length} ${signed(s.delta, 2)}</span>`;
   }
   $("pred").textContent = clock(LAST.time + (alone ? 0 : cmp.time - LAST.time + s.delta));
   $("km").textContent = km(s.d).slice(0, -1) + " / " + (L / 1000).toFixed(1) + " km";
@@ -643,9 +652,9 @@ function setState(s) {
     $("done-t").textContent = clock(LAST.time);
     const d = $("done-d"); d.textContent = alone ? "" : signed(LAST.time - cmp.time) + " vs " + cmpLabel();
     d.className = "d num " + (!alone && LAST.time > cmp.time ? "pos-slower" : "pos-faster");
-    const golds = S.filter((_, k) => isGold(k, LAST)).length;
-    $("done-s").textContent = `SoB ${clock(SOB)} · ${golds} gold splits · ${ST.tips.length} calls in the debrief`;
-    ribbonUpTo(S.length, LAST);
+    const golds = P.filter((_, k) => isGold(k, LAST)).length;
+    $("done-s").textContent = `SoB ${clock(SOB)} · ${golds} gold ${pWord()}${golds === 1 ? "" : "s"} · ${ST.tips.length} calls in the debrief`;
+    ribbonUpTo(P.length, LAST);
     $("sp-now").innerHTML = alone ? `<span>Run ${LAST.n} ${clock(LAST.time)}</span>` : `<span class="${LAST.time > cmp.time ? "pos-slower" : "pos-faster"}">Run ${LAST.n} ${clock(LAST.time)} ${signed(LAST.time - cmp.time)}</span>`;
   }
   if (s === "live" && clockT >= LAST.t[L] - 0.2) restartLive();
@@ -663,7 +672,7 @@ const STRIPS = [
   {key: "gear", label: "GEAR", h: 40},
   {key: "rpm", label: "RPM", h: 56},
 ];
-const LANE = 16, GAP = 6, GUT = 34;
+const LANE = 28, GAP = 6, GUT = 34;
 function drawStrips() {
   const cv = $("c-strips"), total = LANE + STRIPS.reduce((a, s) => a + s.h + GAP, 0);
   const {g, w} = sized(cv, total), W = w - GUT - 6, [a, z] = view, ref = alone ? null : cmp;
@@ -677,6 +686,11 @@ function drawStrips() {
     g.fillStyle = k === secAt(cursor) ? css("--text") : css("--faint");
     if (x1 - x0 > 14) g.fillText(String(k + 1), x0 + 2, 11);
   });
+  if (ST.sectors) for (const sc of ST.sectors) {            // the game's sector lines, labelled
+    if (sc.end < a || sc.start > z) continue;
+    const x = Math.max(GUT, X(sc.start));
+    g.fillStyle = css("--accent"); g.globalAlpha = .7; g.fillRect(x, 13, 1, LANE - 14); g.globalAlpha = 1; g.fillText(sc.name, x + 3, 24);
+  }
   let y = LANE;
   for (const st of STRIPS) {
     const H = st.h, top = y, bot = y + H;
@@ -739,7 +753,7 @@ function drawStrips() {
 function readout() {
   const d = Math.max(0, Math.min(L, Math.round(cursor))), k = secAt(d), ref = alone ? null : cmp;
   $("ro-d").textContent = km(d) + " km";
-  $("ro-sec").textContent = "split " + (k + 1) + " · " + S[k].name;
+  $("ro-sec").textContent = "section " + (k + 1) + " · " + S[k].name;
   const el = $("ro-dt");
   if (ref) { const dt = LAST.t[d] - ref.t[d]; el.textContent = "Δ " + signed(dt, 2) + " s"; el.className = "num " + (dt > 0 ? "pos-slower" : "pos-faster"); }
   else { el.textContent = "Run " + LAST.n; el.className = "num"; }
@@ -757,7 +771,7 @@ function zoomTo(k) {
   zoomSec = k;
   if (k < 0) { view = [0, L]; $("z-name").textContent = "Whole stage"; }
   else { const s = S[k]; view = [Math.max(0, s.start - 60), Math.min(L, s.end + 60)]; cursor = Math.max(view[0], Math.min(view[1], s.apex));
-    $("z-name").textContent = "Split " + (k + 1) + " · " + s.name + " · " + km(s.apex) + " km"; }
+    $("z-name").textContent = "Section " + (k + 1) + " · " + s.name + " · " + km(s.apex) + " km"; }
   drawStrips(); drawMap(); markRow();
 }
 (function bindStrips() {
@@ -793,6 +807,11 @@ function drawMap() {
   });
   const [sx, sy] = P(0), [fx, fy] = P(L);
   g.font = "700 10px " + css("--sans");
+  (ST.sectors || []).slice(1).forEach((sc) => {              // the game's sector lines (S2 on: S1 starts at START)
+    const [qx, qy] = P(Math.round(sc.start)), t = sc.name;
+    g.fillStyle = css("--accent"); g.fillRect(qx - 3, qy - 3, 6, 6);
+    g.fillText(t, qx + 6 + g.measureText(t).width > w - 2 ? qx - 6 - g.measureText(t).width : qx + 6, qy - 6);
+  });
   const lab = (t, x, y) => g.fillText(t, x + 6 + g.measureText(t).width > w - 2 ? x - 6 - g.measureText(t).width : x + 6, y);
   g.fillStyle = css("--faster"); g.fillRect(sx - 3, sy - 3, 6, 6); lab("START", sx, sy + 12);
   g.fillStyle = css("--text"); g.fillRect(fx - 3, fy - 3, 6, 6); lab("FINISH", fx, fy + 12);
@@ -867,8 +886,8 @@ function runHead() {
   const el = $("rh-d");
   if (alone) { el.textContent = "–"; el.className = "d num"; }
   else { const d = LAST.time - cmp.time; el.textContent = signed(d); el.className = "d num " + (d > 0 ? "pos-slower" : "pos-faster"); }
-  const golds = S.filter((_, k) => isGold(k, LAST)).length;
-  $("rh-s").textContent = `Run ${LAST.n} · ${nameOf(LAST.cls)}${ST.multi ? ` · ${golds} gold split${golds === 1 ? "" : "s"}` : ""}`;
+  const golds = P.filter((_, k) => isGold(k, LAST)).length;
+  $("rh-s").textContent = `Run ${LAST.n} · ${nameOf(LAST.cls)}${ST.multi ? ` · ${golds} gold ${pWord()}${golds === 1 ? "" : "s"}` : ""}`;
   $("rh-ref").textContent = alone ? "no other run to compare" : `vs Run ${cmp.n} ${clock(cmp.time)}`;
   $("lg-run").textContent = "Run " + LAST.n;
   $("lg-refw").style.display = alone ? "none" : "";
@@ -1004,6 +1023,8 @@ window.addEventListener("resize", () => { clearTimeout(resizeT); resizeT = setTi
 selectStage(Math.max(0, Math.min(STAGES.length - 1, Number(HASH.s) || 0)));
 if (HASH.run) showView("run");
 if (HASH.coaching) showTab("coaching");
+if (HASH.sheet) $("splits").click();                                      // #sheet: the splits sheet open (screenshots)
+if (HASH.t) clockT = Number(HASH.t) || 0;                             // #t=70: the replay starts 70 s in (screenshots)
 if (HASH.autoplay) apStart(HASH.s !== undefined ? stageIdx : Math.max(0, STAGES.findIndex((s) => s.cmps.length)));   // open on a stage with a comparison
 requestAnimationFrame(tick);
 </script>
