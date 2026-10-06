@@ -709,6 +709,24 @@ def test_a_run_past_the_progress_finish_ends_when_the_car_rests_though_the_game_
     assert learner.runs.run is None
 
 
+def test_a_pause_just_after_progress_says_finished_does_not_end_the_run_before_the_line(tmp_path):
+    """Progress reaches 0.99 before the line: the game repeating its packets in a pause there (the stage clock
+    where it was at the progress finish, progress under 1) is not the car at rest past the finish."""
+    import copy
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    samples = course_samples(Course(STAGE))
+    first = next(i for i, (_, s, _) in enumerate(samples) if s.progress >= 0.99)
+    t_at, at, throttle = samples[first]
+    assert at.progress < 1.0
+    frozen = []
+    for i in range(1, 400):                                   # 6.6 s of the same packet, the car at rest
+        s = copy.copy(at)
+        s.speed = 0.0
+        frozen.append((t_at + i / 60, s, 0.0))
+    feed_course(learner, samples[:first + 1] + frozen)
+    assert learner.runs.run is not None
+
+
 def test_a_lap_of_a_multi_lap_race_is_not_the_runs_end_whatever_the_game(tmp_path):
     """Rallycross: progress is the lap's, near 1 at the end of every lap, with laps above 1."""
     from oversteer.telemetry import Sample

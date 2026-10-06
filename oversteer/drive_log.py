@@ -604,8 +604,11 @@ class RunTracker:
                 self._still += dt
                 if self._still - dt < STOP <= self._still:
                     self._stops += 1
-        elif frozen and self._finish_counts:
-            # Past the finish the game repeats its last packet (DiRT): the car is at rest all the same
+        elif frozen and self._finish_counts and (
+                (sample.progress or 0.0) >= 1.0 or (sample.stage_time or 0.0) > (self._result_time or 0.0)):
+            # Past the finish the game repeats its last packet (DiRT): the car is at rest all the same. Not in a
+            # pause just after progress says finished, which is before the line (progress under 1, the clock
+            # where it was at the progress finish)
             self._still += dt
         if sample.laps is not None:
             summary['laps'] = max(summary['laps'] or 0, sample.laps)
