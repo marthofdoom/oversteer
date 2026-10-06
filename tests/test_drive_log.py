@@ -354,6 +354,14 @@ def test_wrc_generations_stage_by_the_distance_to_the_finish(tmp_path, monkeypat
     assert (stage['name'], stage['location'], stage['runs']) == ('Vargasen', 'Rally Sweden', 1)
 
 
+def test_run_start_is_stored_for_acr_only(tmp_path):
+    """Only ACR's lap_distance is a position on the road spline: another game's (WRC Generations sends -1) is not
+    where a run began."""
+    learner, reader, session = drive_runs(tmp_path, wrcg_samples(Course(STAGE), Course(STAGE).length))
+    [run] = session['runs']
+    assert run['stage'] is not None and reader.run_start(run['id']) is None
+
+
 def test_wrc_generations_two_stages_of_one_length(tmp_path, monkeypatch):
     """A stage and its reverse, one length, neither driven before: which
     stage stays open (a start cell key), but where is known."""

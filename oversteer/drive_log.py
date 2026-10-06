@@ -794,7 +794,7 @@ class RunTracker:
             # DiRT names no stage: its length and where it starts do
             stage = store.match_stage(game, stage_length, start_pos[2])
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
-        if spline is not None:
+        if spline is not None and game == 'acr':             # only ACR's lap_distance is a place on the road
             store.set_run_start(self.run_rows[number], spline)
         self.run_batch[number] = learner.log.batch
         surface = stage_surface(store, game, stage)
