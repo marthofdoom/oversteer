@@ -101,6 +101,13 @@ def test_codemasters_unit_is_the_one_that_makes_the_roundest_plausible_rpm():
     assert telemetry_formats._codemasters_units == {}
 
 
+def test_eawrc_progress_stays_within_the_stage():
+    over = decode_sample(eawrc(stage_current_distance=10150.0, stage_length=10000.0))     # rolling on past the line
+    assert over.progress == 1.0
+    under = decode_sample(eawrc(stage_current_distance=-20.0, stage_length=10000.0))      # behind the start line
+    assert under.progress == 0.0
+
+
 def test_codemasters_gears():
     assert decode_sample(codemasters(3000, 7500, gear=0.0)).gear == 0
     assert decode_sample(codemasters(3000, 7500, gear=10.0)).gear == -1     # reverse in DiRT Rally

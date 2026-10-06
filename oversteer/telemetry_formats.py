@@ -551,7 +551,7 @@ def _eawrc(data, n):
     length = values['stage_length']
     sample.stage_length = length if math.isfinite(length) and length > 0 else None
     if sample.stage_length and sample.distance is not None:
-        sample.progress = sample.distance / sample.stage_length
+        sample.progress = max(0.0, min(1.0, sample.distance / sample.stage_length))
 
     def vector(name):
         return _vector([values['vehicle_{}_{}'.format(name, axis)] for axis in 'xyz'])
