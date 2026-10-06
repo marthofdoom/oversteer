@@ -249,11 +249,23 @@ def splits_row(found):
         mark = '\u2248' if low else ''
         text = '–' if r['last'] is None else mark + '{:.1f}'.format(r['last'])
         sectors.append((r['name'], text, ('\u2605 ' if r['gold'] else '') + signed(r['delta']) if r['last'] is not None
-                        else _("best {}").format(mark + '{:.1f}'.format(r['best'])),
+                        else '–' if r['best'] is None else _("best {}").format(mark + '{:.1f}'.format(r['best'])),
                         split_tone(r['last'], r['delta'], r['gold'])))
     return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
             'gain': gain, 'last': last, 'delta': delta, 'tones': tones, 'rows': rows, 'sectors': sectors,
             'estimated': estimated, 'runs': found.get('runs')}
+
+
+def _splits(reader, profile, car_id):
+    """coach.splits(), or None when it fails: the splits must never take the
+    rest of the view (or the GTK refresh timer) down with them."""
+    from . import coach
+    try:
+        return coach.splits(reader, profile, car_id)
+    except Exception:
+        import logging
+        logging.exception("splits")
+        return None
 
 
 def tuning_lines(tune, notes):
@@ -464,4 +476,4 @@ def gather(reader, profile, key, show_all=False):
     return {'car_id': car['id'], 'context': context_line(session, runs, stage), 'tips': tips,
             'tuning': tuning_lines(tuning.tune_summary(reader, car['id'], car['game']), notes),
             'sessions': session_rows(reader.history(profile, car['key'], 10)),
-            'last_session': session, 'splits': coach.splits(reader, profile, car['id'])}
+            'last_session': session, 'splits': _splits(reader, profile, car['id'])}

@@ -233,3 +233,20 @@ def test_the_splits_row_tones_rows_and_sectors():
     assert none['sectors'] == [] and not none['estimated'] and none['delta'] is None
     assert view.splits_row(dict(found, splits=[dict(r, last=r['best'], delta=0.0, gold=True) for r in found['splits']]))['tones'] \
         == ['gold'] * 4
+
+
+def test_splits_row_takes_a_sector_with_no_times():
+    from oversteer import telemetry_view as tv
+    found = {'name': 'Afon Bidno - Severn', 'last': 190.0, 'best': 186.1, 'possible': 186.1, 'gain': 0.0, 'runs': 3,
+             'splits': [{'name': 'left-left at 0.3 km', 'last': 6.8, 'best': 6.8, 'gold': True, 'delta': 0.0,
+                         'finish': False}],
+             'sectors': [{'name': 'S3', 'last': None, 'best': None, 'gold': False, 'delta': None,
+                          'confidence': 'medium'}]}
+    row = tv.splits_row(found)
+    assert row is not None and [s for s in row['sectors'] if s[0] == 'S3']
+
+
+def test_gather_survives_a_failing_splits(monkeypatch):
+    from oversteer import coach, telemetry_view as tv
+    monkeypatch.setattr(coach, 'splits', lambda *a: 1 / 0)
+    assert tv._splits(None, 'p', 1) is None
