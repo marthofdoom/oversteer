@@ -45,7 +45,7 @@ from .telemetry_store import TRACE_CHANNELS
 CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 G = cc.G
 
-ALGO = 4                         # bumps when the numbers a stored potential holds would change
+ALGO = 5                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)
@@ -69,7 +69,9 @@ ENV_MIN_RUNS = 3                 # runs the envelope needs (docs section 6.1, th
 FLOOR_SPEED = 60.0               # m/s: no corner limit above this
 LAUNCH_SPEED = 0.5               # m/s at the first grid point
 SPOT = 25                        # grid points either side of the apex in which the run's slowest point is looked for
-CAR_MASS_EXTRA = 300.0           # kg the crew and fuel add to the shipped mass (research: 1400 kg measured, 1100.3 shipped)
+CAR_CREW_KG = 165.0              # kg two people in their kit add to the shipped mass, whatever the car
+CAR_LOAD_SHARE = 0.1227          # of the shipped mass: fuel, spares and tools (the i20N, the one car measured: 1400 kg of wheel load
+                                 # against 1100.3 shipped, so 165 + 0.1227 * 1100.3 = 300 kg; the others are scaled from it, not measured)
 CAR_DRAG = (0.0238, 9.3e-5)      # g * (c0 + c2 v^2): rolling and aero drag measured against positions
 LAUNCH_REVS = 0.53               # of the limiter: below it the clutch slips at launch (4000 of 7500 rpm)
 RADIUS_FALLBACK = 0.3265         # m, where the car's data names no tyre radius
@@ -339,6 +341,14 @@ def tyre_radius(data, surface):
     return float(sum(radii) / len(radii)) if radii else RADIUS_FALLBACK
 
 
+def car_mass(data):
+    """The mass the car drives with: the shipped mass (the car as the game's data has it, whether the crew is in it is
+    not stated) plus the crew and a share of it for fuel and spares (CAR_CREW_KG, CAR_LOAD_SHARE). A 588 kg Mini does not
+    carry the 300 kg of a Rally2 car."""
+    shipped = float(data.get('mass_kg') or 1100.0)
+    return shipped + CAR_CREW_KG + CAR_LOAD_SHARE * shipped
+
+
 def car_envelope(rows, data, surface, set_id):
     """The car's capability: the highest grip any run reached on the surface (P99.5 of lateral and braking g, held
     at its value at 8 m/s below it, where the extreme is spins and knocks) and the drive the engine gives (the
@@ -352,7 +362,7 @@ def car_envelope(rows, data, surface, set_id):
     for name in ('lat', 'brake'):
         env[name][low] = env[name][np.argmax(~low)]
     gs = next((g for g in data['gear_sets'] if g['id'] == set_id), car_data.default_set(data))
-    mass = float(data.get('mass_kg') or 1100.0) + CAR_MASS_EXTRA
+    mass = car_mass(data)
     r = tyre_radius(data, surface)
     rpm_t, nm = zip(*data['torque_curve'])
     v = env['bins']

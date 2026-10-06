@@ -405,3 +405,13 @@ def test_the_curvature_reads_a_hairpins_radius_not_the_smoothing_windows(radius)
     peak = np.nanmax(np.abs(k))
     assert 1 / peak == pytest.approx(radius, rel=0.12)
     assert k[np.nanargmax(np.abs(k))] > 0                                      # the arc bends north: a left turn
+
+
+def test_the_car_mass_scales_with_the_car():
+    from oversteer import car_data
+    i20 = car_data.entry('acr/Hyundai i20N Rally2')
+    mini = car_data.entry('acr/Mini Cooper S 1275')
+    assert potential.car_mass(i20) == pytest.approx(1400.3, abs=0.5)               # the one car whose mass was measured
+    assert potential.car_mass(mini) == pytest.approx(588.0 + 165.0 + 0.1227 * 588.0)
+    assert potential.car_mass(mini) - 588.0 < potential.car_mass(i20) - 1100.3          # a smaller car carries less
+    assert potential.car_mass({}) > 1100.0
