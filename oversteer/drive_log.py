@@ -1109,9 +1109,12 @@ def repair_shipped(store):
     return changed
 
 
-def _trace_t_at(trace, value):
-    """The trace's time at driven distance `value` (linear between rows), or
-    None when the trace does not span it."""
+TRACE_TAIL = 15.0               # m: a run's last 10 Hz row is up to a row's distance short of its finish (30 m/s: 3 m)
+
+
+def _trace_t_at(trace, value, tail=0.0):
+    """The trace's time at driven distance `value` (linear between rows), or None when the trace does not span
+    it. With `tail`, a value up to that far past the last row is taken at the last row's speed."""
     previous = None
     for row in trace:
         d = row[T['distance']]
@@ -1119,6 +1122,10 @@ def _trace_t_at(trace, value):
             d0, t0 = previous[T['distance']], previous[T['t']]
             return t0 if d <= d0 else t0 + (row[T['t']] - t0) * (value - d0) / (d - d0)
         previous = row
+    if tail and previous is not None and previous[T['distance']] < value <= previous[T['distance']] + tail:
+        speed = previous[T['speed']]
+        if speed is not None and speed > 1.0:
+            return previous[T['t']] + (value - previous[T['distance']]) / speed
     return None
 
 
@@ -1175,7 +1182,7 @@ def retime_finishes(store):
             start = _run_start_m(store, run, entry)
             d_old = min(course, old - start) if start is not None and course is not None else None
             new = flying - start if d_old is not None else None
-            t_old = _trace_t_at(trace, d_old) if trace and new is not None else None
+            t_old = _trace_t_at(trace, d_old, TRACE_TAIL) if trace and new is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
             if t_new is None or result is None or t_old - t_new >= result:
                 logging.warning("drive log: run %s cannot be re-timed to the flying finish (no trace or out of range)",
@@ -1202,7 +1209,7 @@ def retime_finishes(store):
             start = _run_start_m(store, run, stage_tables.entry(stage) or {})
             d_old = min(course, recorded - start) if start is not None else None
             new = flying - start if d_old is not None else None
-            t_old = _trace_t_at(trace, d_old) if trace and d_old is not None else None
+            t_old = _trace_t_at(trace, d_old, TRACE_TAIL) if trace and d_old is not None else None
             t_new = _trace_t_at(trace, new) if t_old is not None and new > 0 else None
             if t_new is None or result - (t_old - t_new) <= 0:
                 logging.warning("drive log: run %s cannot be moved from finish %.1f to %.1f (trace out of range)",

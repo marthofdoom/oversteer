@@ -453,6 +453,26 @@ def test_runs_timed_to_the_stop_control_move_to_the_learnt_finish(tmp_path):
     learner.close()
 
 
+def test_a_trace_that_ends_a_row_short_of_the_old_line_is_still_re_timed(tmp_path):
+    """A 10 Hz trace stops a row before the run's finish (ACR's old line: 3 m at 30 m/s): the time at the old line is
+    taken a little past the last row, not 'out of range'."""
+    from oversteer.drive_log import retime_finishes
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    start = stage_tables.start_line(stage_tables.entry(PETIT_BALLON))
+    d_old = stage_tables.entry(PETIT_BALLON)['pacenote_last_m'] - start
+    run = _timed_run(store, PETIT_BALLON, result=230.0, course=d_old, end_speed=10.0)
+    rows = [r for r in store.trace(run) if r[1] <= d_old - 3.0]                 # the last row 3 m short of the line
+    store.db.execute('DELETE FROM traces WHERE run = ?', (run,))
+    store.add_trace(run, rows)
+    stage_tables.set_learnt({PETIT_BALLON: {'finish_m': 5740.0, 'finish_runs': 2, 'finish_spread_m': 1.0}})
+    assert retime_finishes(store) == 1
+    row = store.run(run)
+    assert abs(row['result_time'] - (230.0 - (d_old - (5740.0 - start)) / 10.0)) < 0.35 and row['run_class'] is None
+    assert store.finish_unknown(run) is False
+    learner.close()
+
+
 # -- the start offset: a game-clock run starts timing at the game's clock, an older one at 3 m/s --
 
 def test_once_a_stage_and_car_have_a_clock_run_only_clock_runs_rank(tmp_path):
