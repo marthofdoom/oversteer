@@ -463,7 +463,7 @@
    "rate": "packet"
   },
   "surface_grip": {
-   "kind": "game",
+   "kind": "sample",
    "unit": "0..1",
    "description": "The game's grip level of the road (AC graphics surfaceGrip).",
    "rate": "packet"
@@ -584,9 +584,9 @@
    ]
   },
   "tyre_radius": {
-   "kind": "derived",
+   "kind": "sample",
    "unit": "m",
-   "description": "Effective rolling radius per wheel: speed / wheel_rot at low slip, or the game data.",
+   "description": "Rolling radius per wheel: the game's where it sends one (AC, ACC), else speed / wheel_rot at low slip.",
    "rate": "per car",
    "derive_from": [
     [
@@ -596,7 +596,8 @@
      "wheel_rot",
      "speed"
     ]
-   ]
+   ],
+   "convention": "per wheel, ordered FL, FR, RL, RR"
   },
   "slip_drive": {
    "kind": "derived",
@@ -724,6 +725,193 @@
    "unit": "event",
    "description": "A gear-change input: 'gear' (H-pattern gate), 'sequential' or 'paddle', timestamped.",
    "rate": "event"
+  },
+  "tyre_load": {
+   "kind": "sample",
+   "unit": "N",
+   "description": "Vertical load on each tyre.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_fx": {
+   "kind": "sample",
+   "unit": "N",
+   "description": "Longitudinal force at each tyre, car frame (forward positive): the sum is m x a_x (r 0.97 to 0.99 on ACR).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_fy": {
+   "kind": "sample",
+   "unit": "N",
+   "description": "Lateral force at each tyre, car frame (left positive): the sum is m x a_y (r 0.98 to 0.995 on ACR).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_slip": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "The game's own per-wheel slip (ACR wheelSlip: unnormalised, p95 0.2 to 1.8).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "combined_slip": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "Forza's combined tyre slip (1 is the limit).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Tyre temperature.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_wear": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Tyre wear (Forza Motorsport 2023).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_pressure": {
+   "kind": "sample",
+   "unit": "kPa",
+   "description": "Tyre pressure.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "brake_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Brake disc temperature.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "susp_max": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "The suspension's full travel (what susp_norm divides by).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "hub_pos": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Hub position relative to the body (EA SPORTS WRC).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "hub_vel": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "Hub velocity (EA SPORTS WRC).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "ride_height": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Ride height, front then rear.",
+   "rate": "packet"
+  },
+  "ang_vel": {
+   "kind": "sample",
+   "unit": "rad/s",
+   "description": "Angular velocity in the car frame: roll, pitch, yaw. Yaw is confirmed on ACR; the signs of the others wait for a capture.",
+   "convention": "x forward, y left, z up",
+   "rate": "packet"
+  },
+  "attitude": {
+   "kind": "sample",
+   "unit": "rad",
+   "description": "Yaw, pitch, roll of the body (Forza).",
+   "rate": "packet"
+  },
+  "brake_bias": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Share of the braking on the front axle.",
+   "rate": "packet"
+  },
+  "session": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "The game's session type (AC, ACC).",
+   "rate": "packet"
+  },
+  "fuel": {
+   "kind": "sample",
+   "unit": "0..1",
+   "description": "Fuel left (fraction of the tank).",
+   "rate": "packet"
+  },
+  "torque": {
+   "kind": "sample",
+   "unit": "Nm",
+   "description": "Engine torque.",
+   "rate": "packet"
+  },
+  "transmission_speed": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "Speed of the transmission output (EA SPORTS WRC).",
+   "rate": "packet"
+  },
+  "engine_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Engine (water) temperature.",
+   "rate": "packet"
+  },
+  "oil_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Oil temperature.",
+   "rate": "packet"
+  },
+  "oil_pressure": {
+   "kind": "sample",
+   "unit": "bar",
+   "description": "Oil pressure.",
+   "rate": "packet"
+  },
+  "lap_time": {
+   "kind": "sample",
+   "unit": "s",
+   "description": "The current lap's time.",
+   "rate": "packet"
+  },
+  "best_lap": {
+   "kind": "sample",
+   "unit": "s",
+   "description": "The game's best lap time.",
+   "rate": "packet"
+  },
+  "last_lap": {
+   "kind": "sample",
+   "unit": "s",
+   "description": "The game's last lap time.",
+   "rate": "packet"
+  },
+  "driving_line": {
+   "kind": "sample",
+   "unit": "-1..1",
+   "description": "Distance from the racing line, Forza (negative left).",
+   "rate": "packet"
+  },
+  "ai_brake_diff": {
+   "kind": "sample",
+   "unit": "-1..1",
+   "description": "Forza's AI braking difference (the driving assist's brake advice).",
+   "rate": "packet"
+  },
+  "cylinders": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Engine cylinders (Forza).",
+   "rate": "packet"
   }
  },
  "rig": {
@@ -991,7 +1179,52 @@
     },
     "surface_grip": {
      "status": "absent",
-     "note": "the bridge forwards graphics surfaceGrip; ACR leaves it 0 (commit 4a54a23)"
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "the packet carries it, ACR fills it with zeros"
+    },
+    "tyre_load": {
+     "status": "confirmed",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "sum / g = 1250 to 1460 kg at speed"
+    },
+    "tyre_fx": {
+     "status": "confirmed",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "sums to m x a_x, r 0.97 to 0.99"
+    },
+    "tyre_fy": {
+     "status": "confirmed",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "sums to m x a_y, r 0.98 to 0.995"
+    },
+    "tyre_slip": {
+     "status": "confirmed",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "unnormalised, p95 0.2 to 1.8"
+    },
+    "brake_bias": {
+     "status": "confirmed",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "0.5 to 0.6"
+    },
+    "ang_vel": {
+     "status": "decoded",
+     "note": "yaw confirmed (yaw_rate); roll and pitch signs unchecked"
+    },
+    "ride_height": {
+     "status": "absent",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "the packet carries it, ACR fills it with zeros"
+    },
+    "susp_max": {
+     "status": "absent",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "the packet carries it, ACR fills it with zeros"
+    },
+    "session": {
+     "status": "absent",
+     "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
+     "note": "the packet carries it, ACR fills it with zeros"
     }
    },
    "static": {
@@ -1049,12 +1282,12 @@
     "No grip figure from the game (surfaceGrip 0): grip is measured (g-g envelope) or taken from the stage table surface.",
     "No stage clock: result times are Oversteer's own clock from the start to the last pace note.",
     "No handbrake channel: the rig handbrake axis has to stand in (not wired into the trace yet).",
-    "No wheel speed or slip in the trace: tyreRadius is 0, wheelSlip is undecoded; wheel_rot x the learnt or game radius would give both (launch spin, exit spin, lock-ups).",
     "No suspension range (suspensionMaxTravel empty): bottoming needs a learnt bump-stop travel.",
     "No gear count in the packets: the top gear comes from the car data.",
-    "No tyre loads or forces decoded (the bridge forwards wheelLoad, fx, fy): no per-wheel grip use.",
     "Position only since the 2026-09-27 bridge fix: older captures cannot place the car, so discipline by topology was unknown on them.",
-    "The full pace-note list is in the game files but not shipped (86e3faftn)."
+    "The full pace-note list is in the game files but not shipped (86e3faftn).",
+    "Tyre loads, forces and slip are decoded (Sample.tyre_load, tyre_fx, tyre_fy, tyre_slip) but not in the trace yet: per-wheel grip use waits for a trace format change.",
+    "No wheel speed in the trace: tyreRadius is 0; wheel_rot x the learnt or game radius gives it (launch spin, exit spin, lock-ups)."
    ]
   },
   "ac": {
@@ -1141,6 +1374,42 @@
     "handbrake": {
      "status": "absent",
      "note": "not in the physics page"
+    },
+    "tyre_load": {
+     "status": "decoded"
+    },
+    "tyre_slip": {
+     "status": "decoded"
+    },
+    "brake_bias": {
+     "status": "decoded"
+    },
+    "ride_height": {
+     "status": "decoded"
+    },
+    "tyre_radius": {
+     "status": "decoded"
+    },
+    "susp_max": {
+     "status": "decoded"
+    },
+    "surface_grip": {
+     "status": "decoded"
+    },
+    "session": {
+     "status": "decoded"
+    },
+    "tyre_fx": {
+     "status": "absent",
+     "note": "AC (the original) has no tyre forces in physics"
+    },
+    "tyre_fy": {
+     "status": "absent",
+     "note": "AC (the original) has no tyre forces in physics"
+    },
+    "ang_vel": {
+     "status": "absent",
+     "note": "AC and ACC captures have not confirmed the local angular velocity: not decoded"
     }
    },
    "static": {},
@@ -1232,6 +1501,40 @@
     "handbrake": {
      "status": "absent",
      "note": "not in the physics page"
+    },
+    "tyre_load": {
+     "status": "decoded"
+    },
+    "tyre_slip": {
+     "status": "decoded"
+    },
+    "brake_bias": {
+     "status": "decoded"
+    },
+    "ride_height": {
+     "status": "decoded"
+    },
+    "tyre_radius": {
+     "status": "decoded"
+    },
+    "susp_max": {
+     "status": "decoded"
+    },
+    "surface_grip": {
+     "status": "decoded"
+    },
+    "session": {
+     "status": "decoded"
+    },
+    "tyre_fx": {
+     "status": "decoded"
+    },
+    "tyre_fy": {
+     "status": "decoded"
+    },
+    "ang_vel": {
+     "status": "absent",
+     "note": "AC and ACC captures have not confirmed the local angular velocity: not decoded"
     }
    },
    "static": {},
@@ -1371,6 +1674,19 @@
     },
     "handbrake": {
      "status": "absent"
+    },
+    "brake_temp": {
+     "status": "confirmed",
+     "evidence": "marth's 3 WRC Generations captures (decoder review 2026-10-05)",
+     "note": "20 to 668 C"
+    },
+    "tyre_pressure": {
+     "status": "absent",
+     "note": "sent as constants (1 and 0): unused"
+    },
+    "fuel": {
+     "status": "absent",
+     "note": "sent as constants (1 and 0): unused"
     }
    },
    "static": {
@@ -1480,6 +1796,17 @@
     },
     "handbrake": {
      "status": "absent"
+    },
+    "brake_temp": {
+     "status": "decoded"
+    },
+    "tyre_pressure": {
+     "status": "decoded",
+     "note": "psi converted to kPa; from the documentation, unverified"
+    },
+    "fuel": {
+     "status": "decoded",
+     "note": "fuel in tank over capacity; unverified"
     }
    },
    "static": {
@@ -1594,6 +1921,18 @@
      "status": "decoded"
     },
     "game_shift_rpm": {
+     "status": "decoded"
+    },
+    "brake_temp": {
+     "status": "decoded"
+    },
+    "hub_pos": {
+     "status": "decoded"
+    },
+    "hub_vel": {
+     "status": "decoded"
+    },
+    "transmission_speed": {
      "status": "decoded"
     }
    },
@@ -1722,6 +2061,45 @@
     },
     "steer": {
      "status": "decoded"
+    },
+    "torque": {
+     "status": "decoded"
+    },
+    "tyre_temp": {
+     "status": "decoded"
+    },
+    "fuel": {
+     "status": "decoded"
+    },
+    "lap_time": {
+     "status": "decoded"
+    },
+    "best_lap": {
+     "status": "decoded"
+    },
+    "last_lap": {
+     "status": "decoded"
+    },
+    "driving_line": {
+     "status": "decoded"
+    },
+    "ai_brake_diff": {
+     "status": "decoded"
+    },
+    "cylinders": {
+     "status": "decoded"
+    },
+    "combined_slip": {
+     "status": "decoded"
+    },
+    "attitude": {
+     "status": "decoded"
+    },
+    "ang_vel": {
+     "status": "decoded"
+    },
+    "tyre_wear": {
+     "status": "absent"
     }
    },
    "static": {},
@@ -1849,6 +2227,46 @@
     "stage": {
      "status": "decoded",
      "note": "FM 2023 track ordinal"
+    },
+    "torque": {
+     "status": "decoded"
+    },
+    "tyre_temp": {
+     "status": "decoded"
+    },
+    "fuel": {
+     "status": "decoded"
+    },
+    "lap_time": {
+     "status": "decoded"
+    },
+    "best_lap": {
+     "status": "decoded"
+    },
+    "last_lap": {
+     "status": "decoded"
+    },
+    "driving_line": {
+     "status": "decoded"
+    },
+    "ai_brake_diff": {
+     "status": "decoded"
+    },
+    "cylinders": {
+     "status": "decoded"
+    },
+    "combined_slip": {
+     "status": "decoded"
+    },
+    "attitude": {
+     "status": "decoded"
+    },
+    "ang_vel": {
+     "status": "decoded"
+    },
+    "tyre_wear": {
+     "status": "decoded",
+     "note": "Forza Motorsport 2023's packet only"
     }
    },
    "static": {},
@@ -1889,6 +2307,18 @@
      "status": "decoded"
     },
     "boost": {
+     "status": "decoded"
+    },
+    "engine_temp": {
+     "status": "decoded"
+    },
+    "fuel": {
+     "status": "decoded"
+    },
+    "oil_temp": {
+     "status": "decoded"
+    },
+    "oil_pressure": {
      "status": "decoded"
     }
    },
@@ -1937,6 +2367,18 @@
      "status": "decoded"
     },
     "car_name": {
+     "status": "decoded"
+    },
+    "engine_temp": {
+     "status": "decoded"
+    },
+    "fuel": {
+     "status": "decoded"
+    },
+    "oil_temp": {
+     "status": "decoded"
+    },
+    "oil_pressure": {
      "status": "decoded"
     }
    },

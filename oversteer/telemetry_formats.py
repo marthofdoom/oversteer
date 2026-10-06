@@ -160,7 +160,7 @@ class Sample:
       stage_time (s), race_position.
     - What an engineer reads, each None where the game does not send it
       (per wheel FL, FR, RL, RR): tyre_load (N), tyre_fx and tyre_fy (N, car
-      frame: forward, left), wheel_slip (the game's own unit), combined_slip,
+      frame: forward, left), tyre_slip (the game's own unit), combined_slip,
       tyre_radius (m), tyre_temp (C), tyre_wear (0..1 worn), tyre_pressure
       (kPa), brake_temp (C), susp_max (m of travel), hub_pos and hub_vel
       (EA WRC, per wheel), ride_height (front, rear; m), ang_vel (roll,
@@ -178,7 +178,7 @@ class Sample:
                  'wheel_speed', 'wheel_rot', 'slip_ratio', 'slip_kind', 'slip_angle', 'susp', 'susp_vel',
                  'susp_norm', 'puddle', 'rumble', 'surface_rumble', 'lap', 'laps', 'lap_distance', 'distance',
                  'progress', 'stage_time', 'race_position', 'game_shift_rpm', 'boost',
-                 'tyre_load', 'tyre_fx', 'tyre_fy', 'wheel_slip', 'combined_slip', 'tyre_radius', 'tyre_temp', 'tyre_wear',
+                 'tyre_load', 'tyre_fx', 'tyre_fy', 'tyre_slip', 'combined_slip', 'tyre_radius', 'tyre_temp', 'tyre_wear',
                  'tyre_pressure', 'brake_temp', 'susp_max', 'hub_pos', 'hub_vel', 'ride_height', 'ang_vel', 'attitude',
                  'surface_grip', 'brake_bias', 'session', 'fuel', 'torque', 'transmission_speed', 'engine_temp',
                  'oil_temp', 'oil_pressure', 'lap_time', 'best_lap', 'last_lap', 'driving_line', 'ai_brake_diff',
@@ -198,7 +198,7 @@ class Sample:
         self.susp = self.susp_vel = self.susp_norm = self.puddle = self.rumble = self.surface_rumble = None
         self.lap = self.laps = self.lap_distance = self.distance = self.progress = None
         self.stage_time = self.race_position = self.game_shift_rpm = self.boost = None
-        self.tyre_load = self.tyre_fx = self.tyre_fy = self.wheel_slip = self.combined_slip = None
+        self.tyre_load = self.tyre_fx = self.tyre_fy = self.tyre_slip = self.combined_slip = None
         self.tyre_radius = self.tyre_temp = self.tyre_wear = self.tyre_pressure = self.brake_temp = None
         self.susp_max = self.hub_pos = self.hub_vel = self.ride_height = self.ang_vel = self.attitude = None
         self.surface_grip = self.brake_bias = self.session = self.fuel = self.torque = None
@@ -416,7 +416,7 @@ def _ovst3(sample, v):
     # In the packet, all of them: the wheels' slip (the game's unit), the
     # loads (N) and tyre forces (N; car frame, fx forward and fy left:
     # their sums are m x a, r 0.97 to 0.99), and what ACR leaves empty
-    sample.wheel_slip = _vector(slip)
+    sample.tyre_slip = _vector(slip)
     sample.tyre_load, sample.tyre_fx, sample.tyre_fy = _vector(load), _vector(fx), _vector(fy)
     sample.ride_height = _positive(ride)
     sample.tyre_radius = _positive(radius)

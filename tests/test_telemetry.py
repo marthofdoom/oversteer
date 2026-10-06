@@ -564,7 +564,7 @@ def test_a_real_acr_v4_packet_gives_every_channel_it_carries():
     from oversteer.telemetry_formats import decode_sample, G
     sample = decode_sample(ACR_V4_PACKET)
     assert sample.game == 'acr' and sample.stage_time is not None and sample.pos is not None
-    assert len(sample.tyre_load) == len(sample.tyre_fx) == len(sample.tyre_fy) == len(sample.wheel_slip) == 4
+    assert len(sample.tyre_load) == len(sample.tyre_fx) == len(sample.tyre_fy) == len(sample.tyre_slip) == 4
     mass = sum(sample.tyre_load) / G
     assert 1300 < mass < 1500
     # the forces add up to m x a (r 0.97 to 0.99 over the captures): fx forward, fy left
@@ -581,7 +581,7 @@ def test_the_ovst3_empty_fields_are_none_and_the_filled_ones_come_through():
     sample = decode_sample(_ovst3(game=1))
     assert sample.tyre_radius == pytest_approx_t((0.32,) * 4) and sample.susp_max == pytest_approx_t((0.12,) * 4)
     assert abs(sample.surface_grip - 0.97) < 1e-6 and abs(sample.brake_bias - 0.58) < 1e-6 and sample.session == 5
-    assert all(abs(a - 0.02) < 1e-6 for a in sample.wheel_slip)
+    assert all(abs(a - 0.02) < 1e-6 for a in sample.tyre_slip)
     assert sample.ride_height is None                                       # NaN sent
 
 

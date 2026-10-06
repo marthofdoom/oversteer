@@ -151,7 +151,7 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `race_position` | sample | int |  | packet |  |
 | `game_shift_rpm` | sample | rpm |  | packet | (static:car_data) |
 | `boost` | sample | game unit |  | packet |  |
-| `surface_grip` | game | 0..1 |  | packet |  |
+| `surface_grip` | sample | 0..1 |  | packet |  |
 | `clock` | derived | s |  | packet | (always) |
 | `a_long` | derived | m/s^2 | positive forward | packet | (accel) or (speed) |
 | `a_lat` | derived | m/s^2 | positive left | packet | (accel) or (speed, yaw_rate) |
@@ -160,7 +160,7 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `body_slip` | derived | rad | positive when the car moves to its left of where it points | packet | (vel) or (pos, forward) |
 | `curvature` | derived | 1/m | positive left | packet | (yaw_rate, speed) or (pos) |
 | `grade` | derived | ratio | positive uphill | packet | (pos, run_distance) or (forward) or (vel) |
-| `tyre_radius` | derived | m |  | per car | (static:car_data) or (wheel_rot, speed) |
+| `tyre_radius` | sample | m | per wheel, ordered FL, FR, RL, RR | per car | (static:car_data) or (wheel_rot, speed) |
 | `slip_drive` | derived | ratio |  | packet | (wheel_speed, speed) or (slip_ratio) |
 | `wheel_slip` | derived | ratio | per wheel, ordered FL, FR, RL, RR | packet | (wheel_speed, speed) or (slip_ratio) |
 | `steer_rate` | derived | 1/s |  | packet | (steer, clock) |
@@ -172,6 +172,35 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `rig_clutch` | rig | 0..1 |  | event |  |
 | `rig_handbrake` | rig | 0..1 |  | event |  |
 | `shift_press` | rig | event |  | event |  |
+| `tyre_load` | sample | N | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_fx` | sample | N | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_fy` | sample | N | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_slip` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `combined_slip` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_temp` | sample | C | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_wear` | sample | 0..1 | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_pressure` | sample | kPa | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `brake_temp` | sample | C | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `susp_max` | sample | m | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `hub_pos` | sample | m | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `hub_vel` | sample | m/s | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `ride_height` | sample | m |  | packet |  |
+| `ang_vel` | sample | rad/s | x forward, y left, z up | packet |  |
+| `attitude` | sample | rad |  | packet |  |
+| `brake_bias` | sample | 0..1 |  | packet |  |
+| `session` | sample | int |  | packet |  |
+| `fuel` | sample | 0..1 |  | packet |  |
+| `torque` | sample | Nm |  | packet |  |
+| `transmission_speed` | sample | m/s |  | packet |  |
+| `engine_temp` | sample | C |  | packet |  |
+| `oil_temp` | sample | C |  | packet |  |
+| `oil_pressure` | sample | bar |  | packet |  |
+| `lap_time` | sample | s |  | packet |  |
+| `best_lap` | sample | s |  | packet |  |
+| `last_lap` | sample | s |  | packet |  |
+| `driving_line` | sample | -1..1 |  | packet |  |
+| `ai_brake_diff` | sample | -1..1 |  | packet |  |
+| `cylinders` | sample | int |  | packet |  |
 
 ### Games
 
@@ -247,7 +276,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `race_position` | - | - | - | - | - | - | D | D | - | - |
 | `game_shift_rpm` | d | - | - | - | - | D | - | - | - | - |
 | `boost` | - | - | - | - | - | - | D | D | D | D |
-| `surface_grip` | - | - | - | - | - | - | - | - | - | - |
+| `surface_grip` | - | D | D | - | - | - | - | - | - | - |
 | `clock` | d | d | d | d | d | d | d | d | d | d |
 | `a_long` | d | d | d | d | d | d | d | d | d | d |
 | `a_lat` | d | d | d | d | d | d | d | d | - | - |
@@ -256,7 +285,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `body_slip` | d | - | - | d | d | d | d | d | - | - |
 | `curvature` | d | d | d | d | d | d | d | d | - | - |
 | `grade` | d | d | d | d | d | d | d | d | - | - |
-| `tyre_radius` | d | d | d | - | - | - | d | d | - | - |
+| `tyre_radius` | d | D | D | - | - | - | d | d | - | - |
 | `slip_drive` | d | d | d | d | d | d | d | d | - | - |
 | `wheel_slip` | d | d | d | d | d | d | d | d | - | - |
 | `steer_rate` | d | - | - | d | d | d | d | d | - | - |
@@ -268,6 +297,35 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `rig_clutch` | C | C | C | C | C | C | C | C | C | C |
 | `rig_handbrake` | C | C | C | C | C | C | C | C | C | C |
 | `shift_press` | C | C | C | C | C | C | C | C | C | C |
+| `tyre_load` | C | D | D | - | - | - | - | - | - | - |
+| `tyre_fx` | C | - | D | - | - | - | - | - | - | - |
+| `tyre_fy` | C | - | D | - | - | - | - | - | - | - |
+| `tyre_slip` | C | D | D | - | - | - | - | - | - | - |
+| `combined_slip` | - | - | - | - | - | - | D | D | - | - |
+| `tyre_temp` | - | - | - | - | - | - | D | D | - | - |
+| `tyre_wear` | - | - | - | - | - | - | - | D | - | - |
+| `tyre_pressure` | - | - | - | - | D | - | - | - | - | - |
+| `brake_temp` | - | - | - | C | D | D | - | - | - | - |
+| `susp_max` | - | D | D | - | - | - | - | - | - | - |
+| `hub_pos` | - | - | - | - | - | D | - | - | - | - |
+| `hub_vel` | - | - | - | - | - | D | - | - | - | - |
+| `ride_height` | - | D | D | - | - | - | - | - | - | - |
+| `ang_vel` | D | - | - | - | - | - | D | D | - | - |
+| `attitude` | - | - | - | - | - | - | D | D | - | - |
+| `brake_bias` | C | D | D | - | - | - | - | - | - | - |
+| `session` | - | D | D | - | - | - | - | - | - | - |
+| `fuel` | - | - | - | - | D | - | D | D | D | D |
+| `torque` | - | - | - | - | - | - | D | D | - | - |
+| `transmission_speed` | - | - | - | - | - | D | - | - | - | - |
+| `engine_temp` | - | - | - | - | - | - | - | - | D | D |
+| `oil_temp` | - | - | - | - | - | - | - | - | D | D |
+| `oil_pressure` | - | - | - | - | - | - | - | - | D | D |
+| `lap_time` | - | - | - | - | - | - | D | D | - | - |
+| `best_lap` | - | - | - | - | - | - | D | D | - | - |
+| `last_lap` | - | - | - | - | - | - | D | D | - | - |
+| `driving_line` | - | - | - | - | - | - | D | D | - | - |
+| `ai_brake_diff` | - | - | - | - | - | - | D | D | - | - |
+| `cylinders` | - | - | - | - | - | - | D | D | - | - |
 
 ### Games: static data
 
@@ -385,12 +443,12 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 - No grip figure from the game (surfaceGrip 0): grip is measured (g-g envelope) or taken from the stage table surface.
 - No stage clock: result times are Oversteer's own clock from the start to the last pace note.
 - No handbrake channel: the rig handbrake axis has to stand in (not wired into the trace yet).
-- No wheel speed or slip in the trace: tyreRadius is 0, wheelSlip is undecoded; wheel_rot x the learnt or game radius would give both (launch spin, exit spin, lock-ups).
 - No suspension range (suspensionMaxTravel empty): bottoming needs a learnt bump-stop travel.
 - No gear count in the packets: the top gear comes from the car data.
-- No tyre loads or forces decoded (the bridge forwards wheelLoad, fx, fy): no per-wheel grip use.
 - Position only since the 2026-09-27 bridge fix: older captures cannot place the car, so discipline by topology was unknown on them.
 - The full pace-note list is in the game files but not shipped (86e3faftn).
+- Tyre loads, forces and slip are decoded (Sample.tyre_load, tyre_fx, tyre_fy, tyre_slip) but not in the trace yet: per-wheel grip use waits for a trace format change.
+- No wheel speed in the trace: tyreRadius is 0; wheel_rot x the learnt or game radius gives it (launch spin, exit spin, lock-ups).
 
 <!-- end of generated -->
 
