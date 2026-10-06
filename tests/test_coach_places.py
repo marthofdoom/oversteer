@@ -4,6 +4,8 @@ the same corner from run to run, the limiter held on a straight against the refe
 select() does with praise and technique lines. Runs here are written as the store holds them (corners, events,
 metrics, a trace where the rule reads one)."""
 
+import re
+
 from oversteer import coach, coach_context as cc
 from oversteer.coach import Coach, DAY, Tip, select
 from oversteer.telemetry_store import TRACE_CHANNELS
@@ -97,7 +99,10 @@ def test_each_cause_has_its_own_action(tmp_path):
         ({'throttle_on_t': 1.1, 'exit_speed': 20.0 - 4 * KMH},
          'Throttle sooner, as soon as the nose points out: your best run was 0.6 s earlier.'),
         ({'min_speed': 10.0 - 6 * KMH, 'counter_steer': 0.3, 'exit_speed': 20.0 - 1 * KMH},
-         'Rotate the car less on the way in'),
+         'Keep the car straighter through it, as your best run did.'),
+        # braked later with a lower minimum is not "overdriven": it is a lower minimum (and says no "brake earlier")
+        ({'brake_d': 30.0, 'min_speed': 10.0 - 5 * KMH, 'exit_speed': 20.0 - 6 * KMH},
+         'Carry more speed through it: your best run was 5 km/h quicker at the slowest point.'),
         ({'brake_d': None, 'min_speed': 10.0 - 9 * KMH, 'exit_speed': 20.0 - 8 * KMH},
          'Carry more speed through it: your best run was 9 km/h quicker at the slowest point.'),
     ]
@@ -113,13 +118,16 @@ def test_a_section_with_no_difference_in_the_numbers_says_where_the_time_went(tm
     two_runs(h, second={'loss': (0.1, 0.6)})
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert 'were within a few km/h and metres of it' in tip.text
-    assert tip.text.endswith('The time went after the slowest point: look at how early you were back on the throttle '
-                             'and the line you took out of it.')
+    assert tip.text.endswith('The time went after the slowest point: look at how early you were back on the throttle.')
     h = Stage(tmp_path / 'u.db')
     two_runs(h, second={'loss': (0.7, 0.1)})
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
-    assert tip.text.endswith('The time went before the slowest point: look at where you braked and the line you '
-                             'took in.')
+    assert tip.text.endswith('The time went before the slowest point: look at where you braked.')
+    h = Stage(tmp_path / 'v.db')
+    two_runs(h, second={'loss': (0.3, 0.3)})
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    assert tip.text.endswith('The time went across the whole section.')
+    assert 'line' not in tip.text.split('): ', 1)[1]
 
 
 def test_the_start_is_not_a_corner(tmp_path):
@@ -644,6 +652,38 @@ def test_the_best_sections_put_together_and_the_section_where_this_run_was_best(
     a = drive_traced(h, v2=14.0, v3=10.0)
     drive_traced(h, v2=10.0, v3=16.0, reference=a)
     assert not h.by_id('corner.possible')
+
+
+def test_a_section_with_both_traces_is_diagnosed_on_the_same_metres(tmp_path):
+    """The reference's and the run's traces say what happened in the corner, not the stored numbers: the same braking
+    point and more speed taken off is over-slowing, said as that, with the one fix."""
+    h = Stage(tmp_path / 't.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=10.0, reference=a)
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    ref = 'Test car, {:.1f} s on {}'.format(a[0][-1][C['t']], coach._date(h.t - DAY))
+    assert tip.text == ('On Test Stage, the 2 right at 1.1 km, 1.3 s behind your best clean run here ({}): you braked at the '
+                        'same place, took 64 km/h off on the brake where your best run took 50 km/h and were 14 km/h slower '
+                        'at the slowest point (36 against 51). Keep that braking point and brake less: carry 14 km/h '
+                        'more through the slowest point.'.format(ref))
+    assert tip.evidence[0] == '0.7 s of it before the slowest point and 0.5 s after.'
+    assert tip.evidence[1].startswith('Measured on the same metres as your best run: ')
+    assert not re.search(r'\bline\b|flick|handbrake', tip.text)
+
+
+def test_a_section_whose_reference_trace_is_gone_falls_back_to_the_stored_numbers(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    tr, corners = three_corner_run(14.0, 10.0)
+    sections = cc.build_sections(tr, corners)
+    cc.describe_corners(tr, corners, sections)
+    cc.mark_off(corners, [])
+    h.drive(corners, result_time=tr[-1][C['t']], course=tr[-1][C['distance']])                 # no trace: evicted
+    drive_traced(h, v2=10.0, v3=10.0, reference=(tr, corners))
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
+    assert tip.text.endswith('you were 14 km/h slower at the slowest point and left 16 km/h slower. Brake at the same '
+                             'place and carry more speed in: your best run was 14 km/h quicker through the middle.')
+    assert 'Measured on the same metres' not in ' '.join(tip.evidence)
+    assert not re.search(r'\bline\b|flick|handbrake', tip.text)
 
 
 def test_a_run_through_the_real_path_is_coached_section_by_section(tmp_path):

@@ -1,6 +1,7 @@
 # Corner diagnosis: from "what differed" to "what to do"
 
-Status: design, validated on marth's runs; not implemented in the app. The prototype is `research/diagnosis/`.
+Status: implemented (`oversteer/coach_diagnosis.py`, wired in `coach._stage_place` and `coach._potential_lead`); validated on marth's runs.
+The prototype is `research/diagnosis/`; its validation on the app's module gives the same distribution as section 6.
 Branch point: master at v0.15.0 (a48ff6f).
 
 ## 1. The bug, and what it shows

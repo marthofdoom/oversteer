@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Coaching
+- The coach diagnoses each corner from the braking, the speeds and the grip
+  together, measured on the same metres of road as your best run, and says one
+  thing to do. Over-slowing is now called as such ("Brake less there, or not at
+  all, as your best run did: carry 24 km/h more through the slowest point. About
+  26 % of the grip was left there."), and so are a slow run-up (the time was
+  lost before the braking: look at the corner before), a slide, a braking point
+  that was too early, a braking after the slowest point, a late throttle,
+  coasting and a gear. A corner it cannot explain says what it measured and
+  leaves it there.
+- The old braking advice is gone. "Brake 41 m earlier" came from measuring
+  each run's braking back from its own slowest point, so a slowest point that
+  moved read as a braking point that moved; the braking point is now where the
+  brake went down on the road. The top 3 places say "brake later" or "full
+  throttle sooner" only where your own braking or throttle there agrees, and a
+  gear shorter than your fastest pass is quoted only when it cost time on the
+  exit of that place. Nothing is said about the line, a flick or the handbrake
+  unless it was measured.
+
 ## 0.15.0 — 2026-10-06
 
 ### Read this first
