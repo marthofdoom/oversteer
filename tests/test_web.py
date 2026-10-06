@@ -97,6 +97,9 @@ def test_the_page_and_its_headers(served):
     assert 'captureStream' in page and 'MediaRecorder' in page
     for external in ('src="http', "src='http", 'href="http', '@import', 'url('):
         assert external not in page
+    # The sub-tabs, the splits row and no inline style attributes (the CSP allows <style> by hash only)
+    assert 'data-tab="coaching"' in page and 'data-tab="telemetry"' in page and 'id="splits"' in page
+    assert ' style="' not in page and "onclick=" not in page
     for name, value in (('X-Content-Type-Options', 'nosniff'), ('Referrer-Policy', 'no-referrer'),
                         ('Cache-Control', 'no-store')):
         assert response.getheader(name) == value

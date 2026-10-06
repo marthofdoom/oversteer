@@ -206,6 +206,56 @@ def splits_lines(found):
     return summary, rows
 
 
+def split_tone(last, delta, gold):
+    """LiveSplit's colour rule for a split (the web page's splitTone): 'gold' for a best split, else 'ahead'
+    (level with the best), 'behind' (the lighter red, under half a second lost) or 'behind-lose' (more), 'none'
+    when not run. The comparison is each split's best: coach.splits() has no PB per split yet."""
+    if last is None or delta is None:
+        return 'none'
+    if gold:
+        return 'gold'
+    if delta <= 0.05:
+        return 'ahead'
+    return 'behind-lose' if delta > 0.5 else 'behind'
+
+
+def splits_row(found):
+    """coach.splits() for the splits row of the Coaching and Telemetry views, or None without splits: a dict
+    with `stage` (short name), `name`, `pb`, `sob`, `gain`, `last`, `delta` (last less PB, None unless the last
+    run finished), `tones` (one per split, for the ribbon), `rows` ((name, last, delta, best, tone) per split,
+    the stage total and the sum of best at the end), `sectors` ((name, last, delta, tone) per game sector,
+    the last time marked with a leading '≈' where the position is estimated; [] without) and `estimated`."""
+    if not found:
+        return None
+    pb, last = found.get('best'), found.get('last')
+    tones, rows = [], []
+    for n, r in enumerate(found['splits'], 1):
+        tone = split_tone(r['last'], r['delta'], r['gold'])
+        tones.append(tone)
+        name = r['name'][4:] if r['name'].startswith('the ') else r['name']
+        rows.append(('{}. {}{}'.format(n, name, _(" (finish)") if r['finish'] else ''),
+                     '–' if r['last'] is None else '{:.1f}'.format(r['last']),
+                     '–' if r['last'] is None else ('\u2605 ' if r['gold'] else '') + signed(r['delta']),
+                     '–' if r['best'] is None else '{:.1f}'.format(r['best']), tone))
+    delta = None if last is None or pb is None else last - pb
+    rows.append((_("Stage"), clock(last), '–' if delta is None else signed(delta), clock(pb),
+                 'none' if delta is None else 'ahead' if delta <= 0.05 else 'behind-lose'))
+    gain = found.get('gain')
+    rows.append((_("Sum of best"), '', '' if gain is None else '\u2212{:.1f}'.format(gain), clock(found.get('possible')), 'gold'))
+    sectors, estimated = [], False
+    for r in found.get('sectors') or []:
+        low = r.get('confidence') == 'low'
+        estimated = estimated or low
+        mark = '\u2248' if low else ''
+        text = '–' if r['last'] is None else mark + '{:.1f}'.format(r['last'])
+        sectors.append((r['name'], text, ('\u2605 ' if r['gold'] else '') + signed(r['delta']) if r['last'] is not None
+                        else _("best {}").format(mark + '{:.1f}'.format(r['best'])),
+                        split_tone(r['last'], r['delta'], r['gold'])))
+    return {'stage': found['name'].split(' - ')[0], 'name': found['name'], 'pb': pb, 'sob': found.get('possible'),
+            'gain': gain, 'last': last, 'delta': delta, 'tones': tones, 'rows': rows, 'sectors': sectors,
+            'estimated': estimated, 'runs': found.get('runs')}
+
+
 def tuning_lines(tune, notes):
     """The current tune (ratios, what changed, the measured extras or why
     they are missing) and the tuning notes."""

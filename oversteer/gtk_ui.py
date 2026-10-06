@@ -9,7 +9,8 @@ from . import hotkeys
 from . import steam_options
 from .telemetry import DEFAULT_PORT
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
-from .telemetry_view import DISCIPLINES, SURFACES, METHODS, coaching_items, live_status, splits_lines, shift_summary, shift_table
+from . import telemetry_plot
+from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, splits_row, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -1045,19 +1046,26 @@ class GtkUi:
         return self._setting_row(text, subtitle, tooltip, tuple(extra) + (switch,), status), switch
 
     def _build_telemetry_page(self):
-        """The Telemetry tab (docs/telemetry-coaching.md, section 12), in
-        two views: "Car and coaching" (the car, the telemetry arriving now,
-        its learnt shift points, coaching, sessions and setup) and
-        "Settings" (receiving telemetry, the rev lights, moved from Tools,
-        the web page and recording), in framed lists like the other tabs."""
+        """The Telemetry tab (docs/telemetry-coaching.md, section 12; the
+        sub-tabs of docs/telemetry-ui-design.md), in three views:
+        "Coaching" (the car, the telemetry arriving now, its learnt shift
+        points, coaching, sessions and setup), "Telemetry" (the live dash)
+        and "Settings" (receiving telemetry, the rev lights, moved from
+        Tools, the web page and recording), in framed lists like the other
+        tabs. The splits row sits above Coaching and Telemetry."""
         self._telemetry_history = None
         self._telemetry_advice_lines = []
         self._telemetry_rows = None
         self._telemetry_coaching_shown = None
+        self._splits_shown = None
+        self._dash = None
+        self._dash_last = None
+        self._dash_last_at = 0.0
 
         stack = Gtk.Stack()
         stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        stack.add_titled(self._telemetry_overview(), 'overview', _("Car and coaching"))
+        stack.add_titled(self._telemetry_overview(), 'coaching', _("Coaching"))
+        stack.add_titled(self._telemetry_live_view(), 'telemetry', _("Telemetry"))
         stack.add_titled(self._telemetry_settings_view(), 'settings', _("Settings"))
         self.telemetry_stack = stack
         switcher = Gtk.StackSwitcher(stack=stack, halign=Gtk.Align.CENTER)
@@ -1066,7 +1074,10 @@ class GtkUi:
         page.set_margin_top(12)
         switcher.set_margin_bottom(4)
         page.pack_start(switcher, False, False, 0)
+        page.pack_start(self._build_splits_row(), False, False, 0)
         page.pack_start(stack, True, True, 0)
+        # The splits are about the stage, not about the settings
+        stack.connect('notify::visible-child-name', lambda s, p: self._show_splits_row())
 
         self.main_notebook.insert_page(page, Gtk.Label(label=_("Telemetry")), self.TELEMETRY_TAB_POSITION)
         self.main_notebook.connect('switch-page', lambda notebook, child, index:
@@ -1189,6 +1200,66 @@ class GtkUi:
         self.telemetry_tuning = self._list()
         self._section(page, _("Setup"), self.telemetry_tuning)
         return self._scrolled(page)
+
+    def _telemetry_live_view(self):
+        """The Telemetry view: the live dash (gear, speed, revs, the shift lights, the way through the stage), on
+        the web page's visual system; the run analysis is not built yet and says so."""
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        page.set_border_width(12)
+        page.get_style_context().add_class('telemetry-page')
+        self.telemetry_dash = Gtk.DrawingArea()
+        self.telemetry_dash.set_size_request(-1, 240)
+        self.telemetry_dash.set_halign(Gtk.Align.FILL)
+        self.telemetry_dash.connect('draw', self._draw_dash)
+        page.pack_start(self.telemetry_dash, False, False, 0)
+        soon = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        soon.pack_start(self._heading(_("Run analysis"), _("Not built yet.")), False, False, 0)
+        text = Gtk.Label(label=_("Traces against your best run, the delta to it, the stage map and where the time "
+                                 "went will appear here once they are built. Nothing here is made up in the "
+                                 "meantime."), xalign=0)
+        text.set_line_wrap(True)
+        text.set_max_width_chars(80)
+        text.get_style_context().add_class('dim-label')
+        soon.pack_start(text, False, False, 0)
+        page.pack_start(soon, False, False, 0)
+        return self._scrolled(page)
+
+    DASH_PAUSE = 30.0                   # s a pause keeps the last values (dimmed) before the dash empties
+
+    def _draw_dash(self, area, cr):
+        telemetry_plot.dash(cr, area.get_allocated_width(), area.get_allocated_height(), self._dash, flash=True)
+        return False
+
+    def _set_dash(self, live):
+        """`live`: web.live_dict() of the sample arriving now, or None. A pause shows the last values dimmed."""
+        import time
+        now = time.monotonic()
+        data = None
+        if live and live.get('rpm') is not None:
+            def num(x):
+                return x if isinstance(x, (int, float)) and math.isfinite(x) else None
+            km = ''
+            distance, length = num(live.get('distance')), num(live.get('stage_length'))
+            if distance is not None and length:
+                km = _("{:.1f} / {:.1f} km").format(max(0.0, distance) / 1000.0, length / 1000.0)
+            elif distance is not None:
+                km = _("{:.1f} km").format(max(0.0, distance) / 1000.0)
+            share = num(live.get('progress'))
+            if share is None and distance is not None and length:
+                share = distance / length
+            speed = num(live.get('speed'))
+            data = {'gear': live.get('gear'), 'speed': None if speed is None else speed * 3.6, 'rpm': num(live['rpm']) or 0.0,
+                    'shift_rpm': num(live.get('shift_rpm')), 'learnt': live.get('learnt'), 'limiter': num(live.get('limiter')),
+                    'progress': share, 'km': km, 'title': _("Stage") if km else _("Driving")}
+            self._dash_last, self._dash_last_at = data, now
+        elif self._dash_last is not None and now - self._dash_last_at < self.DASH_PAUSE:
+            data = dict(self._dash_last, dim=True, note=_("paused {:.0f} s").format(now - self._dash_last_at))
+        else:
+            self._dash_last = None
+            data = {'gear': None, 'speed': None, 'rpm': 0.0, 'dim': True, 'title': _("No telemetry arriving")}
+        if data != self._dash:
+            self._dash = data
+            self.telemetry_dash.queue_draw()
 
     def _telemetry_settings_view(self):
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
@@ -1408,14 +1479,12 @@ class GtkUi:
         lines behind an expander at the end."""
         tips = self._telemetry_history['tips'] if self._telemetry_history else []
         items = coaching_items(tips, self._telemetry_advice_lines)
-        splits = splits_lines(self._telemetry_history.get('splits') if self._telemetry_history else None)
-        if (items, splits) == self._telemetry_coaching_shown:
+        self._show_splits()
+        if items == self._telemetry_coaching_shown:
             return                          # an open expander stays open
-        self._telemetry_coaching_shown = (items, splits)
+        self._telemetry_coaching_shown = items
         listbox = self.telemetry_coaching
         self._clear_rows(listbox)
-        if splits[0]:
-            self._splits_row(listbox, *splits)
         shown = [item for item in items if item[2] != 'still']
         quiet = [item for item in items if item[2] == 'still']
         if not shown:
@@ -1450,31 +1519,120 @@ class GtkUi:
             listbox.add(row)
         listbox.show_all()
 
-    SPLIT_COLOURS = {'gold': '#d4a017', 'good': '#2e9e5b', 'bad': '#d03a3a'}
+    SPLIT_TONES = {'gold': 'telemetry-split-gold', 'ahead': 'telemetry-split-ahead',
+                   'behind': 'telemetry-split-behind', 'behind-lose': 'telemetry-split-lose', 'none': 'dim-label'}
 
-    def _splits_row(self, listbox, summary, rows):
-        """The split summary line, a LiveSplit-style table (split, last, best, difference) behind it."""
-        row = Gtk.ListBoxRow(activatable=False, selectable=False)
-        expander = Gtk.Expander(label=summary)
-        expander.set_margin_top(8)
-        expander.set_margin_bottom(8)
+    def _build_splits_row(self):
+        """The splits row above Coaching and Telemetry (docs/telemetry-ui-design.md, 4.4): the stage, PB, sum of
+        best and the last run on one line, a ribbon of the splits in LiveSplit's colours (the game's sectors as
+        wider cells at the end), and a click opens the table (split, last, difference, best; the sectors under it)."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_bottom(8)
+        button = Gtk.Button()
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.splits_label = Gtk.Label(xalign=0)
+        self.splits_label.set_ellipsize(3)          # Pango.EllipsizeMode.END
+        inner.pack_start(self.splits_label, False, False, 0)
+        self.splits_ribbon = Gtk.DrawingArea()
+        self.splits_ribbon.set_size_request(-1, 10)
+        self.splits_ribbon.connect('draw', self._draw_ribbon)
+        inner.pack_start(self.splits_ribbon, False, False, 0)
+        button.add(inner)
+        button.set_tooltip_text(_("Show or hide the splits"))
+        box.pack_start(button, False, False, 0)
+        revealer = Gtk.Revealer()
+        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        revealer.set_reveal_child(True)
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(40)
+        scrolled.set_max_content_height(220)
+        scrolled.set_propagate_natural_height(True)
+        self.splits_body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.splits_body.set_margin_top(6)
+        scrolled.add(self.splits_body)
+        revealer.add(scrolled)
+        box.pack_start(revealer, False, False, 0)
+        button.connect('clicked', lambda w: revealer.set_reveal_child(not revealer.get_reveal_child()))
+        self.splits_revealer = revealer
+        self.splits_box = box
+        self._splits_tones = ([], [])
+        box.show_all()
+        box.set_no_show_all(True)               # shown by _show_splits_row() when there are splits
+        return box
+
+    def _draw_ribbon(self, area, cr):
+        telemetry_plot.ribbon(cr, area.get_allocated_width(), area.get_allocated_height(), *self._splits_tones)
+        return False
+
+    def _show_splits_row(self):
+        visible = bool(self._splits_shown) and self.telemetry_stack.get_visible_child_name() != 'settings'
+        self.splits_box.set_visible(visible)
+
+    def _show_splits(self):
+        found = splits_row(self._telemetry_history.get('splits') if self._telemetry_history else None)
+        if found == self._splits_shown:
+            return                          # an open table stays as it is
+        self._splits_shown = found
+        for child in self.splits_body.get_children():
+            child.destroy()
+        if found is None:
+            self._splits_tones = ([], [])
+            self._show_splits_row()
+            return
+        self._splits_tones = (found['tones'], [tone for _n, _t, _d, tone in found['sectors']])
+        summary = '<b>{}</b>   PB <tt><b>{}</b></tt>   {} <tt><b>{}</b></tt>'.format(
+            GLib.markup_escape_text(found['stage']), clock(found['pb']), _("SoB"), clock(found['sob']))
+        if found['last'] is not None and found['delta'] is not None:
+            tone = 'gold' if found['delta'] <= 0.05 else 'behind-lose'
+            summary += '   {} <tt>{}</tt> <span foreground="{}"><tt><b>{}</b></tt></span>'.format(
+                _("Last"), clock(found['last']), telemetry_plot.TONES[tone],
+                _("PB") if found['delta'] <= 0.05 else signed(found['delta']))
+        self.splits_label.set_markup(summary)
         grid = Gtk.Grid(column_spacing=16, row_spacing=4)
-        grid.set_margin_top(6)
-        for col, head in enumerate((_("Split"), _("Last"), _("Best"), _("Difference"))):
+        for col, head in enumerate((_("Split"), _("Last"), _("\u0394 best"), _("Best"))):
             label = Gtk.Label(xalign=0 if col == 0 else 1)
             label.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(head)))
+            label.get_style_context().add_class('telemetry-header')
             grid.attach(label, col, 0, 1, 1)
-        for n, (name, last, best, delta, tone) in enumerate(rows, 1):
-            for col, text in enumerate((name, last, best, delta)):
+        for n, row in enumerate(found['rows'], 1):
+            tone = row[4]
+            for col, value in enumerate(row[:4]):
                 label = Gtk.Label(xalign=0 if col == 0 else 1)
-                markup = '<tt>{}</tt>'.format(GLib.markup_escape_text(text)) if col else GLib.markup_escape_text(text)
-                if col == 3 and tone in self.SPLIT_COLOURS:
-                    markup = '<span foreground="{}">{}</span>'.format(self.SPLIT_COLOURS[tone], markup)
+                markup = GLib.markup_escape_text(value)
+                if col:
+                    markup = '<span font_features="tnum"><tt>{}</tt></span>'.format(markup)
+                if col == 2 and tone in telemetry_plot.TONES and tone != 'none':
+                    markup = '<span foreground="{}">{}</span>'.format(telemetry_plot.TONES[tone], markup)
+                elif n > len(found['rows']) - 2:
+                    markup = '<b>{}</b>'.format(markup)
                 label.set_markup(markup)
                 grid.attach(label, col, n, 1, 1)
-        expander.add(grid)
-        row.add(expander)
-        listbox.add(row)
+        self.splits_body.pack_start(grid, False, False, 0)
+        if found['sectors']:
+            sectors = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+            for name, last, delta, tone in found['sectors']:
+                label = Gtk.Label(xalign=0)
+                colour = telemetry_plot.TONES[tone] if tone != 'none' else telemetry_plot.DIM
+                label.set_markup('<b>{}</b>  <tt>{}</tt>  <span foreground="{}"><tt>{}</tt></span>'.format(
+                    GLib.markup_escape_text(name), GLib.markup_escape_text(last), colour, GLib.markup_escape_text(delta)))
+                sectors.pack_start(label, False, False, 0)
+            self.splits_body.pack_start(sectors, False, False, 0)
+            if found['estimated']:
+                note = Gtk.Label(label=_("\u2248 Sector positions estimated from the game's sector lengths."), xalign=0)
+                note.get_style_context().add_class('dim-label')
+                self.splits_body.pack_start(note, False, False, 0)
+        note = Gtk.Label(label=_("Gold: your last run set that split's best. Green: level with the best; red: behind it, "
+                                 "the darker the more it lost. The finish split includes the slow-down to the stop."),
+                         xalign=0)
+        note.set_line_wrap(True)
+        note.get_style_context().add_class('dim-label')
+        self.splits_body.pack_start(note, False, False, 0)
+        self.splits_body.show_all()
+        self._show_splits_row()
 
     LABEL_CHOICES = (
         ('discipline', _("Discipline"), ('rally-stage', 'hillclimb', 'circuit', 'rallycross', 'drift', 'free-roam',
@@ -1611,11 +1769,13 @@ class GtkUi:
 
     LIVE_STATES = ('off', 'waiting', 'live')
 
-    def set_telemetry_view(self, live, snapshot):
+    def set_telemetry_view(self, live, snapshot, dash=None):
         """`live`: (state, markup) of the telemetry arriving now
         (telemetry_view.live_status()). `snapshot`: the shown car's
-        learner snapshot, or None."""
+        learner snapshot, or None. `dash`: telemetry_web.live_dict() for
+        the dash of the Telemetry view."""
         state, markup = live
+        self._set_dash(dash)
         self.telemetry_live.set_markup(markup)
         context = self.telemetry_live_dot.get_style_context()
         for name in self.LIVE_STATES:

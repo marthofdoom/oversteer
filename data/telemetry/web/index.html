@@ -5,220 +5,388 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#0b0d10">
+<meta name="theme-color" content="#0a0c0f">
 <title>Oversteer telemetry</title>
 <style>
+/* The visual system of docs/telemetry-ui-design.md (section 4): tokens, type and the LiveSplit colours as the
+   style anchor docs/design/telemetry-ui/mobile-telemetry.html has them. Dark only. */
 :root {
-  --bg: #0b0d10; --card: #14171c; --raised: #1b1f26; --text: #f2f4f7; --dim: #98a1ac; --faint: #5d6570;
-  --line: #262b33; --accent: #4c9dff; --good: #3ddc84; --warn: #ffb020; --bad: #ff4d4d; --gold: #ffd23f; --off: #242933;
+  --bg: #0a0c0f; --panel: #11151a; --raised: #171c22; --line: #232a33; --grid: #1a2028;
+  --text: #eef2f6; --dim: #8c96a3; --faint: #56606c; --accent: #4c9dff;
+  --speed: #4cc3ff; --thr: #2fd27a; --brk: #ff4d4d; --steer: #b58cff; --rpm: #ffb020; --gear: #e8edf2;
+  --ref: #8c96a3; --slower: #ff5a4e; --faster: #2fd27a; --neutral: #3a424d;
+  --ls-ahead-gain: #29cc54; --ls-ahead-lose: #70cc89; --ls-behind-gain: #cc7870; --ls-behind-lose: #cc3729;
+  --ls-gold: #d8af1f; --ls-pb: #16a6ff; --ls-none: #2a313a;
+  --led-off: #1f252d; --led-g: #2fd27a; --led-y: #ffc21a; --led-r: #ff4d4d; --led-b: #4c9dff;
+  --warn: #ffb020; --bad: #ff4d4d; --good: #2fd27a;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
+  --top-h: 48px; --nav-h: 58px; --rail-w: 64px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-body {
-  margin: 0; background: var(--bg); color: var(--text); overflow-x: hidden;
-  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Cantarell, sans-serif;
-  font-variant-numeric: tabular-nums;
-}
-button { font: inherit; color: inherit; }
-main { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.35 var(--sans); overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+[hidden] { display: none !important; }
+.num, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; }
+.lbl { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* The bar at the top: connection and screen, always in view */
-.top {
-  position: sticky; top: 0; z-index: 2; background: var(--bg);
-  display: flex; align-items: center; gap: 8px; padding: 10px 0 8px;
-  padding-top: max(10px, env(safe-area-inset-top));
-}
-.brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; margin-right: auto; white-space: nowrap; flex: none; }
-.chip {
-  display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px; flex: 0 1 auto; min-width: 0;
-  border: 1px solid var(--line); border-radius: 16px; background: var(--card);
-  font-size: 13px; line-height: 1; color: var(--dim); white-space: nowrap;
-}
-.chip > span:last-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-@media (max-width: 420px) { .brand { display: none; } #conn { margin-right: auto; } }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
-.chip.st-live .dot { background: var(--good); }
-.chip.st-waiting .dot { background: var(--warn); }
-.chip.st-down .dot { background: var(--bad); }
-#wake { cursor: pointer; flex-shrink: 0; }
-#wake.tap { color: var(--text); border-color: var(--accent); }
-#wake.on { color: var(--dim); }
-#wake video { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--faint); object-fit: cover; }
-#wake .sun { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--faint); flex: none; }
-#wake.on .sun { border-color: var(--good); background: var(--good); }
+/* -- the top bar: connection, sub-tab title, keep-awake -- */
+.top { position: sticky; top: 0; z-index: 5; background: var(--bg);
+  padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left)); }
+.top-row { height: var(--top-h); display: flex; align-items: center; gap: 8px; }
+.conn { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 9px; border: 1px solid var(--line);
+  border-radius: 15px; font-size: 12.5px; color: var(--dim); white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.conn > span:last-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.conn.live .dot { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+.conn.stale .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent); }
+.conn.down .dot { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent); }
+.title { font-weight: 700; font-size: 15px; letter-spacing: .02em; margin-right: auto; white-space: nowrap; }
+.title .brand { display: none; }
+.icon-btn { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--dim); flex: none; }
+.icon-btn:active { background: var(--raised); }
+#wake .sun { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--faint); }
+#wake.on .sun { border-color: var(--good); background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+#wake.tap { color: var(--text); }
 #wake.tap .sun { border-color: var(--accent); }
+#wake.off .sun { border-color: var(--faint); background: linear-gradient(135deg, transparent 42%, var(--faint) 42%, var(--faint) 58%, transparent 58%); }
+#wake video { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; background: var(--faint); }
+.tabs { display: none; }
 
-/* The splits: a chip in the top bar (no new row), its table dropping over the page below it */
-#splits { flex: 1 1 0; cursor: pointer; justify-content: space-between; gap: 8px; color: var(--text); }
-#splits[hidden] { display: none; }
-#splits .sname { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--dim); }
-#splits .snums { flex: none; }
-#splits .snums i { font-style: normal; font-weight: 700; }
-#splits[aria-expanded="true"] { border-color: var(--accent); }
-#splits-panel { position: absolute; left: 0; right: 0; top: 100%; max-height: 70vh; overflow-y: auto; z-index: 3;
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px 10px 8px; }
-#splits-panel[hidden] { display: none; }
-#splits-panel table { font-size: 14px; }
-#splits-panel th, #splits-panel td { padding: 6px 4px; font-size: 14px; }
-#splits-panel td:first-child { white-space: normal; }
-#splits-panel tr.fin td:first-child { color: var(--dim); }
-#splits-panel p { margin: 6px 0 0; color: var(--dim); font-size: 12px; }
-.sgold { color: var(--gold); } .sgood { color: var(--good); } .sbad { color: var(--bad); }
+/* -- the splits row: one line of numbers and a ribbon of the splits, 40 px; it opens the sheet -- */
+.splits { display: block; width: 100%; min-height: 40px; text-align: left; padding: 2px 0 7px; border-bottom: 1px solid var(--line); }
+.splits .l1 { display: flex; align-items: baseline; gap: 10px; height: 22px; white-space: nowrap; overflow: hidden; }
+.splits .stg { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.splits .kv { font-size: 13px; flex: none; }
+.splits .kv b { font-weight: 600; }
+.splits .kv i { font-style: normal; color: var(--dim); font-size: 10.5px; letter-spacing: .06em; margin-right: 4px; text-transform: uppercase; }
+.splits .now { margin-left: auto; font-weight: 700; }
+.splits[aria-expanded="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
+.ribbon { display: flex; gap: 1.5px; height: 7px; margin-top: 3px; }
+.ribbon i { flex: 1 1 0; border-radius: 1.5px; background: var(--ls-none); min-width: 0; }
+.ribbon s { flex: 0 0 5px; }
+.ribbon i.sec { flex: 0 0 16px; }
+.ls-gold { background: var(--ls-gold) !important; } .ls-ahead-gain { background: var(--ls-ahead-gain) !important; }
+.ls-ahead-lose { background: var(--ls-ahead-lose) !important; } .ls-behind-gain { background: var(--ls-behind-gain) !important; }
+.ls-behind-lose { background: var(--ls-behind-lose) !important; }
+.t-gold { color: var(--ls-gold); } .t-ahead-gain { color: var(--ls-ahead-gain); } .t-ahead-lose { color: var(--ls-ahead-lose); }
+.t-behind-gain { color: var(--ls-behind-gain); } .t-behind-lose { color: var(--ls-behind-lose); } .t-none { color: var(--dim); }
+html { scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+.sheet { padding: 6px 0 10px; border-bottom: 1px solid var(--line); max-height: 60vh; overflow: auto; }
 
-/* Live: the numbers to read at arm's length */
-.live {
-  display: grid; gap: 10px 16px; align-items: center;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-areas: "lights lights" "gear speed" "gear rpm" "shift shift" "stage stage";
-  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px;
-}
-.lights { grid-area: lights; display: grid; grid-template-columns: repeat(15, 1fr); gap: 4px; height: 26px; }
-.lights i { border-radius: 4px; background: var(--off); transition: background .08s; }
-.lights i.g { background: var(--good); } .lights i.y { background: var(--warn); } .lights i.r { background: var(--bad); }
-.lights.flash i { background: var(--accent); animation: flash .25s steps(2) infinite; }
-@keyframes flash { 50% { background: var(--off); } }
-.gear {
-  grid-area: gear; font-size: clamp(110px, 34vw, 230px); font-weight: 800; line-height: .9;
-  text-align: center; letter-spacing: -.04em;
-}
-.gear.hot { color: var(--bad); }
-.num { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; }
-.num b { font-size: clamp(40px, 12vw, 84px); font-weight: 700; line-height: 1; }
-.num span { color: var(--dim); font-size: 14px; }
-.speed { grid-area: speed; } .rpm { grid-area: rpm; }
-.rpm b { font-size: clamp(30px, 9vw, 60px); }
-.shift { grid-area: shift; display: flex; align-items: baseline; gap: 4px 12px;
-  border-top: 1px solid var(--line); padding-top: 10px; flex-wrap: wrap; }
-.shift .k { color: var(--dim); font-size: 14px; }
-.shift b { font-size: clamp(24px, 7vw, 40px); }
-.shift .src { color: var(--dim); font-size: 14px; margin-left: auto; }
-.stage { grid-area: stage; }
-.stage .name { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; }
+/* -- the page -- */
+main { padding: 10px max(12px, env(safe-area-inset-right)) calc(var(--nav-h) + env(safe-area-inset-bottom) + 24px) max(12px, env(safe-area-inset-left)); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; min-width: 0; }
+.panel-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; min-height: 16px; }
+.panel-h .lbl:last-child { text-align: right; }
+.panel-h select { margin-left: auto; }
+.view[hidden] { display: none; }
+.view.fade { animation: fade .14s ease-out; }
+@keyframes fade { from { opacity: .3; } }
+select { font: inherit; font-size: 15px; height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--raised); color: var(--text); max-width: 100%; min-width: 0; flex: 1 1 160px; }
+.pos-slower { color: var(--slower); } .pos-faster { color: var(--faster); }
+.empty { color: var(--dim); }
+.dimmed { opacity: .38; filter: saturate(.4); transition: opacity .3s; }
+.banner { display: none; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 10px; margin-bottom: 10px; font-size: 13.5px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.banner.show { display: flex; }
+.banner.bad { border-color: color-mix(in srgb, var(--bad) 50%, transparent); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.banner b { font-weight: 700; }
+
+/* -- Telemetry: the live dash -- */
+.leds { display: grid; grid-template-columns: repeat(15, 1fr); gap: 3px; height: 16px; margin-bottom: 8px; }
+.leds i { border-radius: 3px; background: var(--led-off); }
+.leds i.g { background: var(--led-g); } .leds i.y { background: var(--led-y); } .leds i.r { background: var(--led-r); }
+.leds.flash i { background: var(--led-b); animation: blink .2s steps(2) infinite; }
+@keyframes blink { 50% { background: var(--led-off); } }
+.dash { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 0 12px; align-items: center; }
+.gear { font: 800 clamp(104px, 31vw, 150px)/.86 var(--mono); text-align: center; letter-spacing: -.06em; }
+.gear.hot { color: var(--led-r); }
+.readouts { display: grid; gap: 6px; }
+.big { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px; }
+.big b { font: 700 clamp(46px, 14vw, 64px)/1 var(--mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums slashed-zero; }
+.big span { color: var(--dim); font-size: 12px; width: 34px; }
+.mid b { font-size: clamp(26px, 8vw, 34px); font-weight: 600; }
+.shiftat { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0 6px; font-size: 12px; color: var(--dim); }
+.shiftat b { color: var(--text); font-weight: 600; }
+.stage { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.stage .name { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
 .stage .name span:first-child { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stage .name span:last-child { color: var(--dim); white-space: nowrap; }
-.bar { height: 6px; background: var(--off); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+.stage .name span:last-child { color: var(--dim); white-space: nowrap; font-size: 12px; }
+.bar { height: 6px; background: var(--grid); border-radius: 3px; margin-top: 8px; overflow: hidden; }
 .bar div { height: 100%; width: 0; background: var(--accent); }
-.idle { color: var(--dim); }
 .live.idle-state .gear { color: var(--faint); }
+.soon .big-line { font-size: 17px; font-weight: 600; margin: 2px 0 6px; }
+.soon p { margin: 0 0 6px; color: var(--dim); }
+.soon ul { margin: 0; padding-left: 18px; color: var(--dim); }
 
-/* Cards below */
-.cols { display: grid; gap: 14px; margin-top: 14px; }
-section.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-width: 0; }
-h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 0 0 10px; font-weight: 600; }
-.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
-.row h2 { margin: 0; }
-select { font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
-  background: var(--raised); color: var(--text); max-width: 100%; min-width: 0; flex: 1 1 180px; }
+/* -- Coaching: the last run, the debrief, shift points -- */
+.runhead { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; }
+.runhead .t { font: 700 24px/1.1 var(--mono); }
+.runhead .d { font: 700 20px/1.1 var(--mono); text-align: right; }
+.runhead .s { font-size: 12.5px; color: var(--dim); grid-column: 1 / -1; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.stats div { display: grid; gap: 2px; min-width: 0; }
+.stats b { font: 600 17px/1.2 var(--mono); }
+#trend { margin-top: 10px; }
+#trend svg { display: block; width: 100%; height: 40px; overflow: visible; }
+#trend .foot { margin: 4px 0 0; }
 ul.tips { list-style: none; margin: 0; padding: 0; }
-ul.tips li { padding: 10px 0; border-top: 1px solid var(--line); font-size: 17px; }
+ul.tips li { padding: 10px 0; border-top: 1px solid var(--line); font-size: 15px; line-height: 1.4; }
 ul.tips li:first-child { border-top: 0; padding-top: 2px; }
-.badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
-  padding: 2px 7px; border-radius: 5px; margin-right: 8px; vertical-align: 2px; border: 1px solid currentColor; }
-.k-focus { color: var(--bad); } .k-tip { color: var(--accent); } .k-praise { color: var(--good); }
-.k-still, .k-note, .k-driving, .k-technique { color: var(--dim); } .k-setup { color: var(--warn); }
-li.still { color: var(--dim); font-size: 15px; }
-details { margin-top: 6px; }
-summary { cursor: pointer; color: var(--dim); font-size: 14px; }
-details ul { margin: 4px 0 0; padding-left: 18px; color: var(--dim); font-size: 14px; }
-table { border-collapse: collapse; width: 100%; }
-th, td { text-align: right; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.badge { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  padding: 1px 6px; border-radius: 4px; margin-right: 8px; vertical-align: 1px; border: 1px solid currentColor; font-family: var(--mono); }
+.k-focus { color: var(--brk); } .k-tip { color: var(--accent); } .k-praise { color: var(--thr); }
+.k-still, .k-note, .k-driving { color: var(--dim); } .k-technique { color: var(--steer); } .k-setup { color: var(--rpm); }
+li.still { color: var(--dim); }
+details { margin-top: 2px; }
+summary { cursor: pointer; color: var(--dim); font-size: 13px; min-height: 44px; display: flex; align-items: center; }
+li details summary { min-height: 36px; }
+details ul { margin: 4px 0 8px; padding-left: 18px; color: var(--dim); font-size: 13.5px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 600; text-align: right; padding: 4px 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; padding: 0 4px; height: 40px; border-bottom: 1px solid var(--grid); font-family: var(--mono); font-variant-numeric: tabular-nums slashed-zero; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
-th { font-weight: 600; color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
-td { font-size: 17px; }
-td.best { font-weight: 700; font-size: 19px; }
-td .band { display: block; color: var(--dim); font-size: 12px; font-weight: 400; }
+td.name { font-family: var(--sans); white-space: normal; line-height: 1.2; }
+td.name small { display: block; color: var(--dim); font-size: 11px; }
+tr:last-child td { border-bottom: 0; }
+tr.fin td.name { color: var(--dim); }
+tr.sum td { border-top: 1px solid var(--line); font-weight: 700; }
+.wide { overflow-x: auto; }
+td.best { font-weight: 700; }
+td .band { display: block; color: var(--dim); font-size: 11px; font-weight: 400; }
 td.dim { color: var(--dim); }
+td.early { color: var(--slower); }
 tr.now td { background: var(--raised); }
 tr.now td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-tr:last-child td { border-bottom: 0; }
-.wide { overflow-x: auto; }
-.note { color: var(--dim); font-size: 14px; margin: 10px 0 0; }
+.m { display: none; }
+.foot { color: var(--faint); font-size: 11.5px; margin: 6px 2px 0; }
+.note { color: var(--dim); font-size: 12.5px; margin: 6px 0 0; }
+.sectors { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 6px; margin: 10px 0 2px; }
+.sectors div { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: grid; gap: 1px; min-width: 0; }
+.sectors b { font: 600 14px/1.2 var(--mono); }
+.sectors span.d { font: 12.5px/1.2 var(--mono); }
 .session { padding: 10px 0; border-top: 1px solid var(--line); }
 .session:first-child { border-top: 0; padding-top: 2px; }
 .session .when { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .session .when b { font-weight: 600; }
-.session .when span { color: var(--dim); font-size: 14px; }
-.session .facts { color: var(--dim); font-size: 14px; }
-.facts-line { color: var(--dim); font-size: 15px; margin: 0 0 8px; }
-.empty { color: var(--dim); }
-footer { color: var(--faint); font-size: 12px; margin-top: 18px; }
+.session .when span { color: var(--dim); font-size: 13px; }
+.session .facts { color: var(--dim); font-size: 13px; }
+.facts-line { color: var(--dim); font-size: 13.5px; margin: 0 0 8px; }
+.livebar { display: none; }
+.deskonly { display: none; }
+footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
 
-/* A laptop or a tablet: the live panel on the left, cards beside it */
-@media (min-width: 900px) {
-  .layout { display: grid; grid-template-columns: minmax(360px, 5fr) 7fr; gap: 14px; align-items: start; }
-  .layout > .live { position: sticky; top: 56px; }
-  .cols { margin-top: 0; }
+/* -- the sub-tabs: a bar in thumb reach on a phone; a rail on a phone on its side; tabs on a laptop -- */
+.nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.nav button { height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: var(--dim); position: relative; }
+.nav button svg { width: 22px; height: 22px; }
+.nav button[aria-selected="true"] { color: var(--text); }
+.nav button[aria-selected="true"]::before { content: ""; position: absolute; top: 0; left: 30%; right: 30%; height: 2.5px; border-radius: 0 0 2px 2px; background: var(--accent); }
+
+/* a phone on its side: the rail replaces the bottom bar, the dash beside the cards */
+@media (orientation: landscape) and (max-height: 520px) {
+  :root { --top-h: 40px; }
+  .nav { top: 0; right: auto; width: calc(var(--rail-w) + env(safe-area-inset-left)); grid-template-columns: 1fr; grid-template-rows: 1fr 1fr;
+    border-top: 0; border-right: 1px solid var(--line); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .nav button { height: auto; }
+  .nav button[aria-selected="true"]::before { top: 30%; bottom: 30%; left: 0; right: auto; width: 2.5px; height: auto; }
+  .top, main { margin-left: calc(var(--rail-w) + env(safe-area-inset-left)); }
+  .top { padding-left: 12px; }
+  main { padding-bottom: 16px; padding-left: 12px; }
+  .gear { font-size: clamp(80px, 30vh, 120px); }
+  .big b { font-size: clamp(36px, 15vh, 56px); }
+  .mid b { font-size: clamp(22px, 9vh, 30px); }
+  .cols, .tele { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 10px; align-items: start; }
+  .cols > div, .tele > div { min-width: 0; }
 }
-/* A phone on its side: gear left, numbers right, all in one screen */
-@media (orientation: landscape) and (max-height: 540px) {
-  .live {
-    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: "lights lights lights" "gear speed rpm" "gear shift shift" "stage stage stage";
-    padding: 10px 14px; gap: 6px 16px;
-  }
-  .gear { font-size: clamp(96px, 36vh, 170px); padding: 0 8px; }
-  .num b { font-size: clamp(36px, 15vh, 64px); }
-  .lights { height: 20px; }
+/* a laptop or a desktop browser: tabs in the top bar, two columns, a table that stays open */
+@media (min-width: 900px) and (min-height: 521px) {
+  :root { --top-h: 56px; }
+  body { font-size: 15px; }
+  .nav { display: none; }
+  .top { max-width: none; padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+  .top-row { max-width: 1440px; margin: 0 auto; display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; }
+  .top-row .title { margin: 0; }
+  .title .brand { display: inline; font-size: 17px; }
+  .title .tabname { display: none; }
+  .top-row .conn { grid-column: 3; grid-row: 1; justify-self: end; margin-right: 52px; }
+  #wake { grid-column: 3; grid-row: 1; justify-self: end; }
+  .tabs { display: flex; gap: 4px; grid-column: 2; grid-row: 1; }
+  .tabs button { height: 44px; padding: 0 22px; border-radius: 10px; font-weight: 600; font-size: 14px; letter-spacing: .04em; color: var(--dim); position: relative; }
+  .tabs button:hover { background: var(--panel); }
+  .tabs button[aria-selected="true"] { color: var(--text); background: var(--raised); box-shadow: inset 0 -2px 0 var(--accent); }
+  .splits { max-width: 1440px; margin-left: auto; margin-right: auto; }
+  .sheet { position: absolute; top: 100%; z-index: 4; width: min(640px, calc(100% - 48px)); left: max(24px, calc((100% - 1440px) / 2)); background: var(--panel);
+    border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; padding: 8px 16px 12px; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+  .splits { padding: 4px 0 10px; }
+  .splits .l1 { height: 26px; gap: 22px; }
+  .splits .kv { font-size: 15px; }
+  .splits .stg { font-size: 12px; }
+  .ribbon { height: 10px; margin-top: 4px; }
+  .ribbon i.sec { flex-basis: 40px; }
+  main { max-width: 1440px; margin: 0 auto; padding: 18px 24px 40px; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 0 18px; align-items: start; }
+  .tele { display: grid; grid-template-columns: minmax(380px, 460px) minmax(0, 1fr); gap: 0 18px; align-items: start; }
+  .panel { padding: 14px 16px; margin-bottom: 14px; border-radius: 12px; }
+  .gear { font-size: clamp(120px, 11vw, 170px); }
+  .big b { font-size: 56px; }
+  .mid b { font-size: 32px; }
+  .runhead .t { font-size: 32px; } .runhead .d { font-size: 24px; }
+  #trend svg { height: 72px; }
+  .m { display: table-cell; }
+  td { height: 36px; }
+  summary { min-height: 36px; }
+  .livebar { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 14px; margin-bottom: 14px; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--panel); text-align: left; font-size: 14px; }
+  .livebar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+  .livebar:hover { background: var(--raised); }
+  .livebar .go { margin-left: auto; color: var(--dim); font-size: 12.5px; }
+  .deskonly { display: block; }
+  footer { margin-top: 8px; }
 }
-@media (orientation: landscape) and (max-height: 540px) and (min-width: 900px) {
-  .layout { display: block; }
-  .layout > .live { position: static; }
-  .cols { margin-top: 14px; grid-template-columns: 1fr 1fr; }
-}
-@media (prefers-reduced-motion: reduce) { .lights.flash i { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .leds.flash i { animation: none; } .view.fade { animation: none; } }
 </style>
 </head>
 <body>
-<main>
-  <div class="top">
-    <span class="brand">Oversteer</span>
-    <span class="chip" id="conn"><span class="dot"></span><span id="status">Connecting…</span></span>
-    <button type="button" class="chip" id="splits" hidden aria-expanded="false" aria-controls="splits-panel"><span class="sname" id="splits-name"></span><span class="snums" id="splits-nums"></span></button>
-    <button type="button" class="chip" id="wake" title="Keep this screen on while the page is open"><span class="sun"></span><span id="wake-text">Screen</span></button>
-    <div id="splits-panel" hidden></div>
-  </div>
-
-  <div class="layout">
-    <section class="live idle-state" id="live" aria-label="Live">
-      <div class="lights" id="lights" aria-hidden="true"></div>
-      <div class="gear" id="gear">–</div>
-      <div class="num speed"><b id="speed">–</b><span>km/h</span></div>
-      <div class="num rpm"><b id="rpm">–</b><span>rpm</span></div>
-      <div class="shift"><span class="k">Change up at</span><b id="shift">–</b><span class="src" id="shift-src"></span></div>
-      <div class="stage" id="stage-box">
-        <div class="name"><span id="stage">No telemetry arriving</span><span id="km"></span></div>
-        <div class="bar"><div id="progress"></div></div>
-      </div>
-    </section>
-
-    <div class="cols">
-      <section class="card">
-        <h2>Coaching</h2>
-        <ul class="tips" id="coach"><li class="empty">Loading…</li></ul>
-      </section>
-
-      <section class="card">
-        <div class="row"><h2>Shift points</h2><select id="car" aria-label="Car"></select></div>
-        <div class="wide"><table id="shifts"></table></div>
-        <p class="note" id="shifts-note"></p>
-      </section>
-
-      <section class="card">
-        <h2>Setup</h2>
-        <p class="facts-line" id="tune"></p>
-        <ul class="tips" id="tuning"></ul>
-      </section>
-
-      <section class="card">
-        <h2>Recent sessions</h2>
-        <div id="sessions"></div>
-      </section>
+<header class="top">
+  <div class="top-row">
+    <span class="conn idle" id="conn"><span class="dot"></span><span id="status">Connecting…</span></span>
+    <span class="title"><span class="brand">Oversteer</span><span class="tabname" id="tabname">Coaching</span></span>
+    <div class="tabs" role="tablist" aria-label="Sub-tabs">
+      <button type="button" role="tab" data-tab="coaching" aria-selected="true">Coaching</button>
+      <button type="button" role="tab" data-tab="telemetry" aria-selected="false">Telemetry</button>
     </div>
+    <button type="button" class="icon-btn" id="wake" title="Keep this screen on while the page is open"><span class="sun"></span><span class="sr" id="wake-text">Screen</span></button>
   </div>
+  <button type="button" class="splits" id="splits" hidden aria-expanded="false" aria-controls="splits-panel">
+    <div class="l1">
+      <span class="stg" id="sp-stage"></span>
+      <span class="kv num"><i>PB</i><b id="sp-pb">–</b></span>
+      <span class="kv num"><i>SoB</i><b id="sp-sob">–</b></span>
+      <span class="kv num now" id="sp-now"></span>
+    </div>
+    <div class="ribbon" id="ribbon" aria-hidden="true"></div>
+  </button>
+  <div class="sheet" id="splits-panel" hidden></div>
+</header>
+
+<main>
+  <section id="tab-coaching" class="view" aria-label="Coaching">
+    <button type="button" class="livebar" id="livebar" hidden><span class="dot"></span><span class="num" id="livebar-t"></span><span class="go">Open Telemetry ›</span></button>
+    <div class="cols">
+      <div>
+        <div class="panel" id="lastrun">
+          <div class="panel-h"><span class="lbl">Last run</span><span class="lbl" id="lr-stage"></span></div>
+          <div class="runhead">
+            <span class="t num" id="lr-t">–</span><span class="d num" id="lr-d"></span>
+            <span class="s" id="lr-s">No run to show yet: the times appear once a stage has been driven twice.</span>
+          </div>
+          <div class="stats" id="lr-stats" hidden>
+            <div><span class="lbl">PB</span><b id="lr-pb">–</b></div>
+            <div><span class="lbl">Sum of best</span><b id="lr-sob">–</b></div>
+            <div><span class="lbl">To find</span><b id="lr-gain">–</b></div>
+          </div>
+          <div id="trend" hidden></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h"><span class="lbl">Engineer's debrief</span><span class="lbl" id="coach-n"></span></div>
+          <ul class="tips" id="coach"><li class="empty">Loading…</li></ul>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel deskonly" id="desk-splits" hidden>
+          <div class="panel-h"><span class="lbl">Splits</span><span class="lbl" id="desk-splits-n"></span></div>
+          <div id="desk-splits-body"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-h"><span class="lbl">Shift points</span><select id="car" aria-label="Car"></select></div>
+          <div class="wide"><table id="shifts"></table></div>
+          <details id="shifts-details" hidden><summary>How these are worked out</summary><p class="note" id="shifts-note"></p></details>
+          <p class="note" id="shifts-empty"></p>
+        </div>
+
+        <div class="panel">
+          <details>
+            <summary><span class="lbl">Setup</span></summary>
+            <p class="facts-line" id="tune"></p>
+            <ul class="tips" id="tuning"></ul>
+          </details>
+        </div>
+
+        <div class="panel">
+          <details>
+            <summary><span class="lbl">Recent sessions</span></summary>
+            <div id="sessions"></div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-telemetry" class="view" aria-label="Telemetry" hidden>
+    <div class="banner" id="banner"></div>
+    <div class="tele">
+      <div>
+        <div class="panel live idle-state" id="live" aria-label="Live">
+          <div class="leds" id="lights" aria-hidden="true"></div>
+          <div id="dashbox">
+            <div class="dash">
+              <div class="gear num" id="gear">–</div>
+              <div class="readouts">
+                <div class="big"><b id="speed">–</b><span>km/h</span></div>
+                <div class="big mid"><b id="rpm">–</b><span>rpm</span></div>
+                <div class="shiftat">change up at <b class="num" id="shift">–</b><span id="shift-src"></span></div>
+              </div>
+            </div>
+            <div class="stage" id="stage-box">
+              <div class="name"><span id="stage">No telemetry arriving</span><span class="num" id="km"></span></div>
+              <div class="bar"><div id="progress"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="panel soon">
+          <div class="panel-h"><span class="lbl">Run analysis</span><span class="lbl">coming</span></div>
+          <p class="big-line">Not built yet.</p>
+          <p>Traces against your best run, the delta to it, the stage map and where the time went will appear here once they are built. Nothing on this page is made up in the meantime.</p>
+          <ul>
+            <li>Speed, pedals, steering and gear against the PB, by distance</li>
+            <li>The live delta to the PB and the split you are in</li>
+            <li>g-g and the stage map</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <footer>Read-only: nothing here can change Oversteer. Plain HTTP on your network: anyone on it can read this page.</footer>
 </main>
+
+<nav class="nav" role="tablist" aria-label="Sub-tabs">
+  <button type="button" role="tab" data-tab="coaching" aria-selected="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="2.5" y="13" width="4" height="6" rx="1.5"/><rect x="17.5" y="13" width="4" height="6" rx="1.5"/><path d="M20 19a4 4 0 0 1-4 3h-2"/></svg>
+    Coaching
+  </button>
+  <button type="button" role="tab" data-tab="telemetry" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h3l3-7 4 14 3-9 2 2h5"/></svg>
+    Telemetry
+  </button>
+</nav>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -226,7 +394,9 @@ const METHODS = {"h-pattern": "H-pattern", "sequential": "Sequential", "paddles"
 const GAMES = {"forza-fh": "Forza Horizon", "forza-fm": "Forza Motorsport", "forza": "Forza", "dirt": "DiRT",
   "wrcg": "WRC Generations", "eawrc": "EA SPORTS WRC", "acpmf": "Assetto Corsa", "ac": "Assetto Corsa", "acc": "Assetto Corsa Competizione", "acr": "Assetto Corsa Rally",
   "beamng": "BeamNG.drive", "lfs": "Live for Speed"};
-const LIGHTS = 15;
+const SHORT = {"forza-fh": "FH", "forza-fm": "FM", "dirt": "DiRT", "wrcg": "WRC", "eawrc": "EA WRC", "acpmf": "AC", "ac": "AC", "acc": "ACC",
+  "acr": "ACR", "beamng": "BeamNG", "lfs": "LFS"};
+const LIGHTS = 15, MINUS = "−", STALE_MS = 2000, GONE_MS = 30000;
 let carId = null, sessionSeen = null, carFollowsLive = true, cars = [], liveGear = null, stageName = null;
 
 function el(tag, text, cls) {
@@ -242,6 +412,68 @@ async function get(path) {
   const r = await fetch(path, {cache: "no-store", credentials: "omit"});
   if (!r.ok) throw new Error(r.status);
   return r.json();
+}
+
+// -- the sub-tabs: Coaching and Telemetry; the hash keeps the view over a refresh --
+
+const TABS = ["coaching", "telemetry"];
+let tab = null, tabChosen = false;
+function showTab(name, chosen) {
+  if (!TABS.includes(name)) name = "coaching";
+  if (chosen) tabChosen = true;
+  tab = name;
+  for (const t of TABS) { const v = $("tab-" + t); v.hidden = t !== name; v.classList.toggle("fade", !!chosen && t === name); }
+  for (const b of document.querySelectorAll("[data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  $("tabname").textContent = name === "coaching" ? "Coaching" : "Telemetry";
+  if (chosen) { try { history.replaceState(null, "", "#" + name); } catch (e) { location.hash = name; } }
+}
+for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab, true));
+$("livebar").addEventListener("click", () => showTab("telemetry", true));
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1).split("/")[0], true));
+{
+  const first = location.hash.slice(1).split("/")[0];
+  showTab(TABS.includes(first) ? first : "coaching", false);
+  tabChosen = TABS.includes(first);               // a link to a tab is a choice
+}
+
+// -- the connection: live, paused (stale), not answering, or between stages --
+
+const conn = {status: null, receiving: false, failed: false, sample: null, last: 0};
+function hms(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}); }
+function connState() {
+  const age = conn.last ? Date.now() - conn.last : null;
+  if (conn.failed || conn.status === false) return "down";
+  if (conn.sample) return "live";
+  if (age != null && age >= STALE_MS && age < GONE_MS) return "stale";
+  if (conn.receiving) return "live";
+  return "idle";
+}
+function updateConn() {
+  const state = connState(), chip = $("conn"), banner = $("banner"), s = conn.status || {};
+  const game = s.game ? SHORT[s.game] || GAMES[s.game] || s.game : "";
+  const age = conn.last ? Math.round((Date.now() - conn.last) / 1000) : 0;
+  let text, note = null;
+  if (state === "down") {
+    text = "Oversteer not answering";
+    note = ["bad", "Oversteer is not answering", "retrying every 2 s" + (conn.last ? " · last data " + hms(conn.last) : "")];
+  } else if (state === "stale") {
+    text = "paused " + age + " s";
+    note = ["", "No telemetry for " + age + " s", "the last values are dimmed"];
+  } else if (state === "live") {
+    text = (game || "Receiving") + " · live";
+  } else {
+    text = s.udp_port && s.receiving === false && conn.status ? "Waiting on UDP " + s.udp_port : "between stages";
+  }
+  chip.className = "conn " + state;
+  $("status").textContent = text;
+  chip.title = (s.profile ? "Profile " + s.profile + ". " : "") + (state === "live" ? "Receiving telemetry" + (s.game ? " from " + (GAMES[s.game] || s.game) : "") : "No telemetry arriving");
+  clear(banner);
+  banner.className = "banner" + (note ? " show" + (note[0] ? " " + note[0] : "") : "");
+  if (note) { banner.appendChild(el("b", note[1])); banner.appendChild(el("span", note[2])); }
+  const dim = state === "stale" || state === "down";
+  $("live").classList.toggle("idle-state", state === "idle" || (!conn.sample && !conn.last));
+  $("dashbox").classList.toggle("dimmed", dim);
+  $("lights").classList.toggle("dimmed", dim);
 }
 
 // -- live --
@@ -260,30 +492,40 @@ function lights(value, target) {
 
 let liveTimer = null;
 async function live() {
-  let s = null;
+  let s = null, failed = false;
   if (!document.hidden) {
-    try { s = await get("/api/v1/live"); } catch (e) { s = null; }
+    try { s = await get("/api/v1/live"); } catch (e) { s = null; failed = true; }
+    conn.failed = failed;
+    conn.sample = s;
+    if (s) conn.last = Date.now();
     showLive(s);
+    updateConn();
   }
   clearTimeout(liveTimer);
-  liveTimer = setTimeout(live, s ? 250 : 1000);
+  liveTimer = setTimeout(live, s ? 250 : failed ? 2000 : 1000);
+}
+
+function blankLive() {
+  $("gear").textContent = "–"; $("speed").textContent = "–"; $("rpm").textContent = "–";
+  $("shift").textContent = "–"; $("shift-src").textContent = ""; $("gear").classList.remove("hot");
+  $("stage").textContent = "No telemetry arriving"; $("km").textContent = ""; $("progress").style.width = "0";
+  lights(0, 0);
+  if (liveGear !== null) { liveGear = null; markGear(); }
+  $("livebar").hidden = true;
 }
 
 function showLive(s) {
-  $("live").classList.toggle("idle-state", !s);
   if (!s) {
-    $("gear").textContent = "–"; $("speed").textContent = "–"; $("rpm").textContent = "–";
-    $("shift").textContent = "–"; $("shift-src").textContent = ""; $("gear").classList.remove("hot");
-    $("stage").textContent = "No telemetry arriving"; $("km").textContent = ""; $("progress").style.width = "0";
-    lights(0, 0);
-    if (liveGear !== null) { liveGear = null; markGear(); }
+    // A pause keeps the last values (dimmed by updateConn); only a long silence blanks them
+    if (!conn.last || Date.now() - conn.last >= GONE_MS) blankLive();
+    $("livebar").hidden = true;
     return;
   }
   $("gear").textContent = s.gear == null ? "–" : s.gear < 0 ? "R" : s.gear === 0 ? "N" : String(s.gear);
   $("speed").textContent = s.speed == null ? "–" : Math.round(s.speed * 3.6);
   $("rpm").textContent = rpm(s.rpm);
   $("shift").textContent = s.shift_rpm ? rpm(s.shift_rpm) : "–";
-  $("shift-src").textContent = s.shift_rpm ? (s.learnt ? "learnt for this gear" : "the profile's shift point") : "";
+  $("shift-src").textContent = s.shift_rpm ? (s.learnt ? "learnt" : "profile") : "";
   $("gear").classList.toggle("hot", !!(s.shift_rpm && s.rpm >= s.shift_rpm));
   lights(s.rpm || 0, s.shift_rpm || s.limiter || 0);
   let km = "";
@@ -295,7 +537,15 @@ function showLive(s) {
   $("stage").textContent = stageName || (km ? "Stage" : "Driving");
   if (s.gear !== liveGear) { liveGear = s.gear; markGear(); }
   if (carFollowsLive && s.car) followCar(s.car);
+  // The one live line the desktop Coaching tab keeps
+  const gear = s.gear == null ? "" : s.gear < 0 ? "R" : s.gear === 0 ? "N" : "gear " + s.gear;
+  $("livebar-t").textContent = ["LIVE", gear, s.speed == null ? "" : Math.round(s.speed * 3.6) + " km/h", km].filter(Boolean).join(" · ");
+  $("livebar").hidden = false;
+  // Telemetry arriving when the page opens lands on Telemetry, unless a tab was chosen
+  if (!tabChosen && tab === "coaching" && !landed) { landed = true; showTab("telemetry", false); }
+  landed = true;
 }
+let landed = false;
 
 function followCar(key) {
   const found = cars.find((c) => c.key === key);
@@ -303,18 +553,16 @@ function followCar(key) {
 }
 
 async function status() {
-  const chip = $("conn");
   try {
     const s = await get("/api/v1/status");
-    const game = s.game ? GAMES[s.game] || s.game : "";
-    chip.className = "chip " + (s.receiving ? "st-live" : "st-waiting");
-    $("status").textContent = s.receiving ? (game || "Receiving") : "Waiting" + (s.udp_port ? " on UDP " + s.udp_port : "");
-    chip.title = (s.profile ? "Profile " + s.profile + ". " : "") + (s.receiving ? "Receiving telemetry" + (game ? " from " + game : "") : "No telemetry arriving");
+    conn.status = s;
+    conn.receiving = !!s.receiving;
     stageName = s.stage && s.stage.name ? s.stage.name + (s.stage.location ? ", " + s.stage.location : "") : null;
+    updateConn();
     if (s.session !== sessionSeen) { sessionSeen = s.session; await loadCars(); }
   } catch (e) {
-    chip.className = "chip st-down";
-    $("status").textContent = "Oversteer is not answering";
+    conn.status = false;
+    updateConn();
   }
 }
 
@@ -354,17 +602,32 @@ function tipItem(t, kind) {
   return li;
 }
 
-// -- the splits: the best of each section and what they put together (in the top bar; the table drops down) --
+// -- times: m:ss.s, signed tenths with the true minus --
 
 function clock(t) {
   if (t == null) return "–";
   const m = Math.floor(t / 60), s = t - m * 60;
   return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
 }
-function signed(d) { return d == null ? "–" : (d > 0.05 ? "+" : d < -0.05 ? "−" : "±") + Math.abs(d).toFixed(1); }
+function signed(d) { return d == null ? "–" : (d > 0.05 ? "+" : d < -0.05 ? MINUS : "±") + Math.abs(d).toFixed(1); }
+function seconds(t) { return t == null ? "–" : t.toFixed(1); }
+
+// -- the splits row and its sheet --
+// LiveSplit's colour rule (LiveSplitStateHelper.GetSplitColor): gold for a best split, else green when level
+// with or ahead of the comparison and red behind it, the darker shade when the split gained time and the
+// lighter when it lost time. The comparison here is each split's best (coach.splits() gives no PB per split
+// yet), so "behind" is by how much the split lost: the lighter red under half a second, the darker over.
+function splitTone(r) {
+  if (r.last == null || r.delta == null) return "none";
+  if (r.gold) return "gold";
+  if (r.delta <= 0.05) return "ahead-gain";
+  return r.delta > 0.5 ? "behind-lose" : "behind-gain";
+}
 
 let splitsOpen = false;
 try { splitsOpen = localStorage.getItem("splitsOpen") === "1"; } catch (e) {}
+if (location.hash.split("/")[1] === "splits") splitsOpen = true;     // #coaching/splits: a link to the open sheet
+let splitsData = null;
 function setSplitsOpen(open) {
   splitsOpen = open;
   try { localStorage.setItem("splitsOpen", open ? "1" : "0"); } catch (e) {}
@@ -372,37 +635,140 @@ function setSplitsOpen(open) {
   $("splits-panel").hidden = !open || $("splits").hidden;
 }
 
-function showSplits(sp) {
-  const chip = $("splits"), panel = $("splits-panel");
-  clear(panel);
-  if (!sp) { chip.hidden = true; panel.hidden = true; return; }
-  chip.hidden = false;
-  $("splits-name").textContent = sp.name.replace(/ - .*/, "");
-  const nums = $("splits-nums");
-  clear(nums);
-  nums.appendChild(document.createTextNode(clock(sp.best) + " · SoB "));
-  nums.appendChild(el("i", clock(sp.possible)));
-  if (sp.gain != null) nums.appendChild(document.createTextNode(" (−" + sp.gain.toFixed(1) + ")"));
-  chip.title = sp.name + ": best " + clock(sp.best) + ", sum of best " + clock(sp.possible);
-  panel.appendChild(el("h2", sp.name + " · last " + clock(sp.last)));
+function splitsTable(sp) {
+  const box = el("div");
   const table = el("table");
   const head = el("tr");
-  for (const h of ["Split", "Last", "Best", "Δ"]) head.appendChild(el("th", h));
+  for (const h of ["Split", "Last", "Δ best", "Best"]) head.appendChild(el("th", h));
   table.appendChild(head);
-  for (const r of sp.splits) {
+  sp.splits.forEach((r, i) => {
     const tr = el("tr", null, r.finish ? "fin" : "");
-    tr.appendChild(el("td", r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "")));
-    tr.appendChild(el("td", clock(r.last)));
-    tr.appendChild(el("td", clock(r.best)));
-    tr.appendChild(el("td", r.gold ? "gold" : signed(r.delta),
-      r.last == null ? "dim" : r.gold ? "sgold" : r.delta <= 0.05 ? "sgood" : "sbad"));
+    const name = el("td", null, "name");
+    name.textContent = (i + 1) + ". " + r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "");
+    tr.appendChild(name);
+    tr.appendChild(el("td", seconds(r.last)));
+    tr.appendChild(el("td", (r.gold ? "★ " : "") + (r.last == null ? "–" : signed(r.delta)), "t-" + splitTone(r)));
+    tr.appendChild(el("td", seconds(r.best)));
     table.appendChild(tr);
+  });
+  const sum = el("tr", null, "sum");
+  sum.appendChild(el("td", "Stage", "name"));
+  sum.appendChild(el("td", clock(sp.last)));
+  sum.appendChild(el("td", sp.last != null && sp.best != null ? signed(sp.last - sp.best) : "–",
+    sp.last != null && sp.best != null && sp.last - sp.best <= 0.05 ? "t-ahead-gain" : "t-behind-lose"));
+  sum.appendChild(el("td", clock(sp.best)));
+  table.appendChild(sum);
+  const sob = el("tr");
+  sob.appendChild(el("td", "Sum of best", "name"));
+  sob.appendChild(el("td", ""));
+  sob.appendChild(el("td", sp.gain != null ? MINUS + sp.gain.toFixed(1) : "", "t-gold"));
+  sob.appendChild(el("td", clock(sp.possible)));
+  table.appendChild(sob);
+  box.appendChild(table);
+  if (sp.sectors && sp.sectors.length) {
+    const grid = el("div", null, "sectors");
+    sp.sectors.forEach((r, i) => {
+      const cell = el("div");
+      cell.appendChild(el("span", r.name || "S" + (i + 1), "lbl"));
+      const est = r.confidence === "low" ? "≈" : "";
+      cell.appendChild(el("b", r.last == null ? "–" : est + seconds(r.last), "num"));
+      cell.appendChild(el("span", (r.gold ? "★ " : "") + (r.last == null ? "best " + est + seconds(r.best) : signed(r.delta)), "d t-" + splitTone(r)));
+      grid.appendChild(cell);
+    });
+    box.appendChild(grid);
+    if (sp.sectors.some((r) => r.confidence === "low")) box.appendChild(el("p", "≈ Sector positions estimated from the game's sector lengths.", "foot"));
   }
-  panel.appendChild(table);
-  panel.appendChild(el("p", "Gold: your last run set the best. SoB: the best of every split put together. The finish split includes the slow-down to the stop."));
+  box.appendChild(el("p", "Gold ★: your last run set that split's best. Green: level with the best; red: behind it, the darker the more it lost. Sum of best: every split's best put together. The finish split includes the slow-down to the stop.", "foot"));
+  return box;
+}
+
+function showSplits(sp) {
+  splitsData = sp;
+  const row = $("splits"), panel = $("splits-panel"), desk = $("desk-splits");
+  clear(panel); clear($("desk-splits-body"));
+  if (!sp) { row.hidden = true; panel.hidden = true; desk.hidden = true; return; }
+  row.hidden = false; desk.hidden = false;
+  $("sp-stage").textContent = sp.name.replace(/ - .*/, "");
+  $("sp-pb").textContent = clock(sp.best);
+  $("sp-sob").textContent = clock(sp.possible);
+  const now = $("sp-now");
+  clear(now);
+  if (sp.last != null && sp.best != null) {
+    const d = sp.last - sp.best;
+    now.appendChild(el("i", "Last"));
+    now.appendChild(document.createTextNode(clock(sp.last) + " "));
+    now.appendChild(el("span", d <= 0.05 ? "PB" : signed(d), d <= 0.05 ? "t-gold" : "pos-slower"));
+  }
+  row.title = sp.name + ": PB " + clock(sp.best) + ", sum of best " + clock(sp.possible);
+  const ribbon = $("ribbon");
+  clear(ribbon);
+  for (const r of sp.splits) { const c = el("i", null, "ls-" + splitTone(r)); ribbon.appendChild(c); }
+  if (sp.sectors && sp.sectors.length) {
+    ribbon.appendChild(el("s"));
+    sp.sectors.forEach((r, i) => { const c = el("i", null, "sec ls-" + splitTone(r)); c.title = (r.name || "S" + (i + 1)) + " " + (r.confidence === "low" ? "≈" : "") + seconds(r.last); ribbon.appendChild(c); });
+  }
+  panel.appendChild(el("p", sp.name + " · last " + clock(sp.last), "lbl"));
+  panel.appendChild(splitsTable(sp));
+  $("desk-splits-n").textContent = sp.name.replace(/ - .*/, "");
+  $("desk-splits-body").appendChild(splitsTable(sp));
   setSplitsOpen(splitsOpen);
 }
 $("splits").addEventListener("click", () => setSplitsOpen(!splitsOpen));
+
+// -- Coaching: the last run, with the trend of the times on this stage --
+
+function lastRun(sp, sessionList) {
+  const stats = $("lr-stats"), trend = $("trend");
+  clear(trend);
+  stats.hidden = true; trend.hidden = true;
+  $("lr-d").textContent = ""; $("lr-d").className = "d num";
+  if (!sp) {
+    $("lr-t").textContent = "–"; $("lr-stage").textContent = "";
+    $("lr-s").textContent = "No run to show yet: the times appear once a stage has been driven twice.";
+    return;
+  }
+  $("lr-stage").textContent = sp.name.replace(/ - .*/, "");
+  $("lr-t").textContent = clock(sp.last);
+  const golds = sp.splits.filter((r) => r.gold).length;
+  const facts = [sp.name, sp.runs + " runs", golds + (golds === 1 ? " gold split" : " gold splits")];
+  if (sp.last == null) facts.unshift("Last run not finished");
+  $("lr-s").textContent = facts.join(" · ");
+  if (sp.last != null && sp.best != null) {
+    const d = sp.last - sp.best;
+    $("lr-d").textContent = d <= 0.05 ? "PB" : signed(d);
+    $("lr-d").classList.add(d <= 0.05 ? "t-gold" : "pos-slower");
+  }
+  $("lr-pb").textContent = clock(sp.best);
+  $("lr-sob").textContent = clock(sp.possible);
+  $("lr-gain").textContent = sp.gain == null ? "–" : MINUS + sp.gain.toFixed(1);
+  stats.hidden = false;
+  // The times of the finished runs on this stage, from the sessions already read: the last twelve, oldest left
+  const times = [];
+  for (const s of sessionList || []) for (const r of s.runs || []) {
+    if (r.finished === 1 && r.result_time && (r.stage || s.stage) === sp.stage) times.push([r.started, r.result_time]);
+  }
+  times.sort((a, b) => a[0] - b[0]);
+  const ts = times.slice(-12).map((x) => x[1]);
+  if (ts.length < 2) return;
+  const W = 300, H = 40, pad = 4;
+  const lo = Math.min(...ts, sp.best != null ? sp.best : Infinity, sp.possible != null ? sp.possible : Infinity);
+  const hi = Math.max(...ts);
+  const y = (t) => pad + (hi === lo ? 0.5 : (t - lo) / (hi - lo)) * (H - 2 * pad);
+  const x = (i) => pad + (ts.length === 1 ? 0 : i / (ts.length - 1)) * (W - 2 * pad);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "The last " + ts.length + " times on this stage, quicker higher up");
+  const mk = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); svg.appendChild(e); return e; };
+  if (sp.possible != null) mk("line", {x1: 0, x2: W, y1: y(sp.possible), y2: y(sp.possible), stroke: "var(--faint)", "stroke-dasharray": "3 3", "stroke-width": 1, "vector-effect": "non-scaling-stroke"});
+  if (sp.best != null) mk("line", {x1: 0, x2: W, y1: y(sp.best), y2: y(sp.best), stroke: "var(--ls-gold)", "stroke-dasharray": "5 3", "stroke-width": 1, "vector-effect": "non-scaling-stroke"});
+  mk("polyline", {points: ts.map((t, i) => x(i) + "," + y(t)).join(" "), fill: "none", stroke: "var(--dim)", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke"});
+  trend.appendChild(svg);
+  trend.appendChild(el("p", "Last " + ts.length + " times on this stage · " + clock(ts[ts.length - 1]) + " newest · gold dashes: PB, grey: sum of best", "foot"));
+  trend.hidden = false;
+}
 
 let shown = null;
 async function loadCar() {
@@ -419,22 +785,26 @@ async function loadCar() {
   if (key === shown) return;
   shown = key;
   clear(table); clear(coach); clear(tuningList); clear($("sessions"));
-  note.textContent = ""; $("tune").textContent = "";
+  note.textContent = ""; $("tune").textContent = ""; $("shifts-empty").textContent = ""; $("shifts-details").hidden = true;
+  $("coach-n").textContent = "";
   showSplits(c && c.splits);
+  lastRun(c && c.splits, list);
   if (carId == null) {
-    note.textContent = "Drive with telemetry on and Oversteer learns each car's shift points.";
+    $("shifts-empty").textContent = "Drive with telemetry on and Oversteer learns each car's shift points.";
     coach.appendChild(el("li", "Coaching starts once Oversteer has seen you drive.", "empty"));
     $("sessions").appendChild(el("p", "No sessions yet.", "empty"));
     $("tune").textContent = "No setup seen yet.";
     return;
   }
   if (car) { shiftTable(car, table, note); tune(car); }
-  else note.textContent = "Could not read this car.";
+  else $("shifts-empty").textContent = "Could not read this car.";
   if (c) {
-    const names = {focus: "Focus", tip: "Tip", praise: "Better", technique: "Technique", still: "", note: ""};
+    const names = {focus: "Focus", tip: "Call", praise: "Good", technique: "Technique", still: "", note: ""};
     const order = {focus: 0, praise: 2, still: 3};
     const tips = c.tips.slice().sort((a, b) => (order[a.kind] ?? 1) - (order[b.kind] ?? 1));
     for (const t of tips) coach.appendChild(tipItem(t, names[t.kind] ?? t.kind));
+    const n = c.tips.filter((t) => t.kind !== "still").length;
+    if (n) $("coach-n").textContent = n + (n === 1 ? " call" : " calls");
     if (!c.tips.length) coach.appendChild(el("li", "Nothing to say yet: coaching starts once a run ends.", "empty"));
   } else coach.appendChild(el("li", "Could not read the coaching.", "empty"));
   if (list) sessions(list);
@@ -447,10 +817,11 @@ function markGear() {
 
 function shiftTable(car, table, note) {
   const gears = car.gears || [];
-  if (!gears.length) { note.textContent = "Nothing learnt yet about this car's gears: drive some full-throttle pulls through them."; return; }
+  if (!gears.length) { $("shifts-empty").textContent = "Nothing learnt yet about this car's gears: drive some full-throttle pulls through them."; return; }
   const methods = Object.keys(METHODS).filter((m) => gears.some((g) => g.methods && g.methods[m]));
   const head = el("tr");
-  for (const h of ["Change", "Best", "You"].concat(methods.map((m) => METHODS[m]))) head.appendChild(el("th", h));
+  for (const h of ["Change", "Best", "You", "Δ"]) head.appendChild(el("th", h));
+  for (const m of methods) head.appendChild(el("th", METHODS[m], "m"));
   table.appendChild(head);
   for (const g of gears) {
     const tr = el("tr");
@@ -460,18 +831,22 @@ function shiftTable(car, table, note) {
     if (!g.last && g.best_low != null && g.best_high != null && g.best_high - g.best_low >= 1) best.appendChild(el("span", rpm(g.best_low) + "–" + rpm(g.best_high), "band"));
     tr.appendChild(best);
     tr.appendChild(el("td", g.shifts ? rpm(g.average_shift) : "–", "dim"));
+    // You against Best: red when the average change is more than 300 rpm early
+    const gap = !g.last && g.shifts && g.best != null ? g.average_shift - (g.lights_low != null ? g.lights_low : g.best) : null;
+    tr.appendChild(el("td", gap == null ? "–" : (gap > 0 ? "+" : gap < 0 ? MINUS : "±") + Math.abs(Math.round(gap)), gap != null && gap < -300 ? "early" : "dim"));
     for (const m of methods) {
       const v = g.methods && g.methods[m];
-      tr.appendChild(el("td", v ? rpm(v.rpm) : "–", "dim"));
+      tr.appendChild(el("td", v ? rpm(v.rpm) : "–", "dim m"));
     }
     table.appendChild(tr);
   }
   markGear();
   const parts = [];
   if (car.limiter) parts.push("Limiter " + rpm(car.limiter) + " rpm" + (car.limiter_source ? " (" + car.limiter_source + ")" : "") + ".");
-  parts.push("Best" + (car.shift_surface ? " on " + car.shift_surface : "") + ": where the next gear pulls harder" + (car.power_source === "game data" ? ", from the game's engine data (grip: from where the next gear reaches the grip limit too, up to the engine's best)" : ", with the range it is known to") + ". You: your average change up.");
+  parts.push("Best" + (car.shift_surface ? " on " + car.shift_surface : "") + ": where the next gear pulls harder" + (car.power_source === "game data" ? ", from the game's engine data (grip: from where the next gear reaches the grip limit too, up to the engine's best)" : ", with the range it is known to") + ". You: your average change up; Δ: you against best, in rpm, red when more than 300 early. On a wide screen the columns per shifting method show too.");
   if (car.gearing_aside) parts.push("The game's data is set aside: the gearing learnt is " + Math.round(car.gearing_aside * 100) + " % off every gear set it gives this car.");
   note.textContent = parts.join(" ");
+  $("shifts-details").hidden = false;
 }
 
 function tune(car) {
@@ -539,7 +914,7 @@ function showWake(state) {
   wake.state = state;
   const button = $("wake");
   const text = {on: "Screen on", video: "Screen on", tap: "Tap to keep screen on", off: "Screen may sleep"}[state] || "Screen";
-  button.className = "chip " + (state === "video" ? "on" : state);
+  button.className = "icon-btn " + (state === "video" ? "on" : state);
   $("wake-text").textContent = text;
   button.title = {on: "The screen stays on while this page is open (Wake Lock)",
     video: "The screen is kept on by a tiny muted video while this page is open",
@@ -631,7 +1006,6 @@ async function startWake() {
   document.addEventListener("pointerup", firstTap, true);
   document.addEventListener("keydown", firstTap, true);
 }
-
 $("wake").addEventListener("click", () => keepAwake());
 
 document.addEventListener("visibilitychange", () => {
@@ -653,6 +1027,7 @@ status();
 live();
 startWake();
 setInterval(status, 5000);
+setInterval(updateConn, 1000);
 setInterval(() => { if (!document.hidden && carId != null) loadCar(); }, 30000);
 </script>
 </body>

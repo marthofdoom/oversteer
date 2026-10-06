@@ -210,3 +210,26 @@ def test_the_splits_summary_and_rows():
     assert rows[0] == ('left-left at 0.3 km', '0:06.8', '0:06.8', 'gold', 'gold')
     assert rows[1][3:] == ('+0.4', 'bad') and rows[2][1:] == ('–', '0:06.4', '–', '')
     assert rows[3][3:] == ('−1.0', 'good') and rows[3][0].endswith('(finish)')
+
+
+def test_the_splits_row_tones_rows_and_sectors():
+    assert view.splits_row(None) is None
+    found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'last': 198.8, 'runs': 3, 'splits': [
+        {'name': 'the left-left at 0.3 km', 'last': 6.76, 'best': 6.76, 'gold': True, 'delta': 0.0, 'finish': False},
+        {'name': 'the 1 left at 0.7 km', 'last': 8.38, 'best': 7.94, 'gold': False, 'delta': 0.44, 'finish': False},
+        {'name': 'the 2 right', 'last': 9.9, 'best': 9.0, 'gold': False, 'delta': 0.9, 'finish': False},
+        {'name': 'the 5 left', 'last': None, 'best': 3.5, 'gold': False, 'delta': None, 'finish': True}],
+        'sectors': [{'name': 'S1', 'last': 75.9, 'best': 75.9, 'gold': True, 'delta': 0.0, 'confidence': 'medium'},
+                    {'name': 'S2', 'last': 70.0, 'best': 69.6, 'gold': False, 'delta': 0.46, 'confidence': 'low'}]}
+    row = view.splits_row(found)
+    assert row['stage'] == 'Afon Bidno' and row['tones'] == ['gold', 'behind', 'behind-lose', 'none']
+    assert row['rows'][0][:4] == ('1. left-left at 0.3 km', '6.8', '★ ±0.0', '6.8')
+    assert row['rows'][3][1:3] == ('–', '–')                                  # not run
+    assert row['rows'][-2][:2] == ('Stage', '3:18.8') and row['rows'][-1][2] == '−3.2'
+    # Sectors: n is whatever the game has; low confidence is marked
+    assert [s[:2] for s in row['sectors']] == [('S1', '75.9'), ('S2', '≈70.0')] and row['estimated']
+    assert [s[3] for s in row['sectors']] == ['gold', 'behind']
+    none = view.splits_row(dict(found, sectors=None, last=None))
+    assert none['sectors'] == [] and not none['estimated'] and none['delta'] is None
+    assert view.splits_row(dict(found, splits=[dict(r, last=r['best'], delta=0.0, gold=True) for r in found['splits']]))['tones'] \
+        == ['gold'] * 4

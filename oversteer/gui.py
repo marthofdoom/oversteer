@@ -990,7 +990,8 @@ class Gui:
             snapshot = self.shift_learner.snapshot()
         if snapshot is not None:
             snapshot = dict(snapshot, methods=self._method_shifts(snapshot['key']))
-        self.ui.set_telemetry_view(live, snapshot)
+        from .telemetry_web import live_dict
+        self.ui.set_telemetry_view(live, snapshot, live_dict(telemetry))
         self._refresh_history(snapshot['key'] if snapshot is not None else None)
         if self.telemetry_web is not None and not self.telemetry_web.remote_seen:
             self.refresh_web_status()                 # until the page is opened from another device
