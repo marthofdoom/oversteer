@@ -1457,7 +1457,7 @@ class GtkUi:
     def set_telemetry_web_status(self, text):
         self.telemetry_web_status.set_text(text)
 
-    def set_web_pairing(self, link, token):
+    def set_web_pairing(self, link, token, others=()):
         """The link (with ?pair=) a browser opens to be paired, or None when
         changes from the web page are off or the page is not served. The
         code is shown too, for typing into a page that was opened without it."""
@@ -1465,8 +1465,10 @@ class GtkUi:
         if link is None:
             self.web_pair_row.hide()
             return
-        self.web_pair_text.set_text(_("Scan the code with the phone's camera or open\n{}\nPairing code: {}").format(
-            link, token))
+        text = _("Scan the code with the phone's camera or open\n{}\nPairing code: {}").format(link, token)
+        if others:
+            text += "\n" + _("Other addresses of this computer:") + "\n" + "\n".join(others)
+        self.web_pair_text.set_text(text)
         try:
             self._web_pair_modules = qr.encode(link)
         except ValueError:
@@ -1485,8 +1487,8 @@ class GtkUi:
             return False
         count = len(modules)
         width, height = area.get_allocated_width(), area.get_allocated_height()
-        unit = min(width, height) // (count + 4)             # four modules of quiet zone round it
-        side = unit * (count + 4)
+        unit = min(width, height) // (count + 8)             # four modules of quiet zone round it
+        side = unit * (count + 8)
         left, top = (width - side) / 2, (height - side) / 2
         cr.set_source_rgb(1, 1, 1)
         cr.rectangle(left, top, side, side)
@@ -1495,7 +1497,7 @@ class GtkUi:
         for y, row in enumerate(modules):
             for x, dark in enumerate(row):
                 if dark:
-                    cr.rectangle(left + (x + 2) * unit, top + (y + 2) * unit, unit, unit)
+                    cr.rectangle(left + (x + 4) * unit, top + (y + 4) * unit, unit, unit)
         cr.fill()
         return False
 

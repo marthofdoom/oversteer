@@ -84,6 +84,19 @@ class Lockout:
         self.failures = {}
         self._lock = threading.Lock()
 
+    MAX_TRACKED = 256
+
+    @staticmethod
+    def key_of(address):
+        """The key an address is counted under: an IPv6 client by its /64 (it can pick any address in it)."""
+        try:
+            ip = ipaddress.ip_address(address.split('%')[0])
+        except ValueError:
+            return address
+        if ip.version == 6:
+            return str(ipaddress.ip_network((ip, 64), strict=False))
+        return str(ip)
+
     def _recent(self, key, now):
         times = [t for t in self.failures.get(key, ()) if now - t < self.window]
         if times:
@@ -93,15 +106,19 @@ class Lockout:
         return times
 
     def blocked(self, key):
+        key = self.key_of(key)
         with self._lock:
             return len(self._recent(key, self.clock())) >= self.limit
 
     def fail(self, key):
+        key = self.key_of(key)
         with self._lock:
             now = self.clock()
-            if len(self.failures) > 256:                 # whoever is guessing, memory stays bounded
+            if len(self.failures) >= self.MAX_TRACKED:   # whoever is guessing, memory stays bounded
                 for k in list(self.failures):
                     self._recent(k, now)
+                while len(self.failures) >= self.MAX_TRACKED:
+                    del self.failures[next(iter(self.failures))]     # the oldest address
             self.failures.setdefault(key, []).append(now)
             self._recent(key, now)
 
@@ -153,16 +170,33 @@ def local_addresses():
                     found.append(last)
     except OSError:
         pass
-    if not found:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(('192.0.2.1', 9))                     # TEST-NET-1: never routed anywhere real
-                address = s.getsockname()[0]
-                if not address.startswith('127.'):
-                    found.append(address)
-        except OSError:
-            pass
-    return found
+    route = None
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(('192.0.2.1', 9))                         # TEST-NET-1: never routed anywhere real
+            route = s.getsockname()[0]                          # what the default route sends from
+            if not route.startswith('127.') and route not in found:
+                found.append(route)
+    except OSError:
+        pass
+    return sorted(found, key=lambda a: _address_rank(a, route))
+
+
+def _address_rank(address, route):
+    """Order for offering addresses: the default route's own address, then
+    other private LAN addresses, then CGNAT (Tailscale), then docker and
+    libvirt bridges, then the rest."""
+    try:
+        ip = ipaddress.IPv4Address(address)
+    except ValueError:
+        return 9
+    if address == route:
+        return 0
+    if ip in ipaddress.ip_network('172.17.0.0/16') or ip in ipaddress.ip_network('192.168.122.0/24'):
+        return 4
+    if ip in ipaddress.ip_network('100.64.0.0/10'):
+        return 3
+    return 1 if ip.is_private else 2
 
 
 def urls(bind, port):

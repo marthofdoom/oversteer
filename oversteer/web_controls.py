@@ -72,6 +72,8 @@ def call_on_main(fn, schedule, timeout):
                 state['abandoned'] = True
                 raise TimeoutError("the window did not answer")
         done.wait(timeout)                     # it has started: let it finish
+        if 'value' not in box and 'error' not in box:
+            raise TimeoutError("the window did not finish")
     if 'error' in box:
         raise box['error']
     return box['value']
@@ -101,7 +103,6 @@ class Bridge:
         self.schedule = schedule
         self.timeout = timeout
         self.caps = {}
-        self.updating = False
 
     # -- what the server asks --
 
@@ -172,13 +173,18 @@ class Bridge:
         if not isinstance(changes, dict) or not changes:
             raise Rejected(400, "set must hold at least one setting")
         model = self.controller.model
-        plan = [(key, self._check(key, value)) for key, value in changes.items()]
-        self.updating = True
+        # rev_leds_shift is checked against the mode it will be written under, so after rev_leds_mode
+        order = sorted(changes, key=lambda k: k == 'rev_leds_shift')
+        plan = []
+        for key in order:
+            if key == 'rev_leds_shift' and 'rev_leds_mode' in changes:
+                plan.append((key, self._check_shift(changes[key], changes['rev_leds_mode'])))
+            else:
+                plan.append((key, self._check(key, changes[key])))
         try:
             for key, value in plan:
                 self._write(model, key, value)
         finally:
-            self.updating = False
             self._sync_ui(model, [key for key, _value in plan])
 
     def _available(self, model, key):
@@ -208,6 +214,15 @@ class Bridge:
         if data.get('rev_leds') is not None and data.get('rev_leds_learnt') is not False:
             return 'auto'
         return data.get('rev_leds_shift_unit') or 'percent'
+
+    def _check_shift(self, value, mode):
+        """A shift point sent with a new mode: valid in that mode (never 'auto', which has no single point)."""
+        model = self.controller.model
+        if model.data.get('rev_leds') is None:
+            raise Rejected(409, "rev_leds_shift is not available on this wheel")
+        if mode not in SHIFT_LIMITS:
+            raise Rejected(409, "The shift point is automatic")
+        return _int(value, 'rev_leds_shift', *SHIFT_LIMITS[mode])
 
     def _check(self, key, value):
         """The value, validated like the GTK control it stands for."""
@@ -320,7 +335,9 @@ class Bridge:
                 raise Rejected(400, "unknown effect")
             if not model.get_ffb_enabled():
                 raise Rejected(409, "Force feedback is off")
-            controller.try_effect(arg)
+            # The device directly: the window's try_effect answers a failure with a dialog on the desktop
+            if not controller.device.play_demo(arg, on_error=lambda e: logging.warning("web effect: %s", e)):
+                raise Rejected(409, "This device has no force feedback")
         elif action == 'load_profile':
             if not isinstance(arg, str) or arg not in self.profiles():
                 raise Rejected(400, "unknown profile")

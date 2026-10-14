@@ -970,9 +970,9 @@ class Gui:
         self.ui.set_telemetry_web_status(web_status(web is not None, error, addresses,
                                                     web is not None and web.remote_seen, self.telemetry_web_bind,
                                                     self.telemetry_web_port, self.telemetry_web_control))
-        self.ui.set_web_pairing(addresses[0] + '?pair=' + self.web_token
-                                if addresses and self.telemetry_web_control and self.web_token else None,
-                                self.web_token)
+        offer = addresses and self.telemetry_web_control and self.web_token
+        self.ui.set_web_pairing(addresses[0] + '?pair=' + self.web_token if offer else None, self.web_token,
+                                [a + '?pair=' + self.web_token for a in addresses[1:]] if offer else ())
 
     # -- Telemetry tab --
 
