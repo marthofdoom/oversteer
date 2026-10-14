@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.3 — 2026-10-14
+
+### Web page
+- **Controls and FFB tabs** on the web page read and change the wheel's
+  settings (rotation range, sensitivity, pedals and pedal response curves,
+  centring spring, force feedback strength and effects, rev lights, profiles),
+  through the same rules as the app, which follows every change. Changes are
+  off until you turn on Settings → Web page → "Allow changes from the web
+  page" and pair the browser with the code or QR shown there; "New code"
+  unpairs every browser. Reading stays open to the network as before.
+
+### Tools
+- `scripts/merge-telemetry-db.py` ports one telemetry database's runs into
+  another (for example a development build's into the Flatpak's), with a dry
+  run, a backup first, duplicates skipped and the runs re-analysed.
+
 ## 0.15.2 — 2026-10-06
 
 ### Coaching and telemetry pages
