@@ -7,6 +7,7 @@ import os
 import time
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
+from . import qr
 from . import steam_options
 from .telemetry import DEFAULT_PORT
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
@@ -1385,6 +1386,29 @@ class GtkUi:
             bind=w.get_active_id()))
         web.add(self._setting_row(_("TCP port and who can open it"),
                                   controls=(self.telemetry_web_port, self.telemetry_web_bind)))
+        row, self.telemetry_web_control = self._switch_row(
+            _("Allow changes from the web page"),
+            _("Lets a browser paired with the code below change the wheel's settings (range, pedals, force "
+              "feedback, rev lights, profiles) from the Controls and FFB tabs of the web page. Anyone who "
+              "has the code can do it, and the page is plain HTTP: pair only on a network you trust."),
+            lambda state: self.controller.set_telemetry_web_control(state),
+            subtitle=_("Off by default. A phone must be paired with the code below first."))
+        web.add(row)
+        self.web_pair_link = None
+        self.web_pair_text = self._status_label()
+        self.web_pair_qr = Gtk.DrawingArea()
+        self.web_pair_qr.set_size_request(150, 150)
+        self.web_pair_qr.connect('draw', self._draw_pair_qr)
+        self.web_pair_copy = Gtk.Button(label=_("Copy link"))
+        self.web_pair_copy.connect('clicked', lambda w: self.copy_web_pairing())
+        self.web_pair_new = Gtk.Button(label=_("New code"))
+        self.web_pair_new.set_tooltip_text(_("Unpairs every browser paired so far."))
+        self.web_pair_new.connect('clicked', lambda w: self.controller.new_web_token())
+        self.web_pair_row = self._setting_row(
+            _("Pair a phone or another computer"), status=self.web_pair_text,
+            controls=(self.web_pair_qr, self.web_pair_copy, self.web_pair_new))
+        self.web_pair_row.set_no_show_all(True)
+        web.add(self.web_pair_row)
         self._section(page, _("Web page"), web, _("For every profile."))
 
         record = self._list()
@@ -1426,11 +1450,54 @@ class GtkUi:
         self.telemetry_web.set_active(prefs['telemetry_web_on'])
         self.telemetry_web_port.set_value(prefs['telemetry_web_port'])
         self.telemetry_web_bind.set_active_id(prefs['telemetry_web_bind'])
+        self.telemetry_web_control.set_active(prefs['telemetry_web_control'])
         self.telemetry_capture.set_active(prefs['telemetry_capture_on'])
         self.telemetry_capture_cap.set_value(prefs['telemetry_capture_cap'])
 
     def set_telemetry_web_status(self, text):
         self.telemetry_web_status.set_text(text)
+
+    def set_web_pairing(self, link, token):
+        """The link (with ?pair=) a browser opens to be paired, or None when
+        changes from the web page are off or the page is not served. The
+        code is shown too, for typing into a page that was opened without it."""
+        self.web_pair_link = link
+        if link is None:
+            self.web_pair_row.hide()
+            return
+        self.web_pair_text.set_text(_("Scan the code with the phone's camera or open\n{}\nPairing code: {}").format(
+            link, token))
+        try:
+            self._web_pair_modules = qr.encode(link)
+        except ValueError:
+            self._web_pair_modules = None
+        self.web_pair_qr.set_visible(self._web_pair_modules is not None)
+        self.web_pair_qr.queue_draw()
+        self.web_pair_row.show_all()
+
+    def copy_web_pairing(self):
+        if self.web_pair_link:
+            Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(self.web_pair_link, -1)
+
+    def _draw_pair_qr(self, area, cr):
+        modules = getattr(self, '_web_pair_modules', None)
+        if not modules:
+            return False
+        count = len(modules)
+        width, height = area.get_allocated_width(), area.get_allocated_height()
+        unit = min(width, height) // (count + 4)             # four modules of quiet zone round it
+        side = unit * (count + 4)
+        left, top = (width - side) / 2, (height - side) / 2
+        cr.set_source_rgb(1, 1, 1)
+        cr.rectangle(left, top, side, side)
+        cr.fill()
+        cr.set_source_rgb(0, 0, 0)
+        for y, row in enumerate(modules):
+            for x, dark in enumerate(row):
+                if dark:
+                    cr.rectangle(left + (x + 2) * unit, top + (y + 2) * unit, unit, unit)
+        cr.fill()
+        return False
 
     def set_telemetry_capture_status(self, text):
         self.telemetry_capture_status.set_text(text)

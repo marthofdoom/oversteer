@@ -209,7 +209,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
 
 /* -- the sub-tabs: a bar in thumb reach on a phone; a rail on a phone on its side; tabs on a laptop -- */
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr;
+  backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4, 1fr);
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .nav button { height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: var(--dim); position: relative; }
@@ -220,7 +220,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
 /* a phone on its side: the rail replaces the bottom bar, the dash beside the cards */
 @media (orientation: landscape) and (max-height: 520px) {
   :root { --top-h: 40px; }
-  .nav { top: 0; right: auto; width: calc(var(--rail-w) + env(safe-area-inset-left)); grid-template-columns: 1fr; grid-template-rows: 1fr 1fr;
+  .nav { top: 0; right: auto; width: calc(var(--rail-w) + env(safe-area-inset-left)); grid-template-columns: 1fr; grid-template-rows: repeat(4, 1fr);
     border-top: 0; border-right: 1px solid var(--line); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .nav button { height: auto; }
   .nav button[aria-selected="true"]::before { top: 30%; bottom: 30%; left: 0; right: auto; width: 2.5px; height: auto; }
@@ -246,7 +246,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
   .top-row .conn { grid-column: 3; grid-row: 1; justify-self: end; margin-right: 52px; }
   #wake { grid-column: 3; grid-row: 1; justify-self: end; }
   .tabs { display: flex; gap: 4px; grid-column: 2; grid-row: 1; }
-  .tabs button { height: 44px; padding: 0 22px; border-radius: 10px; font-weight: 600; font-size: 14px; letter-spacing: .04em; color: var(--dim); position: relative; }
+  .tabs button { height: 44px; padding: 0 18px; border-radius: 10px; font-weight: 600; font-size: 14px; letter-spacing: .04em; color: var(--dim); position: relative; }
   .tabs button:hover { background: var(--panel); }
   .tabs button[aria-selected="true"] { color: var(--text); background: var(--raised); box-shadow: inset 0 -2px 0 var(--accent); }
   .splits { max-width: 1440px; margin-left: auto; margin-right: auto; }
@@ -368,6 +368,62 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
   .seg { max-width: 320px; }
 }
 </style>
+<style>
+/* -- Controls and FFB: the wheel's settings (docs/telemetry-ui-design.md visual system; its own block) -- */
+.ctl-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 18px; align-items: start; }
+.ctl-grid > div { min-width: 0; }
+.row { padding: 10px 0; border-top: 1px solid var(--line); }
+.row:first-child { border-top: 0; padding-top: 2px; }
+.row[hidden] { display: none; }
+.row-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-height: 22px; }
+.row-h .name { font-weight: 600; font-size: 14.5px; }
+.row-h .val { font: 600 15px var(--mono); white-space: nowrap; }
+.row .hint { color: var(--dim); font-size: 12.5px; margin-top: 2px; line-height: 1.35; }
+.row input[type="range"] { display: block; width: 100%; height: 40px; margin: 2px 0 0; padding: 0; background: transparent; accent-color: var(--accent); touch-action: pan-y; }
+.row input[type="range"]:disabled { opacity: .5; }
+.row.dis .name, .row.dis .val { color: var(--dim); }
+.swrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 48px; }
+.swrow .txt { min-width: 0; }
+.swrow .name { font-weight: 600; font-size: 14.5px; }
+.sw { flex: none; width: 52px; height: 30px; border-radius: 15px; background: var(--neutral); position: relative; transition: background .15s; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+.sw[aria-checked="true"] { background: var(--accent); }
+.sw[aria-checked="true"]::after { transform: translateX(22px); }
+.sw:disabled { opacity: .4; cursor: default; }
+.seg.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 6px 0 0; }
+.seg button:disabled { opacity: .45; cursor: default; }
+.seg.n3 button { height: 40px; font-size: 12.5px; letter-spacing: .02em; padding: 0 4px; }
+.pedal { padding: 10px 0 4px; border-top: 1px solid var(--line); }
+.pedal > .lbl { display: block; margin-bottom: 2px; }
+.pedal .row { border-top: 0; padding: 4px 0; }
+.pedal .chips { margin: 6px -2px 2px; flex-wrap: wrap; overflow: visible; }
+.pnote { color: var(--dim); font-size: 12.5px; margin: 4px 0 0; }
+.pnote:empty { display: none; }
+.pairbox { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.pairbox input { flex: 1 1 160px; min-width: 0; height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: 15px var(--mono); }
+.pairbox .btn { flex: none; }
+.pairmsg { margin: 0; font-size: 13.5px; line-height: 1.4; }
+.pairmsg b { font-weight: 700; }
+.pairok { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12.5px; }
+.pairok .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; }
+.pairok button { margin-left: auto; color: var(--accent); min-height: 32px; font-size: 12.5px; }
+.profile-row { display: flex; gap: 8px; align-items: center; }
+.profile-row select { flex: 1 1 140px; }
+.dirty { color: var(--warn); font-size: 12.5px; margin: 6px 0 0; }
+.clean { color: var(--dim); font-size: 12.5px; margin: 6px 0 0; }
+.toast { position: fixed; z-index: 9; left: 12px; right: 12px; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px); margin: 0 auto; max-width: 480px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+.toast.bad { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
+.toast[hidden] { display: none; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .ctl-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .toast { left: calc(var(--rail-w) + 12px); bottom: 12px; }
+}
+@media (min-width: 900px) and (min-height: 521px) {
+  .ctl-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .toast { bottom: 24px; }
+}
+</style>
 </head>
 <body>
 <header class="top">
@@ -377,6 +433,8 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
     <div class="tabs" role="tablist" aria-label="Sub-tabs">
       <button type="button" role="tab" data-tab="coaching" aria-selected="true">Coaching</button>
       <button type="button" role="tab" data-tab="telemetry" aria-selected="false">Telemetry</button>
+      <button type="button" role="tab" data-tab="controls" aria-selected="false">Controls</button>
+      <button type="button" role="tab" data-tab="ffb" aria-selected="false">FFB</button>
     </div>
     <button type="button" class="icon-btn" id="wake" title="Keep this screen on while the page is open"><span class="sun"></span><span class="sr" id="wake-text">Screen</span></button>
   </div>
@@ -557,8 +615,19 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
     </div>
   </section>
 
-  <footer>Read-only: nothing here can change Oversteer. Plain HTTP on your network: anyone on it can read this page.</footer>
+  <section id="tab-controls" class="view" aria-label="Controls" hidden>
+    <div id="ctl-note"></div>
+    <div class="ctl-grid" id="ctl-grid-controls"><div id="ctl-a"></div><div id="ctl-b"></div></div>
+  </section>
+
+  <section id="tab-ffb" class="view" aria-label="Force feedback" hidden>
+    <div id="ffb-note"></div>
+    <div class="ctl-grid" id="ctl-grid-ffb"><div id="ffb-a"></div><div id="ffb-b"></div></div>
+  </section>
+
+  <footer>Anyone on your network can read this page (plain HTTP). Changing wheel settings, on the Controls and FFB tabs, needs Allow changes from the web page in Oversteer and a paired browser.</footer>
 </main>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <nav class="nav" role="tablist" aria-label="Sub-tabs">
   <button type="button" role="tab" data-tab="coaching" aria-selected="true">
@@ -568,6 +637,14 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
   <button type="button" role="tab" data-tab="telemetry" aria-selected="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h3l3-7 4 14 3-9 2 2h5"/></svg>
     Telemetry
+  </button>
+  <button type="button" role="tab" data-tab="controls" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M3.5 10.5 10 12M20.5 10.5 14 12M12 14v7"/></svg>
+    Controls
+  </button>
+  <button type="button" role="tab" data-tab="ffb" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+    FFB
   </button>
 </nav>
 <script>
@@ -599,7 +676,8 @@ async function get(path) {
 
 // -- the sub-tabs: Coaching and Telemetry; the hash keeps the view over a refresh --
 
-const TABS = ["coaching", "telemetry"];
+const TABS = ["coaching", "telemetry", "controls", "ffb"];
+const TABNAMES = {coaching: "Coaching", telemetry: "Telemetry", controls: "Controls", ffb: "FFB"};
 let tab = null, tabChosen = false;
 function showTab(name, chosen) {
   if (!TABS.includes(name)) name = "coaching";
@@ -607,9 +685,10 @@ function showTab(name, chosen) {
   tab = name;
   for (const t of TABS) { const v = $("tab-" + t); v.hidden = t !== name; v.classList.toggle("fade", !!chosen && t === name); }
   for (const b of document.querySelectorAll("[data-tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
-  $("tabname").textContent = name === "coaching" ? "Coaching" : "Telemetry";
+  $("tabname").textContent = TABNAMES[name];
   if (chosen && location.hash.slice(1).split("/")[0] !== name) { try { history.replaceState(null, "", "#" + name); } catch (e) { location.hash = name; } }
   if (name === "telemetry" && typeof resumeLive === "function" && started) resumeLive();
+  if (typeof ctlShown === "function") ctlShown(name);
 }
 let started = false;
 for (const b of document.querySelectorAll("[data-tab]")) b.addEventListener("click", () => showTab(b.dataset.tab, true));
@@ -2217,6 +2296,478 @@ setInterval(() => { if (!document.hidden && RV.mode === "run" && tab === "teleme
 setInterval(() => { if (!document.hidden && RV.mode === "run" && tab === "telemetry" && RV.car != null) rvLoadRuns(); }, 30000);
 $("open-run") && $("open-run").addEventListener("click", () => showTele("run", true));
 rvRoute();
+</script>
+<script>
+"use strict";
+// -- Controls and FFB: the wheel's settings. They are read from /api/v1/controls (open, like everything else) and
+// changed by POSTs that carry the pairing token the app shows; the app does the change on its own thread, as its
+// own controls do, so the window and this page stay in step. --
+
+const TOKEN_KEY = "oversteer-pair-token";
+const CTL = {state: null, token: "", paired: false, verified: null, on: false, polling: false, timer: null, failed: false,
+  pending: null, toastTimer: null, rows: [], panels: [], boxes: [], queue: {}, flushTimer: null, inflight: false};
+function tokenGet() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
+function tokenSet(t) { try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+CTL.token = tokenGet();
+
+async function post(path, body) {
+  try {
+    const r = await fetch(path, {method: "POST", credentials: "omit", cache: "no-store",
+      headers: {"Content-Type": "application/json", "X-Oversteer-Token": CTL.token || ""}, body: JSON.stringify(body || {})});
+    let json = null;
+    try { json = await r.json(); } catch (e) {}
+    return {status: r.status, body: json};
+  } catch (e) { return {status: 0, body: {error: "Oversteer is not answering"}}; }
+}
+
+function toast(text, bad) {
+  const t = $("toast");
+  t.textContent = text;
+  t.className = "toast" + (bad ? " bad" : "");
+  t.hidden = false;
+  clearTimeout(CTL.toastTimer);
+  CTL.toastTimer = setTimeout(() => { t.hidden = true; }, bad ? 5000 : 2200);
+}
+function canWrite() { return !!(CTL.state && CTL.state.writable && CTL.paired); }
+
+// -- pairing --
+
+async function verifyToken() {
+  CTL.verified = CTL.token + "|" + (CTL.state && CTL.state.writable);
+  if (!CTL.token || !CTL.state || !CTL.state.writable) { CTL.paired = false; return; }
+  const r = await post("/api/v1/pair", {});
+  CTL.paired = r.status === 200;
+  if (r.status === 401) { tokenSet(""); CTL.token = ""; }
+}
+async function pairWith(code) {
+  code = (code || "").trim();
+  if (!code) return;
+  CTL.token = code;
+  CTL.verified = code + "|true";
+  const r = await post("/api/v1/pair", {});
+  if (r.status === 200) { tokenSet(code); CTL.paired = true; toast("Paired: changes made here go to the wheel"); }
+  else {
+    CTL.token = ""; CTL.paired = false;
+    toast(r.status === 401 ? "That code is not right" : r.status === 403 ? "Changes from the web page are off in Oversteer"
+      : r.status === 429 ? "Too many wrong codes: wait a minute" : "Could not pair", true);
+  }
+  render();
+}
+function unpair() { tokenSet(""); CTL.token = ""; CTL.paired = false; CTL.verified = null; render(); }
+
+// -- changes: batched a moment, one request at a time, then the answer redraws everything --
+
+function change(key, value) {
+  CTL.queue[key] = value;
+  if (!CTL.flushTimer && !CTL.inflight) CTL.flushTimer = setTimeout(flush, 120);
+}
+async function flush() {
+  CTL.flushTimer = null;
+  if (CTL.inflight) return;
+  const set = CTL.queue;
+  CTL.queue = {};
+  if (!Object.keys(set).length) return;
+  CTL.inflight = true;
+  const r = await send({set});
+  CTL.inflight = false;
+  if (!r) await refresh();
+  if (Object.keys(CTL.queue).length) CTL.flushTimer = setTimeout(flush, 120);
+}
+async function act(name, arg) {
+  const r = await send({do: name, arg});
+  if (!r) await refresh();
+}
+// The state after a change, or null when it did not go through (the reason is shown)
+async function send(body) {
+  const r = await post("/api/v1/controls", body);
+  if (r.status === 200 && r.body && r.body.state) { applyState(r.body.state); return r.body.state; }
+  const code = r.body && r.body.code;
+  if (r.status === 401) { tokenSet(""); CTL.token = ""; CTL.paired = false; render(); toast("Pair this browser again", true); }
+  else if (r.status === 403 && code === "off") toast("Changes from the web page are off in Oversteer", true);
+  else toast((r.body && r.body.error) || "The change did not go through", true);
+  for (const row of CTL.rows) row.until = 0;                 // let the controls snap back to what the wheel has
+  return null;
+}
+
+// -- building blocks; every row has root and update(spec, can) --
+
+function mkPanel(parent, title) {
+  const root = el("div", null, "panel"), head = el("div", null, "panel-h"), body = el("div");
+  head.appendChild(el("span", title, "lbl"));
+  root.append(head, body);
+  parent.appendChild(root);
+  CTL.panels.push({root, body});
+  return body;
+}
+function reg(row) { CTL.rows.push(row); return row.root; }
+function busy(row) { return row.active || Date.now() < row.until; }
+function guard(row) {
+  row.active = false; row.until = 0;
+  const done = () => { if (row.active) { row.active = false; row.until = Date.now() + 1500; } };
+  window.addEventListener("pointerup", done); window.addEventListener("pointercancel", done);
+  return () => { row.until = Date.now() + 1500; };
+}
+
+function mkSlider(name, fmt, hint, send) {
+  const root = el("div", null, "row"), head = el("div", null, "row-h"), val = el("span", "", "val num");
+  head.append(el("span", name, "name"), val);
+  const input = document.createElement("input");
+  input.type = "range";
+  input.setAttribute("aria-label", name);
+  root.append(head, input);
+  if (hint) root.appendChild(el("div", hint, "hint"));
+  const row = {root, input, spec: null};
+  const touch = guard(row);
+  input.addEventListener("pointerdown", () => { row.active = true; });
+  input.addEventListener("change", () => { touch(); });
+  input.addEventListener("input", () => { touch(); val.textContent = fmt(+input.value, row.spec); send(+input.value); });
+  row.update = (spec, can) => {
+    root.hidden = !spec;
+    if (!spec) return;
+    row.spec = spec;
+    input.min = spec.min; input.max = spec.max; input.step = spec.step || 1;
+    input.disabled = !can || spec.enabled === false;
+    root.classList.toggle("dis", input.disabled);
+    if (!busy(row)) { input.value = spec.value; val.textContent = fmt(spec.value, spec); }
+  };
+  return row;
+}
+
+function mkSwitch(name, hint, send) {
+  const root = el("div", null, "row"), line = el("div", null, "swrow"), txt = el("div", null, "txt");
+  txt.appendChild(el("div", name, "name"));
+  if (hint) txt.appendChild(el("div", hint, "hint"));
+  const btn = el("button", null, "sw");
+  btn.type = "button";
+  btn.setAttribute("role", "switch");
+  btn.setAttribute("aria-label", name);
+  line.append(txt, btn);
+  root.appendChild(line);
+  const row = {root, btn, spec: null};
+  const touch = guard(row);
+  btn.addEventListener("click", () => {
+    if (btn.disabled) return;
+    const on = btn.getAttribute("aria-checked") !== "true";
+    btn.setAttribute("aria-checked", String(on));
+    touch();
+    send(on);
+  });
+  row.update = (spec, can) => {
+    root.hidden = !spec;
+    if (!spec) return;
+    row.spec = spec;
+    btn.disabled = !can || spec.enabled === false;
+    root.classList.toggle("dis", btn.disabled);
+    if (!busy(row)) btn.setAttribute("aria-checked", String(!!spec.value));
+  };
+  return row;
+}
+
+function mkSeg(name, hint, labels, send) {
+  const root = el("div", null, "row"), head = el("div", null, "row-h"), seg = el("div", null, "seg n3");
+  head.appendChild(el("span", name, "name"));
+  root.append(head);
+  if (hint) root.appendChild(el("div", hint, "hint"));
+  root.appendChild(seg);
+  const row = {root, buttons: {}, spec: null};
+  const touch = guard(row);
+  seg.setAttribute("role", "radiogroup");
+  seg.setAttribute("aria-label", name);
+  for (const [value, text] of labels) {
+    const b = el("button", text);
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.addEventListener("click", () => {
+      if (b.disabled) return;
+      touch();
+      for (const [v, other] of Object.entries(row.buttons)) other.setAttribute("aria-selected", String(v === String(value)));
+      send(value);
+    });
+    row.buttons[value] = b;
+    seg.appendChild(b);
+  }
+  row.update = (spec, can) => {
+    root.hidden = !spec;
+    if (!spec) return;
+    row.spec = spec;
+    for (const [v, b] of Object.entries(row.buttons)) {
+      b.disabled = !can || spec.enabled === false;
+      if (!busy(row)) b.setAttribute("aria-selected", String(v === String(spec.value)));
+      b.setAttribute("aria-checked", b.getAttribute("aria-selected"));
+    }
+  };
+  return row;
+}
+
+// The rotation range's preset buttons (only the ones the wheel can reach)
+function mkPresets(send) {
+  const root = el("div", null, "row"), chips = el("div", null, "chips");
+  root.appendChild(chips);
+  const row = {root, spec: null, shown: ""};
+  row.update = (spec, can, state) => {
+    const range = state && state.settings.range;
+    root.hidden = !range;
+    if (!range) return;
+    const key = range.presets.join();
+    if (row.shown !== key) {
+      row.shown = key;
+      clear(chips);
+      for (const d of range.presets) {
+        const b = el("button", d + "°", "chip");
+        b.type = "button";
+        b.dataset.deg = String(d);
+        b.addEventListener("click", () => send(d));
+        chips.appendChild(b);
+      }
+    }
+    for (const b of chips.children) { b.disabled = !can; b.setAttribute("aria-pressed", String(+b.dataset.deg === range.value)); }
+  };
+  return row;
+}
+
+const PEDAL_LABEL = {clutch: "Clutch", brakes: "Brakes", accelerator: "Accelerator"};
+function mkPedal(name) {
+  const root = el("div", null, "pedal"), key = name + "_response";
+  root.appendChild(el("span", PEDAL_LABEL[name], "lbl"));
+  const inv = mkSwitch("Invert", null, (on) => change("invert_" + name, on));
+  const send = () => change(key, [+start.input.value, +end.input.value, +sens.input.value]);
+  const pct = (v) => v + " %";
+  const start = mkSlider("Starts at", pct, null, send), end = mkSlider("Full at", pct, null, send);
+  const sens = mkSlider("Sensitivity", (v) => v === 50 ? "50 (linear)" : String(v), null, send);
+  const chips = el("div", null, "chips"), note = el("p", null, "pnote");
+  root.append(inv.root, start.root, end.root, sens.root, chips, note);
+  const row = {root, shown: ""};
+  row.update = (spec, can, state) => {
+    const pedal = state && state.pedals[name];
+    root.hidden = !pedal;
+    if (!pedal) return;
+    inv.update(pedal.invert === undefined ? null : {value: pedal.invert}, can);
+    const r = pedal.response;
+    for (const s of [start, end, sens]) s.root.hidden = !r;
+    chips.hidden = !r; note.hidden = !r;
+    if (!r) return;
+    const ok = can && r.enabled;
+    start.update({value: r.value[0], min: 0, max: r.start_max, enabled: ok}, true);
+    end.update({value: r.value[1], min: r.end_min, max: 100, enabled: ok}, true);
+    sens.update({value: r.value[2], min: 0, max: 100, enabled: ok}, true);
+    const key2 = r.presets.map((p) => p.id).join();
+    if (row.shown !== key2) {
+      row.shown = key2;
+      clear(chips);
+      for (const p of r.presets) {
+        const b = el("button", p.label, "chip");
+        b.type = "button";
+        b.dataset.id = p.id;
+        b.addEventListener("click", () => change(key, p.response));
+        chips.appendChild(b);
+      }
+    }
+    const shown = [+start.input.value, +end.input.value, +sens.input.value].join();
+    let hit = null;
+    for (const b of chips.children) {
+      const p = r.presets.find((q) => q.id === b.dataset.id);
+      const on = p && p.response.join() === shown;
+      b.disabled = !ok;
+      b.setAttribute("aria-pressed", String(!!on));
+      if (on) hit = p;
+    }
+    note.textContent = !r.enabled ? "The driver ignores these while the pedals are combined." : hit && hit.note ? hit.note : "";
+    note.hidden = !note.textContent;
+  };
+  return row;
+}
+
+function mkProfile() {
+  const root = el("div", null, "panel"), head = el("div", null, "panel-h"), line = el("div", null, "profile-row");
+  head.appendChild(el("span", "Profile", "lbl"));
+  const select = document.createElement("select"), save = el("button", "Save", "btn ghost"), status = el("p", null, "clean");
+  select.setAttribute("aria-label", "Profile");
+  save.type = "button";
+  line.append(select, save);
+  root.append(head, line, status);
+  const row = {root, listed: ""};
+  select.addEventListener("change", () => { if (select.value) act("load_profile", select.value); });
+  save.addEventListener("click", () => { const p = CTL.state && CTL.state.profile; if (p && p.current) act("save_profile", p.current); });
+  row.update = (spec, can, state) => {
+    const p = state && state.profile;
+    root.hidden = !p || !p.list.length;
+    if (root.hidden) return;
+    const listed = (p.current ? "" : "-|") + p.list.join("|");
+    if (row.listed !== listed) {
+      row.listed = listed;
+      clear(select);
+      if (!p.current) select.appendChild(el("option", "–")).value = "";
+      for (const n of p.list) { const o = el("option", n); o.value = n; select.appendChild(o); }
+    }
+    if (document.activeElement !== select) select.value = p.current || "";
+    select.disabled = !can;
+    save.disabled = !can || !p.current || !p.dirty;
+    status.textContent = p.dirty ? "Unsaved changes: Save keeps them in this profile." : p.current ? "Saved." : "";
+    status.className = p.dirty ? "dirty" : "clean";
+  };
+  return row;
+}
+
+// Pairing and the "off" notice, at the top of each tab
+function mkNotice() {
+  const root = el("div", null, "panel"), msg = el("p", null, "pairmsg"), box = el("div", null, "pairbox"), ok = el("div", null, "pairok");
+  const input = document.createElement("input"), go = el("button", "Pair", "btn");
+  input.type = "text"; input.autocomplete = "off"; input.autocapitalize = "off"; input.spellcheck = false;
+  input.placeholder = "Pairing code"; input.setAttribute("aria-label", "Pairing code");
+  go.type = "button";
+  box.append(input, go);
+  const undo = el("button", "Unpair");
+  undo.type = "button";
+  ok.append(el("span", null, "dot"), el("span", "Paired: changes made here go straight to the wheel."), undo);
+  root.append(msg, box, ok);
+  go.addEventListener("click", () => pairWith(input.value));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") pairWith(input.value); });
+  undo.addEventListener("click", unpair);
+  const row = {root};
+  row.update = (spec, can, state) => {
+    if (!state) { root.hidden = true; return; }
+    root.hidden = false;
+    msg.hidden = box.hidden = ok.hidden = true;
+    if (!state.device) { msg.hidden = false; msg.textContent = "No wheel is connected to Oversteer."; }
+    else if (!state.writable) {
+      msg.hidden = false;
+      msg.textContent = "These settings are read-only here. To change them from this page, turn on Allow changes from the web page in Oversteer (Telemetry, Settings, Web page).";
+    } else if (!CTL.paired) {
+      msg.hidden = box.hidden = false;
+      msg.textContent = "Pair this browser to change settings: open the pairing link or scan the code Oversteer shows (Telemetry, Settings, Web page), or type the code.";
+    } else ok.hidden = false;
+  };
+  return row;
+}
+
+// -- the two tabs --
+
+function buildControls() {
+  const a = $("ctl-a"), b = $("ctl-b");
+  $("ctl-note").appendChild(reg(mkNotice()));
+  a.appendChild(reg(mkProfile()));
+  const wheel = mkPanel(a, "Wheel");
+  wheel.appendChild(reg(Object.assign(mkSlider("Rotation range", (v) => v + "°", null, (v) => change("range", v)), {key: "range"})));
+  wheel.appendChild(reg(mkPresets((d) => change("range", d))));
+  wheel.appendChild(reg(Object.assign(mkSlider("Steering sensitivity", (v) => v === 50 ? "50 (linear)" : String(v), null, (v) => change("sensitivity", v)), {key: "sensitivity"})));
+  const pedals = mkPanel(b, "Pedals");
+  pedals.appendChild(reg(Object.assign(mkSeg("Combine pedals", "Two pedals on one axis: for old games and flight simulators.",
+    [[0, "None"], [1, "Accel + Brakes"], [2, "Accel + Clutch"]], (v) => change("combine_pedals", v)), {key: "combine_pedals"})));
+  for (const name of ["clutch", "brakes", "accelerator"]) pedals.appendChild(reg(mkPedal(name)));
+}
+
+function buildFfb() {
+  const a = $("ffb-a"), b = $("ffb-b");
+  const S = (name, fmt, hint, key) => Object.assign(mkSlider(name, fmt, hint, (v) => change(key, v)), {key});
+  const T = (name, hint, key) => Object.assign(mkSwitch(name, hint, (on) => change(key, on)), {key});
+  const percent = (v) => v + " %";
+  $("ffb-note").appendChild(reg(mkNotice()));
+  a.appendChild(reg(mkProfile()));
+  const main = mkPanel(a, "Force feedback");
+  main.appendChild(reg(T("Force feedback", "Off turns the wheel's forces off; the strengths below are kept.", "ffb_enabled")));
+  main.appendChild(reg(S("Global feedback gain", (v) => v > 100 ? v + " % (clipping)" : v + " %",
+    "Master strength for everything the game sends. Above 100 % strong effects flatten at the wheel's limit.", "ff_gain")));
+  main.appendChild(reg(T("Let games adjust FFB strength", "Off: the game's own strength setting is ignored.", "app_gain")));
+  main.appendChild(reg(T("True inertia effects", "Off plays inertia as a damper, like the Windows driver.", "inertia_mode")));
+  main.appendChild(reg(mkEffects()));
+  const effects = mkPanel(a, "Effect strength");
+  effects.appendChild(reg(S("Spring effect gain", percent, "How hard the game's springs can pull.", "spring_level")));
+  effects.appendChild(reg(S("Damper effect gain", percent, "Resistance that grows with how fast the wheel turns.", "damper_level")));
+  effects.appendChild(reg(S("Friction effect gain", percent, "A constant drag, the same at any speed.", "friction_level")));
+  effects.appendChild(reg(S("Rumble vibration", percent, "Gamepad rumble as a vibration of the rim; 0 disables it.", "rumble_level")));
+  const centre = mkPanel(b, "Centering");
+  centre.appendChild(reg(S("Autocenter strength", percent, "The wheel's own centering spring, independent of any game.", "autocenter")));
+  centre.appendChild(reg(T("Keep centering spring in games", "Keep it on at this strength even when the game switches it off.", "autocenter_persistent")));
+  const leds = mkPanel(b, "Lights");
+  leds.appendChild(reg(T("FFB meter on the wheel's LEDs", "All lit is 100 % of the torque. Takes the LEDs from the rev lights.", "ffb_leds")));
+  leds.appendChild(reg(T("Rev lights from game telemetry", "Shift lights driven by the game's engine RPM.", "rev_leds")));
+  leds.appendChild(reg(Object.assign(mkSeg("Shift at", "Auto is each gear's best upshift once learnt.",
+    [["auto", "Auto"], ["percent", "% of limiter"], ["rpm", "RPM"]], (v) => change("rev_leds_mode", v)), {key: "rev_leds_mode"})));
+  leds.appendChild(reg(S("Shift point", (v, spec) => v + (spec && spec.unit === "rpm" ? " rpm" : " %"), null, "rev_leds_shift")));
+  leds.appendChild(reg(T("Learn the limiter at each launch", "Clutch in, handbrake up, throttle floored at the start.", "rev_leds_launch")));
+}
+
+// Try-effect buttons and the reset
+function mkEffects() {
+  const root = el("div", null, "row"), head = el("div", null, "row-h"), chips = el("div", null, "chips"), btns = el("div", null, "btns");
+  head.appendChild(el("span", "Try an effect", "name"));
+  const reset = el("button", "Reset to defaults", "btn ghost");
+  reset.type = "button";
+  reset.addEventListener("click", () => { if (confirm("Reset force feedback to its defaults (gain 100, effects 30, rumble 50, centering 0)?")) act("reset_ffb"); });
+  const row = {root};
+  for (const kind of ["constant", "spring", "damper", "friction", "rumble"]) {
+    const b = el("button", kind, "chip");
+    b.type = "button";
+    b.addEventListener("click", () => act("try_effect", kind));
+    chips.appendChild(b);
+  }
+  btns.appendChild(reset);
+  root.append(head, chips, btns);
+  row.update = (spec, can, state) => {
+    root.hidden = !(state && state.settings.ff_gain);
+    if (root.hidden) return;
+    for (const b of chips.children) b.disabled = !can || !(state.settings.ffb_enabled && state.settings.ffb_enabled.value);
+    reset.disabled = !can;
+  };
+  return row;
+}
+
+// -- showing the state --
+
+function applyState(state) {
+  CTL.state = state;
+  if (CTL.pending && state) {
+    const code = CTL.pending;
+    CTL.pending = null;
+    if (state.writable) pairWith(code);
+    else toast("Changes from the web page are off in Oversteer", true);
+  }
+  const mark = CTL.token + "|" + state.writable;
+  if (CTL.verified !== mark) verifyToken().then(render);
+  render();
+}
+function render() {
+  const state = CTL.state, can = canWrite();
+  $("ctl-grid-controls").hidden = $("ctl-grid-ffb").hidden = !(state && state.device);
+  for (const row of CTL.rows) {
+    const spec = row.key && state ? state.settings[row.key] : null;
+    row.update(row.key ? spec : null, can, state);
+  }
+  for (const p of CTL.panels) p.root.hidden = [...p.body.children].every((c) => c.hidden);
+}
+async function refresh() {
+  try {
+    applyState(await get("/api/v1/controls"));
+    CTL.failed = false;
+  } catch (e) { CTL.failed = true; }
+}
+async function ctlPoll() {
+  clearTimeout(CTL.timer);
+  if (!CTL.on) return;
+  if (!CTL.polling && !document.hidden && !CTL.inflight && !CTL.flushTimer) {
+    CTL.polling = true;
+    try { await refresh(); } finally { CTL.polling = false; }
+  }
+  CTL.timer = setTimeout(ctlPoll, CTL.failed ? 3000 : 1000);
+}
+function ctlShown(name) {
+  CTL.on = name === "controls" || name === "ffb";
+  if (CTL.on) ctlPoll();
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && CTL.on) ctlPoll(); });
+
+buildControls();
+buildFfb();
+{
+  // A pairing link: ?pair=<code>. The code is kept out of the address bar and the history at once
+  const q = new URLSearchParams(location.search), code = q.get("pair");
+  if (code) {
+    try { history.replaceState(null, "", location.pathname + location.hash); } catch (e) {}
+    CTL.pending = code;
+    showTab("controls", true);
+  }
+  ctlShown(tab);
+}
 </script>
 </body>
 </html>

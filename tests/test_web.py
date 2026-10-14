@@ -110,9 +110,12 @@ def test_the_page_and_its_headers(served):
 
 def test_only_reading(served):
     web = served[0]
-    for method in ('POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'):
+    for method in ('PUT', 'DELETE', 'PATCH', 'OPTIONS'):
         response, _ = request(web, '/api/v1/status', method=method)
-        assert response.status == 405 and response.getheader('Allow') == 'GET, HEAD'
+        assert response.status == 405 and response.getheader('Allow') == 'GET, HEAD, POST'
+    # POST changes settings only on the paths of web_controls, and there is none without them
+    assert request(web, '/api/v1/status', method='POST')[0].status == 404
+    assert request(web, '/api/v1/controls')[0].status == 404
 
 
 def test_the_host_check(served):
