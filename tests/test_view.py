@@ -85,6 +85,9 @@ def test_web_status():
     text = view.web_status(True, None, ['http://192.168.1.20:5301/'], False, 'lan', 5301)
     assert text.startswith('Open http://192.168.1.20:5301/') and 'TCP port 5301' in text and 'plain HTTP' in text
     assert 'firewall' not in view.web_status(True, None, ['http://localhost:5301/'], False, 'local', 5301)
+    assert 'nobody can change anything' in text
+    paired = view.web_status(True, None, ['http://192.168.1.20:5301/'], True, 'lan', 5301, control=True)
+    assert 'nobody can change anything' not in paired and 'paired' in paired
 
 
 def test_gather_from_the_database(tmp_path):
@@ -161,9 +164,11 @@ def test_capture_status():
 def test_preferences_round_trip():
     defaults = view.read_preferences({})
     assert defaults == {'telemetry_learn': False, 'telemetry_web_on': False, 'telemetry_web_port': 5301,
-                        'telemetry_web_bind': 'lan', 'telemetry_capture_on': False, 'telemetry_capture_cap': 1}
+                        'telemetry_web_bind': 'lan', 'telemetry_web_control': False, 'telemetry_capture_on': False,
+                        'telemetry_capture_cap': 1}
     chosen = dict(defaults, telemetry_learn=True, telemetry_web_on=True, telemetry_web_port=8080,
-                  telemetry_web_bind='local', telemetry_capture_on=True, telemetry_capture_cap=5)
+                  telemetry_web_bind='local', telemetry_web_control=True, telemetry_capture_on=True,
+                  telemetry_capture_cap=5)
     written = view.write_preferences(chosen)
     assert written['telemetry_web'] == '1' and written['telemetry_capture_cap'] == '5'
     assert view.read_preferences(written) == chosen

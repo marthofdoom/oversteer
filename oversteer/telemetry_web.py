@@ -5,14 +5,20 @@ Off by default. It serves one self-contained page and a small JSON API
 over what the telemetry listener hears now and what the telemetry
 database holds: the live gear and revs, the learnt shift tables,
 sessions with their verdicts and evidence, coaching and tuning advice.
-Nothing can be changed through it: GET and HEAD only, no cookies, no
-CORS headers (a page from elsewhere cannot read the JSON), a Host check
-against DNS rebinding, at most MAX_REQUESTS in flight, one request per
-connection (an open page's idle keep-alive connections would otherwise
-hold every slot), and clients on this computer's own networks only (a
-public address, as on a VPN or public Wi-Fi, is refused). There is no
-authentication: anyone on the same network can read it, which the tab
-says next to the switch.
+Reading needs no authentication: anyone on the same network can read it,
+which the tab says next to the switch. Nothing can be changed by default.
+The Controls and FFB tabs change wheel settings (oversteer/web_controls.py)
+only when "Allow changes from the web page" is on and the browser has been
+paired: a POST of JSON with the pairing token shown in the app in a header
+(no cookies, so nothing is sent on a page's behalf), from the page's own
+origin (an Origin or Sec-Fetch-Site naming another site is refused), at a
+limited rate, with failed tokens locked out. Reads are GET and HEAD only,
+there are no cookies and no CORS headers (a page from elsewhere cannot read
+the JSON), a Host check against DNS rebinding, at most MAX_REQUESTS in
+flight, one request per connection (an open page's idle keep-alive
+connections would otherwise hold every slot), and clients on this
+computer's own networks only (a public address, as on a VPN or public
+Wi-Fi, is refused).
 
 Each request opens its own read-only connection to the database and
 closes it: a server thread lives for one request only, so a per-thread
@@ -21,6 +27,7 @@ connection would leak one per request.
 
 import base64
 import hashlib
+import hmac
 import http.server
 import ipaddress
 import json
@@ -30,6 +37,7 @@ import os
 import re
 import socket
 import threading
+import time
 import urllib.parse
 
 from . import coach, live_buffer, run_analysis, tuning
@@ -40,6 +48,79 @@ MAX_REQUESTS = 8                 # in flight at once; more get 503
 TIMEOUT = 10.0                   # s a connection may take to send its request
 BINDS = {'lan': '0.0.0.0', 'local': '127.0.0.1'}
 API = '/api/v1/'
+TOKEN_HEADER = 'X-Oversteer-Token'
+MAX_BODY = 4096                  # bytes of a POST; a change is a few settings
+WRITES_PER_SECOND = 8            # sustained, with a burst of WRITE_BURST
+WRITE_BURST = 20
+MAX_FAILURES = 5                 # wrong tokens from one address within FAILURE_WINDOW s lock it out for that long
+FAILURE_WINDOW = 60.0
+
+
+class Bucket:
+    """A token bucket: `take()` is True while the rate allows."""
+
+    def __init__(self, rate, burst, clock=time.monotonic):
+        self.rate, self.burst, self.clock = float(rate), float(burst), clock
+        self.level, self.at = float(burst), clock()
+        self._lock = threading.Lock()
+
+    def take(self):
+        with self._lock:
+            now = self.clock()
+            self.level = min(self.burst, self.level + (now - self.at) * self.rate)
+            self.at = now
+            if self.level < 1:
+                return False
+            self.level -= 1
+            return True
+
+
+class Lockout:
+    """Wrong tokens counted per address: `limit` of them within `window`
+    seconds block the address until the window has passed."""
+
+    def __init__(self, limit=MAX_FAILURES, window=FAILURE_WINDOW, clock=time.monotonic):
+        self.limit, self.window, self.clock = limit, window, clock
+        self.failures = {}
+        self._lock = threading.Lock()
+
+    MAX_TRACKED = 256
+
+    @staticmethod
+    def key_of(address):
+        """The key an address is counted under: an IPv6 client by its /64 (it can pick any address in it)."""
+        try:
+            ip = ipaddress.ip_address(address.split('%')[0])
+        except ValueError:
+            return address
+        if ip.version == 6:
+            return str(ipaddress.ip_network((ip, 64), strict=False))
+        return str(ip)
+
+    def _recent(self, key, now):
+        times = [t for t in self.failures.get(key, ()) if now - t < self.window]
+        if times:
+            self.failures[key] = times
+        else:
+            self.failures.pop(key, None)
+        return times
+
+    def blocked(self, key):
+        key = self.key_of(key)
+        with self._lock:
+            return len(self._recent(key, self.clock())) >= self.limit
+
+    def fail(self, key):
+        key = self.key_of(key)
+        with self._lock:
+            now = self.clock()
+            if len(self.failures) >= self.MAX_TRACKED:   # whoever is guessing, memory stays bounded
+                for k in list(self.failures):
+                    self._recent(k, now)
+                while len(self.failures) >= self.MAX_TRACKED:
+                    del self.failures[next(iter(self.failures))]     # the oldest address
+            self.failures.setdefault(key, []).append(now)
+            self._recent(key, now)
 
 
 def find_page(datadir=None):
@@ -89,16 +170,33 @@ def local_addresses():
                     found.append(last)
     except OSError:
         pass
-    if not found:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(('192.0.2.1', 9))                     # TEST-NET-1: never routed anywhere real
-                address = s.getsockname()[0]
-                if not address.startswith('127.'):
-                    found.append(address)
-        except OSError:
-            pass
-    return found
+    route = None
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(('192.0.2.1', 9))                         # TEST-NET-1: never routed anywhere real
+            route = s.getsockname()[0]                          # what the default route sends from
+            if not route.startswith('127.') and route not in found:
+                found.append(route)
+    except OSError:
+        pass
+    return sorted(found, key=lambda a: _address_rank(a, route))
+
+
+def _address_rank(address, route):
+    """Order for offering addresses: the default route's own address, then
+    other private LAN addresses, then CGNAT (Tailscale), then docker and
+    libvirt bridges, then the rest."""
+    try:
+        ip = ipaddress.IPv4Address(address)
+    except ValueError:
+        return 9
+    if address == route:
+        return 0
+    if ip in ipaddress.ip_network('172.17.0.0/16') or ip in ipaddress.ip_network('192.168.122.0/24'):
+        return 4
+    if ip in ipaddress.ip_network('100.64.0.0/10'):
+        return 3
+    return 1 if ip.is_private else 2
 
 
 def urls(bind, port):
@@ -183,7 +281,8 @@ def current_stage(reader, learner, live):
 class TelemetryWeb(http.server.ThreadingHTTPServer):
     """The server. `live()` returns the live strip (or None), `profile()`
     the Oversteer profile whose data is shown, `status()` extra status
-    fields (the UDP port, the current car and session); `learner` (a
+    fields (the UDP port, the current car and session); `control` the
+    Controls and FFB tabs' settings (web_controls.Bridge, optional); `learner` (a
     ShiftLearner, optional) gives the car being driven its live shift
     table, and its `live_run` (a live_buffer.LiveBuffer) the run going on
     for `live?since=`. start() binds and serves from a daemon thread;
@@ -193,7 +292,7 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, port=DEFAULT_PORT, bind='0.0.0.0', live=None, reader_path=None, profile=None, status=None,
-                 learner=None, page=None, version=''):
+                 learner=None, page=None, version='', control=None):
         self.port = int(port)
         self.bind = BINDS.get(bind, bind)
         self.live = live or (lambda: None)
@@ -202,6 +301,9 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
         self.status = status or (lambda: {})
         self.learner = learner
         self.version = version
+        self.control = control               # web_controls.Bridge: the settings the page can read and change
+        self.write_limit = Bucket(WRITES_PER_SECOND, WRITE_BURST)
+        self.lockout = Lockout()
         self.error = None
         self.remote_seen = False             # a request came from another machine
         self._slots = threading.BoundedSemaphore(MAX_REQUESTS)
@@ -303,6 +405,10 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                 finally:
                     reader.close()
             return 200, body
+        if path == 'controls':
+            if self.control is None:
+                return 404, {'error': 'no settings here'}
+            return 200, self.control.state()
         if path == 'live':
             if 'since' not in query:
                 return 200, self.live()                  # the dash alone, as before phase 3
@@ -473,7 +579,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raise AttributeError(name)
 
     def _not_allowed(self):
-        self._send(405, b'', 'text/plain', extra={'Allow': 'GET, HEAD'})
+        self._send(405, b'', 'text/plain', extra={'Allow': 'GET, HEAD, POST'})
 
     def do_HEAD(self):
         self._get(head=True)
@@ -506,6 +612,88 @@ class Handler(http.server.BaseHTTPRequestHandler):
             status, body = 500, {'error': 'internal error'}
         data = json.dumps(_clean(body), ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self._send(status, data, 'application/json; charset=utf-8', head=head)
+
+    def _json(self, status, body, extra=None):
+        data = json.dumps(_clean(body), ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        self._send(status, data, 'application/json; charset=utf-8', extra=extra)
+
+    def _same_origin(self):
+        """A POST from this page, not from another site: browsers send Origin
+        (and Sec-Fetch-Site) on every POST; a tool that sends neither has no
+        page to be fooled by and still needs the token."""
+        site = self.headers.get('Sec-Fetch-Site')
+        if site is not None and site not in ('same-origin', 'none'):
+            return False
+        origin = self.headers.get('Origin')
+        if origin is None:
+            return True
+        host = (self.headers.get('Host') or '').lower()
+        parts = urllib.parse.urlsplit(origin)
+        return bool(host) and parts.scheme in ('http', 'https') and parts.netloc.lower() == host
+
+    def do_POST(self):
+        """`pair` checks the token; `controls` changes settings (web_controls.py).
+        Order: host, path, size, origin, type, switch, lockout, token, rate, body."""
+        server = self.server
+        if not allowed_host(self.headers.get('Host'), server.names):
+            self._send(421, b'Misdirected request\n', 'text/plain')
+            return
+        path = urllib.parse.urlsplit(self.path).path
+        if path not in (API + 'controls', API + 'pair'):
+            self._send(404, b'Not found\n', 'text/plain')
+            return
+        try:
+            length = int(self.headers.get('Content-Length') or '')
+        except ValueError:
+            self._json(411, {'error': 'Content-Length needed'})
+            return
+        if not 0 <= length <= MAX_BODY:
+            self._json(413, {'error': 'too large'})
+            return
+        raw = self.rfile.read(length) if length else b''          # before any answer: a reply over unread data resets
+        ip = self.client_address[0]
+        if not ipaddress.ip_address(ip).is_loopback:
+            server.remote_seen = True
+        if not self._same_origin():
+            self._json(403, {'error': 'not from this page', 'code': 'origin'})
+            return
+        if self.headers.get_content_type() != 'application/json':
+            self._json(415, {'error': 'JSON only'})
+            return
+        control = server.control
+        if control is None:
+            self._json(404, {'error': 'no settings here'})
+            return
+        if not control.enabled:
+            self._json(403, {'error': 'Changes from the web page are off', 'code': 'off'})
+            return
+        if server.lockout.blocked(ip):
+            self._json(429, {'error': 'too many wrong codes', 'code': 'locked'}, extra={'Retry-After': '60'})
+            return
+        token, held = self.headers.get(TOKEN_HEADER) or '', control.token
+        if not held or not hmac.compare_digest(token.encode('utf-8'), held.encode('utf-8')):
+            server.lockout.fail(ip)
+            self._json(401, {'error': 'pair this browser first', 'code': 'token'})
+            return
+        if path == API + 'pair':
+            self._json(200, {'ok': True})
+            return
+        if not server.write_limit.take():
+            self._json(429, {'error': 'too fast', 'code': 'rate'}, extra={'Retry-After': '1'})
+            return
+        try:
+            payload = json.loads(raw.decode('utf-8'))
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            self._json(400, {'error': 'a JSON object is needed'})
+            return
+        try:
+            status, body = control.apply(payload)
+        except Exception:
+            logging.exception("telemetry web page: change")
+            status, body = 500, {'error': 'internal error'}
+        self._json(status, body)
 
     def _send(self, status, data, kind, head=False, extra=None):
         self.send_response(status)

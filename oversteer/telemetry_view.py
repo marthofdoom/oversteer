@@ -406,7 +406,7 @@ def live_status(port, sample=None, learnt=None, elsewhere=None):
     return 'live', '  ·  '.join(parts)
 
 
-def web_status(running, error, addresses, remote_seen, bind, port):
+def web_status(running, error, addresses, remote_seen, bind, port, control=False):
     """The lines under the web page switch: where to open it, or why it is
     not running, and what having it on means."""
     if error:
@@ -415,10 +415,16 @@ def web_status(running, error, addresses, remote_seen, bind, port):
         return _("Off. When on, any phone or computer on your network can open a read-only page with the "
                  "live gear, the shift tables, coaching and your history.")
     lines = [_("Open {}").format(_(" or ").join(addresses))]
-    lines.append(_("Anyone on the same network can read your driving history, car and profile names, when you "
-                   "drive and the live telemetry; nobody can change anything. It is plain HTTP: anything on the "
-                   "way can read it too. On a public or shared network, use \"This computer only\" or leave it "
-                   "off."))
+    if control:
+        lines.append(_("Anyone on the same network can read your driving history, car and profile names, when you "
+                       "drive and the live telemetry. Only a browser paired with the code below can change wheel "
+                       "settings. It is plain HTTP: anything on the way can read it, the code included. On a "
+                       "public or shared network, use \"This computer only\" or leave it off."))
+    else:
+        lines.append(_("Anyone on the same network can read your driving history, car and profile names, when you "
+                       "drive and the live telemetry; nobody can change anything. It is plain HTTP: anything on "
+                       "the way can read it too. On a public or shared network, use \"This computer only\" or "
+                       "leave it off."))
     if bind != 'local' and not remote_seen:
         lines.append(_("Not opened from another device yet: if it does not load there, the firewall "
                        "(firewalld, ufw) may need TCP port {} opened.").format(port))
@@ -459,6 +465,7 @@ PREFERENCES = (
     ('telemetry_web_on', 'telemetry_web', False),
     ('telemetry_web_port', 'telemetry_web_port', 5301),
     ('telemetry_web_bind', 'telemetry_web_bind', 'lan'),
+    ('telemetry_web_control', 'telemetry_web_control', False),      # wheel settings changeable from the page
     ('telemetry_capture_on', 'telemetry_capture', False),
     ('telemetry_capture_cap', 'telemetry_capture_cap', 1),       # GB
 )

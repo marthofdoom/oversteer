@@ -8,6 +8,7 @@ from locale import gettext as _
 import logging
 import os
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -87,7 +88,10 @@ class Gui:
         self._methods_cache = None
         self._history_stamp = None              # what the tab's history sections were last read for
         self._history = None                    # and what they showed (telemetry_view.gather())
-        self.telemetry_web = None               # the read-only web page's server, when on
+        self.telemetry_web = None               # the web page's server, when on
+        self.web_controls = None                # web_controls.Bridge: the page's Controls and FFB tabs
+        self.web_generation = 0
+        self.web_token = ''                     # pairs a browser to change settings (config.ini web_token)
         self.telemetry_recorder = None          # telemetry_capture.Recorder, while recording
         self._capture_shown_at = 0.0
         # App preferences (config.ini): learn with the rev lights off (D4),
@@ -165,6 +169,9 @@ class Gui:
 
         Thread(target=self.input_thread, daemon = True).start()
         GLib.timeout_add(1000, self.refresh_telemetry_view)
+        if not self.web_token:
+            self.web_token = secrets.token_urlsafe(12)
+            self.save_preferences()
         self.ui.set_telemetry_preferences(self._telemetry_preferences())
         self.apply_telemetry_capture()
         if self.device is None and self.telemetry_learn:
@@ -847,9 +854,34 @@ class Gui:
             self.save_preferences()
             self.apply_telemetry_web()
 
+    def set_telemetry_web_control(self, on):
+        """Allow (or stop allowing) wheel settings to be changed from the web page."""
+        if bool(on) == self.telemetry_web_control:
+            return
+        self.telemetry_web_control = bool(on)
+        if on and not self.web_token:
+            self.web_token = secrets.token_urlsafe(12)
+        self.save_preferences()
+        self.refresh_web_status()
+
+    def new_web_token(self):
+        """A new pairing code: browsers paired with the old one are unpaired."""
+        self.web_token = secrets.token_urlsafe(12)
+        self.save_preferences()
+        self.refresh_web_status()
+
+    def refresh_web_controls(self, generation):
+        """Timer while the web page is served: what only the device can say, for its Controls and FFB tabs."""
+        if generation != self.web_generation or self.telemetry_web is None or self.web_controls is None:
+            return False
+        self.web_controls.refresh()
+        return True
+
     def apply_telemetry_web(self):
-        """Start or stop the read-only web page to match the preferences."""
+        """Start or stop the web page to match the preferences."""
         from .telemetry_web import TelemetryWeb, find_page, live_dict
+        from .web_controls import Bridge
+        self.web_generation += 1                 # ends the last server's refresh timer
         if self.telemetry_web is not None:
             self.telemetry_web.stop()
             self.telemetry_web = None
@@ -858,14 +890,18 @@ class Gui:
             if self.shift_learner.db is None:
                 self.update_learner_directory()
             log = self.shift_learner.log
+            if self.web_controls is None:
+                self.web_controls = Bridge(self, GLib.idle_add)
             web = TelemetryWeb(port=self.telemetry_web_port, bind=self.telemetry_web_bind,
                                live=lambda: live_dict(self.telemetry),
                                reader_path=log.path if log is not None else None,
                                profile=lambda: self.shift_learner.profile, status=self._web_status,
                                learner=self.shift_learner, page=find_page(self.app.datadir),
-                               version=self.app.version)
+                               version=self.app.version, control=self.web_controls)
             if web.start():
                 self.telemetry_web = web
+                self.web_controls.refresh()
+                GLib.timeout_add_seconds(2, self.refresh_web_controls, self.web_generation)
             else:
                 error = web.error
         self.refresh_web_status(error)
@@ -933,7 +969,10 @@ class Gui:
         addresses = urls(self.telemetry_web_bind, web.port) if web is not None else []
         self.ui.set_telemetry_web_status(web_status(web is not None, error, addresses,
                                                     web is not None and web.remote_seen, self.telemetry_web_bind,
-                                                    self.telemetry_web_port))
+                                                    self.telemetry_web_port, self.telemetry_web_control))
+        offer = addresses and self.telemetry_web_control and self.web_token
+        self.ui.set_web_pairing(addresses[0] + '?pair=' + self.web_token if offer else None, self.web_token,
+                                [a + '?pair=' + self.web_token for a in addresses[1:]] if offer else ())
 
     # -- Telemetry tab --
 
@@ -1257,6 +1296,7 @@ class Gui:
             from .telemetry_view import read_preferences
             for name, value in read_preferences(config['DEFAULT']).items():
                 setattr(self, name, value)
+            self.web_token = config['DEFAULT'].get('web_token', '')
             if 'hotkeys' in config['DEFAULT']:
                 self.global_hotkeys = {a: i for a, i in hotkeys.parse(config['DEFAULT']['hotkeys']).items()
                                        if a in hotkeys.GLOBAL_ACTIONS}
@@ -1295,6 +1335,7 @@ class Gui:
             'button_config': ','.join(map(str, self.button_config[1:])),
             'hotkeys': hotkeys.serialize(self.global_hotkeys),
             'last_profile': self.last_profile,
+            'web_token': self.web_token,
         }
         from .telemetry_view import write_preferences
         config['DEFAULT'].update(write_preferences(self._telemetry_preferences()))
