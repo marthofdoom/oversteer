@@ -50,3 +50,23 @@ def test_lockout_counts_an_ipv6_network_and_stays_small():
     for i in range(1000):
         lock.fail('10.1.{}.{}'.format(i // 250, i % 250))
     assert len(lock.failures) <= Lockout.MAX_TRACKED
+
+
+def test_the_pairing_row_shows_when_offered_and_stays_hidden_when_not():
+    gi = __import__('gi')
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import Gtk
+    from oversteer.gtk_ui import GtkUi
+    ui = GtkUi.__new__(GtkUi)
+    row = Gtk.Box()
+    row.add(Gtk.Label(label='x'))
+    row.set_no_show_all(True)
+    win = Gtk.OffscreenWindow()
+    win.add(row)
+    win.show_all()
+    ui.web_pair_row, ui.web_pair_text, ui.web_pair_qr, ui.web_pair_link = row, Gtk.Label(), Gtk.DrawingArea(), None
+    GtkUi.set_web_pairing(ui, 'http://192.168.1.2:5301/?pair=abc', 'abc')
+    assert row.get_visible()                       # show_all() alone skipped a no_show_all row
+    GtkUi.set_web_pairing(ui, None, 'abc')
+    win.show_all()
+    assert not row.get_visible()

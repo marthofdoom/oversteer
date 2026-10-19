@@ -1464,6 +1464,7 @@ class GtkUi:
         self.web_pair_link = link
         if link is None:
             self.web_pair_row.hide()
+            self.web_pair_row.set_no_show_all(True)     # the window's show_all must not bring it back
             return
         text = _("Scan the code with the phone's camera or open\n{}\nPairing code: {}").format(link, token)
         if others:
@@ -1473,9 +1474,11 @@ class GtkUi:
             self._web_pair_modules = qr.encode(link)
         except ValueError:
             self._web_pair_modules = None
+        # show_all() skips a widget that is itself no_show_all: lift that first
+        self.web_pair_row.set_no_show_all(False)
+        self.web_pair_row.show_all()
         self.web_pair_qr.set_visible(self._web_pair_modules is not None)
         self.web_pair_qr.queue_draw()
-        self.web_pair_row.show_all()
 
     def copy_web_pairing(self):
         if self.web_pair_link:

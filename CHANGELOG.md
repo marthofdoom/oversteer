@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.4 — 2026-10-18
+
+### Fixed
+- Settings → Web page: the pairing code and QR now appear when "Allow changes
+  from the web page" is turned on (the row stayed hidden).
+
 ## 0.15.3 — 2026-10-14
 
 ### Web page

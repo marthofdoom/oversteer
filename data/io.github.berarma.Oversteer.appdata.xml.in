@@ -47,6 +47,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.15.4" date="2026-10-18">
+      <description>
+        <p>The web page pairing code now shows when changes from the web page are allowed.</p>
+      </description>
+    </release>
     <release version="0.15.3" date="2026-10-14">
       <description>
         <p>Controls and force feedback tabs on the web page, behind a switch and pairing.</p>
