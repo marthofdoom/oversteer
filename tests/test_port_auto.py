@@ -274,11 +274,12 @@ def test_capture_records_every_port_while_unlocked_then_the_active_one(tmp_path)
     t.handle(100.2, ovst(6000, 8500), addr, 5310)             # another port while locked: dropped, not recorded
     t.handle(100.3, b'unknown', addr, 20777)                  # the active port: everything on it
     t.handle(100.4, forza(4100), addr, 20777)
-    t.handle(104.0, ovst(6000, 8500), addr, 5310)             # takes over: on with 5310's file
+    t.handle(104.0, ovst(6000, 8500), addr, 5310)             # takes over: a new 5310 file (the first closed at the lock)
     t.handle(104.1, ovst(6100, 8500), addr, 5310)
     recorder.close()
-    assert _captures(tmp_path) == {20777: [[forza(4000), b'unknown', forza(4100)]],
-                                   5310: [[b'garbage', ovst(6000, 8500), ovst(6100, 8500)]]}
+    found = _captures(tmp_path)
+    assert found[20777] == [[forza(4000), b'unknown', forza(4100)]]
+    assert sorted(found[5310]) == sorted([[b'garbage'], [ovst(6000, 8500), ovst(6100, 8500)]])
 
 
 def test_unknown_packets_on_several_ports_make_one_file_per_port(tmp_path):
@@ -538,7 +539,7 @@ def test_the_old_main_file_closes_if_quiet_and_promotion_keeps_its_start(tmp_pat
     assert recorder._file_port == 20777 and recorder._side == {}
     recorder.packet(80.0, addr, b'c', 5310)                            # 20777 still open: a side file
     recorder.main(5310, 80.1)                                          # promoted, with its own start time
-    assert recorder._file_port == 5310 and recorder._started == 52.0 and 20777 in recorder._side
+    assert recorder._file_port == 5310 and recorder._started == 52.0 and recorder._side == {}   # 20777 closed
     recorder.close()
     assert _captures(tmp_path) == {4444: [[b'a']], 20777: [[b'b']], 5310: [[b'c']]}
 
@@ -570,3 +571,39 @@ def test_a_port_added_after_stop_is_closed():
     selector = object()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     assert t._add_port(12345, sock, selector) is False and sock.fileno() == -1 and t._socks == {}
+
+
+def test_going_back_to_a_port_opens_a_new_file_and_keeps_the_first_sidecar(tmp_path):
+    """5310, then 20777, then 5310 again within CAPTURE_GAP: the first 5310 stint's file and its wheel sidecar are
+    closed at the switch and stay whole; the return gets a new file and a sidecar of its own."""
+    from oversteer import telemetry_capture as tc
+    from tests.test_diagnostics import FakeWheel
+    sources = []
+
+    def wheel():
+        source = FakeWheel([[(0x03, 0, 100)]] * 3)                  # a few steering events, then idle
+        reads = source.read
+        source.read = lambda timeout: (time.sleep(0.01) or (reads(timeout) if source.batches else []))
+        sources.append(source)
+        return source, {'range': 540}
+    ticks = iter([50.0, 51.0, 52.0, 53.0])
+    recorder = tc.Recorder(str(tmp_path), version='t', threaded=False, clock=lambda: next(ticks), wheel=wheel)
+    t = Telemetry(FakeLeds(), port=AUTO)
+    t.recorder = recorder
+    addr = ('127.0.0.1', 40000)
+    t.handle(10.0, ovst(6000, 8500), addr, 5310)
+    first = recorder.path
+    time.sleep(0.15)                                          # the first sidecar records its events
+    t.handle(14.0, forza(4000), addr, 20777)                  # 5310 quiet 4 s: 20777 takes over
+    assert recorder._file_port == 20777 and sources[0].closed
+    first_events = list(tc.read_wheel(first + tc.WHEEL_SUFFIX)[1])
+    assert first_events
+    t.handle(18.0, ovst(6100, 8500), addr, 5310)              # back to 5310 within CAPTURE_GAP
+    assert recorder._file_port == 5310 and recorder.path not in (first,)
+    again = recorder.path
+    recorder.close()
+    meta, events = tc.read_wheel(first + tc.WHEEL_SUFFIX)
+    assert meta['capture'] == os.path.basename(first) and list(events) == first_events
+    assert tc.read_wheel(again + tc.WHEEL_SUFFIX)[0]['capture'] == os.path.basename(again)
+    found = _captures(tmp_path)
+    assert sorted(found[5310]) == [[ovst(6000, 8500)], [ovst(6100, 8500)]] and found[20777] == [[forza(4000)]]

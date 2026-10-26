@@ -391,7 +391,9 @@ class Recorder:
     for that port (`_side`, one per port at most); the same cap and
     pruning cover them all. The wheel's sidecar goes with the main file:
     `main(port)` (the listener, when a game locks on `port`) makes that
-    port's file the main one and moves the sidecar to it."""
+    port's file the main one (the previous main file, with its sidecar,
+    is closed) and starts the sidecar there. Only files that never had a
+    sidecar are ever promoted, so a sidecar is never written twice."""
 
     def __init__(self, folder, cap=DEFAULT_CAP, port=None, version=None, threaded=True, clock=time.time,
                  wheel=None):
@@ -520,15 +522,11 @@ class Recorder:
             return
         try:
             if self._writer is not None:
-                # The old main file: its sidecar ends here; it goes on as a side file unless it is quiet
-                sampler, self._sampler = self._sampler, None
-                if sampler is not None:
-                    sampler.stop()
-                if now - self._last > CAPTURE_GAP:
-                    self._close_file()
-                else:
-                    self._side[self._file_port] = [self._writer, self.path, self._last, self._started]
-                    self._writer, self.path, self._file_port = None, None, None
+                # The old main file ends here, with its sidecar. Not kept as a
+                # side file: while another port is locked its packets never
+                # reach the recorder, and promoting it again later would start
+                # a new sidecar on the same path, truncating the first one.
+                self._close_file()
             if port in self._side:
                 self._promote(port, now)
             # else: the port's next packet opens the main file, with its sidecar
