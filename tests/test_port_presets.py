@@ -64,3 +64,43 @@ def test_typed_port_applies_only_when_valid():
     assert 'error' not in entry.get_style_context().list_classes()
     assert ui.rev_leds_port.get_active() == 1
     assert GtkUi.rev_leds_port_typed(ui) is None     # unchanged
+
+
+def test_enter_keeps_bad_text_and_leaving_reverts_it():
+    ui, GtkUi = _ui()
+    entry = ui.rev_leds_port.get_child()
+    GtkUi._show_rev_leds_port(ui, 20777)
+    entry.set_text('99999')
+    assert GtkUi.rev_leds_port_typed(ui) is None
+    assert entry.get_text() == '99999' and 'error' in entry.get_style_context().list_classes()
+    assert GtkUi.rev_leds_port_typed(ui, leave=True) is None
+    assert entry.get_text().startswith('20777: ') and ui.rev_leds_port.get_active() == 1
+
+
+def test_a_bare_preset_number_selects_its_row():
+    ui, GtkUi = _ui()
+    GtkUi._show_rev_leds_port(ui, 6000)
+    ui.rev_leds_port.get_child().set_text('4444')
+    assert GtkUi.rev_leds_port_typed(ui) == 4444
+    assert ui.rev_leds_port.get_active() == 2
+
+
+def test_no_stored_port_shows_the_default_and_a_low_port_is_flagged():
+    ui, GtkUi = _ui()
+    entry = ui.rev_leds_port.get_child()
+    GtkUi._show_rev_leds_port(ui, DEFAULT_PORT)         # what set_rev_leds does for port None
+    assert ui.rev_leds_port.get_active() == 0
+    GtkUi._show_rev_leds_port(ui, 500)
+    assert entry.get_text() == '500' and 'error' in entry.get_style_context().list_classes()
+
+
+def test_model_port_out_of_range_means_default():
+    from oversteer.model import Model
+    assert Model._valid_port(70000) is None and Model._valid_port(0) is None
+    assert Model._valid_port(None) is None and Model._valid_port('x') is None
+    assert Model._valid_port('20777') == 20777 and Model._valid_port(500) == 500
+
+
+def test_listener_survives_an_out_of_range_port():
+    t = telemetry.Telemetry(telemetry.NoLeds(), 70000)
+    assert t.start() is False

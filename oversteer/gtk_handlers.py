@@ -209,6 +209,13 @@ class GtkHandlers:
                 self.model.set_rev_leds_port(port)
         return False
 
+    def on_rev_leds_port_leave(self, widget, *args):
+        if not self.ui.updating_rev_leds:
+            port = self.ui.rev_leds_port_typed(leave=True)
+            if port is not None:
+                self.model.set_rev_leds_port(port)
+        return False
+
     def on_launch_options_copy_clicked(self, widget):
         self.ui.copy_launch_options()
 

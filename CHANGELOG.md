@@ -3,10 +3,11 @@
 ## Unreleased
 
 ### Telemetry
-- The UDP port in Settings -> Telemetry is now a drop-down with the games' ports
-  (5310 Oversteer default for the Assetto Corsa Rally bridge and Forza, 20777 DiRT Rally 2.0)
-  that also takes any typed port from 1024 to 65535 (applied on Enter or when you leave the box;
-  an invalid entry shows an error and keeps the last port). The saved value is still the number.
+- The UDP port in Settings -> Telemetry is now a drop-down with the games' ports (5310 Oversteer
+  default for the Assetto Corsa bridges and Forza, 20777 DiRT Rally / DiRT Rally 2.0 / DiRT 4 / EA SPORTS WRC,
+  4444 BeamNG.drive) that also takes any typed port from 1024 to 65535 (applied on Enter or when you
+  leave the box; an invalid entry shows an error and keeps the last port). The saved value is still
+  the number. A saved port outside 1 to 65535 now falls back to the default instead of failing to listen.
 
 ### Diagnostics
 - A rotating log file (5 x 2 MB) in the data folder (`oversteer/logs/oversteer.log`),
