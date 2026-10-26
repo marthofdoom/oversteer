@@ -8,6 +8,18 @@
   4444 BeamNG.drive) that also takes any typed port from 1024 to 65535 (applied on Enter or when you
   leave the box; an invalid entry shows an error and keeps the last port). The saved value is still
   the number. A saved port outside 1 to 65535 now falls back to the default instead of failing to listen.
+- **Auto port** (the new default): the first row of the port drop-down, "Auto: listen on all of these",
+  listens on 5310, 20777 and 4444 and on 5300 (where WRC Generations and bridges set up before 0.14 still
+  send) at once, from one listener thread. A port another app holds (SimHub on 20777, Forza Horizon 6 on
+  5300) is skipped and shown in the status ("Listening on UDP 5310, 4444, 5300 (20777 busy: another app has
+  it)"). Only a packet of a game Oversteer decodes picks a port; the first one becomes the active port
+  ("Receiving DiRT Rally on UDP 20777") and the others are ignored until it has been quiet for 3 s. Taking
+  telemetry from another port ends the session, so runs never join two streams. "Record raw telemetry"
+  records the active port only, with that port in the capture's header (a new file when it changes; the
+  format is unchanged). Profiles with no port or the old default (5310, or 5300 from before 0.14) open in
+  Auto; a profile with another port, or one that picks a port now, keeps listening on that port alone
+  (saved as `rev_leds_port_auto = 0` beside `rev_leds_port`). With one port, the hint about a game
+  sending to the other default stays. The web page's "Waiting on UDP" lists Auto's ports.
 
 ### Diagnostics
 - A rotating log file (5 x 2 MB) in the data folder (`oversteer/logs/oversteer.log`),

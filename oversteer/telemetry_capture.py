@@ -398,6 +398,7 @@ class Recorder:
         self.error = None                 # why recording stopped (a full disk, no permission)
         self.path = None                  # the file being written
         self._writer = None
+        self._file_port = None            # the port in the open file's header
         self._last = 0.0
         self._queue = queue.Queue(maxsize=RECORD_QUEUE)
         self._thread = None
@@ -407,15 +408,18 @@ class Recorder:
             self._thread = threading.Thread(target=self._run, name='telemetry-capture', daemon=True)
             self._thread.start()
 
-    def packet(self, now, addr, data):
-        """The listener: one datagram as it arrived, at `now` (monotonic)."""
+    def packet(self, now, addr, data, port=None):
+        """The listener: one datagram as it arrived, at `now` (monotonic),
+        on UDP `port` (None: `self.port`). A packet on another port than
+        the open file's header names starts a new file: a file is one
+        port's stream (Auto can move to another port)."""
         if self._closed:
             return                        # the listener read its recorder just before it was switched off
         if not self._threaded:
-            self._write(now, addr, data)
+            self._write(now, addr, data, port)
             return
         try:
-            self._queue.put_nowait((now, addr, data))
+            self._queue.put_nowait((now, addr, data, port))
         except queue.Full:
             self.dropped += 1
 
@@ -449,14 +453,16 @@ class Recorder:
                 return
             self._write(*item)
 
-    def _write(self, now, addr, data):
+    def _write(self, now, addr, data, port=None):
         if self.error is not None:
             return
+        if port is None:
+            port = self.port
         try:
-            if self._writer is not None and now - self._last > CAPTURE_GAP:
+            if self._writer is not None and (now - self._last > CAPTURE_GAP or port != self._file_port):
                 self._close_file()
             if self._writer is None:
-                self._open()
+                self._open(port)
             first = self._writer.packets == 0
             self._writer.write(now, addr, data)
             if first:
@@ -467,7 +473,7 @@ class Recorder:
             self.error = str(e)
             self._close_file()
 
-    def _open(self):
+    def _open(self, port=None):
         os.makedirs(self.folder, exist_ok=True)
         started = self.clock()
         base = time.strftime('%Y%m%d-%H%M%S', time.localtime(started))
@@ -477,7 +483,8 @@ class Recorder:
             path = os.path.join(self.folder, '{}-{}{}'.format(base, n, SUFFIX))
         # Room for the new file before it grows: the cap holds while recording
         prune(self.folder, self.cap)
-        self._writer = CaptureWriter(path, port=self.port, version=self.version, started=started)
+        self._writer = CaptureWriter(path, port=port, version=self.version, started=started)
+        self._file_port = port
         self._started = started
         self.path = path
         logging.info("telemetry capture: recording to %s", os.path.basename(path))

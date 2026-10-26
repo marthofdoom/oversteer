@@ -37,6 +37,7 @@ def _ui():
     ui = GtkUi.__new__(GtkUi)
     ui.updating_rev_leds = False
     ui.rev_leds_port = Gtk.ComboBoxText.new_with_entry()
+    ui.rev_leds_port.append_text(GtkUi.port_auto_text())       # row 0: Auto, then the presets
     for port, label in PORT_PRESETS:
         ui.rev_leds_port.append_text(GtkUi.port_preset_text(port, label))
     return ui, GtkUi
@@ -46,7 +47,7 @@ def test_set_port_shows_the_preset_row_or_the_bare_number():
     ui, GtkUi = _ui()
     entry = ui.rev_leds_port.get_child()
     GtkUi._show_rev_leds_port(ui, 20777)
-    assert ui.rev_leds_port.get_active() == 1 and entry.get_text().startswith('20777: ')
+    assert ui.rev_leds_port.get_active() == 2 and entry.get_text().startswith('20777: ')
     GtkUi._show_rev_leds_port(ui, 6000)
     assert ui.rev_leds_port.get_active() == -1 and entry.get_text() == '6000'
 
@@ -62,7 +63,7 @@ def test_typed_port_applies_only_when_valid():
     entry.set_text('20777')
     assert GtkUi.rev_leds_port_typed(ui) == 20777
     assert 'error' not in entry.get_style_context().list_classes()
-    assert ui.rev_leds_port.get_active() == 1
+    assert ui.rev_leds_port.get_active() == 2
     assert GtkUi.rev_leds_port_typed(ui) is None     # unchanged
 
 
@@ -74,7 +75,7 @@ def test_enter_keeps_bad_text_and_leaving_reverts_it():
     assert GtkUi.rev_leds_port_typed(ui) is None
     assert entry.get_text() == '99999' and 'error' in entry.get_style_context().list_classes()
     assert GtkUi.rev_leds_port_typed(ui, leave=True) is None
-    assert entry.get_text().startswith('20777: ') and ui.rev_leds_port.get_active() == 1
+    assert entry.get_text().startswith('20777: ') and ui.rev_leds_port.get_active() == 2
 
 
 def test_a_bare_preset_number_selects_its_row():
@@ -82,14 +83,26 @@ def test_a_bare_preset_number_selects_its_row():
     GtkUi._show_rev_leds_port(ui, 6000)
     ui.rev_leds_port.get_child().set_text('4444')
     assert GtkUi.rev_leds_port_typed(ui) == 4444
-    assert ui.rev_leds_port.get_active() == 2
+    assert ui.rev_leds_port.get_active() == 3
 
 
-def test_no_stored_port_shows_the_default_and_a_low_port_is_flagged():
+def test_auto_is_the_first_row_and_a_low_port_is_flagged():
+    from oversteer.telemetry import AUTO
     ui, GtkUi = _ui()
     entry = ui.rev_leds_port.get_child()
-    GtkUi._show_rev_leds_port(ui, DEFAULT_PORT)         # what set_rev_leds does for port None
+    GtkUi._show_rev_leds_port(ui, None)                 # Auto (what a profile with no port shows)
     assert ui.rev_leds_port.get_active() == 0
+    GtkUi._show_rev_leds_port(ui, DEFAULT_PORT)
+    assert ui.rev_leds_port.get_active() == 1
+    ui.rev_leds_port.set_active(0)                      # the Auto row picked
+    assert GtkUi.rev_leds_port_selected(ui) == AUTO and ui._rev_leds_port_valid is None
+    assert GtkUi.rev_leds_port_typed(ui, leave=True) is None    # leaving the Auto row changes nothing
+    entry.set_text('20777')
+    assert GtkUi.rev_leds_port_typed(ui) == 20777
+    entry.set_text('auto')                              # typed back to Auto
+    assert GtkUi.rev_leds_port_typed(ui) == AUTO and ui.rev_leds_port.get_active() == 0
+    entry.set_text('abc')
+    assert GtkUi.rev_leds_port_typed(ui, leave=True) is None and ui.rev_leds_port.get_active() == 0
     GtkUi._show_rev_leds_port(ui, 500)
     assert entry.get_text() == '500' and 'error' in entry.get_style_context().list_classes()
 
