@@ -169,7 +169,9 @@ class Sample:
       surface_grip, brake_bias (front share), session (the game's session
       type), fuel, torque (Nm), transmission_speed, engine_temp, oil_temp,
       oil_pressure, lap_time, best_lap, last_lap (s), driving_line and
-      ai_brake_diff (Forza, -1..1), cylinders."""
+      ai_brake_diff (Forza, -1..1), cylinders, laps_done (DiRT: laps
+      finished), sector (DiRT: the split being driven, 0-based) and
+      split_times (DiRT: the first two splits' times, None until set)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -182,7 +184,7 @@ class Sample:
                  'tyre_pressure', 'brake_temp', 'susp_max', 'hub_pos', 'hub_vel', 'ride_height', 'ang_vel', 'attitude',
                  'surface_grip', 'brake_bias', 'session', 'fuel', 'torque', 'transmission_speed', 'engine_temp',
                  'oil_temp', 'oil_pressure', 'lap_time', 'best_lap', 'last_lap', 'driving_line', 'ai_brake_diff',
-                 'cylinders')
+                 'cylinders', 'laps_done', 'sector', 'split_times')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -205,6 +207,7 @@ class Sample:
         self.transmission_speed = self.engine_temp = self.oil_temp = self.oil_pressure = None
         self.lap_time = self.best_lap = self.last_lap = self.driving_line = self.ai_brake_diff = None
         self.cylinders = None
+        self.laps_done = self.sector = self.split_times = None
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -585,7 +588,9 @@ def _codemasters(data, n):
         forward = tuple(-c for c in forward)
     sample.forward = forward
     if forward is not None and left is not None:
-        sample.up = _cross(forward, left)
+        # DiRT's world is left-handed with y up: left x forward is up there
+        # (forward x left pointed down, flipping the sign of vel's vertical part)
+        sample.up = _cross(left, forward) if game == 'dirt' else _cross(forward, left)
     sample.vel = _to_car(_vector(floats[8:11]), forward, left, sample.up)
     rl, rr, fl, fr = floats[17:21]
     rate = floats[21:25]
@@ -607,11 +612,14 @@ def _codemasters(data, n):
     if len(floats) > 54:
         # Brake temperatures, rear first, C (51 to 54: 20 to 668 on marth's WRCG captures)
         rl, rr, fl, fr = floats[51:55]
-        sample.brake_temp = _vector((fl, fr, rl, rr))
+        # (-273.15, absolute zero, is a sensor the game leaves unset: None for that wheel)
+        sample.brake_temp = tuple(t if math.isfinite(t) and t > -273.0 else None for t in (fl, fr, rl, rr))
+        if all(t is None for t in sample.brake_temp):
+            sample.brake_temp = None
     if game == 'dirt' and len(floats) > 58:
         # As the DiRT Rally 2.0 documentation has them (WRCG sends 1.0 and 0 there: unused)
         rl, rr, fl, fr = floats[55:59]
-        sample.tyre_pressure = _vector((fl * 6.894757, fr * 6.894757, rl * 6.894757, rr * 6.894757))   # psi
+        sample.tyre_pressure = _positive((fl * 6.894757, fr * 6.894757, rl * 6.894757, rr * 6.894757))   # psi (all 0: not sent)
         fuel, capacity = floats[45], floats[46]
         sample.fuel = fuel / capacity if math.isfinite(fuel) and math.isfinite(capacity) and capacity > 0 else None
     # DiRT's is negative left (verify). WRCG's is positive left: it
@@ -629,6 +637,18 @@ def _codemasters(data, n):
         sample.lap = int(floats[36]) if math.isfinite(floats[36]) else None
         sample.laps = int(floats[60]) if math.isfinite(floats[60]) and 0 <= floats[60] < 1000 else None
         sample.stage_length = _finite(floats[61])
+    if game == 'dirt' and len(floats) > 62:
+        # The game's own end of the stage: its official stage time is sent from the finish packet on (f62), the
+        # laps finished (59) and the split being driven (48) with the first two splits' times (49, 50; 0: not yet)
+        last = _finite(floats[62])
+        sample.last_lap = last if last is not None and last > 0 else None
+        sample.laps_done = int(floats[59]) if math.isfinite(floats[59]) and 0 <= floats[59] < 1000 else None
+        sample.sector = int(floats[48]) if math.isfinite(floats[48]) and 0 <= floats[48] < 100 else None
+        sample.split_times = tuple(v if math.isfinite(v) and v > 0 else None for v in floats[49:51])
+        if math.isfinite(floats[3]) and floats[3] >= 1.5:
+            # progress 2.0: the results screen, the stage is over
+            sample.running = False
+            sample.packet = 'end'
     if game == 'wrcg':
         # WRC Generations leaves 61 at 0 and puts the stage's length, in
         # km, where DiRT has its progress (seen on a capture of Mexico's

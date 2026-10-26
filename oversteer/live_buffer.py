@@ -312,7 +312,17 @@ class LiveBuffer:
         """Run `number` crossed the finish with `result_time` s on its own
         clock (None where the game gives none)."""
         run = self._run
-        if run is None or run['n'] != number or run['final'] is not None:
+        if run is None or run['n'] != number:
+            return
+        if run['final'] is not None:
+            # A later, better time for the same finish (the game's clock ran a little on past the first reading):
+            # the shown time and delta take it up, nothing else is redone
+            ref = run['ref'] if not run['mid'] else None
+            if _fin(result_time) and run['final']['time'] is not None and result_time > run['final']['time']:
+                delta = result_time - ref.result_time if ref is not None and ref.result_time is not None else None
+                run['final'] = {'time': result_time, 'delta': delta}
+                run['delta'] = delta if delta is not None else run['delta']
+                self._publish(now)
             return
         self._adopt()
         ref = run['ref'] if not run['mid'] else None

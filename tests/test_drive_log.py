@@ -599,24 +599,24 @@ def acr_after_finish(t0, d, track='Wales Afon Bidno', seconds=60.0, speed=0.0, c
     return samples
 
 
-def test_acr_run_ends_when_the_car_rests_after_the_finish(tmp_path):
+def test_acr_run_ends_at_the_detected_finish(tmp_path):
+    """The analysis does not wait for the car to stop: the run ends as the finish is detected, and the
+    roll-out after it starts no run."""
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    before = learner.history_changed
     drive = acr_drive(0.0, 238.0, 5530.0)
     feed_course(learner, drive)
-    assert learner.runs.run is not None                    # not over yet: nothing past the line
-    before = learner.history_changed
-    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=5.0)
-    feed_course(learner, after[:10])
-    assert learner.runs.run is not None                    # a second of standing is not enough
-    feed_course(learner, after[10:])
     learner.log.sync()
-    assert learner.runs.run is None                        # over seconds after the line, not at the next stage
+    assert learner.runs.run is None                        # over at the line, not seconds later
     assert learner.history_changed > before
+    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=20.0, speed=5.0)
+    feed_course(learner, after)
+    assert learner.runs.run is None                        # the roll-out is no run (the guard)
     reader = learner._reader()
     session = reader.session(reader.history('_no_profile', drive[0][1].car)[0]['id'])
     [run] = [r for r in session['runs'] if r['distance'] > 300]
     assert run['finished'] == 1 and 225 < run['result_time'] < 235
-    assert run['distance'] < 5400                          # the standing seconds are not in it
+    assert run['distance'] < 5400                          # nothing past the line is in it
 
 
 @pytest.mark.usefixtures('without_real_lines')
@@ -700,7 +700,7 @@ def test_a_run_past_the_progress_finish_ends_when_the_car_rests_though_the_game_
     the car standing, not 60 s to wait."""
     import copy
     learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
-    samples = course_samples(Course(STAGE))
+    samples = course_samples(Course(STAGE), game='wrcg')
     t_last, last, throttle = samples[-1]
     assert last.progress >= 0.99
     frozen = []
@@ -1122,3 +1122,103 @@ def test_the_path_of_a_run_is_read_on_the_games_plan():
     assert len(a) == len(w) and all(abs(p[0] - q[0]) < 1e-9 and abs(p[1] - q[1]) < 1e-9 for p, q in zip(a, w))
     wrong = drive_detect._path(_circle_trace('wrcg'), c['x'], c['y'], c['z'], 'acr')
     assert all(p[1] == wrong[0][1] for p in wrong)       # the height as north: a path that never turns
+
+
+def acr_clocked_drive(t0, start, until, step, line, speed=22.0, track='Wales Afon Bidno'):
+    """acr_drive with the game's stage clock (bridge version 4) that moves once every `step` s from the moment the
+    car moves off and stands still from `line` m on (the game's clock stopped at its line)."""
+    drive = acr_drive(t0, start, until, track=track, speed=speed)
+    moving_from = drive[20][0]
+    stopped_at = None
+    for t, s, _ in drive[20:]:
+        if stopped_at is None and s.lap_distance >= line:
+            stopped_at = t
+        elapsed = (stopped_at if stopped_at is not None else t) - moving_from
+        s.stage_time = int(elapsed / step) * step
+    for _, s, _ in drive[:20]:
+        s.stage_time = 0.0
+    return drive, (stopped_at - moving_from) if stopped_at is not None else None
+
+
+@pytest.mark.parametrize('step', [1.035, 0.1])
+def test_acr_clock_that_steps_once_a_second_is_not_a_stopped_clock(tmp_path, step):
+    """A stage clock updating once a second (the Cwmbiga capture) stands still for a step all the time:
+    within 400 m of the line that is not the clock having stopped. The finish is at the line, the result the
+    clock's last step, and the trace's time is not a staircase."""
+    from oversteer import stage_tables
+    line = stage_tables.acr_stage('Wales Afon Bidno', start=238.0)['finish_m']
+    drive, real = acr_clocked_drive(0.0, 238.0, line + 150.0, step, line)
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 300]
+    assert run['finished'] == 1
+    assert abs(run['result_time'] - real) < step + 0.2
+    assert abs(run['distance'] - (line - 238.0)) < 60      # not 155 m short of it
+
+
+def test_run_clock_follows_a_coarse_clock_without_a_staircase():
+    from oversteer.drive_log import RunClock
+    clock = RunClock(0.0)
+    stage, ts = 0.0, []
+    for i in range(1, 600):
+        if i % 60 == 0:
+            stage += 1.0                                   # steps once a second at 60 Hz packets
+        clock.tick(stage, 1 / 60)
+        ts.append(clock.t)
+    assert all(b >= a for a, b in zip(ts, ts[1:]))         # never back
+    mid = ts[300:360]
+    assert len({round(t, 3) for t in mid}) > 30            # moves between the steps
+    assert 1.4 < clock.max_step < 1.6 or 0.9 < clock.max_step < 1.1
+    assert clock.stopped_after > 1.5
+    fast = RunClock(0.016)
+    for i in range(2, 300):
+        fast.tick(i * 0.016, 0.016)
+    assert fast.stopped_after == 1.0 and fast.exact
+
+
+def dirt_results(t0, stage, seconds, speed=5.0, last_lap=None):
+    """DiRT Rally 2.0 after the finish: the clock back to 0, progress 2.0, the car rolling."""
+    from oversteer.telemetry import Sample
+    out, t = [], t0
+    while t < t0 + seconds:
+        s = Sample(1500.0, 7500.0, gear=1, speed=speed, car='dirt/7500-800-5', game='dirt', throttle=0.0)
+        s.pos = (0.0, 0.0, 0.0)
+        s.stage_time, s.progress, s.lap, s.last_lap, s.running, s.packet = 0.0, 2.0, 1, last_lap, False, 'end'
+        s.stage_length, s.lap_distance = stage, stage
+        out.append((t, s, 0.0))
+        t += 0.1
+    return out
+
+
+def test_dirt_finish_is_the_games_official_time_and_leaves_no_phantom_run(tmp_path):
+    course = Course(STAGE)
+    drive = course_samples(course)
+    official = drive[-2][1].stage_time + 1.234                # the game's time at its line, ahead of any reading before
+    for _, s, _th in drive[-1:]:
+        s.last_lap = official
+    results = dirt_results(drive[-1][0] + 0.1, course.length, 20.0, last_lap=official)
+    for _, s, _th in results:
+        s.pos = drive[-1][1].pos
+    second = course_samples(Course(STAGE), t=results[-1][0] + 30.0)
+    learner, reader, session = drive_runs(tmp_path, drive, results, second)
+    runs = [r for r in session['runs'] if r['distance'] > 100]
+    assert len(session['runs']) == 2 and len(runs) == 2   # nothing between the two stage runs
+    assert all(r['finished'] == 1 and r['end'] != 'restart' for r in runs) if 'end' in runs[0] else True
+    assert abs(runs[0]['result_time'] - official) < 0.001
+
+
+def test_dirt_results_screen_starts_no_run(tmp_path):
+    course = Course(STAGE)
+    drive = course_samples(course)
+    results = dirt_results(drive[-1][0] + 0.1, course.length, 30.0, speed=20.0, last_lap=drive[-1][1].last_lap)
+    learner, reader, session = drive_runs(tmp_path, drive, results)
+    assert len(session['runs']) == 1
+
+
+def test_progress_finish_result_follows_the_clock_to_the_line(tmp_path):
+    """WRCG: progress says finished before the line; the clock goes on to it. The result is the clock's last
+    reading, not the one at 99 %."""
+    course = Course(STAGE)
+    drive = course_samples(course, game='wrcg')
+    learner, reader, session = drive_runs(tmp_path, drive)
+    [run] = [r for r in session['runs'] if r['distance'] > 100]
+    assert abs(run['result_time'] - drive[-1][1].stage_time) < 0.05
