@@ -25,6 +25,36 @@ from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 # its documentation says to keep Data Out away from that range; the game
 # runs on this machine, so 5300 can collide.
 DEFAULT_PORT = 5310
+# Ports offered in Settings -> Telemetry (and for the web page): (port, label).
+# DEFAULT_PORT stays first. Only games this module decodes are listed.
+#  - 5310: Oversteer's own default; oversteer-run / the shm bridge (Assetto
+#    Corsa, Competizione, Rally) send there, and docs/forza-horizon-6.md
+#    tells Forza users to point Data Out at it (Forza has no fixed port and
+#    5200-5300 belong to the game itself).
+#  - 20777: DiRT Rally 2.0's hardware_settings_config.xml sends extradata 3
+#    to it (docs/dirt-rally-2-parity.md). DiRT 4 uses the same Codemasters
+#    layout; its port is not documented in this repo.
+PORT_PRESETS = [
+    (DEFAULT_PORT, "Oversteer default (Assetto Corsa Rally bridge, Forza)"),
+    (20777, "DiRT Rally 2.0 default (Codemasters layout)"),
+]
+PORT_MIN = 1024
+PORT_MAX = 65535
+
+
+def parse_port(text):
+    """The port typed in the port box as an int from PORT_MIN to PORT_MAX,
+    or None. A preset row ("5310: Oversteer default ...") is read by its
+    number."""
+    if text is None:
+        return None
+    head = str(text).split(':', 1)[0].strip()
+    if not (head.isascii() and head.isdigit()):
+        return None
+    port = int(head)
+    return port if PORT_MIN <= port <= PORT_MAX else None
+
+
 LEGACY_PORT = 5300                                   # the default before 0.14: games may still send there
 PROBE_AFTER = 10.0                                   # seconds of nothing before looking at the other port
 PROBE_EVERY = 15.0                                   # a bridge sends only while on a stage: look often...

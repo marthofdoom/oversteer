@@ -42,13 +42,6 @@
     <property name="step-increment">50</property>
     <property name="page-increment">500</property>
   </object>
-  <object class="GtkAdjustment" id="rev_leds_port_adjustment">
-    <property name="lower">1024</property>
-    <property name="upper">65535</property>
-    <property name="value">5310</property>
-    <property name="step-increment">1</property>
-    <property name="page-increment">100</property>
-  </object>
   <object class="GtkAdjustment" id="ff_gain_adjustment">
     <property name="upper">150</property>
     <property name="value">100</property>
@@ -3158,12 +3151,11 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkSpinButton" id="rev_leds_port">
+                              <object class="GtkComboBoxText" id="rev_leds_port">
                                 <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="adjustment">rev_leds_port_adjustment</property>
-                                <property name="numeric">True</property>
-                                <signal name="value-changed" handler="on_rev_leds_port_value_changed" swapped="no"/>
+                                <property name="can-focus">False</property>
+                                <property name="has-entry">True</property>
+                                <signal name="changed" handler="on_rev_leds_port_changed" swapped="no"/>
                               </object>
                               <packing>
                                 <property name="expand">False</property>
