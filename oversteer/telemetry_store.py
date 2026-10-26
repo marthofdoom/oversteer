@@ -1485,7 +1485,8 @@ class Store(Reader):
         """Drop the oldest traces beyond `cap` bytes in total; their runs,
         metrics and verdicts stay. The trace of each car's best finished run
         on a stage (the reference the coach reads the sections against, in
-        each wetness) is kept: without it the stage gets no tips by place.
+        each wetness) is kept: without it the stage gets no tips by place. So is the trace of every PB the car
+        set on a stage, a run with offs too (the quickest finished run so far when it was driven).
         A run whose trace is gone is not backfilled when the metrics change
         meaning: its old ones stay."""
         total = self._do('SELECT COALESCE(SUM(LENGTH(data)), 0) FROM traces').fetchone()[0]
@@ -1501,6 +1502,16 @@ class Store(Reader):
             if key not in best or result - (first or 0.0) < best[key][0]:
                 best[key] = (result - (first or 0.0), run)
         kept = {run for _, run in best.values()}
+        # every PB, now and at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the
+        # wetness or the time after the first section): each finished run quicker than all the runs before it
+        records = {}
+        for run, stage, car, result in self._do(
+                'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                "AND r.run_class IN ('clean', 'learning', 'off') ORDER BY r.started, r.id").fetchall():
+            if result < records.get((stage, car), float('inf')):
+                records[(stage, car)] = result
+                kept.add(run)
         dropped = 0
         for run, size in self._do('SELECT run, LENGTH(data) FROM traces ORDER BY run').fetchall():
             if total <= cap:

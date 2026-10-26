@@ -685,7 +685,7 @@ def live_delta_view(body, bounds=None, unit='sections'):
     if body['state'] not in ('live', 'stale'):
         return None
     if body.get('ref_status') == 'none':
-        return {'note': _("No PB yet on this stage: finish a clean run"), 'dim': True}
+        return {'note': _("No PB yet on this stage: finish a run"), 'dim': True}
     ref = body.get('ref')
     if body.get('ref_status') != 'ready' or body.get('delta') is None or not ref:
         return None

@@ -1027,3 +1027,55 @@ def test_the_sum_of_best_is_never_slower_than_the_pb(tmp_path):
     drive_traced(h, v2=10.0, v3=13.0, reference=a)
     found = coach.splits(h.store, h.profile, h.car)
     assert found['possible'] <= found['best'] + 1e-9
+
+
+def _flat_trace(seconds_per_sector, sector_m=1000.0):
+    """A trace at a steady speed per sector: rows every 10 m, distance 0 to 3 sectors."""
+    rows, t = [], 0.0
+    for k, secs in enumerate(seconds_per_sector):
+        for n in range(int(sector_m / 10)):
+            row = [float('nan')] * len(TRACE_CHANNELS)
+            row[cc.CH['t']], row[cc.CH['distance']], row[cc.CH['speed']] = t, k * sector_m + n * 10.0, 30.0
+            rows.append(row)
+            t += secs / (sector_m / 10)
+    row = [float('nan')] * len(TRACE_CHANNELS)
+    row[cc.CH['t']], row[cc.CH['distance']], row[cc.CH['speed']] = t, len(seconds_per_sector) * sector_m, 30.0
+    rows.append(row)
+    return rows
+
+
+def test_an_off_beside_a_sector_line_sets_no_sector_best(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    monkeypatch.setattr(stage_tables, 'entry', lambda stage: {})
+    monkeypatch.setattr(stage_tables, 'run_origin', lambda entry: 0.0)
+    monkeypatch.setattr(stage_tables, 'sector_bounds', lambda entry: {
+        'start_m': 0.0, 'bounds': [(0.0, 1000.0), (1000.0, 2000.0), (2000.0, 3000.0)], 'confidence': 'game'})
+    pb = {'run': 1, 'trace': _flat_trace([30.0, 40.0, 50.0])}
+    off = {'run': 2, 'trace': _flat_trace([30.0, 36.0, 50.0])}      # S2 "quicker": it cut the corner after an off at 980 m
+    last = {'run': 3, 'trace': _flat_trace([31.0, 41.0, 51.0])}
+    classes = {1: 'clean', 2: 'off', 3: 'clean'}
+    run = {'id': 3}
+    with_bad = coach._sectors('x', run, pb, [last, off], classes, bad={2: [(980.0, 980.0)]})
+    assert [v['best'] for v in with_bad] == pytest.approx([30.0, 40.0, 50.0])
+    without = coach._sectors('x', run, pb, [last, off], classes)
+    assert without[1]['best'] == pytest.approx(36.0)
+
+
+def test_a_phantom_restart_does_not_become_the_stage_just_driven(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    loss = {'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second=dict(loss)), result_time=203.0)
+    h.drive(corners_with(), run_class='restart', finished=0, stage=OTHER_STAGE, course=100.0, days=0.001)
+    tips = h.tips(show_all=True)
+    assert [t for t in tips if STAGE_KEY in t.id] and not [t for t in tips if t.id.startswith('scope.first')]
+
+
+def test_a_habit_line_is_said_once_until_its_number_moves(tmp_path):
+    h = History(tmp_path / 't.db')
+    tip = Tip('shift.better:3', 'praise', 'Better: 3→4 is on the lights band 47 % of the time.', value=47.0, cost=1.0)
+    state = {'shift.better:3': {'times': 1, 'value': 47.0, 'last_shown': 100.0}}
+    assert select([], [tip], [], state, 200.0) == []
+    state['shift.better:3']['value'] = 30.0
+    assert select([], [tip], [], state, 200.0) == [tip]
+    assert select([], [tip], [], {}, 200.0) == [tip]

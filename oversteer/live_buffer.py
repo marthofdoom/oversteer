@@ -107,8 +107,8 @@ class Reference:
 
 def load_reference(store, stage, car, exclude=None):
     """The coach's reference for a run of `car` (cars.id) on `stage`, as a
-    Reference, or None: coach_context.reference_run over the car's clean and
-    learning runs of the stage, as coach.splits() and the drive log's own
+    Reference, or None: coach_context.reference_run over the car's finished runs (PB_CLASSES: clean, learning, off)
+    of the stage, as coach.splits() and the drive log's own
     analysis pick it (the wetness of a run just started is not known: any
     run compares). Its trace is cut as the coach cuts it (stage_rows), its
     splits are the sections of its grid (coach_context.grid_of: the bounds

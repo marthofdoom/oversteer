@@ -1062,7 +1062,7 @@ class RunTracker:
         store.add_corners(run, corners)
         store.add_events(run, analysis['events'])
         klass = analysis['run_class']
-        if klass in ('clean', 'learning') and store.finish_unknown(run):
+        if klass in coach_context.PB_CLASSES and store.finish_unknown(run):
             klass = 'partial'                            # timed to the old line and not re-timable (retime_finishes)
         store.update_run(run, course=course, run_class=klass)
         for s in analysis['shifts']:

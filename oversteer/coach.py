@@ -541,6 +541,8 @@ CORNER_LOSS = 1.5                # s in the three worst sections against the bes
 BUDGET = 0.1                     # a tip is shown when it costs this share of the costliest one
 PRAISE = 3                       # praise lines per view (and one is forced in when two tips show)
 TECHNIQUE_SHIFT = 0.2            # a technique line comes back when its share moved this far (20 points)
+PHANTOM_M = 500.0                # m: an unfinished run shorter than this does not say which stage was just driven
+ONCE = ('shift.better', 'launch.better', 'launch.steady', 'learning', 'retuned:')    # habit lines said once...
 STAGES_COACHED = 3               # the stages (newest runs) whose sections are read for tips
 SECTION_TIPS = 3                 # the costliest sections named per stage
 TWO_PLACES = 0.5                 # the two costliest sections hold this share of the loss: "most of it in two places"
@@ -933,19 +935,23 @@ class Coach:
         return self._stages[stage]
 
     def _current_stage(self, car_id):
-        """The stage of the car's newest run of any class (a restart included), None without one or a car."""
+        """The stage of the car's newest run of any class (a restart included, but not a run that never got
+        PHANTOM_M down the road without finishing: a phantom restart at a finish), None without one or a car."""
         if car_id is None:
             return None
         for session in self.reader.sessions(car_id, 6):
-            found = [r for r in self.reader.runs(session['id']) if r['stage']]
+            found = [r for r in self.reader.runs(session['id']) if r['stage']
+                     and (r['finished'] == 1 or (r['distance'] or 0.0) >= PHANTOM_M)]
             if found:
                 return max(found, key=lambda r: (r['started'] or 0, r['id']))['stage']
         return None
 
     def _only_restarts(self, stage, car_id):
-        """True when the car's runs of the stage are all restarts: it has no run to coach yet."""
+        """True when the car's runs of the stage are all restarts: it has no run to coach yet (a circuit has no
+        'first full run': it is not said there)."""
         found = self.reader.stage_runs(stage, limit=20, car=car_id)
-        return bool(found) and all(r['run_class'] == 'restart' for r in found)
+        entry = stage_tables.entry(stage) or {}
+        return bool(found) and all(r['run_class'] == 'restart' for r in found) and entry.get('discipline') != 'circuit'
 
     def tips(self, profile, car_id=None, limit=TIPS, show_all=False):
         """[Tip]: the focus habit, up to `limit` tips, one praise, the gate
@@ -1677,7 +1683,8 @@ class Coach:
             return None
         near = [k for k in reader.corners(ref['id']) if k.get('d') is not None
                 and abs(k['d'] - corner['d']) <= coach_context.SECTION_REACH]
-        return min(near, key=lambda k: abs(k['d'] - corner['d'])) if near else None
+        found = min(near, key=lambda k: abs(k['d'] - corner['d'])) if near else None
+        return None if found is None or found.get('off') else found      # a pass that went off there is no model
 
     def _spread(self, stage, name, run, events, sections, report, candidates, praise):
         """R7: the speed through the same section from run to run (corner.spread events). A section that
@@ -1694,7 +1701,7 @@ class Coach:
         refs = {}
         if report is not None:
             for it in report:
-                if it['ref'] is not None:
+                if it['ref'] is not None and not it['ref_off']:      # not a speed taken beside the reference's off
                     refs[round(it['d'], 1)] = coach_context.key_corner(it['ref']).get('min_speed')
         wide = []
         for e in spreads:
@@ -2140,7 +2147,8 @@ def stitch(reader, run, ref, ref_corners, before):
     sectors = _sectors(run['stage'], run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
                        {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
                        {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded},
-                       {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded})
+                       {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded},
+                       {x['run']: _bad_ranges(reader, x['run']) for x in [ref_rows] + loaded})
     by_sector = bool(sectors) and all(v['confidence'] in SECTOR_SPLITS and v['best'] is not None for v in sectors)
     splits_possible = sum(v['best'] for v in sectors) if by_sector else possible
     if splits_possible is not None and pb is not None and splits_possible > pb['result_time']:
@@ -2258,7 +2266,13 @@ def splits(reader, profile, car_id):
             'unit': unit, 'splits': rows, 'sections': out, 'sectors': sectors}
 
 
-def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None):
+def _bad_ranges(reader, run_id):
+    """[(d0, d1)] m of the run's offs, spins and hits (an incident: no fair sector time beside it)."""
+    return [(e['d0'], e['d1'] if e['d1'] is not None else e['d0']) for e in reader.events(run_id)
+            if e['kind'] in ('off', 'spin', 'hit') and e['d0'] is not None]
+
+
+def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None, bad=None):
     """The game's sectors of `stage` timed from the traces (`ref_rows` and `loaded`, as splits reads them), or None.
     Each sector's bounds are on the road spline; a trace's distance is driven from the run's start, which
     is the start line, so a bound is taken less it. A run is timed through a sector it covered end to end
@@ -2273,13 +2287,19 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
         return None
     bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
 
-    def times(trace, run_id=None):
+    def times(trace, run_id=None, clean=False):
         origin = (starts or {}).get(run_id)
         if origin is None:
             origin = stage_tables.run_origin(entry)
         shift = 0.0 if origin is None else origin - placed['start_m']
-        return coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
-                                          (results or {}).get(run_id))
+        found = coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
+                                           (results or {}).get(run_id))
+        if clean:       # a sector with an off, spin or hit in it or within OFF_REACH of it is no fair best (as grid_times)
+            reach = potential.OFF_REACH
+            found = {i: t for i, t in found.items() if not any(
+                lo - reach < bounds[i][1] - shift and hi + reach > bounds[i][0] - shift
+                for lo, hi in (bad or {}).get(run_id, ()))}
+        return found
 
     mine = next((x for x in loaded if x['run'] == run['id']), None)
     last = times(mine['trace'], run['id']) if mine else {}
@@ -2287,7 +2307,7 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
     for x in [{'run': ref_rows['run'], 'trace': ref_rows['trace']}] + loaded:
         if classes.get(x['run']) not in coach_context.PB_CLASSES:
             continue
-        for i, t in times(x['trace'], x['run']).items():
+        for i, t in times(x['trace'], x['run'], x['run'] != ref_rows['run']).items():
             if i not in best or t < best[i]:
                 if i in best:
                     runner[i] = best[i]
@@ -2320,7 +2340,20 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
     lines, not repeated once shown twice unless it grew, and when two tips show at least one, so a view
     does not read as a list of faults. Techniques (correct technique described) are shown once and come
     back when their share moved TECHNIQUE_SHIFT. Each note once."""
+    def moved(tip):
+        """A habit line already shown (ONCE) comes back only when its number changed by RESHOW_WORSE, or after
+        RESHOW_AFTER: said run after run it is noise."""
+        seen = state.get(tip.id)
+        if show_all or seen is None or not tip.id.startswith(ONCE) or not (seen['times'] or 0):
+            return True
+        if seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER:
+            return True
+        old = seen['value']
+        return old is not None and tip.value is not None and abs(tip.value - old) >= RESHOW_WORSE * max(abs(old), 1e-9)
+
     def fresh(tip):
+        if not moved(tip):
+            return False
         seen = state.get(tip.id)
         if show_all or seen is None or (seen['times'] or 0) < QUIET_AFTER:
             return True
@@ -2350,6 +2383,8 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
         if tip is focus:
             continue
         tip.kind = 'tip'
+        if not moved(tip):
+            continue                     # a habit line already said: not even quietly, until it moved
         if not worth(tip):
             still.append(tip)
         elif fresh(tip) and (show_all or tips < limit):
@@ -2362,8 +2397,8 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
         seen = state.get(tip.id)
         grew = seen is not None and seen['value'] is not None and tip.value is not None \
             and abs(tip.value) <= abs(seen['value']) * (1 - RESHOW_WORSE)
-        if show_all or seen is None or (seen['times'] or 0) < QUIET_AFTER or grew \
-                or (seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER):
+        if moved(tip) and (show_all or seen is None or (seen['times'] or 0) < QUIET_AFTER or grew
+                           or (seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER)):
             praised.append(tip)
     if not show_all:
         praised = praised[:PRAISE]
