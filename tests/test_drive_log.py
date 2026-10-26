@@ -1222,3 +1222,30 @@ def test_progress_finish_result_follows_the_clock_to_the_line(tmp_path):
     learner, reader, session = drive_runs(tmp_path, drive)
     [run] = [r for r in session['runs'] if r['distance'] > 100]
     assert abs(run['result_time'] - drive[-1][1].stage_time) < 0.05
+
+
+def test_dirt_retiring_half_way_is_not_a_finish(tmp_path):
+    """Quitting a DR2 stage shows the results screen (progress 2.0) with no official time and the lap counter
+    at 0: the run is unfinished, never a PB."""
+    course = Course(STAGE)
+    drive = course_samples(course)[:4000]
+    last = drive[-1][1]
+    results = dirt_results(drive[-1][0] + 0.1, course.length, 20.0, speed=0.0, last_lap=None)
+    for _, s, _th in results:
+        s.lap, s.pos = 0, last.pos
+    learner, reader, session = drive_runs(tmp_path, drive, results)
+    runs = [r for r in session['runs'] if r['distance'] > 100]
+    assert len(session['runs']) == 1 and runs[0]['finished'] != 1 and runs[0]['result_time'] is None
+
+
+def test_a_fine_clock_with_one_stall_stays_fine():
+    from oversteer.drive_log import RunClock
+    clock = RunClock(0.016)
+    stage = 0.016
+    for i in range(2, 600):
+        if i == 300:
+            for _ in range(72):                           # a 1.2 s stall, the clock standing
+                clock.tick(stage, 1 / 60)
+        stage += 0.016
+        clock.tick(stage, 0.016)
+    assert clock.max_step == 0.0 and clock.stopped_after == 1.0

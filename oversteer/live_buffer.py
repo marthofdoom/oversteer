@@ -154,7 +154,7 @@ class _Splits:
     """Where the live run is among a list of (name, d0, d1) and what it has
     lost to the reference since the current one began. Listener thread."""
 
-    __slots__ = ('bounds', 'starts', 'index', 'entry', 'prev')
+    __slots__ = ('bounds', 'starts', 'index', 'entry', 'prev', 'last_entry')
 
     def __init__(self, bounds):
         self.bounds = bounds
@@ -162,6 +162,7 @@ class _Splits:
         self.index = None               # the split the car is in
         self.entry = None               # the delta where it entered it (None: not known)
         self.prev = None                # (index, s lost in it) of the split last left
+        self.last_entry = None          # the delta where the last split was entered, kept when the run finished in it
 
     def feed(self, d, delta_at):
         """The car is at `d`; `delta_at(x)` gives the delta at x m (x up
@@ -193,7 +194,14 @@ class _Splits:
         if self.bounds and self.index == len(self.bounds) - 1:
             if at is not None and self.entry is not None:
                 self.prev = (self.index, at - self.entry)
+            self.last_entry = self.entry
             self.index, self.entry = None, None
+
+    def recomplete(self, at):
+        """The finish's time was corrected: the last split, timed at the first reading, is timed again."""
+        if self.bounds and self.index is None and self.prev is not None and self.prev[0] == len(self.bounds) - 1 \
+                and at is not None and self.last_entry is not None:
+            self.prev = (self.prev[0], at - self.last_entry)
 
     def view(self, delta):
         if not self.bounds:
@@ -322,6 +330,8 @@ class LiveBuffer:
                 delta = result_time - ref.result_time if ref is not None and ref.result_time is not None else None
                 run['final'] = {'time': result_time, 'delta': delta}
                 run['delta'] = delta if delta is not None else run['delta']
+                run['splits'].recomplete(delta)
+                run['sectors'].recomplete(delta)
                 self._publish(now)
             return
         self._adopt()

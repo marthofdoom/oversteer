@@ -645,7 +645,7 @@ def _codemasters(data, n):
         sample.laps_done = int(floats[59]) if math.isfinite(floats[59]) and 0 <= floats[59] < 1000 else None
         sample.sector = int(floats[48]) if math.isfinite(floats[48]) and 0 <= floats[48] < 100 else None
         sample.split_times = tuple(v if math.isfinite(v) and v > 0 else None for v in floats[49:51])
-        if math.isfinite(floats[3]) and floats[3] >= 1.5:
+        if math.isfinite(floats[3]) and floats[3] >= 1.5 and not (sample.laps and sample.laps > 1):
             # progress 2.0: the results screen, the stage is over
             sample.running = False
             sample.packet = 'end'
