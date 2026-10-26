@@ -562,7 +562,8 @@ class Gui:
 
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""
-        from .telemetry import Telemetry, NoLeds, DEFAULT_PORT, LEGACY_PORT
+        from .telemetry import Telemetry, NoLeds, AUTO, DEFAULT_PORT, LEGACY_PORT
+        from .telemetry_view import listening_status, receiving_status, legacy_hint
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
@@ -595,11 +596,20 @@ class Gui:
             telemetry = self.telemetry
             if telemetry is None or generation != self.telemetry_generation:
                 return
-            if shown['source']:
+            locked = telemetry.locked
+            if shown['source'] and telemetry.auto and locked is not None:
+                text = receiving_status(locked[2], locked[0])
+                if locked[0] == LEGACY_PORT:
+                    text += '  ·  ' + legacy_hint()
+            elif shown['source']:
                 text = _("telemetry from {}").format(shown['source'])
+            elif telemetry.auto:
+                text = listening_status(telemetry.listening, telemetry.busy)
+                if telemetry.legacy_heard:
+                    text += '  ·  ' + legacy_hint()
             elif telemetry.elsewhere:
-                text = _("telemetry arrives on UDP {0}, not {1}: set the port here to {0}, or the game to {1}").format(
-                    telemetry.other_port, telemetry.port)
+                text = _("telemetry arrives on UDP {0}, not {1}: choose Auto or set the port here to {0}, or set "
+                         "the game to {1}").format(telemetry.other_port, telemetry.port)
             elif telemetry.elsewhere is False and telemetry.port == DEFAULT_PORT:
                 text = _("waiting for telemetry on UDP {} (games set up for 5300 need the new port)").format(
                     telemetry.port)
@@ -620,16 +630,23 @@ class Gui:
         def limiter(rpm):
             shown['limiter'] = rpm
             self.ui.safe_call(show)
-        self.telemetry = Telemetry(leds, self.model.get_rev_leds_port() or DEFAULT_PORT, on_status=status,
+        port = AUTO if self.model.get_rev_leds_port_auto() else (self.model.get_rev_leds_port() or DEFAULT_PORT)
+        self.telemetry = Telemetry(leds, port, on_status=status,
                                    inputs=lambda: self.launch_inputs, on_limiter=limiter,
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry.recorder = self.telemetry_recorder
-        if self.telemetry_recorder is not None:
-            self.telemetry_recorder.port = self.telemetry.port
+        if self.telemetry_recorder is not None and not self.telemetry.auto:
+            self.telemetry_recorder.port = self.telemetry.port   # Auto: each packet brings its port
         self.telemetry_status = show
         if self.telemetry.start():
-            self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
+            if self.telemetry.auto:
+                self.ui.set_rev_leds_status(listening_status(self.telemetry.listening, self.telemetry.busy))
+            else:
+                self.ui.set_rev_leds_status(_("waiting for telemetry on UDP {}").format(self.telemetry.port))
+        elif self.telemetry.auto:
+            self.ui.set_rev_leds_status(listening_status([], self.telemetry.busy))
+            self.telemetry = None
         elif self.telemetry.port == LEGACY_PORT:
             # Forza Horizon 6 binds its own socket in 5200-5300
             self.ui.set_rev_leds_status(_("port {} in use (Forza Horizon 6 may hold it): use {}").format(
@@ -994,7 +1011,9 @@ class Gui:
         address telemetry comes from."""
         telemetry = self.telemetry
         sample = telemetry.live if telemetry is not None else None
-        return {'udp_port': telemetry.port if telemetry is not None else None, 'receiving': sample is not None,
+        return {'udp_port': telemetry.udp_port if telemetry is not None else None,
+                'udp_ports': list(telemetry.listening) if telemetry is not None else [],
+                'receiving': sample is not None,
                 'game': sample.game if sample is not None else None, 'session': self.shift_learner.session}
 
     def refresh_web_status(self, error=None):
@@ -1042,10 +1061,13 @@ class Gui:
 
     def refresh_telemetry_view(self):
         """Once a second: the live line, and the shown car's learning."""
-        from .telemetry_view import live_status
+        from .telemetry_view import live_status, ports_text
         telemetry = self.telemetry
         sample = telemetry.live if telemetry is not None else None
-        live = live_status(telemetry.port if telemetry is not None else None, sample,
+        shown_port = None
+        if telemetry is not None:
+            shown_port = telemetry.port if not telemetry.auto else ports_text(telemetry.listening)
+        live = live_status(shown_port, sample,
                            elsewhere=telemetry.other_port if telemetry is not None and telemetry.elsewhere else None,
                            learnt=telemetry.using_learnt if telemetry is not None else None)
         key = self.shift_learner.car.key if self.shift_learner.car else None

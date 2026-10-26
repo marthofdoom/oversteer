@@ -168,15 +168,16 @@ def capture_summary(folder):
 
 def prune(folder, cap, keep=None):
     """Delete the oldest unlabelled captures until the folder holds at
-    most `cap` bytes; labelled ones and `keep` (the file being written)
-    stay. The paths deleted."""
+    most `cap` bytes; labelled ones and `keep` (the file being written, or
+    a collection of them) stay. The paths deleted."""
+    keep = {keep} if isinstance(keep, str) else set(keep or ())
     captures = list_captures(folder)
     total = sum(size for _p, size, _l in captures)
     deleted = []
     for path, size, labelled in captures:
         if total <= cap:
             break
-        if labelled or path == keep:
+        if labelled or path in keep:
             continue
         try:
             os.remove(path)
@@ -382,7 +383,17 @@ class Recorder:
     dropped and counted); gzip and the disk are this object's own thread,
     so a slow disk never holds up the rev lights, and recording works
     whether or not the learner has a database. `threaded=False` writes
-    inline (tests); `check(now)` then closes a file gone quiet."""
+    inline (tests); `check(now)` then closes a file gone quiet.
+
+    A file holds one UDP port's packets (its header names the port). The
+    listener's Auto mode records every port while no game is locked, so a
+    packet on another port than the open file's goes to a file of its own
+    for that port (`_side`, one per port at most); the same cap and
+    pruning cover them all. The wheel's sidecar goes with the main file:
+    `main(port)` (the listener, when a game locks on `port`) makes that
+    port's file the main one (the previous main file, with its sidecar,
+    is closed) and starts the sidecar there. Only files that never had a
+    sidecar are ever promoted, so a sidecar is never written twice."""
 
     def __init__(self, folder, cap=DEFAULT_CAP, port=None, version=None, threaded=True, clock=time.time,
                  wheel=None):
@@ -398,7 +409,9 @@ class Recorder:
         self.error = None                 # why recording stopped (a full disk, no permission)
         self.path = None                  # the file being written
         self._writer = None
+        self._file_port = None            # the port in the open file's header
         self._last = 0.0
+        self._side = {}                   # port -> [CaptureWriter, path, last packet, started]: other ports' files
         self._queue = queue.Queue(maxsize=RECORD_QUEUE)
         self._thread = None
         self._threaded = threaded
@@ -407,22 +420,38 @@ class Recorder:
             self._thread = threading.Thread(target=self._run, name='telemetry-capture', daemon=True)
             self._thread.start()
 
-    def packet(self, now, addr, data):
-        """The listener: one datagram as it arrived, at `now` (monotonic)."""
+    def packet(self, now, addr, data, port=None):
+        """The listener: one datagram as it arrived, at `now` (monotonic),
+        on UDP `port` (None: `self.port`)."""
         if self._closed:
             return                        # the listener read its recorder just before it was switched off
         if not self._threaded:
-            self._write(now, addr, data)
+            self._write(now, addr, data, port)
             return
         try:
-            self._queue.put_nowait((now, addr, data))
+            self._queue.put_nowait((now, addr, data, port))
+        except queue.Full:
+            self.dropped += 1
+
+    def main(self, port, now):
+        """The listener: a game locked on UDP `port` at `now`; its file is
+        the main one (with the wheel's sidecar) from here on."""
+        if self._closed:
+            return
+        if not self._threaded:
+            self._main(port, now)
+            return
+        try:
+            self._queue.put_nowait(('main', port, now))
         except queue.Full:
             self.dropped += 1
 
     def check(self, now):
-        """Close the file once telemetry has stopped for CAPTURE_GAP."""
+        """Close the files once telemetry has stopped for CAPTURE_GAP."""
         if self._writer is not None and now - self._last > CAPTURE_GAP:
             self._close_file()
+        for port in [p for p, side in self._side.items() if now - side[2] > CAPTURE_GAP]:
+            self._close_side(port)
 
     def close(self, timeout=5.0):
         self._closed = True
@@ -435,7 +464,7 @@ class Recorder:
             alive, self._thread = self._thread.is_alive(), None
             if alive:
                 return                    # still writing: it closes the file itself when it gets to the end
-        self._close_file()
+        self._close_all()
 
     def _run(self):
         while True:
@@ -445,18 +474,28 @@ class Recorder:
                 self.check(time.monotonic())
                 continue
             if item is None:
-                self._close_file()
+                self._close_all()
                 return
+            if item[0] == 'main':
+                self._main(item[1], item[2])
+                continue
             self._write(*item)
 
-    def _write(self, now, addr, data):
+    def _write(self, now, addr, data, port=None):
         if self.error is not None:
             return
+        if port is None:
+            port = self.port
         try:
             if self._writer is not None and now - self._last > CAPTURE_GAP:
                 self._close_file()
+            if self._writer is not None and port != self._file_port:
+                self._write_side(now, addr, data, port)
+                return
+            if self._writer is None and port in self._side:
+                self._promote(port, now)          # that port's file goes on as the main one
             if self._writer is None:
-                self._open()
+                self._open(port)
             first = self._writer.packets == 0
             self._writer.write(now, addr, data)
             if first:
@@ -465,9 +504,52 @@ class Recorder:
         except OSError as e:
             logging.warning("telemetry capture: %s", e)
             self.error = str(e)
-            self._close_file()
+            self._close_all()
 
-    def _open(self):
+    def _write_side(self, now, addr, data, port):
+        side = self._side.get(port)
+        if side is not None and now - side[2] > CAPTURE_GAP:
+            self._close_side(port)
+            side = None
+        if side is None:
+            writer, path, started = self._new_file(port)
+            side = self._side[port] = [writer, path, now, started]
+        side[0].write(now, addr, data)
+        side[2] = now
+
+    def _main(self, port, now):
+        if self.error is not None or (self._writer is not None and self._file_port == port):
+            return
+        try:
+            if self._writer is not None:
+                # The old main file ends here, with its sidecar. Not kept as a
+                # side file: while another port is locked its packets never
+                # reach the recorder, and promoting it again later would start
+                # a new sidecar on the same path, truncating the first one.
+                self._close_file()
+            if port in self._side:
+                self._promote(port, now)
+            # else: the port's next packet opens the main file, with its sidecar
+        except OSError as e:
+            logging.warning("telemetry capture: %s", e)
+            self.error = str(e)
+            self._close_all()
+
+    def _promote(self, port, now):
+        """A side file becomes the main one (no main open): with its own
+        start time, and the wheel's sidecar from here on."""
+        writer, path, last, started = self._side.pop(port)
+        if now - last > CAPTURE_GAP:
+            self._side[port] = [writer, path, last, started]
+            self._close_side(port)
+            return
+        self._writer, self.path, self._file_port, self._last, self._started = writer, path, port, last, started
+        self._start_wheel(writer._first if writer._first is not None else now)
+
+    def _open_paths(self):
+        return [p for p in [self.path] + [side[1] for side in self._side.values()] if p]
+
+    def _new_file(self, port):
         os.makedirs(self.folder, exist_ok=True)
         started = self.clock()
         base = time.strftime('%Y%m%d-%H%M%S', time.localtime(started))
@@ -476,11 +558,14 @@ class Recorder:
             n += 1
             path = os.path.join(self.folder, '{}-{}{}'.format(base, n, SUFFIX))
         # Room for the new file before it grows: the cap holds while recording
-        prune(self.folder, self.cap)
-        self._writer = CaptureWriter(path, port=self.port, version=self.version, started=started)
-        self._started = started
-        self.path = path
-        logging.info("telemetry capture: recording to %s", os.path.basename(path))
+        prune(self.folder, self.cap, keep=self._open_paths())
+        writer = CaptureWriter(path, port=port, version=self.version, started=started)
+        logging.info("telemetry capture: recording UDP %s to %s", port, os.path.basename(path))
+        return writer, path, started
+
+    def _open(self, port=None):
+        self._writer, self.path, self._started = self._new_file(port)
+        self._file_port = port
 
     def _start_wheel(self, origin):
         if self.wheel is None:
@@ -517,7 +602,20 @@ class Recorder:
         except OSError as e:
             logging.warning("telemetry capture: %s", e)
         self.path = None
-        prune(self.folder, self.cap)
+        prune(self.folder, self.cap, keep=self._open_paths())
+
+    def _close_side(self, port):
+        writer = self._side.pop(port)[0]
+        try:
+            writer.close()
+        except OSError as e:
+            logging.warning("telemetry capture: %s", e)
+        prune(self.folder, self.cap, keep=self._open_paths())
+
+    def _close_all(self):
+        self._close_file()
+        for port in list(self._side):
+            self._close_side(port)
 
 
 class NullLeds:

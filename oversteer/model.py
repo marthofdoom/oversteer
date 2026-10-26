@@ -33,6 +33,7 @@ class Model:
         'ffb_leds': None,
         'rev_leds': None,
         'rev_leds_port': None,
+        'rev_leds_port_auto': None,
         'rev_leds_shift': None,
         'rev_leds_shift_unit': None,
         'rev_leds_launch': None,
@@ -67,6 +68,7 @@ class Model:
         'ffb_leds': 'integer',
         'rev_leds': 'boolean',
         'rev_leds_port': 'integer',
+        'rev_leds_port_auto': 'boolean',
         'rev_leds_shift': 'integer',
         'rev_leds_shift_unit': 'string',
         'rev_leds_launch': 'boolean',
@@ -151,7 +153,8 @@ class Model:
             'rumble_level': self.device.get_rumble_level(),
             'ffb_leds': self.device.get_ffb_leds(),
             'rev_leds': False if self.device.has_rev_leds() else None,
-            'rev_leds_port': 5310 if self.device.has_rev_leds() else None,   # telemetry.DEFAULT_PORT
+            'rev_leds_port': None,                     # no fixed port: Auto (rev_leds_port_auto)
+            'rev_leds_port_auto': True if self.device.has_rev_leds() else None,
             'rev_leds_shift': 95 if self.device.has_rev_leds() else None,
             'rev_leds_shift_unit': 'percent' if self.device.has_rev_leds() else None,
             'rev_leds_launch': True if self.device.has_rev_leds() else None,
@@ -293,6 +296,15 @@ class Model:
             if data['rev_leds_learnt'] is None:
                 data['rev_leds_learnt'] = True
             data['rev_leds_shift'] = self._clamp_shift(data['rev_leds_shift_unit'], data['rev_leds_shift'])
+
+        # A profile from before Auto: no port, or the 5310 the app wrote as
+        # its default without being asked (one of Auto's ports), listens on
+        # all of them. Any other port stays fixed, 5300 too: Auto only
+        # probes 5300 (Forza Horizon 6's range), and a game set to it would
+        # lose telemetry. The port itself is kept: an older Oversteer
+        # reading the profile listens there as before.
+        if data['rev_leds_port_auto'] is None:
+            data['rev_leds_port_auto'] = self._port_auto(data)
 
         # A profile saved before hotkeys existed keeps the ones in use, so
         # switching to it (perhaps by a hotkey) doesn't strand the others.
@@ -565,13 +577,40 @@ class Model:
             return None
         return value if 1 <= value <= 65535 else None
 
+    # No port, or the 5310 the app saved as its default since 0.14 (5300 before it stays fixed:
+    # Auto only probes 5300).
+    # An older Oversteer that saves a profile drops rev_leds_port_auto (unknown to it), so a
+    # fixed 5310 saved by it reads as Auto again here: accepted, Auto listens on 5310 too.
+    LEGACY_DEFAULT_PORTS = (None, 5310)
+
     def set_rev_leds_port(self, value):
-        value = self._valid_port(value)
-        if self.set_if_changed('rev_leds_port', value) and self.ui is not None and self.data['rev_leds']:
+        """Listen on one port, or on Auto's (`value` telemetry.AUTO). Auto
+        is kept apart from the port (rev_leds_port_auto), so a profile
+        that picks 5310 itself keeps it; the port stays as it was when
+        Auto is picked, for an older Oversteer reading the profile."""
+        if value == 'auto':                        # telemetry.AUTO
+            changed = self.set_if_changed('rev_leds_port_auto', True)
+        else:
+            value = self._valid_port(value)
+            changed = self.set_if_changed('rev_leds_port', value)
+            changed = self.set_if_changed('rev_leds_port_auto', False) or changed
+        if changed and self.ui is not None and self.data['rev_leds']:
             self.ui.controller.apply_rev_leds()
 
     def get_rev_leds_port(self):
+        """The fixed port, or None (the default port). See get_rev_leds_port_auto()."""
         return self._valid_port(self.data['rev_leds_port'])
+
+    def get_rev_leds_port_auto(self):
+        """Whether the listener takes Auto's ports (a profile with nothing saved does)."""
+        return self._port_auto(self.data)
+
+    @classmethod
+    def _port_auto(cls, data):
+        auto = data.get('rev_leds_port_auto')
+        if auto is None:
+            return cls._valid_port(data.get('rev_leds_port')) in cls.LEGACY_DEFAULT_PORTS
+        return bool(auto)
 
     @staticmethod
     def _clamp_shift(unit, value):
@@ -735,7 +774,8 @@ class Model:
         self.ui.set_friction_level(data['friction_level'])
         self.ui.set_rumble_level(data['rumble_level'])
         self.ui.set_ffb_leds(data['ffb_leds'])
-        self.ui.set_rev_leds(data['rev_leds'], self._valid_port(data['rev_leds_port']), data['rev_leds_shift'],
+        self.ui.set_rev_leds(data['rev_leds'], 'auto' if self._port_auto(data)
+                             else (self._valid_port(data['rev_leds_port']) or 5310), data['rev_leds_shift'],
                              'auto' if data['rev_leds'] is not None and data['rev_leds_learnt'] is not False
                              else data['rev_leds_shift_unit'])
         self.ui.set_rev_leds_options(data['rev_leds_launch'], data['rev_leds_learnt'])

@@ -727,7 +727,9 @@ function updateConn() {
   } else if (state === "live") {
     text = (game || "Receiving") + " · live";
   } else {
-    text = s.udp_port && s.receiving === false && conn.status ? "Waiting on UDP " + s.udp_port : "between stages";
+    // Auto listens on several ports until one brings a game
+    const ports = s.udp_port ? String(s.udp_port) : (s.udp_ports && s.udp_ports.length ? s.udp_ports.join(", ") : "");
+    text = ports && s.receiving === false && conn.status ? "Waiting on UDP " + ports : "between stages";
   }
   chip.className = "conn " + state;
   $("status").textContent = text;

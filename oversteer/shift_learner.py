@@ -1531,6 +1531,14 @@ class ShiftLearner:
             self._reset_motion()
         self.history_changed += 1
 
+    def new_source(self):
+        """The listener took telemetry from another port (Auto): what
+        arrives next is another stream, so the session and its run end
+        here, as a change of car would end them, instead of the drive log
+        reading the switch as a jump inside one run."""
+        with self.lock:
+            self._end_session_locked()
+
     def tick(self, now):
         """No telemetry is arriving (the listener's idle loop): end the
         session once SESSION_GAP has passed since the last packet."""

@@ -373,6 +373,58 @@ def session_lines(history):
     return ['  ·  '.join(part for part in row if part) for row in session_rows(history)]
 
 
+def game_label(game):
+    """A decoded format's game as people call it ('dirt' -> DiRT Rally)."""
+    from .drive_detect import GAMES
+    return GAMES.get(game, game or _("telemetry"))
+
+
+def busy_reason(port, error):
+    """Why a telemetry port could not be bound, in a few words."""
+    import errno
+    from .telemetry import LEGACY_PORT
+    code = getattr(error, 'errno', None)
+    if code == errno.EADDRINUSE:
+        return _("Forza Horizon 6 may hold it") if port == LEGACY_PORT else _("another app has it")
+    if code in (errno.EACCES, errno.EPERM):
+        return _("no permission")
+    return str(error)
+
+
+def ports_text(ports):
+    return ', '.join(str(p) for p in ports)
+
+
+def listening_status(listening, busy):
+    """The Auto listener's status while nothing is locked: "Listening on
+    UDP 5310, 20777, 4444, 5300 (20777 busy: another app has it)"."""
+    skipped = '; '.join(_("{port} busy: {why}").format(port=port, why=busy_reason(port, error))
+                        for port, error in busy.items())
+    if not listening:
+        return _("No telemetry port free ({})").format(skipped) if skipped else _("No telemetry port free")
+    text = _("Listening on UDP {}").format(ports_text(listening))
+    if skipped:
+        text += ' (' + skipped + ')'
+    if SIMHUB_PORT in listening:
+        # Only one app can hold a UDP port: SimHub started after Oversteer finds 20777 taken
+        text += '  ·  ' + _("SimHub needs {} free: pick another port here").format(SIMHUB_PORT)
+    return text
+
+
+SIMHUB_PORT = 20777          # the Codemasters port SimHub (and similar tools) listen on
+
+
+def legacy_hint():
+    """A game heard on 5300, in Forza Horizon 6's range: Auto only probes it."""
+    from .telemetry import LEGACY_PORT, DEFAULT_PORT
+    return _("UDP {0} has telemetry: set the game to {1}").format(LEGACY_PORT, DEFAULT_PORT)
+
+
+def receiving_status(game, port):
+    """"Receiving DiRT Rally on UDP 20777"."""
+    return _("Receiving {game} on UDP {port}").format(game=game_label(game), port=port)
+
+
 def live_status(port, sample=None, learnt=None, elsewhere=None):
     """(state, markup) of the line about the telemetry arriving now:
     'off' without a listener (`port` None), 'waiting' while nothing

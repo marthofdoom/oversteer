@@ -235,8 +235,9 @@ comes from a public catalogue or the game); car engine data from `physicsdefinit
   (fetch at refresh, or ask); the other crosswalk (no licence) is never shipped.
 
 ## 7. First capture: instructions for marth
-1. Oversteer (Flatpak): Telemetry tab: UDP port **5310**, "Learn from game telemetry" on,
-   **"Record raw telemetry" on**. Save the profile you use for FH6 (port is per profile).
+1. Oversteer (Flatpak): Settings -> Telemetry: UDP port **Auto** (the default; it listens on 5310
+   among others) or **5310**, "Learn from game telemetry" on, **"Record raw telemetry" on**. Save
+   the profile you use for FH6 (port is per profile).
 2. FH6: Settings > HUD and Gameplay: **Data Out: On**, **Data Out IP Address: 127.0.0.1**,
    **Data Out IP Port: 5310**. (Never 5200-5300.)
 3. Drive, in this order, without closing Oversteer:
