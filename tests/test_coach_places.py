@@ -1061,6 +1061,23 @@ def test_an_off_beside_a_sector_line_sets_no_sector_best(tmp_path, monkeypatch):
     assert without[1]['best'] == pytest.approx(36.0)
 
 
+def test_a_sector_every_run_had_an_incident_in_stays_a_sector_with_the_pbs_time(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    monkeypatch.setattr(stage_tables, 'entry', lambda stage: {})
+    monkeypatch.setattr(stage_tables, 'run_origin', lambda entry: 0.0)
+    monkeypatch.setattr(stage_tables, 'sector_bounds', lambda entry: {
+        'start_m': 0.0, 'bounds': [(0.0, 1000.0), (1000.0, 2000.0), (2000.0, 3000.0)], 'confidence': 'game'})
+    pb = {'run': 1, 'trace': _flat_trace([30.0, 40.0, 50.0])}
+    off = {'run': 2, 'trace': _flat_trace([30.0, 36.0, 50.0])}
+    last = {'run': 3, 'trace': _flat_trace([31.0, 41.0, 51.0])}
+    classes = {1: 'clean', 2: 'off', 3: 'clean'}
+    bad = {r: [(980.0, 980.0)] for r in (1, 2, 3)}      # every run, the PB too, had an incident at the S1/S2 line
+    found = coach._sectors('x', {'id': 3}, pb, [last, off], classes, bad=bad)
+    assert found is not None and [v['name'] for v in found] == ['S1', 'S2', 'S3']
+    assert found[1]['best'] == pytest.approx(40.0) and found[1]['pb'] == pytest.approx(40.0)
+    assert found[1]['delta'] == pytest.approx(1.0) and not found[1]['gold']
+
+
 def test_a_phantom_restart_does_not_become_the_stage_just_driven(tmp_path):
     h = Stage(tmp_path / 't.db')
     loss = {'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}
