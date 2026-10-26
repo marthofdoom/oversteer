@@ -554,13 +554,24 @@ class Model:
     def get_rev_leds(self):
         return self.data['rev_leds']
 
+    @staticmethod
+    def _valid_port(value):
+        """The port as an int, or None (meaning the default) if it is not a
+        possible UDP port; below 1024 is kept (it needs root) and flagged
+        by the UI."""
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return None
+        return value if 1 <= value <= 65535 else None
+
     def set_rev_leds_port(self, value):
-        value = int(value)
+        value = self._valid_port(value)
         if self.set_if_changed('rev_leds_port', value) and self.ui is not None and self.data['rev_leds']:
             self.ui.controller.apply_rev_leds()
 
     def get_rev_leds_port(self):
-        return self.data['rev_leds_port']
+        return self._valid_port(self.data['rev_leds_port'])
 
     @staticmethod
     def _clamp_shift(unit, value):
@@ -724,7 +735,7 @@ class Model:
         self.ui.set_friction_level(data['friction_level'])
         self.ui.set_rumble_level(data['rumble_level'])
         self.ui.set_ffb_leds(data['ffb_leds'])
-        self.ui.set_rev_leds(data['rev_leds'], data['rev_leds_port'], data['rev_leds_shift'],
+        self.ui.set_rev_leds(data['rev_leds'], self._valid_port(data['rev_leds_port']), data['rev_leds_shift'],
                              'auto' if data['rev_leds'] is not None and data['rev_leds_learnt'] is not False
                              else data['rev_leds_shift_unit'])
         self.ui.set_rev_leds_options(data['rev_leds_launch'], data['rev_leds_learnt'])

@@ -195,9 +195,26 @@ class GtkHandlers:
         self.model.set_rev_leds(state)
         return False
 
-    def on_rev_leds_port_value_changed(self, widget):
+    def on_rev_leds_port_changed(self, widget):
+        # A preset row was picked; typing leaves no row active and waits for Enter or focus-out
         if not self.ui.updating_rev_leds:
-            self.model.set_rev_leds_port(widget.get_value_as_int())
+            port = self.ui.rev_leds_port_selected()
+            if port is not None:
+                self.model.set_rev_leds_port(port)
+
+    def on_rev_leds_port_commit(self, widget, *args):
+        if not self.ui.updating_rev_leds:
+            port = self.ui.rev_leds_port_typed()
+            if port is not None:
+                self.model.set_rev_leds_port(port)
+        return False
+
+    def on_rev_leds_port_leave(self, widget, *args):
+        if not self.ui.updating_rev_leds:
+            port = self.ui.rev_leds_port_typed(leave=True)
+            if port is not None:
+                self.model.set_rev_leds_port(port)
+        return False
 
     def on_launch_options_copy_clicked(self, widget):
         self.ui.copy_launch_options()

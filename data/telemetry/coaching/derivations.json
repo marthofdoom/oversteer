@@ -912,6 +912,24 @@
    "unit": "int",
    "description": "Engine cylinders (Forza).",
    "rate": "packet"
+  },
+  "laps_done": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Laps finished (DiRT Rally 2.0, field 59).",
+   "rate": "packet"
+  },
+  "sector": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "The split being driven, 0-based (DiRT Rally 2.0, field 48).",
+   "rate": "packet"
+  },
+  "split_times": {
+   "kind": "sample",
+   "unit": "s",
+   "description": "The first two splits' times, None until set (DiRT Rally 2.0, fields 49 and 50).",
+   "rate": "packet"
   }
  },
  "rig": {
