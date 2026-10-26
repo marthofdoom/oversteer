@@ -5,7 +5,7 @@ import os
 import subprocess
 from .device_manager import DeviceManager
 from .model import Model
-from . import car_data, stage_tables
+from . import car_data, diagnostics, stage_tables
 import sys
 from xdg.BaseDirectory import save_config_path
 
@@ -66,6 +66,8 @@ class Application:
         parser.add_argument('-p', '--profile', help=_("load settings from a profile"))
         parser.add_argument('-g', '--gui', action='store_true', help=_("start the GUI"))
         parser.add_argument('--debug', action='store_true', help=_("enable debug output"))
+        parser.add_argument('--diagnostics-bundle', metavar='PATH',
+                help=_("write a zip of the logs, the latest captures and the versions to PATH, for a bug report"))
         parser.add_argument('--proxy-list', action='store_true', help=_("list proxy devices and their state"))
         parser.add_argument('--proxy-run', metavar='ID', action='append',
                 help=_("run a proxy in the foreground (for testing; repeatable)"))
@@ -85,10 +87,19 @@ class Application:
 
         if args.debug:
             argc -= 1
-        else:
-            logging.disable(level=logging.INFO)
 
-        if args.proxy_list or args.proxy_run or args.proxy_daemon or args.proxy_install or args.proxy_remove:
+        proxy_command = args.proxy_list or args.proxy_run or args.proxy_daemon or args.proxy_install \
+            or args.proxy_remove
+        # The proxy service runs as root: no log file in a user's folder from it
+        debug = args.debug or diagnostics.read_debug_preference(os.path.join(save_config_path('oversteer'), 'config.ini'))
+        diagnostics.setup(debug=debug, to_file=not proxy_command)
+        diagnostics.install_excepthooks()
+        logging.info("Oversteer %s starting: %s", self.version, ' '.join(argv[1:]))
+
+        if args.diagnostics_bundle:
+            exit(self.write_diagnostics_bundle(args.diagnostics_bundle))
+
+        if proxy_command:
             exit(self.run_proxy_command(args, argv))
 
         self.device_manager = DeviceManager()
@@ -186,6 +197,17 @@ class Application:
         model.flush_device()
         if args.command:
             subprocess.Popen(args.command, shell=True)
+
+    def write_diagnostics_bundle(self, path):
+        folder = os.path.join(diagnostics.data_home(), 'oversteer', 'captures')
+        config_file = os.path.join(save_config_path('oversteer'), 'config.ini')
+        try:
+            count = diagnostics.make_bundle(path, self.version, folder, config_file)
+        except OSError as e:
+            print(_("Can't write {}: {}").format(path, e))
+            return 1
+        print(_("Diagnostics bundle written to {} ({} files, no database).").format(path, count))
+        return 0
 
     def run_proxy_command(self, args, argv):
         import signal

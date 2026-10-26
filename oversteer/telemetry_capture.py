@@ -15,6 +15,22 @@ record. The app records into a folder (`Recorder`), a file per stretch of
 driving; the labels given to a session are kept next to its captures in
 a `<file>.json` sidecar, so a capture copied elsewhere (a test fixture, a
 bug report) still says what it was.
+
+With the wheel's own inputs recorded too, a capture has a second sidecar,
+`<file>.wheel.gz` (see `WheelSampler`): gzip of
+
+    b'OVWHL1\n'
+    one JSON line: {"capture": <capture file name>, "started": <epoch of the capture's first packet>,
+                    "clock": "seconds since the capture's first packet", "fields": "t type code value",
+                    "device": <name>, "range": <degrees, sysfs>, "sensitivity": <sysfs>,
+                    "axes": {<evdev code>: [min, max, value at the start]}, "oversteer": <version>}
+    records: struct '<dHHi' (seconds since the capture's first packet, evdev
+             event type, event code, value) for every EV_ABS and EV_KEY event
+
+The times are on the capture records' own clock (the listener's monotonic
+one, taken from the first packet), so a steering sample lines up with the
+telemetry packet beside it. Read-only: the wheel's node is opened without a
+grab and nothing is written to it. The .ovcap format is unchanged.
 """
 
 import glob
@@ -23,6 +39,7 @@ import json
 import logging
 import os
 import queue
+import select
 import socket
 import struct
 import threading
@@ -32,6 +49,10 @@ import zlib
 MAGIC = b'OVCAP1\n'
 RECORD = struct.Struct('<dIH')
 SUFFIX = '.ovcap.gz'
+WHEEL_MAGIC = b'OVWHL1\n'
+WHEEL_RECORD = struct.Struct('<dHHi')
+WHEEL_SUFFIX = '.wheel.gz'
+EV_KEY, EV_ABS = 0x01, 0x03          # linux/input-event-codes.h
 CAPTURE_GAP = 60.0          # seconds without telemetry that close a capture file: a menu or a pause does not
 RECORD_QUEUE = 4096         # packets waiting for the writer (about 30 s at 120 a second)
 DEFAULT_CAP = 1 << 30       # bytes kept in the folder; the oldest unlabelled captures go first
@@ -125,6 +146,11 @@ def list_captures(folder):
     return [(path, size, labelled) for _mtime, path, size, labelled in sorted(found)]
 
 
+def sidecars(path):
+    """The sidecar files of a capture that exist: its labels and its wheel inputs."""
+    return [p for p in (path + '.json', path + WHEEL_SUFFIX) if os.path.exists(p)]
+
+
 def capture_summary(folder):
     """(captures, bytes, labelled) in `folder`."""
     captures = list_captures(folder)
@@ -147,6 +173,10 @@ def prune(folder, cap, keep=None):
             os.remove(path)
         except OSError:
             continue
+        try:
+            os.remove(path + WHEEL_SUFFIX)       # the wheel's inputs go with the capture
+        except OSError:
+            pass
         total -= size
         deleted.append(path)
     return deleted
@@ -184,6 +214,153 @@ def label_captures(folder, started, ended, label, about=None):
     return count
 
 
+class EvdevWheelSource:
+    """The wheel's own events from its evdev node: read-only, no grab, a
+    descriptor of its own (the app's own reading of the wheel is not
+    disturbed). `read(timeout)` returns [(type, code, value)] for the
+    EV_ABS and EV_KEY events that arrived; OSError when the device is gone.
+    Anything with the same methods stands in for it in tests."""
+
+    def __init__(self, node):
+        from evdev import InputDevice
+        self.device = InputDevice(node)
+
+    def info(self):
+        from evdev import ecodes
+        caps = self.device.capabilities(absinfo=True)
+        axes = {int(code): [i.min, i.max, i.value] for code, i in caps.get(ecodes.EV_ABS, [])}
+        return {'device': self.device.name, 'axes': axes}
+
+    def read(self, timeout):
+        ready, _, _ = select.select([self.device.fd], [], [], timeout)
+        if not ready:
+            return []
+        return [(e.type, e.code, e.value) for e in self.device.read() if e.type in (EV_ABS, EV_KEY)]
+
+    def close(self):
+        try:
+            self.device.close()
+        except OSError:
+            pass
+
+
+def wheel_from_device(device):
+    """For `Recorder(wheel=...)`: (source, header fields) for a Device, or
+    None when its node can't be read. The range and sensitivity come from
+    sysfs, read only."""
+    if device is None:
+        return None
+    node = device._input_node()
+    if node is None:
+        return None
+    extra = {}
+    for name in ('range', 'sensitivity'):
+        try:
+            extra[name] = getattr(device, 'get_' + name)()
+        except (OSError, ValueError):
+            extra[name] = None
+    return EvdevWheelSource(node), extra
+
+
+class WheelSampler:
+    """Writes the wheel's events to the capture's `.wheel.gz` sidecar on a
+    thread of its own. `origin` is the capture's time zero on `clock` (the
+    first packet's monotonic time). `pump()` does one read (tests drive
+    it directly); `start()` runs it on the thread until `stop()`."""
+
+    def __init__(self, source, path, origin, header=None, clock=time.monotonic, poll=0.2):
+        self.source = source
+        self.path = path
+        self.origin = origin
+        self.clock = clock
+        self.poll = poll
+        self.events = 0
+        self._stop = threading.Event()
+        self._thread = None
+        self._file = gzip.open(path, 'wb')
+        self._file.write(WHEEL_MAGIC)
+        meta = {'clock': "seconds since the capture's first packet", 'fields': 't type code value'}
+        try:
+            meta.update(source.info())
+        except (OSError, AttributeError):
+            pass
+        meta.update(header or {})
+        self._file.write(json.dumps(meta).encode() + b'\n')
+        self._file.flush()
+
+    def pump(self):
+        """One read from the source, written. False when the source is gone."""
+        try:
+            events = self.source.read(self.poll)
+        except OSError as e:
+            logging.info("wheel sidecar: the wheel went away: %s", e)
+            return False
+        now = self.clock() - self.origin
+        for etype, code, value in events:
+            self._file.write(WHEEL_RECORD.pack(now, etype, code, value))
+            self.events += 1
+        return True
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, name='wheel-sidecar', daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        try:
+            while not self._stop.is_set():
+                if not self.pump():
+                    break
+        except Exception:
+            logging.exception("wheel sidecar")
+        self._finish()
+
+    def stop(self, timeout=2.0):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout)
+        else:
+            self._finish()
+
+    def _finish(self):
+        file, self._file = self._file, None
+        if file is not None:
+            try:
+                file.close()
+            except OSError:
+                pass
+        try:
+            self.source.close()
+        except OSError:
+            pass
+
+
+def read_wheel(path):
+    """(meta dict, iterator of (t, type, code, value)) of a `.wheel.gz`
+    sidecar; ends quietly at a truncated tail, ValueError if it is not one."""
+    stream = gzip.open(path, 'rb')
+    try:
+        if stream.readline() != WHEEL_MAGIC:
+            raise ValueError("{}: not an Oversteer wheel sidecar".format(path))
+        meta = json.loads(stream.readline().decode() or '{}')
+    except (OSError, EOFError, ValueError, zlib.error):
+        stream.close()
+        raise ValueError("{}: not an Oversteer wheel sidecar".format(path))
+
+    def records():
+        try:
+            while True:
+                head = stream.read(WHEEL_RECORD.size)
+                if len(head) < WHEEL_RECORD.size:
+                    return
+                yield WHEEL_RECORD.unpack(head)
+        except (EOFError, OSError, zlib.error):
+            return
+        finally:
+            stream.close()
+
+    return meta, records()
+
+
 class Recorder:
     """Records every datagram the listener receives into `folder`: a file
     per stretch of driving (a new one after CAPTURE_GAP without
@@ -194,8 +371,12 @@ class Recorder:
     whether or not the learner has a database. `threaded=False` writes
     inline (tests); `check(now)` then closes a file gone quiet."""
 
-    def __init__(self, folder, cap=DEFAULT_CAP, port=None, version=None, threaded=True, clock=time.time):
+    def __init__(self, folder, cap=DEFAULT_CAP, port=None, version=None, threaded=True, clock=time.time,
+                 wheel=None):
         self.folder = folder
+        self.wheel = wheel                # () -> (source, header fields) or None: the wheel's inputs, beside each capture
+        self._sampler = None
+        self._started = None
         self.cap = cap
         self.port = port
         self.version = version
@@ -263,7 +444,10 @@ class Recorder:
                 self._close_file()
             if self._writer is None:
                 self._open()
+            first = self._writer.packets == 0
             self._writer.write(now, addr, data)
+            if first:
+                self._start_wheel(now)
             self._last = now
         except OSError as e:
             logging.warning("telemetry capture: %s", e)
@@ -281,9 +465,29 @@ class Recorder:
         # Room for the new file before it grows: the cap holds while recording
         prune(self.folder, self.cap)
         self._writer = CaptureWriter(path, port=self.port, version=self.version, started=started)
+        self._started = started
         self.path = path
+        logging.info("telemetry capture: recording to %s", os.path.basename(path))
+
+    def _start_wheel(self, origin):
+        if self.wheel is None:
+            return
+        try:
+            found = self.wheel()
+            if found is None:
+                return
+            source, extra = found
+            header = dict(extra, capture=os.path.basename(self.path), oversteer=self.version, started=self._started)
+            self._sampler = WheelSampler(source, self.path + WHEEL_SUFFIX, origin, header)
+            self._sampler.start()
+        except Exception as e:
+            logging.warning("wheel sidecar: %s", e)
+            self._sampler = None
 
     def _close_file(self):
+        sampler, self._sampler = self._sampler, None
+        if sampler is not None:
+            sampler.stop()
         writer, self._writer = self._writer, None
         if writer is None:
             return

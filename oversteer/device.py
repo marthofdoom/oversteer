@@ -9,8 +9,6 @@ import select
 import time
 from . import wheel_ids as wid
 
-logging.basicConfig(level=logging.DEBUG)
-
 class Device:
 
     last_axis_value = {

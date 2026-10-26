@@ -158,6 +158,7 @@ class Bridge:
             else:
                 self._do(payload['do'], payload.get('arg'))
             self.refresh()
+            logging.info("web write: %s", {k: payload[k] for k in kinds + (['arg'] if 'arg' in payload else [])})
             return 200, {'ok': True, 'state': self.state()}
         except Rejected as e:
             return e.status, {'error': e.message}

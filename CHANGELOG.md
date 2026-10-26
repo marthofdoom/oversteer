@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Diagnostics
+- A rotating log file (5 x 2 MB) in the data folder (`oversteer/logs/oversteer.log`),
+  INFO by default, DEBUG with `--debug` or Settings -> Diagnostics. It records the game
+  detected, runs (start, end, finish), car and stage recognition, backfill, coach analysis
+  latency, potential, web changes and every uncaught exception with its traceback.
+- "Record raw telemetry" also writes the wheel's own inputs (steering, pedals, buttons,
+  range, sensitivity) to `<capture>.wheel.gz`, on the capture's clock. The capture format
+  is unchanged.
+- Settings -> Diagnostics: open the log folder, save a diagnostics bundle (also
+  `--diagnostics-bundle PATH`): logs, the latest captures, versions and settings, no database.
+
 ## 0.15.4 — 2026-10-18
 
 ### Fixed
