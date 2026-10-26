@@ -201,6 +201,9 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `driving_line` | sample | -1..1 |  | packet |  |
 | `ai_brake_diff` | sample | -1..1 |  | packet |  |
 | `cylinders` | sample | int |  | packet |  |
+| `laps_done` | sample | int |  | packet |  |
+| `sector` | sample | int |  | packet |  |
+| `split_times` | sample | s |  | packet |  |
 
 ### Games
 
@@ -326,6 +329,9 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `driving_line` | - | - | - | - | - | - | D | D | - | - |
 | `ai_brake_diff` | - | - | - | - | - | - | D | D | - | - |
 | `cylinders` | - | - | - | - | - | - | D | D | - | - |
+| `laps_done` | - | - | - | - | - | - | - | - | - | - |
+| `sector` | - | - | - | - | - | - | - | - | - | - |
+| `split_times` | - | - | - | - | - | - | - | - | - | - |
 
 ### Games: static data
 
