@@ -1500,8 +1500,8 @@ class Store(Reader):
                 "AND r.run_class IN ('clean', 'learning', 'off') AND r.id IN (SELECT run FROM traces) "
                 'AND ' + self.ON_CLOCK).fetchall():
             key = (stage, car, wet)
-            if key not in best or result - (first or 0.0) < best[key][0]:
-                best[key] = (result - (first or 0.0), run)
+            if key not in best or result < best[key][0]:
+                best[key] = (result, run)
         kept = {run for _, run in best.values()}
         # every PB, now and at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the
         # wetness or the time after the first section): each finished run quicker than all the runs before it
