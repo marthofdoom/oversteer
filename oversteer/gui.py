@@ -20,7 +20,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
-from . import hotkeys
+from . import diagnostics, hotkeys
 from .model import Model
 from .test import Test
 from .combined_chart import CombinedChart
@@ -173,6 +173,7 @@ class Gui:
             self.web_token = secrets.token_urlsafe(12)
             self.save_preferences()
         self.ui.set_telemetry_preferences(self._telemetry_preferences())
+        self.refresh_diagnostics_status()
         self.apply_telemetry_capture()
         if self.device is None and self.telemetry_learn:
             self.apply_rev_leds()               # learning needs no wheel
@@ -906,6 +907,39 @@ class Gui:
                 error = web.error
         self.refresh_web_status(error)
 
+    def set_diagnostics_debug(self, on):
+        if bool(on) != self.diagnostics_debug:
+            self.diagnostics_debug = bool(on)
+            self.save_preferences()
+            diagnostics.set_debug(self.diagnostics_debug)
+
+    def refresh_diagnostics_status(self):
+        folder = diagnostics.log_dir()
+        try:
+            logs = sum(os.path.getsize(p) for p in diagnostics.log_files(folder))
+        except OSError:
+            logs = 0
+        bundle = diagnostics.bundle_size(self.capture_folder(), logs=diagnostics.log_files(folder))
+        self.ui.set_diagnostics_status(_("{}\nLogs: {}. A bundle holds up to about {}.").format(
+            folder, diagnostics.human_size(logs), diagnostics.human_size(bundle)))
+
+    def open_log_folder(self):
+        folder = diagnostics.log_dir()
+        os.makedirs(folder, exist_ok=True)
+        self.ui.open_folder(folder)
+
+    def save_diagnostics_bundle(self):
+        path = self.ui.file_chooser(_('Save the diagnostics bundle'), 'save', diagnostics.default_bundle_name())
+        if not path:
+            return
+        try:
+            count = diagnostics.make_bundle(path, self.app.version, self.capture_folder(),
+                                            os.path.join(self.config_path, 'config.ini'))
+        except OSError as e:
+            self.ui.error_dialog(_("Can't write the bundle"), str(e))
+            return
+        self.ui.info_dialog(_("Diagnostics bundle saved"), _("{} files in {}.").format(count, path))
+
     def capture_folder(self):
         from xdg.BaseDirectory import save_data_path
         return os.path.join(save_data_path('oversteer'), 'captures')
@@ -924,7 +958,7 @@ class Gui:
         """Start or stop recording raw telemetry to match the preferences.
         The recorder outlives the listener (a change of port or wheel
         restarts that), so a stretch of driving stays one file."""
-        from .telemetry_capture import Recorder
+        from .telemetry_capture import Recorder, wheel_from_device
         recorder = self.telemetry_recorder
         if recorder is not None and (not self.telemetry_capture_on or recorder.error):
             if self.telemetry is not None:
@@ -934,7 +968,7 @@ class Gui:
         if self.telemetry_capture_on and recorder is None:
             recorder = self.telemetry_recorder = Recorder(
                 self.capture_folder(), port=self.telemetry.port if self.telemetry is not None else None,
-                version=self.app.version)
+                version=self.app.version, wheel=lambda: wheel_from_device(self.device))
         if recorder is not None:
             recorder.cap = self.telemetry_capture_cap << 30
         if self.telemetry is not None:
@@ -953,6 +987,7 @@ class Gui:
             self.telemetry_capture_on, self.telemetry is not None, folder, capture_summary(folder),
             self.telemetry_capture_cap, recorder.error if recorder is not None else None,
             recorder.dropped if recorder is not None else 0))
+        self.refresh_diagnostics_status()
 
     def _web_status(self):
         """Web threads: what the page's status line says. Never the

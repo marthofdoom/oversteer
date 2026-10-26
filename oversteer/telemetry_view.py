@@ -468,6 +468,7 @@ PREFERENCES = (
     ('telemetry_web_control', 'telemetry_web_control', False),      # wheel settings changeable from the page
     ('telemetry_capture_on', 'telemetry_capture', False),
     ('telemetry_capture_cap', 'telemetry_capture_cap', 1),       # GB
+    ('diagnostics_debug', 'diagnostics_debug', False),           # debug lines in the log file
 )
 LIMITS = {'telemetry_web_port': (1024, 65535), 'telemetry_capture_cap': (1, 100)}
 CHOICES = {'telemetry_web_bind': ('lan', 'local')}

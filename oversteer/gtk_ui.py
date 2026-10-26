@@ -1426,6 +1426,24 @@ class GtkUi:
         record.add(self._setting_row(_("Keep at most"), _("GB of captures: the oldest go first."),
                                      controls=(self.telemetry_capture_cap,)))
         self._section(page, _("Recording"), record, _("For every profile."))
+
+        diag = self._list()
+        self.diagnostics_status = self._status_label()
+        row, self.diagnostics_debug = self._switch_row(
+            _("Detailed log"),
+            _("Write debug lines to the log too (for chasing a problem; the log grows faster). Off: information, "
+              "warnings and errors."),
+            lambda state: self.controller.set_diagnostics_debug(state))
+        diag.add(row)
+        open_logs = Gtk.Button(label=_("Open log folder"))
+        open_logs.connect('clicked', lambda w: self.controller.open_log_folder())
+        bundle = Gtk.Button(label=_("Save a diagnostics bundle…"))
+        bundle.connect('clicked', lambda w: self.controller.save_diagnostics_bundle())
+        diag.add(self._setting_row(
+            _("Logs and bundle"), status=self.diagnostics_status, controls=(open_logs, bundle),
+            tooltip=_("The bundle is a zip of the logs, the latest captures with the wheel's inputs, the versions "
+                      "and the settings (no database, no pairing code): attach it to a bug report.")))
+        self._section(page, _("Diagnostics"), diag, _("For every profile."))
         return self._scrolled(page)
 
     @staticmethod
@@ -1453,6 +1471,7 @@ class GtkUi:
         self.telemetry_web_control.set_active(prefs['telemetry_web_control'])
         self.telemetry_capture.set_active(prefs['telemetry_capture_on'])
         self.telemetry_capture_cap.set_value(prefs['telemetry_capture_cap'])
+        self.diagnostics_debug.set_active(prefs['diagnostics_debug'])
 
     def set_telemetry_web_status(self, text):
         self.telemetry_web_status.set_text(text)
@@ -1503,6 +1522,15 @@ class GtkUi:
                     cr.rectangle(left + (x + 4) * unit, top + (y + 4) * unit, unit, unit)
         cr.fill()
         return False
+
+    def set_diagnostics_status(self, text):
+        self.diagnostics_status.set_text(text)
+
+    def open_folder(self, path):
+        try:
+            Gtk.show_uri_on_window(self.window, GLib.filename_to_uri(path, None), Gdk.CURRENT_TIME)
+        except GLib.Error as e:
+            logging.warning("open %s: %s", path, e.message)
 
     def set_telemetry_capture_status(self, text):
         self.telemetry_capture_status.set_text(text)

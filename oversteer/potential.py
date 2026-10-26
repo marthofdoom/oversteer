@@ -955,6 +955,7 @@ def after_run(store, run_id):
         run = store.run(run_id)
         if run is None or not run['stage'] or run['car'] is None or run['finished'] != 1:
             return None
+        logging.info("potential: recompute for run %s, stage %s", run_id, run['stage'])
         return recompute(store, run['stage'], run['car'], sob=sum_of_best(store, run))
     except Exception:
         logging.exception("potential: after run %s", run_id)

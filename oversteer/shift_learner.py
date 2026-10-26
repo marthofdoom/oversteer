@@ -1207,6 +1207,8 @@ class ShiftLearner:
         if car is None:
             car = CarModel(key, name)
         car.game = car.game or game
+        if self.car is None or self.car.key != key:
+            logging.info("car recognised: %s (%s)", key, car.game or 'unknown game')
         self._models[key] = car
         self.car = car
         self._reset_motion()

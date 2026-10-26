@@ -318,6 +318,7 @@ class RunTracker:
         self.run = None                  # the run going on: a number, its row id is the drive log's
         self._runs = 0
         self.run_rows = {}               # run number -> runs.id; drive-log thread only
+        self.end_mono = {}               # run number -> time.monotonic() when it ended, for the analysis latency log
         self.run_batch = {}              # run number -> the drive log's batch its row was written in
         self._live_loaded = set()        # run numbers whose live reference was looked up; drive-log thread only
         self._n_in_session = {}          # session number -> runs started in it
@@ -563,6 +564,9 @@ class RunTracker:
         self._from_line = True
         self._start_d = sample.lap_distance
         self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
+        logging.info("run %s start: game %s, stage %s, track %s, car %s, session %s, standing %.1f s, launch %.1f s",
+                     self.run, sample.game, sample.stage, sample.track, sample.car, session,
+                     self._summary['standing'], self._summary['launch'])
         learner.live_run.start_run(self.run, now, sample.game, sample.stage, sample.track, sample.stage_length,
                                    sample.lap_distance)
         learner.log.post(self._write_start, self.run, session, n, self._wall0, sample.stage, sample.game,
@@ -790,6 +794,8 @@ class RunTracker:
 
     def _finish_at(self, now, d, result, clock):
         self._finished, self._result_time, self._result_clock = 1, result, clock
+        logging.info("run %s: finish detected at %.0f m, time %s, clock %s", self.run, d,
+                     '%.3f' % result if result is not None else 'none', clock)
         self._finish_d = d
         self.learner.live_run.finish(self.run, now, self._result_time, d)
 
@@ -825,6 +831,11 @@ class RunTracker:
                        puddles=self._puddles / self._samples if self._samples else None,
                        progress=self._progress,
                        course=self._finish_d if self._finish_d is not None else last_d)
+        logging.info("run %s end: reason %s, finished %s, result %s, clock %s, %.0f m in %.1f s, stage %s, car %s",
+                     self.run, reason, finished, '%.3f' % self._result_time if self._result_time is not None else 'none',
+                     self._result_clock or 'none', self._distance, self._duration, summary.get('stage'),
+                     summary.get('car'))
+        self.end_mono[self.run] = time.monotonic()
         self.learner.log.post(self._write_end, self.run, self.learner.wall(self._last_t or now), summary, self._trace)
         self.learner.live_run.end_run(self.run, now, reason)
         guard = None
@@ -916,6 +927,8 @@ class RunTracker:
         store = self.learner.log.store
         if summary['distance'] < RUN_MIN:
             store.drop_run(run)                          # menus, a car parked: not a run
+            self.end_mono.pop(number, None)
+            logging.info("run %s dropped: %.0f m is not a run", number, summary['distance'])
             return True
         fields = {'ended': ended, 'distance': summary['distance'], 'duration': summary['duration'],
                   'moving_time': summary['moving_time'], 'finished': summary['finished'],
@@ -949,6 +962,7 @@ class RunTracker:
                 if location is not None:
                     store.upsert_stage(stage, game, location=location)
         summary['stage'] = stage
+        logging.info("run %s recognised: stage %s, car %s", number, stage, summary.get('car'))
         verdicts = drive_detect.detect_run(store, run, summary, trace, TRACE_CHANNELS)
         fields.update(verdicts)
         fields['course'] = summary['course']
@@ -966,6 +980,9 @@ class RunTracker:
         # The coach's tips for this run are there to read: said once they are committed, as a reader that
         # looks at the stamp reads the file
         self.learner.log.after_commit(self._history_changed)
+        ended = self.end_mono.pop(number, None)
+        logging.info("run %s: coach analysis written%s", number,
+                     ' %.2f s after the run ended' % (time.monotonic() - ended) if ended is not None else '')
         return True
 
     def _learn_finish(self, store, run, stage, stop):
@@ -1108,6 +1125,7 @@ def repair_shipped(store):
     changed += requeue_moved_stages(store)       # before the re-timing: it forgets the marks of stages that moved
     changed += retime_finishes(store)
     if changed:
+        logging.info("repair: %d rows changed from the shipped data", changed)
         store.commit()
     return changed
 
@@ -1373,6 +1391,8 @@ def backfill_step(learner, limit=3):
             logging.exception("drive log: backfill of run %s", run)
             store.rollback_savepoint('backfill')
             failed.add(run)
+        else:
+            logging.info("backfill: run %s worked over", run)
         done += 1
     if done < limit:
         done += _potentials_step(learner, store)

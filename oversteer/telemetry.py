@@ -403,6 +403,8 @@ class Telemetry:
         self.leds.off()
         self._lit = None
         self.last_packet = 0.0
+        logging.info("telemetry: stopped (nothing from %s for %.0f s)", self._source[1] if self._source else '?',
+                     IDLE_TIMEOUT)
         self.last_source = None
         self._source = None
         self.learned_max = self.seen_max = 0.0
@@ -440,6 +442,8 @@ class Telemetry:
         source = (addr[0], sample.game)
         if self._source is None:
             self._source = source
+            logging.info("telemetry: game %s detected (%d-byte packets from %s, UDP %d)", source[1] or 'unknown',
+                         len(data), addr[0], self.port)
         elif source != self._source:
             if source not in self._ignored:
                 self._ignored.add(source)
