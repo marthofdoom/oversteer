@@ -1249,3 +1249,27 @@ def test_a_fine_clock_with_one_stall_stays_fine():
         stage += 0.016
         clock.tick(stage, 0.016)
     assert clock.max_step == 0.0 and clock.stopped_after == 1.0
+
+
+def test_a_fine_clock_frozen_mid_stage_does_not_lengthen_the_result():
+    from oversteer.drive_log import RunClock
+    clock = RunClock(0.016)
+    stage = 0.016
+    for i in range(2, 1200):
+        if i == 600:
+            for _ in range(180):                          # frozen for 3 s while the car goes on
+                clock.tick(stage, 1 / 60)
+        stage += 0.016
+        clock.tick(stage, 0.016)
+    assert abs(stage + clock.result_offset - stage) < 1e-9
+    assert clock.t > stage + 2.0                          # t follows the run's own time, the result the game's
+
+
+def test_a_looped_clock_still_counts_the_lap_in_the_result():
+    from oversteer.drive_log import RunClock
+    clock = RunClock(0.5)
+    for st in (0.6, 0.7, 0.8):
+        clock.tick(st, 0.1)
+    clock.tick(0.1, 0.1)                                  # back to 0: a lap
+    clock.tick(0.2, 0.1)
+    assert clock.result_offset > 0.5

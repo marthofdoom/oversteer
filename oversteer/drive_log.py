@@ -352,6 +352,8 @@ class RunClock:
         else:
             # It went back (a lap's clock), or the run's own time ran ahead of it while it stood
             self.t += stage_time - last if forward else dt
+            if forward:
+                self.runup += self.t - stage_time - self.offset      # a stall's drift is not in the game's time
             self.offset = self.t - stage_time
             self.exact = False
 
