@@ -32,6 +32,7 @@ LOG_FORMAT = '%(asctime)s %(levelname)s [%(threadName)s] %(module)s: %(message)s
 BUNDLE_CAPTURES = 3
 SECRET_KEYS = ('web_token',)
 PAIR_QUERY = re.compile(rb'([?&]pair=)[^&\s]+')
+IPV4 = re.compile(rb'\b(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}\b')
 
 _file_handler = None
 _stream_handler = None
@@ -57,9 +58,9 @@ def log_path(environ=None, home=None):
     return os.path.join(log_dir(environ, home), LOG_NAME)
 
 
-def setup(debug=False, folder=None, stream=sys.stderr, to_file=True):
-    """Configure logging once: the rotating file (INFO, DEBUG with `debug`) and
-    a stream handler (warnings, everything with `debug`). Returns the file's
+def setup(debug=False, folder=None, stream=sys.stderr, to_file=True, file_debug=False):
+    """Configure logging once: the rotating file (INFO, DEBUG with `debug` or
+    `file_debug`) and a stream handler (warnings, everything with `debug`). Returns the file's
     path, or None when no log file could be made (the stream still works)."""
     global _file_handler, _stream_handler
     root = logging.getLogger()
@@ -84,7 +85,7 @@ def setup(debug=False, folder=None, stream=sys.stderr, to_file=True):
         path = os.path.join(folder, LOG_NAME)
         _file_handler = logging.handlers.RotatingFileHandler(
             path, maxBytes=LOG_BYTES, backupCount=LOG_FILES - 1, encoding='utf-8')
-        _file_handler.setLevel(logging.DEBUG if debug else logging.INFO)
+        _file_handler.setLevel(logging.DEBUG if debug or file_debug else logging.INFO)
         _file_handler.setFormatter(formatter)
         root.addHandler(_file_handler)
     except OSError as e:
@@ -235,10 +236,12 @@ def config_secrets(config_file):
 
 
 def redacted_log(data, secrets=()):
-    """A log's bytes without the pairing code or any ?pair= value."""
+    """A log's bytes without the pairing code, any ?pair= value, or the last
+    two parts of an IPv4 address (127.0.0.1 stays)."""
     for secret in secrets:
         data = data.replace(secret.encode('utf-8'), b'(removed)')
-    return PAIR_QUERY.sub(rb'\1(removed)', data)
+    data = PAIR_QUERY.sub(rb'\1(removed)', data)
+    return IPV4.sub(lambda m: m.group(0) if m.group(0) == b'127.0.0.1' else m.group(1) + b'.x.x', data)
 
 
 def bundle_members(capture_folder, count=BUNDLE_CAPTURES, logs=None):
@@ -268,10 +271,13 @@ def make_bundle(path, version, capture_folder, config_file=None, count=BUNDLE_CA
     members = bundle_members(capture_folder, count, logs)
     captures = [p for p, name in members if name.endswith('.ovcap.gz')]
     secrets = config_secrets(config_file) if config_file else []
+    added = 0
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('versions.txt', versions_text(version, captures))
+        added += 1
         if config_file:
             z.writestr('config.ini', redacted_config(config_file))
+            added += 1
         for source, name in members:
             try:
                 if name.startswith('logs/'):
@@ -281,8 +287,8 @@ def make_bundle(path, version, capture_folder, config_file=None, count=BUNDLE_CA
                     z.write(source, name)
             except OSError as e:
                 z.writestr(name + '.error', str(e))
-    logging.info("diagnostics: bundle written to %s (%d files)", path, len(members) + 2)
-    return len(members) + 2
+    logging.info("diagnostics: bundle written to %s (%d files)", path, added + len(members))
+    return added + len(members)
 
 
 def human_size(n):

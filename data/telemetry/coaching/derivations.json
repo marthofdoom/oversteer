@@ -3973,7 +3973,7 @@
    "id": "corner.loss",
    "name": "Section time loss",
    "category": "corners",
-   "description": "Seconds lost in the sections of the last run against the car's best finished clean run of the stage (corners less than 1.5 s apart joined, each section from where the reference's braking for it begins to where the next one's does; the first section, which holds the launch, is left out of the tips), named by call and distance, with what was done differently (braking point, minimum speed, exit speed, throttle) and the one thing to do; offs and a learning run left out. The metric is the three worst sections' sum. The best sections of all the car's runs put together are the stage's \"possible\" time.",
+   "description": "Seconds lost in the sections of the last run against the car's best finished run of the stage (the reference: the fastest run of a PB class, clean, learning or with offs; corners less than 1.5 s apart joined, each section from where the reference's braking for it begins to where the next one's does; the first section, which holds the launch, is left out of the tips), named by call and distance, with what was done differently (braking point, minimum speed, exit speed, throttle) and the one thing to do. The metric is the three worst sections' sum. The best sections of all the car's runs put together are the stage's \"possible\" time.",
    "derivations": [
     {
      "id": "traces",
@@ -3996,7 +3996,7 @@
    "gates": {
     "discipline": "any",
     "surface": "any",
-    "conditions": "a finished clean or learning run of the same car and stage, in the same conditions"
+    "conditions": "a finished run (clean, learning or with offs) of the same car and stage, in the same conditions"
    },
    "outputs": [
     {

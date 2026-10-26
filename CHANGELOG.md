@@ -9,23 +9,30 @@
   leave the box; an invalid entry shows an error and keeps the last port). The saved value is still
   the number. A saved port outside 1 to 65535 now falls back to the default instead of failing to listen.
 - **Auto port** (the new default): the first row of the port drop-down, "Auto: listen on all of these",
-  listens on 5310, 20777 and 4444 at once, from one listener thread. A port another app holds is skipped,
-  shown in the status ("Listening on UDP 5310, 4444 (20777 busy: another app has it)") and tried again
-  every 30 s, so it is picked up once that app exits; while Auto holds 20777 the status says SimHub needs a
-  fixed port instead. 5300 (where WRC Generations and bridges set up before 0.14 still send) is in Forza
-  Horizon 6's own range, so Auto never holds it for good: while nothing is locked, and until a game has been
-  heard on Auto's own ports, it listens there for 1 s now and then, as the old probe did, keeps it only while a game heard there holds the lock, and says
-  "UDP 5300 has telemetry: set the game to 5310". Only a packet of a game Oversteer decodes picks a port;
-  the first one becomes the active port ("Receiving DiRT Rally on UDP 20777") and the others are ignored
-  until it has been quiet for 3 s. Telemetry from another port and another game or machine ends the
-  session, so runs never join two streams; one game sending to two ports stays one session. "Record raw
-  telemetry" records the active port only once a game is locked, and every port (unknown packets
-  included, a file per port) while none is, so a game not decoded yet is still captured; the wheel's sidecar moves to the locked port's file; the capture
-  format is unchanged and the same cap and pruning apply. Profiles with no port or the old default 5310 open in
-  Auto; a profile with another port (5300 included, as Auto only probes it), or one that picks a port
-  now, keeps listening on that port alone (saved as `rev_leds_port_auto = 0` beside `rev_leds_port`). With one
-  port, the hint about a game sending to the other default stays. The web page's "Waiting on UDP" lists
-  Auto's ports.
+  listens on 5310, 20777 and 4444 at once. A port another app holds is skipped, shown in the status
+  ("Listening on UDP 5310, 4444 (20777 busy: another app has it)") and tried again every 30 s; while Auto
+  holds 20777 the status says SimHub needs a fixed port instead. The first packet of a game Oversteer
+  decodes picks the active port ("Receiving DiRT Rally on UDP 20777"); the others are ignored until it
+  has been quiet for 3 s, and a different game or machine ends the session, so runs never join two
+  streams. 5300 (where WRC Generations and bridges set up before 0.14 still send) is in Forza Horizon 6's
+  range, so Auto only listens there for 1 s now and then, until a game has been heard on its own ports,
+  and says "UDP 5300 has telemetry: set the game to 5310". "Record raw telemetry" records the active
+  port once a game is locked, and every port (a file each, unknown packets included) while none is; the
+  capture format and the cap are unchanged. Profiles with no port or the old default 5310 open in Auto;
+  a profile with another port keeps listening on that port alone (saved as `rev_leds_port_auto = 0`).
+  The web page's "Waiting on UDP" lists Auto's ports.
+
+### Coaching and timing
+- Runs end at the finish line, and coarse stage clocks (a clock that ticks in steps) are timed smoothly.
+- DiRT Rally 2.0 and WRC Generations take the game's official stage time.
+- No phantom runs from the results screen, and retiring half-way is not a finish.
+- Your PB is the fastest finished run, offs included, and a new PB is compared with your previous best.
+  With no finished run the page says "No PB yet on this stage: finish a run".
+- Coaching covers only the stage you just drove. On a stage with no earlier run it says "First full run
+  of ... gives the coach a reference." Habit tips are said once per sitting.
+- Sector bests ignore a sector spoiled by an off, a spin or a hit within 200 m; if every run was spoiled
+  there, the PB's own time is used, so the splits stay in sectors.
+- PB runs and their traces are never pruned.
 
 ### Diagnostics
 - A rotating log file (5 x 2 MB) in the data folder (`oversteer/logs/oversteer.log`),
@@ -37,6 +44,8 @@
   is unchanged.
 - Settings -> Diagnostics: open the log folder, save a diagnostics bundle (also
   `--diagnostics-bundle PATH`): logs, the latest captures, versions and settings, no database.
+  The bundle's logs have the last two parts of IPv4 addresses masked; the Settings "Detailed log"
+  option no longer makes the terminal output detailed (only `--debug` does).
 
 ## 0.15.4 — 2026-10-18
 

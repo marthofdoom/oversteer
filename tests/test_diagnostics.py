@@ -343,3 +343,31 @@ def test_root_level_follows_the_handlers(clean_logging, tmp_path):
     assert logging.getLogger().level == logging.DEBUG
     dg.set_debug(False)
     assert logging.getLogger().level == logging.INFO
+
+
+def test_redacted_log_masks_ipv4_but_keeps_loopback():
+    text = b'from 192.168.1.42 and 10.0.7.9, local 127.0.0.1, version 1.2.3\n'
+    out = dg.redacted_log(text)
+    assert b'192.168.x.x' in out and b'10.0.x.x' in out
+    assert b'192.168.1.42' not in out and b'10.0.7.9' not in out
+    assert b'127.0.0.1' in out and b'1.2.3' in out
+
+
+def test_bundle_count_is_what_was_added(tmp_path):
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    (logs / 'oversteer.log').write_text('x\n')
+    out = tmp_path / 'b.zip'
+    n = dg.make_bundle(str(out), '1', str(tmp_path / 'none'), None, logs=dg.log_files(str(logs)))
+    with zipfile.ZipFile(out) as z:
+        assert sorted(z.namelist()) == ['logs/oversteer.log', 'versions.txt']
+    assert n == 2
+
+
+def test_file_debug_leaves_the_stream_at_warning(tmp_path, clean_logging):
+    out = io.StringIO()
+    path = dg.setup(folder=str(tmp_path), stream=out, file_debug=True)
+    logging.debug("file only")
+    dg._file_handler.flush()
+    assert "file only" in open(path).read()
+    assert "file only" not in out.getvalue()
