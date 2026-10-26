@@ -2308,7 +2308,7 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
     for x in [{'run': ref_rows['run'], 'trace': ref_rows['trace']}] + loaded:
         if classes.get(x['run']) not in coach_context.PB_CLASSES:
             continue
-        for i, t in times(x['trace'], x['run'], x['run'] != ref_rows['run']).items():
+        for i, t in times(x['trace'], x['run'], True).items():
             if i not in best or t < best[i]:
                 if i in best:
                     runner[i] = best[i]
@@ -2342,16 +2342,17 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
     does not read as a list of faults. Techniques (correct technique described) are shown once and come
     back when their share moved TECHNIQUE_SHIFT. Each note once."""
     def moved(tip):
-        """A habit line already shown (ONCE) comes back only when its number changed by RESHOW_WORSE (and not in the
-        sitting it was shown in: SHOWING), or after RESHOW_AFTER: said run after run it is noise."""
+        """A habit line already shown (ONCE) stays as it is in the sitting it was shown in (SHOWING), then comes back only when its number
+        changed by RESHOW_WORSE, or after RESHOW_AFTER: said run after run it is noise."""
         seen = state.get(tip.id)
         if show_all or seen is None or not tip.id.startswith(ONCE) or not (seen['times'] or 0):
             return True
+        if seen['last_shown'] is not None and now - seen['last_shown'] < SHOWING:
+            return True                  # the sitting it was said in: every redraw looks the same
         if seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER:
             return True
         old = seen['value']
-        return (seen['last_shown'] is None or now - seen['last_shown'] >= SHOWING) and old is not None \
-            and tip.value is not None and abs(tip.value - old) >= RESHOW_WORSE * max(abs(old), 1e-9)
+        return old is not None and tip.value is not None and abs(tip.value - old) >= RESHOW_WORSE * max(abs(old), 1e-9)
 
     def fresh(tip):
         if not moved(tip):

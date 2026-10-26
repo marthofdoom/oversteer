@@ -1075,8 +1075,8 @@ def test_a_habit_line_is_said_once_until_its_number_moves(tmp_path):
     h = History(tmp_path / 't.db')
     tip = Tip('shift.better:3', 'praise', 'Better: 3→4 is on the lights band 47 % of the time.', value=47.0, cost=1.0)
     state = {'shift.better:3': {'times': 1, 'value': 47.0, 'last_shown': 100.0}}
-    assert select([], [tip], [], state, 200.0) == []
+    assert select([], [tip], [], state, 200.0) == [tip]            # the sitting it was said in: a redraw looks the same
+    assert select([], [tip], [], state, 100.0 + coach.SHOWING + 1) == []       # a later sitting, the same number
     state['shift.better:3']['value'] = 30.0
-    assert select([], [tip], [], state, 200.0) == []                # the same sitting
-    assert select([], [tip], [], state, 100.0 + coach.SHOWING) == [tip]
+    assert select([], [tip], [], state, 100.0 + coach.SHOWING + 1) == [tip]    # a later sitting, a moved number
     assert select([], [tip], [], {}, 200.0) == [tip]
