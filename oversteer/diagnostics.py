@@ -76,6 +76,7 @@ def setup(debug=False, folder=None, stream=sys.stderr, to_file=True):
         root.addHandler(_stream_handler)
     path = None
     if not to_file:
+        _root_level()
         return None
     try:
         folder = folder or log_dir()

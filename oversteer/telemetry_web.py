@@ -572,7 +572,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         # The pairing link is GET /?pair=<token>: never into the log
-        logging.debug("telemetry web page: %s", PAIR_QUERY.sub(r'\1(removed)', format % args))
+        # Control characters escaped like http.server 3.12+, so a crafted request
+        # cannot forge log lines
+        message = PAIR_QUERY.sub(r'\1(removed)', format % args)
+        message = re.sub(r'[\x00-\x1f\x7f]', lambda m: '\\x{:02x}'.format(ord(m.group())), message)
+        logging.debug("telemetry web page: %s", message)
 
     def __getattr__(self, name):
         # Every method but GET and HEAD: 405, not the default 501

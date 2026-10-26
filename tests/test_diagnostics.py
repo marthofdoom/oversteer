@@ -74,6 +74,13 @@ def test_setup_stream_warns_only_unless_debug(tmp_path, clean_logging):
     assert "chatty" in out2.getvalue()
 
 
+def test_setup_without_file_still_passes_debug(clean_logging):
+    buf = io.StringIO()
+    assert dg.setup(debug=True, stream=buf, to_file=False) is None
+    logging.debug("proxy debug line")
+    assert "proxy debug line" in buf.getvalue()
+
+
 def test_setup_survives_an_unwritable_folder(tmp_path, clean_logging):
     blocked = tmp_path / 'f'
     blocked.write_text('x')
@@ -285,6 +292,28 @@ def test_recorder_closes_the_wheel_when_the_sampler_fails(tmp_path, monkeypatch)
     rec.packet(1.0, ('127.0.0.1', 1), b'x')
     rec.close()
     assert source.closed
+
+
+def test_recorder_finishes_the_sampler_when_start_fails(tmp_path, monkeypatch):
+    source = FakeWheel([])
+
+    def boom(self):
+        raise RuntimeError("no thread")
+    monkeypatch.setattr(tc.WheelSampler, 'start', boom)
+    rec = tc.Recorder(str(tmp_path), threaded=False, wheel=lambda: (source, {}))
+    rec.packet(1.0, ('127.0.0.1', 1), b'x')
+    assert rec._sampler is None
+    rec.close()
+    assert source.closed
+
+
+def test_web_log_escapes_control_characters(clean_logging, caplog):
+    from oversteer import telemetry_web as tw
+    h = tw.Handler.__new__(tw.Handler)
+    with caplog.at_level(logging.DEBUG):
+        h.log_message("%s", "GET /a\nFAKE line\x1b[0m\x7f")
+    assert "\n" not in caplog.messages[-1]
+    assert "\\x0aFAKE line\\x1b[0m\\x7f" in caplog.messages[-1]
 
 
 def test_web_log_masks_the_pairing_token(clean_logging, caplog):

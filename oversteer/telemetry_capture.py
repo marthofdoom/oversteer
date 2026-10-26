@@ -287,15 +287,19 @@ class WheelSampler:
         self._stop = threading.Event()
         self._thread = None
         self._file = gzip.open(path, 'wb')
-        self._file.write(WHEEL_MAGIC)
-        meta = {'clock': "seconds since the capture's first packet", 'fields': 't type code value'}
         try:
-            meta.update(source.info())
-        except (OSError, AttributeError):
-            pass
-        meta.update(header or {})
-        self._file.write(json.dumps(meta).encode() + b'\n')
-        self._file.flush()
+            self._file.write(WHEEL_MAGIC)
+            meta = {'clock': "seconds since the capture's first packet", 'fields': 't type code value'}
+            try:
+                meta.update(source.info())
+            except (OSError, AttributeError):
+                pass
+            meta.update(header or {})
+            self._file.write(json.dumps(meta).encode() + b'\n')
+            self._file.flush()
+        except BaseException:
+            self._file.close()           # the caller still owns the source
+            raise
 
     def pump(self):
         """One read from the source, written. False when the source is gone."""
@@ -492,8 +496,10 @@ class Recorder:
             self._sampler.start()
         except Exception as e:
             logging.warning("wheel sidecar: %s", e)
-            self._sampler = None
-            if source is not None:
+            sampler, self._sampler = self._sampler, None
+            if sampler is not None:
+                sampler._finish()            # closes its file and the source
+            elif source is not None:
                 try:
                     source.close()           # the sampler never took it over
                 except Exception:
