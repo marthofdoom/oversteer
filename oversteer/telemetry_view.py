@@ -403,7 +403,21 @@ def listening_status(listening, busy):
     if not listening:
         return _("No telemetry port free ({})").format(skipped) if skipped else _("No telemetry port free")
     text = _("Listening on UDP {}").format(ports_text(listening))
-    return text + ' (' + skipped + ')' if skipped else text
+    if skipped:
+        text += ' (' + skipped + ')'
+    if SIMHUB_PORT in listening:
+        # Only one app can hold a UDP port: SimHub started after Oversteer finds 20777 taken
+        text += '  ·  ' + _("SimHub needs {} free: pick one port here").format(SIMHUB_PORT)
+    return text
+
+
+SIMHUB_PORT = 20777          # the Codemasters port SimHub (and similar tools) listen on
+
+
+def legacy_hint():
+    """A game heard on 5300, in Forza Horizon 6's range: Auto only probes it."""
+    from .telemetry import LEGACY_PORT, DEFAULT_PORT
+    return _("UDP {0} has telemetry: set the game to {1}").format(LEGACY_PORT, DEFAULT_PORT)
 
 
 def receiving_status(game, port):

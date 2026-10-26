@@ -71,9 +71,9 @@ def _fds():
     return len(glob.glob('/proc/self/fd/*'))
 
 
-def test_auto_ports_are_the_presets_then_legacy_and_never_forza_or_the_web_port():
-    assert module.auto_ports() == [5310, 20777, 4444, 5300]
-    assert module.auto_ports(avoid=(20777,)) == [5310, 4444, 5300]
+def test_auto_holds_the_presets_and_never_forza_horizon_6s_range():
+    assert module.auto_ports() == [5310, 20777, 4444]
+    assert module.LEGACY_PORT in module.FORZA_OWN and 5200 in module.FORZA_OWN
     assert not any(p in module.FORZA_OWN for p in module.auto_ports())
 
 
@@ -82,8 +82,9 @@ def test_auto_binds_every_free_port(ports):
     assert t.port is None and t.auto
     try:
         assert t.start()
-        assert t.listening == ports and t.busy == {}
-        assert not any(_bindable(p) for p in ports)           # all held by the one listener
+        assert t.listening == ports[:3] and t.busy == {}
+        assert not any(_bindable(p) for p in ports[:3])       # all held by the one listener
+        assert _bindable(ports[3])                            # the legacy port is not
     finally:
         t.stop()
 
@@ -95,11 +96,10 @@ def test_a_held_port_is_skipped_and_reported(ports):
     t = Telemetry(FakeLeds(), port=AUTO)
     try:
         assert t.start()
-        assert t.listening == [ports[0], ports[2], ports[3]]
+        assert t.listening == [ports[0], ports[2]]
         assert list(t.busy) == [ports[1]] and t.busy[ports[1]].errno == errno.EADDRINUSE
         text = listening_status(t.listening, t.busy)
-        assert text == "Listening on UDP {}, {}, {} ({} busy: another app has it)".format(
-            ports[0], ports[2], ports[3], ports[1])
+        assert text == "Listening on UDP {}, {} ({} busy: another app has it)".format(ports[0], ports[2], ports[1])
     finally:
         t.stop()
         other.close()
@@ -107,13 +107,13 @@ def test_a_held_port_is_skipped_and_reported(ports):
 
 def test_every_port_held_fails_to_start(ports):
     held = []
-    for p in ports:
+    for p in ports[:3]:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.bind(('0.0.0.0', p))
         held.append(s)
     t = Telemetry(FakeLeds(), port=AUTO)
     try:
-        assert t.start() is False and set(t.busy) == set(ports) and t.listening == []
+        assert t.start() is False and set(t.busy) == set(ports[:3]) and t.listening == []
     finally:
         t.stop()
         for s in held:
@@ -214,8 +214,8 @@ def test_takeover_through_the_sockets(ports, monkeypatch):
     t = Telemetry(FakeLeds(), port=AUTO)
     try:
         assert t.start()
-        _send(ports[3], forza(4000), times=3, gap=0.01)
-        assert _wait(lambda: t.active_port == ports[3])
+        _send(ports[2], forza(4000), times=3, gap=0.01)
+        assert _wait(lambda: t.active_port == ports[2])
         _send(ports[0], ovst(6000, 8500), times=60, gap=0.01)  # keeps sending after the game stopped
         assert _wait(lambda: t.active_port == ports[0])
         assert t.live.game == 'acpmf'
@@ -249,34 +249,54 @@ def test_stop_closes_every_socket_and_restarts_cleanly(ports):
     t = Telemetry(FakeLeds(), port=AUTO)                       # stop/start of the same listener
     assert t.start()
     t.stop()
-    assert t.start() and t.listening == ports
+    assert t.start() and t.listening == ports[:3]
     t.stop()
     assert all(_bindable(p) for p in ports) and _fds() == before
 
 
-def test_capture_records_the_active_port_only(tmp_path):
+def _captures(folder):
+    from oversteer import telemetry_capture as tc
+    found = {}
+    for path in sorted(glob.glob(os.path.join(str(folder), '*' + tc.SUFFIX))):
+        meta, records = tc.read_capture(path)
+        found.setdefault(meta['port'], []).append([data for _t, _a, data in records])
+    return found
+
+
+def test_capture_records_every_port_while_unlocked_then_the_active_one(tmp_path):
     from oversteer import telemetry_capture as tc
     recorder = tc.Recorder(str(tmp_path), version='test', threaded=False, clock=lambda: 1.7e9)
     t = Telemetry(FakeLeds(), port=AUTO)
     t.recorder = recorder
     addr = ('127.0.0.1', 40000)
-    t.handle(100.0, b'garbage', addr, 5310)                   # before any lock: not recorded
-    t.handle(100.1, forza(4000), addr, 20777)                 # locks: the capture starts here
-    t.handle(100.2, ovst(6000, 8500), addr, 5310)             # another port: dropped, not recorded
+    t.handle(100.0, b'garbage', addr, 5310)                   # nothing locked: recorded (a game not decoded yet)
+    t.handle(100.1, forza(4000), addr, 20777)                 # locks, in a file of its own port
+    t.handle(100.2, ovst(6000, 8500), addr, 5310)             # another port while locked: dropped, not recorded
     t.handle(100.3, b'unknown', addr, 20777)                  # the active port: everything on it
     t.handle(100.4, forza(4100), addr, 20777)
-    t.handle(104.0, ovst(6000, 8500), addr, 5310)             # takes over: a new file, with its port
+    t.handle(104.0, ovst(6000, 8500), addr, 5310)             # takes over: on with 5310's file
     t.handle(104.1, ovst(6100, 8500), addr, 5310)
     recorder.close()
-    files = sorted(glob.glob(os.path.join(str(tmp_path), '*' + tc.SUFFIX)))
-    assert len(files) == 2
-    found = []
-    for path in files:
-        meta, records = tc.read_capture(path)
-        found.append((meta['port'], [data for _t, _a, data in records]))
-    found.sort(key=lambda f: len(f[1]), reverse=True)
-    assert found[0] == (20777, [forza(4000), b'unknown', forza(4100)])
-    assert found[1] == (5310, [ovst(6000, 8500), ovst(6100, 8500)])
+    assert _captures(tmp_path) == {20777: [[forza(4000), b'unknown', forza(4100)]],
+                                   5310: [[b'garbage', ovst(6000, 8500), ovst(6100, 8500)]]}
+
+
+def test_unknown_packets_on_several_ports_make_one_file_per_port(tmp_path):
+    """RBR's 664-byte NGP packets (not decoded yet) next to another tool's: captured, without a file per packet."""
+    from oversteer import telemetry_capture as tc
+    recorder = tc.Recorder(str(tmp_path), version='test', threaded=False, clock=lambda: 1.7e9)
+    t = Telemetry(FakeLeds(), port=AUTO)
+    t.recorder = recorder
+    addr = ('127.0.0.1', 40000)
+    for i in range(50):
+        t.handle(100.0 + i * 0.01, b'\x01' * 664, addr, 5310)
+        t.handle(100.0 + i * 0.01, b'\x02' * 10, addr, 4444)
+    assert t.locked is None
+    recorder.check(100.5 + tc.CAPTURE_GAP + 1)               # both go quiet: both closed
+    assert recorder.path is None and recorder._side == {}
+    recorder.close()
+    found = _captures(tmp_path)
+    assert {port: [len(f) for f in files] for port, files in found.items()} == {5310: [50], 4444: [50]}
 
 
 def test_status_texts():
@@ -317,11 +337,11 @@ def test_profile_round_trip_auto_and_fixed(tmp_path):
 
 
 @pytest.mark.parametrize('stored, auto, port', [
-    ('', True, None), ('rev_leds_port = 5310\n', True, 5310), ('rev_leds_port = 5300\n', True, 5300),
+    ('', True, None), ('rev_leds_port = 5310\n', True, 5310), ('rev_leds_port = 5300\n', False, 5300),
     ('rev_leds_port = 6000\n', False, 6000), ('rev_leds_port = 20777\n', False, 20777),
 ])
 def test_old_profiles(tmp_path, stored, auto, port):
-    """Before Auto: no port, or the app's own default (5310, 5300 before 0.14), opens in Auto; a typed port stays."""
+    """Before Auto: no port, or the app's own default 5310, opens in Auto; any other port (5300 too) stays."""
     path = tmp_path / 'old.ini'
     path.write_text("[DEFAULT]\nrev_leds = 1\n" + stored)
     model = _model()
@@ -340,3 +360,133 @@ def test_picking_auto_restarts_the_listener():
     assert controller.revs == 2 and model.get_rev_leds_port() == 20777     # kept for an older Oversteer
     model.set_rev_leds_port(AUTO)
     assert controller.revs == 2
+
+
+def test_one_game_on_two_ports_is_one_session_whichever_port_it_comes_back_on():
+    """A game set to send to two ports (RBR and EA WRC allow several): after a pause it may come back on the other
+    port first; that is the same stream, so no new session."""
+    learner = _Learner()
+    t = Telemetry(FakeLeds(), port=AUTO, learner=learner)
+    addr = ('127.0.0.1', 40000)
+    for i in range(5):
+        t.handle(100.0 + i * 0.01, forza(4000), addr, 5310)
+        t.handle(100.0 + i * 0.01, forza(4000), addr, 20777)
+    assert t.active_port == 5310 and t.dropped[20777] == 5
+    t.handle(110.0, forza(4000), addr, 20777)                 # back after a pause, the other port first
+    t.handle(110.0, forza(4000), addr, 5310)
+    assert t.active_port == 20777 and learner.new_sources == 0
+    t.handle(120.0, forza(4000), addr, 5310)                  # and flipped back after another pause
+    assert t.active_port == 5310 and learner.new_sources == 0
+    t.handle(130.0, ovst(6000, 8500), addr, 20777)            # another game there: a new session
+    assert t.active_port == 20777 and learner.new_sources == 1
+
+
+def test_new_source_keeps_finished_runs(tmp_path):
+    """The learner's end of a source switch, on a real drive log: after a finish and in the middle of a run. The
+    finished run (the stage's best) stays, the run cut short is kept unfinished."""
+    from oversteer.shift_learner import ShiftLearner
+    from tests.sim import feed_course
+    from tests.test_drive_log import acr_after_finish, acr_drive
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive = acr_drive(0.0, 238.0, 5530.0)
+    feed_course(learner, drive)
+    after = acr_after_finish(drive[-1][0] + 0.1, 5530.0, seconds=5.0)
+    feed_course(learner, after)
+    learner.log.sync()
+    assert learner.runs.run is None                           # finished and over
+    learner.new_source()                                      # a switch after the finish
+    assert learner.session is None
+    second = acr_drive(after[-1][0] + 1.0, 238.0, 2000.0)
+    feed_course(learner, second)
+    assert learner.runs.run is not None and learner.session is not None
+    learner.new_source()                                      # a switch mid-run
+    assert learner.runs.run is None and learner.session is None
+    learner.new_source()                                      # twice is harmless
+    learner.log.sync()
+    reader = learner._reader()
+    history = reader.history('_no_profile', drive[0][1].car)
+    assert len(history) == 2                                  # two sessions
+    runs = [r for h in history for r in reader.session(h['id'])['runs'] if r['distance'] > 300]
+    finished = [r for r in runs if r['finished']]
+    assert len(runs) == 2 and len(finished) == 1 and 225 < finished[0]['result_time'] < 235
+    best = reader.stage_runs('acr:wales:afon-bidno-severn')
+    assert any(r.get('result_time') == finished[0]['result_time'] for r in best)
+    learner.close()
+
+
+def test_legacy_port_is_probed_and_held_only_while_its_game_is_locked(ports, monkeypatch):
+    import threading
+    monkeypatch.setattr(module, 'PROBE_AFTER', 0.0)
+    monkeypatch.setattr(module, 'PROBE_EVERY', 0.3)
+    monkeypatch.setattr(module, 'PROBE_LISTEN', 0.3)
+    monkeypatch.setattr(module, 'IDLE_TIMEOUT', 0.2)
+    monkeypatch.setattr(module, 'LOCK_SILENCE', 0.3)
+    legacy = ports[3]
+    t = Telemetry(FakeLeds(), port=AUTO)
+    try:
+        assert t.start()
+        assert legacy not in t.listening
+        # Nothing there: held for a moment only, then free again
+        assert _wait(lambda: _bindable(legacy))
+        stop = threading.Event()
+
+        def game():
+            out = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            while not stop.is_set():
+                out.sendto(forza(4000), ('127.0.0.1', legacy))
+                time.sleep(0.01)
+            out.close()
+        sender = threading.Thread(target=game, daemon=True)
+        sender.start()
+        try:
+            assert _wait(lambda: t.active_port == legacy, timeout=3.0)
+            assert t.legacy_heard and legacy in t.listening and not _bindable(legacy)
+        finally:
+            stop.set()
+            sender.join()
+        # The game stopped: let go once idle and LOCK_SILENCE have passed
+        assert _wait(lambda: legacy not in t.listening and t.locked is None, timeout=3.0)
+        assert _wait(lambda: _bindable(legacy))
+    finally:
+        t.stop()
+    assert _bindable(legacy)
+
+
+def test_a_busy_port_is_taken_once_it_is_free(ports, monkeypatch):
+    monkeypatch.setattr(module, 'BUSY_RETRY', 0.2)
+    statuses = []
+    other = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    other.bind(('0.0.0.0', ports[1]))
+    t = Telemetry(FakeLeds(), port=AUTO, on_status=statuses.append)
+    try:
+        assert t.start() and ports[1] in t.busy
+        time.sleep(0.3)
+        assert ports[1] in t.busy                              # still held: still busy
+        other.close()                                          # SimHub exits
+        assert _wait(lambda: t.listening == ports[:3] and t.busy == {})
+        assert None in statuses                                # the status line was told
+        _send(ports[1], forza(4000), times=3, gap=0.01)
+        assert _wait(lambda: t.active_port == ports[1])
+    finally:
+        t.stop()
+        other.close()
+    assert all(_bindable(p) for p in ports)
+
+
+def test_a_burst_is_read_whole(ports):
+    t = Telemetry(FakeLeds(), port=AUTO)
+    try:
+        assert t.start()
+        _send(ports[0], forza(4000), times=200)                # no gaps: one select should read many
+        assert _wait(lambda: t.live is not None)
+        _send(ports[1], ovst(6000, 8500), times=200)
+        assert _wait(lambda: t.dropped.get(ports[1], 0) == 200)
+    finally:
+        t.stop()
+
+
+def test_simhub_hint_while_holding_20777():
+    from oversteer.telemetry_view import listening_status, legacy_hint
+    assert "SimHub" in listening_status([5310, 20777, 4444], {})
+    assert "SimHub" not in listening_status([5310, 4444], {20777: OSError(errno.EADDRINUSE, 'x')})
+    assert legacy_hint() == "UDP 5300 has telemetry: set the game to 5310"

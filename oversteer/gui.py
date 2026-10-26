@@ -563,7 +563,7 @@ class Gui:
     def apply_rev_leds(self):
         """Start or stop the telemetry listener to match the model."""
         from .telemetry import Telemetry, NoLeds, AUTO, DEFAULT_PORT, LEGACY_PORT
-        from .telemetry_view import listening_status, receiving_status
+        from .telemetry_view import listening_status, receiving_status, legacy_hint
         if self.telemetry is not None:
             self.telemetry.stop()
             self.telemetry = None
@@ -599,10 +599,14 @@ class Gui:
             locked = telemetry.locked
             if shown['source'] and telemetry.auto and locked is not None:
                 text = receiving_status(locked[2], locked[0])
+                if locked[0] == LEGACY_PORT:
+                    text += '  ·  ' + legacy_hint()
             elif shown['source']:
                 text = _("telemetry from {}").format(shown['source'])
             elif telemetry.auto:
                 text = listening_status(telemetry.listening, telemetry.busy)
+                if telemetry.legacy_heard:
+                    text += '  ·  ' + legacy_hint()
             elif telemetry.elsewhere:
                 text = _("telemetry arrives on UDP {0}, not {1}: choose Auto or set the port here to {0}, or set "
                          "the game to {1}").format(telemetry.other_port, telemetry.port)
@@ -627,11 +631,10 @@ class Gui:
             shown['limiter'] = rpm
             self.ui.safe_call(show)
         port = AUTO if self.model.get_rev_leds_port_auto() else (self.model.get_rev_leds_port() or DEFAULT_PORT)
-        web_port = getattr(self, 'telemetry_web_port', None)
         self.telemetry = Telemetry(leds, port, on_status=status,
                                    inputs=lambda: self.launch_inputs, on_limiter=limiter,
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
-                                   avoid=(web_port,) if web_port else (), **self._shift_kwargs())
+                                   **self._shift_kwargs())
         self.telemetry.recorder = self.telemetry_recorder
         if self.telemetry_recorder is not None and not self.telemetry.auto:
             self.telemetry_recorder.port = self.telemetry.port   # Auto: each packet brings its port

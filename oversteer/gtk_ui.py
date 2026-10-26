@@ -1412,13 +1412,15 @@ class GtkUi:
         receive = self._list()
         receive.add(self._setting_row(
             _("UDP port"), _("Where games send their telemetry. Saved with the profile."),
-            _("Auto (the default) listens on every port in the list, and on 5300 where older setups send, "
-              "and takes the first one that brings a game's telemetry; another port is used only once that "
-              "one has been quiet for a few seconds. Turn on the game's UDP telemetry and point it at this "
+            _("Auto (the default) listens on every port in the list and takes the first one that brings a "
+              "game's telemetry; another port is used only once that one has been quiet for a few seconds. "
+              "It only looks at 5300 (where older setups send) now and then, as Forza Horizon 6 may need "
+              "that port: move such a game to 5310. A port another app holds is tried again every 30 s; "
+              "SimHub, which needs 20777, wants one port picked here instead of Auto. Turn on the game's UDP telemetry and point it at this "
               "computer at its usual port (Forza: Settings > HUD and gameplay > Data Out; BeamNG: OutGauge; "
               "Live for Speed: OutGauge Port in cfg.txt; DiRT Rally 2.0: hardware_settings_config.xml, "
-              "extradata 3). Only one app can listen on a UDP port: a port another tool such as SimHub holds "
-              "is skipped and shown. Forza has no fixed port: set Data Out to the Oversteer default and keep "
+              "extradata 3). Only one app can listen on a UDP port: a port another tool holds is skipped and "
+              "shown. Forza has no fixed port: set Data Out to the Oversteer default and keep "
               "away from 5200 to 5300, which the game uses itself. Pick one port to listen there alone, or "
               "type any port from 1024 to 65535."), (self.rev_leds_port,)))
         row, self.telemetry_learn = self._switch_row(

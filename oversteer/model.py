@@ -297,10 +297,11 @@ class Model:
                 data['rev_leds_learnt'] = True
             data['rev_leds_shift'] = self._clamp_shift(data['rev_leds_shift_unit'], data['rev_leds_shift'])
 
-        # A profile from before Auto: no port, or one the app wrote as its
-        # default without being asked (5310 since 0.14, 5300 before; both
-        # are among Auto's ports), listens on all of them. Another port was
-        # typed in, and stays. The port itself is kept: an older Oversteer
+        # A profile from before Auto: no port, or the 5310 the app wrote as
+        # its default without being asked (one of Auto's ports), listens on
+        # all of them. Any other port stays fixed, 5300 too: Auto only
+        # probes 5300 (Forza Horizon 6's range), and a game set to it would
+        # lose telemetry. The port itself is kept: an older Oversteer
         # reading the profile listens there as before.
         if data['rev_leds_port_auto'] is None:
             data['rev_leds_port_auto'] = self._port_auto(data)
@@ -576,8 +577,11 @@ class Model:
             return None
         return value if 1 <= value <= 65535 else None
 
-    # The ports the app saved as its default before Auto (5300 before 0.14, then 5310)
-    LEGACY_DEFAULT_PORTS = (None, 5300, 5310)
+    # No port, or the 5310 the app saved as its default since 0.14 (5300 before it stays fixed:
+    # Auto only probes 5300).
+    # An older Oversteer that saves a profile drops rev_leds_port_auto (unknown to it), so a
+    # fixed 5310 saved by it reads as Auto again here: accepted, Auto listens on 5310 too.
+    LEGACY_DEFAULT_PORTS = (None, 5310)
 
     def set_rev_leds_port(self, value):
         """Listen on one port, or on Auto's (`value` telemetry.AUTO). Auto
