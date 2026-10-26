@@ -508,7 +508,7 @@ Order by glance priority (the mockup is the reference):
 
 Data: `/api/v1/live?since=<seq>`, which returns the sample plus the 10 Hz rows
 since `seq`, the delta, and the split (§9.1). Without a PB on this stage and
-car the delta block reads "No PB yet on this stage: finish a clean run",
+car the delta block reads "No PB yet on this stage: finish a run",
 dimmed, and the splits row shows only "Run time 1:12.4".
 
 ### 7.3 Mobile · Telemetry › Run — built in the mockup

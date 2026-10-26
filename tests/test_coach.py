@@ -490,9 +490,11 @@ def test_stage_tips_compare_with_the_same_stage(tmp_path):
     h.session([{'name': 'corner.loss', 'value': 4.4, 'count': 1}])
     h.session([{'name': 'corner.loss', 'value': 9.0, 'count': 1}], stage='eawrc:5:3')       # another stage
     tips = [t for t in h.tips() if t.id.startswith('corner.loss')]
-    assert [t.id for t in tips] == ['corner.loss:eawrc:5:3', 'corner.loss:eawrc:4:12']
-    assert tips[1].text == ('On stage eawrc:4:12, your last run lost 4.4 s in its three worst sections against your '
-                            'best run there in this car.')
+    assert [t.id for t in tips] == ['corner.loss:eawrc:5:3']        # the stage just driven; the one before it is not coached
+    h.session([{'name': 'corner.loss', 'value': 4.4, 'count': 1}])
+    [tip] = [t for t in h.tips() if t.id.startswith('corner.loss')]
+    assert tip.text == ('On stage eawrc:4:12, your last run lost 4.4 s in its three worst sections against your '
+                        'best run there in this car.')
     for value in (1.0, 1.1, 1.0, 1.2):
         h.session([{'name': 'consistency.split_sd', 'value': value, 'count': 4}])
     h.session([{'name': 'consistency.split_sd', 'value': 0.4, 'count': 4}])

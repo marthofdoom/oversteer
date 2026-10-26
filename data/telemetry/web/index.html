@@ -917,7 +917,7 @@ function splitDelta(r) {
 function splitName(sp, r, i) {
   return bySector(sp) ? r.name : (i + 1) + ". " + r.name.replace(/^the /, "") + (r.finish ? " (finish)" : "");
 }
-// "PB" is said for a clean run that is the best, never for a learning or off run that was merely quick
+// "PB" is said for the quickest finished run (clean, learning or with offs), never for one that was merely quick
 function lastBadge(sp) {
   if (sp.last == null || sp.best == null) return null;
   if (sp.new_pb) return {text: "PB", cls: "t-gold"};
@@ -1358,7 +1358,7 @@ function liveShow(b, force) {
   clear(note);
   note.hidden = true;
   if (live && b.ref_status === "none") {
-    note.textContent = "No PB yet on this stage: finish a clean run";
+    note.textContent = "No PB yet on this stage: finish a run";
     note.hidden = false;
   } else if (fin && !done) {
     note.appendChild(document.createTextNode("Run finished"));

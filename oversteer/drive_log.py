@@ -1121,7 +1121,7 @@ class RunTracker:
                       if started is None or r['started'] <= started]
             last_started = before[0]['started'] if before else None
             ref = coach_context.reference_run(
-                [r for r in before if r['run_class'] in ('clean', 'learning')], wet=verdicts.get('wet'))
+                [r for r in before if r['run_class'] in coach_context.PB_CLASSES], wet=verdicts.get('wet'))
             if ref is not None:
                 ref_trace = store.trace(ref['id'])
                 ref_corners = store.corners(ref['id'])
@@ -1155,7 +1155,7 @@ class RunTracker:
         store.add_corners(run, corners)
         store.add_events(run, analysis['events'])
         klass = analysis['run_class']
-        if klass in ('clean', 'learning') and store.finish_unknown(run):
+        if klass in coach_context.PB_CLASSES and store.finish_unknown(run):
             klass = 'partial'                            # timed to the old line and not re-timable (retime_finishes)
         store.update_run(run, course=course, run_class=klass)
         for s in analysis['shifts']:

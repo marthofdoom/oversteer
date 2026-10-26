@@ -245,7 +245,7 @@ def potential_line(potential):
 def splits_row(found):
     """coach.splits() for the splits row of the Coaching and Telemetry views, or None without splits: a dict
     with `stage` (short name), `name`, `pb`, `sob`, `gain`, `last`, `delta` (last less PB, None unless the last
-    run finished), `new_pb` (the last run is the PB, and clean: the only time the row says PB), `finish_m` and
+    run finished), `new_pb` (the last run is the PB: the only time the row says PB), `finish_m` and
     `finish_confidence` (the times end at the stage's flying finish), `tones` (one per split, for the ribbon),
     `bounds` ((d0, d1) per split, for cells as long as the splits), `rows` ((name, last, Δ PB, best, tone, save)
     per split, the stage total and the sum of best at the end), `unit` ('sectors': the splits are the game's own sectors; 'sections': the corner
@@ -737,7 +737,7 @@ def live_delta_view(body, bounds=None, unit='sections'):
     if body['state'] not in ('live', 'stale'):
         return None
     if body.get('ref_status') == 'none':
-        return {'note': _("No PB yet on this stage: finish a clean run"), 'dim': True}
+        return {'note': _("No PB yet on this stage: finish a run"), 'dim': True}
     ref = body.get('ref')
     if body.get('ref_status') != 'ready' or body.get('delta') is None or not ref:
         return None

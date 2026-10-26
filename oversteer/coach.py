@@ -541,6 +541,9 @@ CORNER_LOSS = 1.5                # s in the three worst sections against the bes
 BUDGET = 0.1                     # a tip is shown when it costs this share of the costliest one
 PRAISE = 3                       # praise lines per view (and one is forced in when two tips show)
 TECHNIQUE_SHIFT = 0.2            # a technique line comes back when its share moved this far (20 points)
+PHANTOM_M = 500.0                # m: an unfinished run shorter than this does not say which stage was just driven
+ONCE = ('shift.better', 'launch.better', 'launch.steady', 'learning', 'retuned:')    # habit lines said once...
+SECTOR_REACH = 200.0             # m: an off, spin or hit this near a sector (the recovery smears the line crossing) sets no sector best
 STAGES_COACHED = 3               # the stages (newest runs) whose sections are read for tips
 SECTION_TIPS = 3                 # the costliest sections named per stage
 TWO_PLACES = 0.5                 # the two costliest sections hold this share of the loss: "most of it in two places"
@@ -932,6 +935,25 @@ class Coach:
             self._stages[stage] = _stage_name(stage, self.reader.stage(stage))
         return self._stages[stage]
 
+    def _current_stage(self, car_id):
+        """The stage of the car's newest run of any class (a restart included, but not a run that never got
+        PHANTOM_M down the road without finishing: a phantom restart at a finish), None without one or a car."""
+        if car_id is None:
+            return None
+        for session in self.reader.sessions(car_id, 6):
+            found = [r for r in self.reader.runs(session['id']) if r['stage']
+                     and (r['finished'] == 1 or (r['distance'] or 0.0) >= PHANTOM_M)]
+            if found:
+                return max(found, key=lambda r: (r['started'] or 0, r['id']))['stage']
+        return None
+
+    def _only_restarts(self, stage, car_id):
+        """True when the car's runs of the stage are all restarts: it has no run to coach yet (a circuit has no
+        'first full run': it is not said there)."""
+        found = self.reader.stage_runs(stage, limit=20, car=car_id)
+        entry = stage_tables.entry(stage) or {}
+        return bool(found) and all(r['run_class'] == 'restart' for r in found) and entry.get('discipline') != 'circuit'
+
     def tips(self, profile, car_id=None, limit=TIPS, show_all=False):
         """[Tip]: the focus habit, up to `limit` tips, one praise, the gate
         notes and up to STILL quiet lines, in that order. Nothing is marked
@@ -953,12 +975,20 @@ class Coach:
         slices = {}
         for r in rows:
             slices.setdefault((r['name'], r['gear'], r['method'], r['discipline'], r['surface']), []).append(r)
-        placed, judged = self._place_tips(rows, model, candidates, praise, notes, techniques)
+        # After a run the coaching is about the stage just driven: the stage of the car's newest run of any class
+        # (a restart too). The sections, spreads, incidents and praise of the stages before it are not said
+        current = self._current_stage(car_id)
+        placed, judged = self._place_tips(rows, model, candidates, praise, notes, techniques, current)
+        if current is not None and current not in placed and self._only_restarts(current, car_id):
+            label = self._stage_label(current)
+            notes.append(Tip('scope.first:' + current, 'note', 'First full run of {} gives the coach a reference.'.format(
+                'this stage' if label.startswith('stage ') else label), [], None, cost=0.0, count=0))
         self._shift_tips(slices, model, candidates, praise, notes, techniques)
         self._method_tips(rows, candidates)
         self._rate_tips(slices, rows, candidates, praise, judged)
         self._launch_tips(slices, rows, candidates, praise)
-        self._stage_tips(rows, candidates, praise, placed, model)
+        self._stage_tips([r for r in rows if current is None or r['stage'] in (None, current)], candidates, praise,
+                         placed, model)
         if model is not None:
             self._model_notes(model, now, candidates)
         state = self.reader.coach_state(profile, car_id)
@@ -1306,8 +1336,9 @@ class Coach:
 
     # -- the stage's last run, section by section (docs/coach-techniques.md, 7.2.2 and 7.3 R4-R7) --
 
-    def _place_tips(self, rows, model, candidates, praise, notes, techniques):
-        """The newest run of each of the STAGES_COACHED newest stages, read section by section from its
+    def _place_tips(self, rows, model, candidates, praise, notes, techniques, current=None):
+        """The newest run of each of the STAGES_COACHED newest stages (only `current`, the stage just driven, where
+        it is given: the stages before it are not coached), read section by section from its
         stored corners and events against the car's best finished run there: corner tips by place and
         cause (R6), the throttle and pedals leaving corners (R4, R5), spins, stops and offs, the speed
         through the same section from run to run (R7), the limiter held on a straight against the
@@ -1319,7 +1350,8 @@ class Coach:
             if r['stage'] and r['run'] is not None:
                 stages.setdefault(r['stage'], {})[r['run']] = r['started']
         placed, judged = set(), set()
-        for stage in sorted(stages, key=lambda k: (-max(stages[k].values()), k))[:STAGES_COACHED]:
+        newest = sorted(stages, key=lambda k: (-max(stages[k].values()), k))
+        for stage in ([s for s in newest if s == current] if current is not None else newest[:STAGES_COACHED]):
             run = None
             for run_id, _ in sorted(stages[stage].items(), key=lambda kv: -kv[1]):
                 found = reader.run(run_id)
@@ -1351,7 +1383,7 @@ class Coach:
         self._held_corner(stage, name, run, techniques)
         before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
                   if r['started'] <= run['started']]
-        ref = coach_context.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')],
+        ref = coach_context.reference_run([r for r in before if r['run_class'] in coach_context.PB_CLASSES],
                                           wet=run['wet'])
         ref_corners = reader.corners(ref['id']) if ref is not None else []
         report = coach_context.section_report(corners, ref_corners) if ref_corners else None
@@ -1360,16 +1392,17 @@ class Coach:
         if report is None or run['run_class'] in ('learning', 'unclassified'):
             return False
         ref_text = '{}, {} on {}'.format(car, span(ref['result_time']), _date(ref['started']))
-        # A run is "best yet" only when quicker than every earlier clean run; it is then measured against
-        # the run it beat. The reference is chosen by the time after the start, so it may not be the quickest
+        # A run is "best yet" only when quicker than every earlier finished run (the PB: clean, learning or with
+        # offs); it is then measured against the run it beat. The reference is chosen by the time after the start,
+        # so it may not be the quickest
         prior = _prior_best(run, before)
-        beat = prior is not None and run['finished'] == 1 and run['run_class'] == 'clean' \
+        beat = prior is not None and run['finished'] == 1 and run['run_class'] in coach_context.PB_CLASSES \
             and bool(run['result_time']) and run['result_time'] < prior['result_time']
         quickest = _ref_is_quickest(ref, before)
         if beat:
-            ref_name = 'your previous best clean run' if quickest else 'your previous quickest run after the start'
+            ref_name = 'your previous best run' if quickest else 'your previous quickest run after the start'
         else:
-            ref_name = 'your best clean run' if quickest else 'your quickest run after the start'
+            ref_name = 'your best run' if quickest else 'your quickest run after the start'
         named = []
         for n, it in enumerate(report):
             if it['loss'] is None or it['off'] or it['compare'] is None or it['first'] or it['ref_off'] or it['last']:
@@ -1645,13 +1678,14 @@ class Coach:
         the same bend as `corner` (the nearest within SECTION_REACH m), or None."""
         reader = self.reader
         before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
-                  if r['started'] <= run['started'] and r['run_class'] in ('clean', 'learning')]
+                  if r['started'] <= run['started'] and r['run_class'] in coach_context.PB_CLASSES]
         ref = coach_context.reference_run(before, wet=run['wet'])
         if ref is None:
             return None
         near = [k for k in reader.corners(ref['id']) if k.get('d') is not None
                 and abs(k['d'] - corner['d']) <= coach_context.SECTION_REACH]
-        return min(near, key=lambda k: abs(k['d'] - corner['d'])) if near else None
+        found = min(near, key=lambda k: abs(k['d'] - corner['d'])) if near else None
+        return None if found is None or found.get('off') else found      # a pass that went off there is no model
 
     def _spread(self, stage, name, run, events, sections, report, candidates, praise):
         """R7: the speed through the same section from run to run (corner.spread events). A section that
@@ -1668,7 +1702,7 @@ class Coach:
         refs = {}
         if report is not None:
             for it in report:
-                if it['ref'] is not None:
+                if it['ref'] is not None and not it['ref_off']:      # not a speed taken beside the reference's off
                     refs[round(it['d'], 1)] = coach_context.key_corner(it['ref']).get('min_speed')
         wide = []
         for e in spreads:
@@ -1680,7 +1714,7 @@ class Coach:
         if wide:
             top = wide[:3]
             best = [refs.get(round(sec['apex'], 1)) for _, _, sec in top]
-            action = ('Your best clean run took {} at {} km/h: aim for that each time.'.format(
+            action = ('Your best run took {} at {} km/h: aim for that each time.'.format(
                 'it' if len(top) == 1 else 'them', _say(['{:.0f}'.format(b * 3.6) for b in best]))
                 if all(b is not None for b in best) else
                 'Pick the speed of your quickest run through {} and repeat it.'.format(
@@ -1764,7 +1798,7 @@ class Coach:
                 continue
             candidates.append(Tip('limiter.held:{}:{:.0f}'.format(stage, e['d0']), 'tip',
                                   'On {}, from {:.1f} km you held {} on the limiter for {:.1f} s with no corner to use '
-                                  'it for: your best clean run was {:.1f} s quicker to the next braking{}. Change up as the '
+                                  'it for: your best run was {:.1f} s quicker to the next braking{}. Change up as the '
                                   'lights flash.'.format(
                                       name, e['d0'] / 1000.0, _ordinal(e['gear']), e['value'], max(0.0, found['lost']),
                                       ', in {}'.format(_ordinal(found['ref_gear'])) if found['ref_gear'] else ''),
@@ -1777,10 +1811,10 @@ class Coach:
         time, once per stage)."""
         reader = self.reader
         prior = _prior_best(run, before)
-        if (prior is not None and run['finished'] == 1 and run['result_time'] and run['run_class'] in ('clean',)
+        if (prior is not None and run['finished'] == 1 and run['result_time'] and run['run_class'] in coach_context.PB_CLASSES
                 and run['result_time'] < prior['result_time']):
             gain = prior['result_time'] - run['result_time']
-            sentence = 'On {}, your best clean run yet in the {}: {:.1f} s quicker than {} ({}).'.format(
+            sentence = 'On {}, your best run yet in the {}: {:.1f} s quicker than {} ({}).'.format(
                 name, car, gain, _date(prior['started']), span(prior['result_time']))
             if gained and prior['id'] == ref['id']:                 # the gains are against the reference
                 it = gained[0]
@@ -1824,7 +1858,7 @@ class Coach:
             notes.append(Tip('corner.possible:' + stage, 'note',
                              'On {}, your best sections put together make {}, {:.1f} s under {} in '
                              'the {} ({}).{}'.format(
-                                 name, span(found['possible']), found['gain'], 'your best clean run', car, span(pb['result_time']),
+                                 name, span(found['possible']), found['gain'], 'your best run', car, span(pb['result_time']),
                                  ' The biggest gain is {}, {:.1f} s.'.format(
                                      coach_context.section_name(best['grid'][j]), gains[j]) if j is not None else ''),
                              [], found['gain'], cost=0.0, count=len(loaded) + 1))
@@ -1893,7 +1927,7 @@ class Coach:
     def _quickest_pass(self, stage, run, split, found):
         """The run row of the quickest pass through a split of the stage, `run` itself excluded (None where it is the
         quickest, or there is none to compare with): the one the splits' stitch names for the split, else the car's
-        quickest finished clean run."""
+        quickest finished run (the PB)."""
         reader = self.reader
         who = found['best']['who'].get(split) if found is not None and split is not None else None
         if who is None:
@@ -1901,7 +1935,7 @@ class Coach:
                 pb = found['pb']
             else:
                 done = [r for r in reader.stage_runs(stage, limit=60, car=run['car'], ranked=True)
-                        if r['started'] <= run['started'] and r['run_class'] == 'clean' and r['finished'] == 1
+                        if r['started'] <= run['started'] and r['run_class'] in coach_context.PB_CLASSES and r['finished'] == 1
                         and r['result_time']]
                 pb = min(done, key=lambda r: r['result_time']) if done else None
             who = pb['id'] if pb is not None else None
@@ -2077,14 +2111,14 @@ def _began_mid_stage(reader, run_id, stage):
 def stitch(reader, run, ref, ref_corners, before):
     """The best of the car's runs on the stage section by section, for both the coach's "possible" note and
     splits(), so they agree: {best (coach_context.stitched on the reference's grid), loaded (the runs read),
-    pb (the quickest finished clean run, `run` itself counting; None without one), possible (its time less what
+    pb (the quickest finished run, PB_CLASSES, `run` itself counting; None without one), possible (its time less what
     the best sections take off it, coach_context.sum_of_best), gain}. None without the reference's trace or a grid."""
     ref_trace = reader.trace(ref['id'])
     if not ref_trace or not ref_corners:
         return None
     ref_rows = {'trace': coach_context.stage_rows(ref_trace, ref['course'], True, ref['result_time']),
                 'corners': ref_corners, 'course': ref['course'], 'run': ref['id']}
-    finished = [r for r in before + [run] if r['run_class'] == 'clean' and r.get('finished') == 1
+    finished = [r for r in before + [run] if r['run_class'] in coach_context.PB_CLASSES and r.get('finished') == 1
                 and r.get('result_time')]
     pb = min(finished, key=lambda r: r['result_time']) if finished else None
     picked = ([run] + [r for r in before if r['id'] != ref['id'] and r['run_class'] in ('clean', 'learning', 'off',
@@ -2114,25 +2148,28 @@ def stitch(reader, run, ref, ref_corners, before):
     sectors = _sectors(run['stage'], run, ref_rows, loaded, {r['id']: r['run_class'] for r in before + [run]},
                        {x['run']: reader.run_start(x['run']) for x in [ref_rows] + loaded},
                        {x['run']: reader.run_clock(x['run']) for x in [ref_rows] + loaded},
-                       {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded})
+                       {x['run']: (reader.run(x['run']) or {}).get('result_time') for x in [ref_rows] + loaded},
+                       {x['run']: _bad_ranges(reader, x['run']) for x in [ref_rows] + loaded})
     by_sector = bool(sectors) and all(v['confidence'] in SECTOR_SPLITS and v['best'] is not None for v in sectors)
     splits_possible = sum(v['best'] for v in sectors) if by_sector else possible
+    if splits_possible is not None and pb is not None and splits_possible > pb['result_time']:
+        splits_possible = pb['result_time']                 # never slower than the PB itself
     return {'best': best, 'loaded': loaded, 'ref_rows': ref_rows, 'pb': pb, 'possible': possible, 'gain': gain,
             'sectors': sectors, 'by_sector': by_sector, 'splits_possible': splits_possible,
             'splits_gain': None if pb is None or splits_possible is None else pb['result_time'] - splits_possible}
 
 
 def _prior_best(run, before):
-    """The quickest finished clean run of the car on the stage before `run`, or None."""
-    found = [r for r in before if r['id'] != run['id'] and r['run_class'] == 'clean' and r.get('finished') == 1
+    """The quickest finished run of the car on the stage before `run` (the PB it had: coach_context.PB_CLASSES), or None."""
+    found = [r for r in before if r['id'] != run['id'] and r['run_class'] in coach_context.PB_CLASSES and r.get('finished') == 1
              and r.get('result_time')]
     return min(found, key=lambda r: r['result_time']) if found else None
 
 
 def _ref_is_quickest(ref, before):
-    """True when no earlier finished clean or learning run was quicker over the whole stage than the reference
+    """True when no earlier finished run (PB_CLASSES) was quicker over the whole stage than the reference
     (which is ranked by the time after the first section)."""
-    return not any(r['id'] != ref['id'] and r['run_class'] in ('clean', 'learning') and r.get('finished')
+    return not any(r['id'] != ref['id'] and r['run_class'] in coach_context.PB_CLASSES and r.get('finished')
                    and r.get('result_time') and r['result_time'] < ref['result_time'] for r in before)
 
 
@@ -2143,9 +2180,9 @@ def splits(reader, profile, car_id):
     """The car's split times on the stage of its most recent run (the coach's own reference and the
     runs "possible" is built from), or None with fewer than two runs, no corners or no grid: a dict with
     `stage`, `name`, `last` (the latest run's time, None unless it finished), `best` (the quickest finished
-    clean run's), `possible` (the quickest run's time less what the best sections take off it, section by
+    run's, the PB: clean, learning or with offs), `possible` (the quickest run's time less what the best sections take off it, section by
     section over the whole stage, coach_context.sum_of_best: never over `best`), `gain` (best less possible),
-    `new_pb` (the last run is the best, and clean), `last_class`, `finish_m` and `finish_confidence` (the stage's
+    `new_pb` (the last run is the PB), `last_class`, `finish_m` and `finish_confidence` (the stage's
     flying finish, where the table has one: the times end there, not at the stop), `runs`, and `splits`: per section of the reference's grid, `name`, `last`, `best`, `gold` (the
     latest run set the best), `delta` (last less best), `pb` (the reference run's time through it: the PB the
     LiveSplit colours are against), `margin` (a gold split: how much it beat the previous best by), `cum` (the last run's elapsed time at the split's end less the PB's: ahead
@@ -2158,7 +2195,7 @@ def splits(reader, profile, car_id):
     be placed. `unit` says what `splits` are: 'sectors' where the sectors lie on the game's lines or a measured start
     and finish (SECTOR_SPLITS) and every one has a best (then `splits` are the sector rows, `possible` is their sum of
     best and so is the potential's user layer), else 'sections' (the corner sections); `sections` are always those. The best is over the
-    clean and learning runs read; a sector a run did not drive from end to end is not timed."""
+    clean, learning and off runs read; a sector a run did not drive from end to end is not timed."""
     rows = reader.metrics(profile, car_id, SESSIONS_READ)
     started = {}
     for r in rows:
@@ -2176,7 +2213,7 @@ def splits(reader, profile, car_id):
     stage = run['stage']
     before = [r for r in reader.stage_runs(stage, exclude=run['id'], limit=60, car=run['car'], ranked=True)
               if r['started'] <= run['started']]
-    ref = coach_context.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')], wet=run['wet'])
+    ref = coach_context.reference_run([r for r in before if r['run_class'] in coach_context.PB_CLASSES], wet=run['wet'])
     if ref is None:
         return None
     found = stitch(reader, run, ref, reader.corners(ref['id']), before)
@@ -2220,7 +2257,7 @@ def splits(reader, profile, car_id):
                 v['available'] = None if v['last'] is None else v['last'] - v['grip_s']
     return {'stage': stage, 'ref_run': ref['id'], 'name': _stage_name(stage, reader.stage(stage)),
             'last': run['result_time'] if finished else None, 'last_class': run['run_class'],
-            'new_pb': bool(finished and run['run_class'] == 'clean' and found['pb'] is not None
+            'new_pb': bool(finished and run['run_class'] in coach_context.PB_CLASSES and found['pb'] is not None
                            and found['pb']['id'] == run['id']),
             'finish_m': entry.get('finish_m'), 'finish_confidence': entry.get('finish_confidence'),
             'finish_real': bool(stage_tables.sector_lines(entry)),
@@ -2230,7 +2267,13 @@ def splits(reader, profile, car_id):
             'unit': unit, 'splits': rows, 'sections': out, 'sectors': sectors}
 
 
-def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None):
+def _bad_ranges(reader, run_id):
+    """[(d0, d1)] m of the run's offs, spins and hits (an incident: no fair sector time beside it)."""
+    return [(e['d0'], e['d1'] if e['d1'] is not None else e['d0']) for e in reader.events(run_id)
+            if e['kind'] in ('off', 'spin', 'hit') and e['d0'] is not None]
+
+
+def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, results=None, bad=None):
     """The game's sectors of `stage` timed from the traces (`ref_rows` and `loaded`, as splits reads them), or None.
     Each sector's bounds are on the road spline; a trace's distance is driven from the run's start, which
     is the start line, so a bound is taken less it. A run is timed through a sector it covered end to end
@@ -2245,21 +2288,27 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
         return None
     bounds = [(a - placed['start_m'], b - placed['start_m']) for a, b in placed['bounds']]
 
-    def times(trace, run_id=None):
+    def times(trace, run_id=None, clean=False):
         origin = (starts or {}).get(run_id)
         if origin is None:
             origin = stage_tables.run_origin(entry)
         shift = 0.0 if origin is None else origin - placed['start_m']
-        return coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
-                                          (results or {}).get(run_id))
+        found = coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
+                                           (results or {}).get(run_id))
+        if clean:       # a sector with an off, spin or hit in it or within SECTOR_REACH of it is no fair best (as grid_times)
+            reach = SECTOR_REACH
+            found = {i: t for i, t in found.items() if not any(
+                lo - reach < bounds[i][1] - shift and hi + reach > bounds[i][0] - shift
+                for lo, hi in (bad or {}).get(run_id, ()))}
+        return found
 
     mine = next((x for x in loaded if x['run'] == run['id']), None)
     last = times(mine['trace'], run['id']) if mine else {}
     best, who, runner = {}, {}, {}
     for x in [{'run': ref_rows['run'], 'trace': ref_rows['trace']}] + loaded:
-        if classes.get(x['run']) not in ('clean', 'learning'):
+        if classes.get(x['run']) not in coach_context.PB_CLASSES:
             continue
-        for i, t in times(x['trace'], x['run']).items():
+        for i, t in times(x['trace'], x['run'], True).items():
             if i not in best or t < best[i]:
                 if i in best:
                     runner[i] = best[i]
@@ -2292,7 +2341,22 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
     lines, not repeated once shown twice unless it grew, and when two tips show at least one, so a view
     does not read as a list of faults. Techniques (correct technique described) are shown once and come
     back when their share moved TECHNIQUE_SHIFT. Each note once."""
+    def moved(tip):
+        """A habit line already shown (ONCE) stays as it is in the sitting it was shown in (SHOWING), then comes back only when its number
+        changed by RESHOW_WORSE, or after RESHOW_AFTER: said run after run it is noise."""
+        seen = state.get(tip.id)
+        if show_all or seen is None or not tip.id.startswith(ONCE) or not (seen['times'] or 0):
+            return True
+        if seen['last_shown'] is not None and now - seen['last_shown'] < SHOWING:
+            return True                  # the sitting it was said in: every redraw looks the same
+        if seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER:
+            return True
+        old = seen['value']
+        return old is not None and tip.value is not None and abs(tip.value - old) >= RESHOW_WORSE * max(abs(old), 1e-9)
+
     def fresh(tip):
+        if not moved(tip):
+            return False
         seen = state.get(tip.id)
         if show_all or seen is None or (seen['times'] or 0) < QUIET_AFTER:
             return True
@@ -2322,6 +2386,8 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
         if tip is focus:
             continue
         tip.kind = 'tip'
+        if not moved(tip):
+            continue                     # a habit line already said: not even quietly, until it moved
         if not worth(tip):
             still.append(tip)
         elif fresh(tip) and (show_all or tips < limit):
@@ -2334,8 +2400,8 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
         seen = state.get(tip.id)
         grew = seen is not None and seen['value'] is not None and tip.value is not None \
             and abs(tip.value) <= abs(seen['value']) * (1 - RESHOW_WORSE)
-        if show_all or seen is None or (seen['times'] or 0) < QUIET_AFTER or grew \
-                or (seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER):
+        if moved(tip) and (show_all or seen is None or (seen['times'] or 0) < QUIET_AFTER or grew
+                           or (seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER)):
             praised.append(tip)
     if not show_all:
         praised = praised[:PRAISE]

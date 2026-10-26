@@ -464,3 +464,48 @@ def test_the_reference_runs_trace_survives_the_cap(tmp_path):
     size = store.db.execute('SELECT LENGTH(data) FROM traces WHERE run = ?', (runs[0],)).fetchone()[0]
     assert store.prune_traces(cap=size * 2) == 1
     assert store.trace(runs[0]) is not None and store.trace(runs[1]) is None and store.trace(runs[2]) is not None
+
+
+def _pruned(tmp_path, specs, clock=()):
+    """Runs of one car on one stage, oldest first: (result_time, run_class, first section time). Returns (store, ids,
+    dropped) after a prune that leaves room for two traces."""
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'acr/a', 'acr')
+    session = store.start_session('p', car, 'acr', 1.0)
+    rows = [tuple(float(i + c) for c in range(len(TRACE_CHANNELS))) for i in range(100)]
+    ids = []
+    for n, (result, klass, first) in enumerate(specs, 1):
+        run = store.start_run(session, n, float(n), 'acr:x:y', 'acr', 5000.0)
+        store.end_run(run, ended=300.0, distance=5000.0, finished=1, result_time=result, course=4900.0,
+                      run_class=klass, wet='dry')
+        store.add_corners(run, [{'d': 100.0, 'section_t': first}])
+        store.add_trace(run, rows)
+        ids.append(run)
+        if n in clock:
+            store.set_run_clock(run, 'game')
+    size = store.db.execute('SELECT LENGTH(data) FROM traces WHERE run = ?', (ids[0],)).fetchone()[0]
+    return store, ids, store.prune_traces(cap=size * 2)
+
+
+def test_the_trace_of_a_pb_with_an_off_survives_the_cap(tmp_path):
+    store, ids, _ = _pruned(tmp_path, [(210.0, 'clean', 10.0), (200.0, 'off', 10.0), (220.0, 'clean', 10.0),
+                                      (205.0, 'clean', 10.0), (230.0, 'clean', 10.0)])
+    assert store.trace(ids[1]) is not None             # the PB, an off run
+    assert store.trace(ids[0]) is not None             # the PB it beat, when it was set
+    assert store.trace(ids[2]) is None and store.trace(ids[4]) is None
+
+
+def test_the_trace_of_a_pb_that_ranks_badly_after_the_first_section_survives_the_cap(tmp_path):
+    store, ids, _ = _pruned(tmp_path, [(205.0, 'clean', 20.0), (200.0, 'clean', 100.0), (230.0, 'clean', 10.0),
+                                      (240.0, 'clean', 10.0)])
+    assert store.trace(ids[1]) is not None and store.trace(ids[0]) is not None
+    assert store.trace(ids[2]) is None
+
+
+def test_the_pb_among_the_game_clock_runs_keeps_its_trace(tmp_path):
+    # run 1 is quicker but timed by the progress, run 3 is the first on the game's clock: once a car has a clock run on
+    # the stage only its clock runs rank, so the PB is run 3; run 2 ranks better after the first section
+    store, ids, _ = _pruned(tmp_path, [(190.0, 'clean', 10.0), (230.0, 'clean', 100.0), (205.0, 'clean', 10.0),
+                                      (240.0, 'clean', 10.0), (250.0, 'clean', 10.0)], clock=(2, 3, 4, 5))
+    assert store.trace(ids[2]) is not None             # the PB on the game's clock, slower than the progress-timed run 1
+    assert store.trace(ids[0]) is not None             # the PB it was when set

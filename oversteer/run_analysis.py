@@ -78,7 +78,7 @@ stage_pb_id = cc.stage_pb_id
 
 def recent_runs(reader, car_id, limit=12, namespace=None):
     """The car's recent runs on the stage of its latest run, newest first: id, n, started, time, finished,
-    run_class, wet, stage, stage_name, pb (the quickest finished clean run), trace (it has one). []
+    run_class, wet, stage, stage_name, pb (the quickest finished run), trace (it has one). []
     without runs."""
     stage = None
     for session in reader.sessions(car_id, 6):
@@ -111,9 +111,9 @@ def _before(reader, run):
 
 
 def pb_run(reader, run, before=None):
-    """The coach's reference for `run`: the quickest finished clean or learning run before it, or None."""
+    """The coach's reference for `run`: the quickest finished run (clean, learning or with offs) before it, or None."""
     before = _before(reader, run) if before is None else before
-    return cc.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')], wet=run['wet'])
+    return cc.reference_run([r for r in before if r['run_class'] in cc.PB_CLASSES], wet=run['wet'])
 
 
 def previous_run(reader, run, before=None):

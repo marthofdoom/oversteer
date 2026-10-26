@@ -1829,7 +1829,7 @@ class GtkUi:
         summary = '<b>{}</b>   PB <tt><b>{}</b></tt>   {} <tt><b>{}</b></tt>'.format(
             GLib.markup_escape_text(found['stage']), clock(found['pb']), _("SoB"), clock(found['sob']))
         if found['last'] is not None and found['delta'] is not None:
-            # PB only for a clean run that is the best: a learning or off run quicker than that is not a PB
+            # PB for the quickest finished run, clean or with offs (coach.splits new_pb)
             tone = 'gold' if found['new_pb'] else 'ahead-gain' if round(found['delta'], 1) <= 0 else 'behind-lose'
             summary += '   {} <tt>{}</tt> <span foreground="{}"><tt><b>{}</b></tt></span>'.format(
                 _("Last"), clock(found['last']), telemetry_plot.TONES[tone],

@@ -1485,7 +1485,8 @@ class Store(Reader):
         """Drop the oldest traces beyond `cap` bytes in total; their runs,
         metrics and verdicts stay. The trace of each car's best finished run
         on a stage (the reference the coach reads the sections against, in
-        each wetness) is kept: without it the stage gets no tips by place.
+        each wetness) is kept: without it the stage gets no tips by place. So is the trace of every PB the car
+        set on a stage, a run with offs too (the quickest finished run so far when it was driven).
         A run whose trace is gone is not backfilled when the metrics change
         meaning: its old ones stay."""
         total = self._do('SELECT COALESCE(SUM(LENGTH(data)), 0) FROM traces').fetchone()[0]
@@ -1496,11 +1497,31 @@ class Store(Reader):
                 'SELECT r.id, r.stage, s.car, r.wet, r.result_time, (SELECT c.section_t FROM corners c WHERE '
                 'c.run = r.id AND c.section_t IS NOT NULL ORDER BY c.d LIMIT 1) FROM runs r JOIN sessions s ON '
                 'r.session = s.id WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                "AND r.run_class IN ('clean', 'learning') AND r.id IN (SELECT run FROM traces)").fetchall():
+                "AND r.run_class IN ('clean', 'learning', 'off') AND r.id IN (SELECT run FROM traces) "
+                'AND ' + self.ON_CLOCK).fetchall():
             key = (stage, car, wet)
-            if key not in best or result - (first or 0.0) < best[key][0]:
-                best[key] = (result - (first or 0.0), run)
+            if key not in best or result < best[key][0]:
+                best[key] = (result, run)
         kept = {run for _, run in best.values()}
+        # every PB, now and at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the
+        # wetness or the time after the first section): each finished run quicker than all the runs before it
+        records = {}
+        for run, stage, car, result in self._do(
+                'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                "AND r.run_class IN ('clean', 'learning', 'off') ORDER BY r.started, r.id").fetchall():
+            if result < records.get((stage, car), float('inf')):
+                records[(stage, car)] = result
+                kept.add(run)
+        # the PB as stage_pb_id ranks it (once a car has a run on the game's own clock on a stage, only its clock runs)
+        pbs = {}
+        for run, stage, car, result in self._do(
+                'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                "AND r.run_class IN ('clean', 'learning', 'off') AND " + self.ON_CLOCK).fetchall():
+            if result < pbs.get((stage, car), (float('inf'),))[0]:
+                pbs[(stage, car)] = (result, run)
+        kept.update(run for _, run in pbs.values())
         dropped = 0
         for run, size in self._do('SELECT run, LENGTH(data) FROM traces ORDER BY run').fetchall():
             if total <= cap:
