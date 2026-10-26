@@ -407,7 +407,7 @@ def listening_status(listening, busy):
         text += ' (' + skipped + ')'
     if SIMHUB_PORT in listening:
         # Only one app can hold a UDP port: SimHub started after Oversteer finds 20777 taken
-        text += '  ·  ' + _("SimHub needs {} free: pick one port here").format(SIMHUB_PORT)
+        text += '  ·  ' + _("SimHub needs {} free: pick another port here").format(SIMHUB_PORT)
     return text
 
 

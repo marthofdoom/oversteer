@@ -13,14 +13,14 @@
   shown in the status ("Listening on UDP 5310, 4444 (20777 busy: another app has it)") and tried again
   every 30 s, so it is picked up once that app exits; while Auto holds 20777 the status says SimHub needs a
   fixed port instead. 5300 (where WRC Generations and bridges set up before 0.14 still send) is in Forza
-  Horizon 6's own range, so Auto never holds it for good: while nothing is locked it listens there for 1 s
-  now and then, as the old probe did, keeps it only while a game heard there holds the lock, and says
+  Horizon 6's own range, so Auto never holds it for good: while nothing is locked, and until a game has been
+  heard on Auto's own ports, it listens there for 1 s now and then, as the old probe did, keeps it only while a game heard there holds the lock, and says
   "UDP 5300 has telemetry: set the game to 5310". Only a packet of a game Oversteer decodes picks a port;
   the first one becomes the active port ("Receiving DiRT Rally on UDP 20777") and the others are ignored
   until it has been quiet for 3 s. Telemetry from another port and another game or machine ends the
   session, so runs never join two streams; one game sending to two ports stays one session. "Record raw
   telemetry" records the active port only once a game is locked, and every port (unknown packets
-  included, a file per port) while none is, so a game not decoded yet is still captured; the capture
+  included, a file per port) while none is, so a game not decoded yet is still captured; the wheel's sidecar moves to the locked port's file; the capture
   format is unchanged and the same cap and pruning apply. Profiles with no port or the old default 5310 open in
   Auto; a profile with another port (5300 included, as Auto only probes it), or one that picks a port
   now, keeps listening on that port alone (saved as `rev_leds_port_auto = 0` beside `rev_leds_port`). With one

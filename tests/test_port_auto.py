@@ -490,3 +490,83 @@ def test_simhub_hint_while_holding_20777():
     assert "SimHub" in listening_status([5310, 20777, 4444], {})
     assert "SimHub" not in listening_status([5310, 4444], {20777: OSError(errno.EADDRINUSE, 'x')})
     assert legacy_hint() == "UDP 5300 has telemetry: set the game to 5310"
+
+
+def test_the_wheel_sidecar_follows_the_locked_port(tmp_path):
+    """A stray packet on one port opens the capture (and the wheel's sidecar) first; when a game locks on another
+    port, its file becomes the main one: the sidecar moves there and the first one ends at the switch."""
+    from oversteer import telemetry_capture as tc
+    from tests.test_diagnostics import FakeWheel
+    sources = []
+
+    def wheel():
+        source = FakeWheel([])
+        source.read = lambda timeout: (time.sleep(0.01) or [])      # an idle wheel
+        sources.append(source)
+        return source, {'range': 540}
+    ticks = iter([50.0, 51.0, 52.0, 53.0])
+    recorder = tc.Recorder(str(tmp_path), version='t', threaded=False, clock=lambda: next(ticks), wheel=wheel)
+    t = Telemetry(FakeLeds(), port=AUTO)
+    t.recorder = recorder
+    addr = ('127.0.0.1', 40000)
+    t.handle(10.0, b'stray', addr, 4444)                      # opens the main file on 4444, with the sidecar
+    stray = recorder.path
+    assert recorder._sampler is not None and len(sources) == 1
+    t.handle(10.5, forza(4000), addr, 20777)                  # a side file, then the lock makes it the main one
+    assert t.active_port == 20777 and recorder._file_port == 20777 and recorder.path != stray
+    assert sources[0].closed                                  # the stray file's sidecar ended at the switch
+    assert len(sources) == 2 and recorder._sampler.origin == 10.5
+    game = recorder.path
+    t.handle(10.6, forza(4100), addr, 20777)
+    t.handle(10.7, ovst(6000, 8500), addr, 4444)              # dropped while locked
+    recorder.close()
+    assert sources[1].closed
+    meta, _events = tc.read_wheel(game + tc.WHEEL_SUFFIX)
+    assert meta['capture'] == os.path.basename(game) and meta['started'] == 51.0
+    meta, _events = tc.read_wheel(stray + tc.WHEEL_SUFFIX)
+    assert meta['capture'] == os.path.basename(stray) and meta['started'] == 50.0
+    assert _captures(tmp_path) == {4444: [[b'stray']], 20777: [[forza(4000), forza(4100)]]}
+
+
+def test_the_old_main_file_closes_if_quiet_and_promotion_keeps_its_start(tmp_path):
+    from oversteer import telemetry_capture as tc
+    ticks = iter([50.0, 51.0, 52.0])
+    recorder = tc.Recorder(str(tmp_path), version='t', threaded=False, clock=lambda: next(ticks))
+    addr = ('127.0.0.1', 1)
+    recorder.packet(10.0, addr, b'a', 4444)
+    recorder.packet(10.0 + tc.CAPTURE_GAP + 5, addr, b'b', 20777)    # 4444 quiet: closed, 20777 is the main one
+    assert recorder._file_port == 20777 and recorder._side == {}
+    recorder.packet(80.0, addr, b'c', 5310)                            # 20777 still open: a side file
+    recorder.main(5310, 80.1)                                          # promoted, with its own start time
+    assert recorder._file_port == 5310 and recorder._started == 52.0 and 20777 in recorder._side
+    recorder.close()
+    assert _captures(tmp_path) == {4444: [[b'a']], 20777: [[b'b']], 5310: [[b'c']]}
+
+
+def test_no_probe_once_a_game_was_heard_on_autos_own_ports(ports, monkeypatch):
+    monkeypatch.setattr(module, 'PROBE_AFTER', 0.0)
+    monkeypatch.setattr(module, 'PROBE_EVERY', 0.05)
+    monkeypatch.setattr(module, 'PROBE_LISTEN', 0.05)
+    legacy = ports[3]
+    t = Telemetry(FakeLeds(), port=AUTO)
+    probes = []
+    real_bind = t._bind
+    t._bind = lambda port: (probes.append(port), real_bind(port))[1]
+    try:
+        assert t.start()
+        _send(ports[0], forza(4000), times=3, gap=0.01)
+        assert _wait(lambda: t.heard)
+        time.sleep(0.05)
+        probes.clear()
+        time.sleep(0.4)                                       # locked, then idle: still no probe
+        assert legacy not in probes
+    finally:
+        t.stop()
+
+
+def test_a_port_added_after_stop_is_closed():
+    """A thread that outlived stop()'s join must not leave a socket behind (or in another listener)."""
+    t = Telemetry(FakeLeds(), port=AUTO)
+    selector = object()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    assert t._add_port(12345, sock, selector) is False and sock.fileno() == -1 and t._socks == {}

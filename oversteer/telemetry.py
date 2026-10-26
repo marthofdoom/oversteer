@@ -282,6 +282,7 @@ class Telemetry:
         self._last_source = None          # the source (port, address, game) the previous lock was on
         self._busy_at = 0.0               # Auto: when to try the busy ports again
         self._probe = None                # Auto: (socket, until) while LEGACY_PORT is being probed
+        self._ports_lock = threading.Lock()   # stop()'s swap against the thread adding or closing a port
         self._ignored_ports = set()       # ports whose dropped packets were logged since the lock was taken
         self.set_shift(shift, shift_rpm, launch)
         self.inputs = inputs
@@ -470,9 +471,11 @@ class Telemetry:
             # A select() lasts 0.25 s; a probe (fixed mode) holds its port up to PROBE_LISTEN
             self._thread.join(PROBE_LISTEN + 1.0)
             self._thread = None
-        selector, self._selector = self._selector, None
-        socks, self._socks = self._socks, {}
-        probe, self._probe = self._probe, None
+        with self._ports_lock:
+            # A thread that outlived the join can no longer add a port (it checks the selector under the lock)
+            selector, self._selector = self._selector, None
+            socks, self._socks = self._socks, {}
+            probe, self._probe = self._probe, None
         if selector is not None:
             selector.close()
         for sock in socks.values():
@@ -503,7 +506,7 @@ class Telemetry:
                         if self.running:
                             # Never seen on a bound UDP socket: drop that port rather than spin on it
                             logging.warning("telemetry: UDP %s stops: %s", port, e)
-                            self._close_port(port)
+                            self._close_port(port, selector)
                         break
                     self.handle(time.monotonic(), data, addr, port)
             if not self.running:
@@ -518,37 +521,47 @@ class Telemetry:
                     self._probe_at = now + self._probe_gap(now)
                     self.probe_other_port()
             if self.auto:
-                self._auto_tick(now)
+                self._auto_tick(now, selector)
 
     def _probe_gap(self, now):
         # Auto, once a game was heard on LEGACY_PORT: keep looking often, it will be back after its menus
         often = now - self._started_at < PROBE_OFTEN_FOR or (self.auto and self.legacy_heard)
         return PROBE_EVERY if often else PROBE_LATER
 
-    def _close_port(self, port):
-        """Stop listening on `port` (the listener thread)."""
-        sock = self._socks.pop(port, None)
-        if sock is None:
-            return
-        try:
-            self._selector.unregister(sock)
-        except (KeyError, ValueError, OSError, AttributeError):
-            pass
-        sock.close()
-        if port in self.listening:
-            self.listening = [p for p in self.listening if p != port]
-
-    def _add_port(self, port, sock, listed=True):
-        """Listen on `port` too, with `sock` already bound (the listener
-        thread); `listed`: shown in `listening` (a probe is not)."""
-        try:
-            self._selector.register(sock, selectors.EVENT_READ, port)
-        except (KeyError, ValueError, OSError, AttributeError):
+    def _close_port(self, port, selector):
+        """Stop listening on `port` (the listener thread waiting on `selector`)."""
+        with self._ports_lock:
+            if selector is not self._selector:
+                return                    # stopped meanwhile: stop() closed it, or it is another listener's
+            sock = self._socks.pop(port, None)
+            if sock is None:
+                return
+            try:
+                selector.unregister(sock)
+            except (KeyError, ValueError, OSError):
+                pass
             sock.close()
-            return False
-        self._socks[port] = sock
-        if listed:
-            self._list_port(port)
+            if self._probe is not None and self._probe[0] is sock:
+                self._probe = None
+            if port in self.listening:
+                self.listening = [p for p in self.listening if p != port]
+
+    def _add_port(self, port, sock, selector, listed=True):
+        """Listen on `port` too, with `sock` already bound (the listener
+        thread waiting on `selector`); `listed`: shown in `listening` (a
+        probe is not). False, `sock` closed, once stop() has run."""
+        with self._ports_lock:
+            if selector is not self._selector or not self.running:
+                sock.close()
+                return False
+            try:
+                selector.register(sock, selectors.EVENT_READ, port)
+            except (KeyError, ValueError, OSError):
+                sock.close()
+                return False
+            self._socks[port] = sock
+            if listed:
+                self._list_port(port)
         return True
 
     def _list_port(self, port):
@@ -557,7 +570,7 @@ class Telemetry:
         order = auto_ports() + [LEGACY_PORT]
         self.listening = sorted(self.listening + [port], key=lambda p: order.index(p) if p in order else len(order))
 
-    def _auto_tick(self, now):
+    def _auto_tick(self, now, selector):
         """Auto, after each wait (cheap unless something is due): try the
         busy ports again, and probe LEGACY_PORT while nothing is locked."""
         if self.busy and now >= self._busy_at:
@@ -569,7 +582,7 @@ class Telemetry:
                 except (OSError, OverflowError) as e:
                     busy[port] = e
                     continue
-                if self._add_port(port, sock):
+                if self._add_port(port, sock, selector):
                     del busy[port]
                     logging.info("telemetry: UDP %d is free now: listening there too", port)
             if busy != self.busy:
@@ -579,8 +592,7 @@ class Telemetry:
         if probe is not None:
             if now >= probe[1]:
                 # Nothing locked there in time: let it go again, Forza Horizon 6 may want it
-                self._probe = None
-                self._close_port(LEGACY_PORT)
+                self._close_port(LEGACY_PORT, selector)
             return
         if LEGACY_PORT in self._socks:
             # Held while the game heard there holds the lock, and through
@@ -590,8 +602,13 @@ class Telemetry:
                     locked is None and released is not None and released[0] == LEGACY_PORT
                     and now - released[1] < LOCK_SILENCE):
                 logging.info("telemetry: UDP %d let go again (Forza Horizon 6's range)", LEGACY_PORT)
-                self._close_port(LEGACY_PORT)
+                self._close_port(LEGACY_PORT, selector)
                 self._status(self.last_source)
+            return
+        # As in fixed mode: not once a game was heard on Auto's own ports
+        # (Forza Horizon 6 starting must not land in a probe second), unless
+        # it was heard on LEGACY_PORT itself
+        if self.heard and not self.legacy_heard:
             return
         if self._source is None and now >= self._probe_at and LEGACY_PORT not in self._socks:
             self._probe_at = now + self._probe_gap(now)
@@ -599,7 +616,7 @@ class Telemetry:
                 sock = self._bind(LEGACY_PORT)
             except (OSError, OverflowError):
                 return                    # in use: someone else's port, nothing to learn from it
-            if self._add_port(LEGACY_PORT, sock, listed=False):
+            if self._add_port(LEGACY_PORT, sock, selector, listed=False):
                 self._probe = (sock, now + PROBE_LISTEN)
 
     @property
@@ -676,7 +693,7 @@ class Telemetry:
             self.learner.idle()
         self._status(None)
 
-    def _lock(self, source, size):
+    def _lock(self, source, size, now):
         """Take `source` (port, address, game): its packets are the ones
         passed on until it goes quiet."""
         port = source[0]
@@ -702,6 +719,10 @@ class Telemetry:
             self.legacy_heard = True
             self._probe = None
             self._list_port(port)
+        recorder = self.recorder
+        if self.auto and recorder is not None:
+            # The capture's main file (with the wheel's sidecar) is this port's from here on
+            recorder.main(port, now)
         logging.info("telemetry: game %s detected (%d-byte packets from %s, UDP %s)", source[2] or 'unknown',
                      size, source[1], port)
 
@@ -758,7 +779,7 @@ class Telemetry:
         # packet and end and start a learning session on each
         source = (port, addr[0], sample.game)
         if self._source is None:
-            self._lock(source, len(data))
+            self._lock(source, len(data), now)
         elif source != self._source:
             if source not in self._ignored:
                 self._ignored.add(source)
