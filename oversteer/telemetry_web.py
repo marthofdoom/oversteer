@@ -49,6 +49,7 @@ TIMEOUT = 10.0                   # s a connection may take to send its request
 BINDS = {'lan': '0.0.0.0', 'local': '127.0.0.1'}
 API = '/api/v1/'
 TOKEN_HEADER = 'X-Oversteer-Token'
+PAIR_QUERY = re.compile(r'([?&]pair=)[^&\s]+')
 MAX_BODY = 4096                  # bytes of a POST; a change is a few settings
 WRITES_PER_SECOND = 8            # sustained, with a burst of WRITE_BURST
 WRITE_BURST = 20
@@ -570,7 +571,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
     def log_message(self, format, *args):
-        logging.debug("telemetry web page: " + format, *args)
+        # The pairing link is GET /?pair=<token>: never into the log
+        logging.debug("telemetry web page: %s", PAIR_QUERY.sub(r'\1(removed)', format % args))
 
     def __getattr__(self, name):
         # Every method but GET and HEAD: 405, not the default 501

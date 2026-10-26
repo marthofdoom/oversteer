@@ -265,3 +265,52 @@ def test_bundle_cli_flag(tmp_path, monkeypatch):
     assert e.value.code == 0
     with zipfile.ZipFile(out) as z:
         assert 'versions.txt' in z.namelist()
+
+
+def test_capture_size_counts_the_wheel_sidecar(tmp_path):
+    path = _fake_capture(str(tmp_path), 'a')
+    plain = os.path.getsize(path)
+    (tmp_path / ('a' + tc.SUFFIX + tc.WHEEL_SUFFIX)).write_bytes(b'x' * 100)
+    assert tc.list_captures(str(tmp_path))[0][1] == plain + 100
+    assert tc.capture_summary(str(tmp_path))[1] == plain + 100
+
+
+def test_recorder_closes_the_wheel_when_the_sampler_fails(tmp_path, monkeypatch):
+    source = FakeWheel([])
+
+    def boom(*args, **kwargs):
+        raise OSError("no sidecar")
+    monkeypatch.setattr(tc, 'WheelSampler', boom)
+    rec = tc.Recorder(str(tmp_path), threaded=False, wheel=lambda: (source, {}))
+    rec.packet(1.0, ('127.0.0.1', 1), b'x')
+    rec.close()
+    assert source.closed
+
+
+def test_web_log_masks_the_pairing_token(clean_logging, caplog):
+    from oversteer.telemetry_web import Handler
+    caplog.set_level(logging.DEBUG)
+    Handler.log_message(None, '"%s" %s %s', 'GET /?pair=SECRETX&a=1 HTTP/1.1', '200', '-')
+    assert 'SECRETX' not in caplog.text and 'pair=(removed)&a=1' in caplog.text
+
+
+def test_bundle_logs_carry_neither_the_token_nor_the_pair_link(tmp_path):
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    (logs / 'oversteer.log').write_text('x hunter2 y\nGET /?pair=SECRETX HTTP/1.1\n')
+    config = tmp_path / 'config.ini'
+    config.write_text("[DEFAULT]\nweb_token = hunter2\n")
+    out = tmp_path / 'b.zip'
+    dg.make_bundle(str(out), '1', str(tmp_path / 'none'), str(config), logs=dg.log_files(str(logs)))
+    with zipfile.ZipFile(out) as z:
+        text = z.read('logs/oversteer.log').decode()
+    assert 'hunter2' not in text and 'SECRETX' not in text and 'pair=(removed)' in text
+
+
+def test_root_level_follows_the_handlers(clean_logging, tmp_path):
+    dg.setup(folder=str(tmp_path), stream=None)
+    assert logging.getLogger().level == logging.INFO
+    dg.set_debug(True)
+    assert logging.getLogger().level == logging.DEBUG
+    dg.set_debug(False)
+    assert logging.getLogger().level == logging.INFO

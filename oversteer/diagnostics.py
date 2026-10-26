@@ -18,6 +18,7 @@ import logging
 import logging.handlers
 import os
 import platform
+import re
 import sys
 import threading
 import time
@@ -30,6 +31,7 @@ LOG_FILES = 5                       # the live file and four rotated ones
 LOG_FORMAT = '%(asctime)s %(levelname)s [%(threadName)s] %(module)s: %(message)s'
 BUNDLE_CAPTURES = 3
 SECRET_KEYS = ('web_token',)
+PAIR_QUERY = re.compile(rb'([?&]pair=)[^&\s]+')
 
 _file_handler = None
 _stream_handler = None
@@ -66,7 +68,6 @@ def setup(debug=False, folder=None, stream=sys.stderr, to_file=True):
             root.removeHandler(handler)
             handler.close()
     _file_handler = _stream_handler = None
-    root.setLevel(logging.DEBUG)
     formatter = logging.Formatter(LOG_FORMAT)
     if stream is not None:
         _stream_handler = logging.StreamHandler(stream)
@@ -88,13 +89,22 @@ def setup(debug=False, folder=None, stream=sys.stderr, to_file=True):
     except OSError as e:
         path = None
         logging.warning("diagnostics log: %s", e)
+    _root_level()
     return path
+
+
+def _root_level():
+    """The root passes only what some handler wants, so logging.debug() calls
+    stay cheap while the file is at INFO and the stream at WARNING."""
+    levels = [h.level for h in (_file_handler, _stream_handler) if h is not None]
+    logging.getLogger().setLevel(min(levels) if levels else logging.WARNING)
 
 
 def set_debug(on):
     """Switch the file's level while running (the Settings toggle)."""
     if _file_handler is not None:
         _file_handler.setLevel(logging.DEBUG if on else logging.INFO)
+    _root_level()
     logging.info("diagnostics: debug logging %s", 'on' if on else 'off')
 
 
@@ -108,6 +118,9 @@ def install_excepthooks():
     previous_unraisable = sys.unraisablehook
 
     def hook(kind, value, trace):
+        if issubclass(kind, KeyboardInterrupt):
+            previous(kind, value, trace)
+            return
         logging.getLogger().error("uncaught exception", exc_info=(kind, value, trace))
         previous(kind, value, trace)
 
@@ -209,6 +222,24 @@ def redacted_config(config_file):
     return '\n'.join(out) + '\n'
 
 
+def config_secrets(config_file):
+    """The secret values config.ini holds (the pairing code)."""
+    try:
+        with open(config_file, encoding='utf-8') as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    values = (line.split('=', 1)[1].strip() for line in lines if '=' in line and line.split('=', 1)[0].strip() in SECRET_KEYS)
+    return [v for v in values if v]
+
+
+def redacted_log(data, secrets=()):
+    """A log's bytes without the pairing code or any ?pair= value."""
+    for secret in secrets:
+        data = data.replace(secret.encode('utf-8'), b'(removed)')
+    return PAIR_QUERY.sub(rb'\1(removed)', data)
+
+
 def bundle_members(capture_folder, count=BUNDLE_CAPTURES, logs=None):
     """[(path, name in the zip)]: the logs and the newest `count` captures
     with their sidecars (.json labels, .wheel.gz wheel inputs)."""
@@ -235,13 +266,18 @@ def make_bundle(path, version, capture_folder, config_file=None, count=BUNDLE_CA
     """Write the diagnostics zip to `path`. Returns the number of files in it."""
     members = bundle_members(capture_folder, count, logs)
     captures = [p for p, name in members if name.endswith('.ovcap.gz')]
+    secrets = config_secrets(config_file) if config_file else []
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('versions.txt', versions_text(version, captures))
         if config_file:
             z.writestr('config.ini', redacted_config(config_file))
         for source, name in members:
             try:
-                z.write(source, name)
+                if name.startswith('logs/'):
+                    with open(source, 'rb') as f:
+                        z.writestr(name, redacted_log(f.read(), secrets))
+                else:
+                    z.write(source, name)
             except OSError as e:
                 z.writestr(name + '.error', str(e))
     logging.info("diagnostics: bundle written to %s (%d files)", path, len(members) + 2)

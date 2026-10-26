@@ -1528,7 +1528,7 @@ class GtkUi:
 
     def open_folder(self, path):
         try:
-            Gtk.show_uri_on_window(self.window, 'file://' + path, Gdk.CURRENT_TIME)
+            Gtk.show_uri_on_window(self.window, GLib.filename_to_uri(path, None), Gdk.CURRENT_TIME)
         except GLib.Error as e:
             logging.warning("open %s: %s", path, e.message)
 

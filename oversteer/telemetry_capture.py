@@ -134,13 +134,22 @@ def read_capture(path):
     return meta, records()
 
 
+def _wheel_size(path):
+    try:
+        return os.path.getsize(path + WHEEL_SUFFIX)
+    except OSError:
+        return 0
+
+
 def list_captures(folder):
     """[(path, bytes, labelled)] of the captures in `folder`, oldest
-    first (by when they were last written)."""
+    first (by when they were last written). The bytes include the wheel
+    sidecar, which goes with the capture."""
     found = []
     for path in glob.glob(os.path.join(glob.escape(folder), '*' + SUFFIX)):
         try:
-            found.append((os.path.getmtime(path), path, os.path.getsize(path), os.path.exists(path + '.json')))
+            found.append((os.path.getmtime(path), path, os.path.getsize(path) + _wheel_size(path),
+                          os.path.exists(path + '.json')))
         except OSError:
             continue                     # deleted meanwhile
     return [(path, size, labelled) for _mtime, path, size, labelled in sorted(found)]
@@ -472,6 +481,7 @@ class Recorder:
     def _start_wheel(self, origin):
         if self.wheel is None:
             return
+        source = None
         try:
             found = self.wheel()
             if found is None:
@@ -483,6 +493,11 @@ class Recorder:
         except Exception as e:
             logging.warning("wheel sidecar: %s", e)
             self._sampler = None
+            if source is not None:
+                try:
+                    source.close()           # the sampler never took it over
+                except Exception:
+                    pass
 
     def _close_file(self):
         sampler, self._sampler = self._sampler, None
