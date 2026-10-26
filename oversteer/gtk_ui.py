@@ -9,7 +9,7 @@ from .gtk_handlers import GtkHandlers
 from . import hotkeys
 from . import qr
 from . import steam_options
-from .telemetry import DEFAULT_PORT
+from .telemetry import DEFAULT_PORT, PORT_PRESETS, PORT_MIN, PORT_MAX, parse_port
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
 from . import telemetry_plot
 from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, splits_row, shift_summary, shift_table
@@ -72,6 +72,10 @@ class GtkUi:
     def start(self):
         handlers = GtkHandlers(self, self.controller)
         self.builder.connect_signals(handlers)
+        entry = self.rev_leds_port.get_child()
+        entry.connect('activate', handlers.on_rev_leds_port_commit)
+        entry.connect('focus-out-event', handlers.on_rev_leds_port_leave)
+        entry.connect('changed', lambda e: self._port_error(None))
         self.window.show_all()
         self.reset_view()
         self._set_range_markers(1080)
@@ -654,8 +658,7 @@ class GtkUi:
         self.rev_leds_shift.set_sensitive(enabled is not None and not auto)
         self.updating_rev_leds = True
         try:
-            if port is not None:
-                self.rev_leds_port.set_value(int(port))
+            self._show_rev_leds_port(int(port) if port is not None else DEFAULT_PORT)
             if unit is not None:
                 # The spin button's range follows the unit
                 self.rev_leds_shift.set_adjustment(self.rev_leds_shift_rpm_adjustment if unit == 'rpm'
@@ -663,6 +666,67 @@ class GtkUi:
                 self.rev_leds_shift_unit.set_active_id(unit)
             if shift is not None and not auto:
                 self.rev_leds_shift.set_value(int(shift))
+        finally:
+            self.updating_rev_leds = False
+
+    @staticmethod
+    def port_preset_text(port, label):
+        return "{}: {}".format(port, _(label))
+
+    def _show_rev_leds_port(self, port):
+        """Show `port`: its preset row if it has one, else the bare number."""
+        self._rev_leds_port_valid = port
+        for index, (preset, label) in enumerate(PORT_PRESETS):
+            if preset == port:
+                self.rev_leds_port.set_active(index)
+                self._port_error(None)
+                return
+        self.rev_leds_port.set_active(-1)
+        self.rev_leds_port.get_child().set_text(str(port))
+        # Set after the text: a change of the text clears the error state
+        self._port_error(_("Ports below 1024 need root.") if port < PORT_MIN else None)
+
+    def _port_error(self, message):
+        """The port entry's error state (icon, style class, tooltip), or none."""
+        entry = self.rev_leds_port.get_child()
+        context = entry.get_style_context()
+        if message:
+            context.add_class('error')
+            entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, 'dialog-error-symbolic')
+            entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, message)
+        else:
+            context.remove_class('error')
+            entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, None)
+
+    def rev_leds_port_selected(self):
+        """The port of the preset row picked in the box, or None while typing."""
+        index = self.rev_leds_port.get_active()
+        if index < 0:
+            return None
+        self._rev_leds_port_valid = PORT_PRESETS[index][0]
+        self._port_error(None)
+        return self._rev_leds_port_valid
+
+    def rev_leds_port_typed(self, leave=False):
+        """The port typed in the box (on Enter, or focus-out with `leave`) if
+        it is valid and new, else None. An invalid entry gets the error state
+        and the last valid port stays; on Enter the text stays to be fixed,
+        on leaving it goes back to the port in use."""
+        port = parse_port(self.rev_leds_port.get_child().get_text())
+        valid = getattr(self, '_rev_leds_port_valid', None)
+        if port is None:
+            if leave:
+                self._with_port_update(self._show_rev_leds_port, valid or DEFAULT_PORT)
+            else:
+                self._port_error(_("Enter a port from {low} to {high}.").format(low=PORT_MIN, high=PORT_MAX))
+            return None
+        self._with_port_update(self._show_rev_leds_port, port)    # a preset's number selects its row
+        return port if port != valid else None
+
+    def _with_port_update(self, func, *args):
+        self.updating_rev_leds = True
+        try:
+            func(*args)
         finally:
             self.updating_rev_leds = False
 
@@ -1326,8 +1390,11 @@ class GtkUi:
         receive.add(self._setting_row(
             _("UDP port"), _("Where games send their telemetry. Saved with the profile."),
             _("Turn on the game's UDP telemetry and point it at this computer and this port (Forza: Settings > "
-              "HUD and gameplay > Data Out; BeamNG: OutGauge; DiRT Rally 2.0: hardware_settings_config.xml, "
-              "extradata 3)."), (self.rev_leds_port,)))
+              "HUD and gameplay > Data Out; BeamNG: OutGauge; Live for Speed: set OutGauge Port in cfg.txt to "
+              "the port here; DiRT Rally 2.0: hardware_settings_config.xml, extradata 3). Only one app can "
+              "listen on a UDP port, so another tool such as SimHub may hold 20777. Forza has no fixed port: set Data Out to the Oversteer default and keep away "
+              "from 5200 to 5300, which the game uses itself. Pick a game's port or type any port from "
+              "1024 to 65535."), (self.rev_leds_port,)))
         row, self.telemetry_learn = self._switch_row(
             _("Learn from game telemetry"),
             _("Listen to the game's telemetry and learn from it even with the rev lights off or on a wheel "
@@ -1876,7 +1943,7 @@ class GtkUi:
         buttons.pack_start(structure, False, False, 0)
         config = Gtk.Button(label=_("Copy config lines"))
         config.connect('clicked', lambda w: self._copy_text(
-            eawrc_config_lines(self.rev_leds_port.get_value_as_int() or DEFAULT_PORT)))
+            eawrc_config_lines(getattr(self, '_rev_leds_port_valid', None) or DEFAULT_PORT)))
         buttons.pack_start(config, False, False, 0)
         box.pack_start(buttons, False, False, 0)
         expander.add(box)
@@ -2168,6 +2235,15 @@ class GtkUi:
         self.ffbmeter_leds = self.builder.get_object('ffbmeter_leds')
         self.rev_leds = self.builder.get_object('rev_leds')
         self.rev_leds_port = self.builder.get_object('rev_leds_port')
+        for port, label in PORT_PRESETS:
+            self.rev_leds_port.append_text(self.port_preset_text(port, label))
+        self.rev_leds_port.get_child().set_width_chars(16)
+        self.rev_leds_port.connect('scroll-event', lambda w, e: True)    # scrolling the page must not switch ports
+        self.updating_rev_leds = True
+        try:
+            self._show_rev_leds_port(DEFAULT_PORT)               # profiles without a port listen on it
+        finally:
+            self.updating_rev_leds = False
         self.rev_leds_shift = self.builder.get_object('rev_leds_shift')
         self.rev_leds_shift_unit = self.builder.get_object('rev_leds_shift_unit')
         self.rev_leds_shift_percent_adjustment = self.builder.get_object('rev_leds_shift_adjustment')

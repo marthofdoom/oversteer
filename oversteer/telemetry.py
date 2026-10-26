@@ -25,6 +25,47 @@ from .telemetry_formats import Sample, decode_sample, decode  # noqa: F401
 # its documentation says to keep Data Out away from that range; the game
 # runs on this machine, so 5300 can collide.
 DEFAULT_PORT = 5310
+
+
+def N_(text):
+    """Marks a string for translation; it is translated where shown."""
+    return text
+
+
+# Ports offered in Settings -> Telemetry: (port, label), one row per port.
+# DEFAULT_PORT stays first. Only games this module decodes are listed.
+#  - 5310: Oversteer's own default; oversteer-run / the shm bridge (Assetto
+#    Corsa, Competizione, Rally: OVST3_GAMES) send there, and
+#    docs/forza-horizon-6.md tells Forza users to point Data Out at it (Forza
+#    has no fixed port and 5200-5300 belong to the game itself).
+#  - 20777: the stock port in DiRT Rally 2.0's hardware_settings_config.xml
+#    (docs/dirt-rally-2-parity.md) and in EA SPORTS WRC's config.json. DiRT
+#    Rally and DiRT 4 share the Codemasters layout (decoded as 'dirt').
+#  - 4444: BeamNG.drive's default outgaugePort (OutGauge is decoded). Live for
+#    Speed has no default port (set OutGauge Port in its cfg.txt) and WRC
+#    Generations' stock port is not documented, so neither gets a row.
+PORT_PRESETS = [
+    (DEFAULT_PORT, N_("Oversteer default (Assetto Corsa, Competizione, Rally bridge; Forza)")),
+    (20777, N_("DiRT Rally 2.0, DiRT Rally, DiRT 4, EA SPORTS WRC")),
+    (4444, N_("BeamNG.drive OutGauge")),
+]
+PORT_MIN = 1024
+PORT_MAX = 65535
+
+
+def parse_port(text):
+    """The port typed in the port box as an int from PORT_MIN to PORT_MAX,
+    or None. A preset row ("5310: Oversteer default ...") is read by its
+    number."""
+    if text is None:
+        return None
+    head = str(text).split(':', 1)[0].strip()
+    if not (head.isascii() and head.isdigit()):
+        return None
+    port = int(head)
+    return port if PORT_MIN <= port <= PORT_MAX else None
+
+
 LEGACY_PORT = 5300                                   # the default before 0.14: games may still send there
 PROBE_AFTER = 10.0                                   # seconds of nothing before looking at the other port
 PROBE_EVERY = 15.0                                   # a bridge sends only while on a stage: look often...
@@ -320,7 +361,7 @@ class Telemetry:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._sock.bind(('0.0.0.0', self.port))
             self._sock.settimeout(0.25)
-        except OSError as e:
+        except (OSError, OverflowError) as e:
             logging.warning("telemetry: cannot listen on UDP %d: %s", self.port, e)
             self._sock = None
             return False
