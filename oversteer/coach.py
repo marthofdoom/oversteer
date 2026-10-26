@@ -543,6 +543,7 @@ PRAISE = 3                       # praise lines per view (and one is forced in w
 TECHNIQUE_SHIFT = 0.2            # a technique line comes back when its share moved this far (20 points)
 PHANTOM_M = 500.0                # m: an unfinished run shorter than this does not say which stage was just driven
 ONCE = ('shift.better', 'launch.better', 'launch.steady', 'learning', 'retuned:')    # habit lines said once...
+SECTOR_REACH = 200.0             # m: an off, spin or hit this near a sector (the recovery smears the line crossing) sets no sector best
 STAGES_COACHED = 3               # the stages (newest runs) whose sections are read for tips
 SECTION_TIPS = 3                 # the costliest sections named per stage
 TWO_PLACES = 0.5                 # the two costliest sections hold this share of the loss: "most of it in two places"
@@ -2294,8 +2295,8 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
         shift = 0.0 if origin is None else origin - placed['start_m']
         found = coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
                                            (results or {}).get(run_id))
-        if clean:       # a sector with an off, spin or hit in it or within OFF_REACH of it is no fair best (as grid_times)
-            reach = potential.OFF_REACH
+        if clean:       # a sector with an off, spin or hit in it or within SECTOR_REACH of it is no fair best (as grid_times)
+            reach = SECTOR_REACH
             found = {i: t for i, t in found.items() if not any(
                 lo - reach < bounds[i][1] - shift and hi + reach > bounds[i][0] - shift
                 for lo, hi in (bad or {}).get(run_id, ()))}
@@ -2341,15 +2342,16 @@ def select(candidates, praise, notes, state, now, limit=TIPS, show_all=False, te
     does not read as a list of faults. Techniques (correct technique described) are shown once and come
     back when their share moved TECHNIQUE_SHIFT. Each note once."""
     def moved(tip):
-        """A habit line already shown (ONCE) comes back only when its number changed by RESHOW_WORSE, or after
-        RESHOW_AFTER: said run after run it is noise."""
+        """A habit line already shown (ONCE) comes back only when its number changed by RESHOW_WORSE (and not in the
+        sitting it was shown in: SHOWING), or after RESHOW_AFTER: said run after run it is noise."""
         seen = state.get(tip.id)
         if show_all or seen is None or not tip.id.startswith(ONCE) or not (seen['times'] or 0):
             return True
         if seen['last_shown'] is not None and now - seen['last_shown'] >= RESHOW_AFTER:
             return True
         old = seen['value']
-        return old is not None and tip.value is not None and abs(tip.value - old) >= RESHOW_WORSE * max(abs(old), 1e-9)
+        return (seen['last_shown'] is None or now - seen['last_shown'] >= SHOWING) and old is not None \
+            and tip.value is not None and abs(tip.value - old) >= RESHOW_WORSE * max(abs(old), 1e-9)
 
     def fresh(tip):
         if not moved(tip):
