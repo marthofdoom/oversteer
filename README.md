@@ -31,7 +31,7 @@ What you get, all from the game's telemetry (no overlay, nothing injected into t
   RPM the car holds, so the shift light is a percentage of the real limiter at each launch.
 - **Coaching.** Every stage is kept as a run, with its corners and gear changes. The coach picks
   the habit to work on first (up to three tips with numbers) and, where it can, says where:
-  the corner, how much time it cost, and what your best clean run did there. It also praises
+  the corner, how much time it cost, and what your best run did there. It also praises
   what improved and tries not to call a technique a fault (left-foot braking, for one, is
   recognised). It is a rule-based coach working from your own history: read the
   [coaching design](docs/telemetry-coaching.md) and the

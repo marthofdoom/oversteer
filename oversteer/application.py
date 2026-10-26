@@ -91,8 +91,9 @@ class Application:
         proxy_command = args.proxy_list or args.proxy_run or args.proxy_daemon or args.proxy_install \
             or args.proxy_remove
         # The proxy service runs as root: no log file in a user's folder from it
-        debug = args.debug or diagnostics.read_debug_preference(os.path.join(save_config_path('oversteer'), 'config.ini'))
-        diagnostics.setup(debug=debug, to_file=not proxy_command)
+        # The Settings preference makes the log file DEBUG; only --debug does the same for stderr
+        file_debug = diagnostics.read_debug_preference(os.path.join(save_config_path('oversteer'), 'config.ini'))
+        diagnostics.setup(debug=args.debug, file_debug=file_debug, to_file=not proxy_command)
         diagnostics.install_excepthooks()
         logging.info("Oversteer %s starting: %s", self.version, ' '.join(argv[1:]))
 

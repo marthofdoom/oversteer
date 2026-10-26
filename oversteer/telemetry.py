@@ -723,8 +723,8 @@ class Telemetry:
         if self.auto and recorder is not None:
             # The capture's main file (with the wheel's sidecar) is this port's from here on
             recorder.main(port, now)
-        logging.info("telemetry: game %s detected (%d-byte packets from %s, UDP %s)", source[2] or 'unknown',
-                     size, source[1], port)
+        logging.info("telemetry: game %s detected (%d-byte packets, UDP %s)", source[2] or 'unknown', size, port)
+        logging.debug("telemetry: game %s sends from %s", source[2] or 'unknown', source[1])
 
     def _drop(self, port, data):
         """A packet on a port other than the active one: counted, logged
@@ -783,8 +783,9 @@ class Telemetry:
         elif source != self._source:
             if source not in self._ignored:
                 self._ignored.add(source)
-                logging.info("telemetry: ignoring %s from %s while %s from %s is arriving",
-                             source[2] or 'telemetry', source[1], self._source[2] or 'telemetry', self._source[1])
+                logging.info("telemetry: ignoring %s while %s is arriving",
+                             source[2] or 'telemetry', self._source[2] or 'telemetry')
+                logging.debug("telemetry: ignored source %s, active source %s", source[1], self._source[1])
             return
         rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
         self.live = sample
