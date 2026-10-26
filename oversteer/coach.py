@@ -2316,6 +2316,9 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
             elif i not in runner or t < runner[i]:
                 runner[i] = t
     pbs = times(ref_rows['trace'], ref_rows['run'])
+    for i, t in pbs.items():        # every run blanked in a sector: the PB's own time stands, so the view stays in sectors
+        if i not in best:
+            best[i], who[i] = t, ref_rows['run']
     out = []
     for i in range(len(bounds)):
         t = last.get(i)
