@@ -45,7 +45,7 @@ from .telemetry_store import TRACE_CHANNELS
 CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 G = cc.G
 
-ALGO = 5                         # bumps when the numbers a stored potential holds would change
+ALGO = 6                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)
@@ -735,8 +735,7 @@ def stage(runs, data, surface, plan, env_rows, env_runs, sob=None, road_m=None, 
         v_car, _vl = simulate(k, car_env, floor=floor)
         t_car = cumulative(v_car)
     T = np.array([elapsed(r['arr'], grid) for r in full])
-    pick = [r for r in full if r['class'] == 'clean'] or [r for r in full if r['class'] == 'learning'] or full
-    pb = min(pick, key=lambda r: r['arr']['t'][-1])
+    pb = min(full, key=lambda r: r['arr']['t'][-1])          # the fastest finished run, clean or with offs (marth, 2026-10-26)
     pb_i = full.index(pb)
     cuts = sections(grid, k)
     pot = {'ds': DS, 'length': length, 'v_grip': [round(float(x), 2) for x in v_grip],
@@ -777,7 +776,7 @@ def stage(runs, data, surface, plan, env_rows, env_runs, sob=None, road_m=None, 
     t_car_total = None if v_car is None else sum(s['car_s'] for s in secs)
     totals = T[:, -1]
     out = {'ds': DS, 'length': length, 'runs': len(full), 'pb_run': pb['id'], 'pb_s': float(totals[pb_i]),
-           'user_s': sob if sob is not None else user, 'grip_s': float(t_grip_total), 'car_s': t_car_total,
+           'user_s': sob if sob is not None else min(user, float(totals[pb_i])), 'grip_s': float(t_grip_total), 'car_s': t_car_total,
            'gear_set': set_id, 'sections': secs, 'profile': pot, 'percentile': P_GRIP, 'algo': ALGO,
            'envelopes': {'grip': _env_json(env), 'car': _env_json(car_env)}}
     # the layers keep their order (the floors make it hold per section; a total can still be off by a rounding)
@@ -896,7 +895,7 @@ def stitched(store, run):
     from . import coach
     before = [r for r in store.stage_runs(run['stage'], exclude=run['id'], limit=60, car=run['car'], ranked=True)
               if r['started'] <= run['started']]
-    ref = cc.reference_run([r for r in before if r['run_class'] in ('clean', 'learning')], wet=run['wet'])
+    ref = cc.reference_run([r for r in before if r['run_class'] in cc.PB_CLASSES], wet=run['wet'])
     if ref is None:
         return None
     return coach.stitch(store, run, ref, store.corners(ref['id']), before)

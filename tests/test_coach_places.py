@@ -82,7 +82,7 @@ def test_a_section_that_lost_time_is_named_with_its_place_numbers_and_action(tmp
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     assert tip.id == 'corner.section:{}:600'.format(STAGE_KEY) and tip.kind == 'tip'
     ref = 'Test car, 3:20.0 on {}'.format(coach._date(h.t - DAY))
-    assert tip.text == ('On Test Stage, the 3 right at 0.6 km, 0.6 s behind your best clean run here ({}): you braked 25 m '
+    assert tip.text == ('On Test Stage, the 3 right at 0.6 km, 0.6 s behind your best run here ({}): you braked 25 m '
                         'earlier, were 7 km/h slower at the slowest point and left 5 km/h slower. '
                         'Brake about 25 m later, as your best run did.'.format(ref))
     assert abs(tip.cost - 0.6) < 1e-9 and tip.ref
@@ -152,7 +152,7 @@ def test_only_the_three_costliest_sections_and_those_that_lost_a_tenth_are_named
     h.drive(mine, result_time=203.0)
     tips = [t for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
     assert [t.id.split(':')[-1] for t in tips] == ['300', '1200', '900']     # by cost, then by name
-    assert tips[0].evidence[1].startswith('2.1 s behind your best clean run over 5 sections. Spread over the stage; the '
+    assert tips[0].evidence[1].startswith('2.1 s behind your best run over 5 sections. Spread over the stage; the '
                                           'biggest are')
 
 
@@ -173,7 +173,7 @@ def test_a_late_throttle_in_two_corners_is_one_tip_and_the_corners_are_not_told_
     late = {'throttle_on_t': 1.0, 'exit_speed': 20.0 - 4 * KMH, 'loss': (0.0, 0.4)}
     h.drive(corners_with(second=dict(late), third=dict(late)), result_time=203.0)
     [tip] = h.by_id('throttle.late')
-    assert tip.text.startswith('On Test Stage, the throttle came 0.5 s later on average than in your best clean run here (')
+    assert tip.text.startswith('On Test Stage, the throttle came 0.5 s later on average than in your best run here (')
     assert 'leaving the 3 right at 0.6 km and the 3 left at 1.2 km: 0.8 s of exit time. Throttle as soon as the ' \
            'nose points out.' in tip.text
     assert not h.by_id('corner.section')                          # said once, as a pattern
@@ -202,7 +202,7 @@ def test_both_pedals_leaving_corners_is_a_tip_on_tarmac_with_three_corners_that_
     [tip] = run('tarmac', 3)
     assert tip.text.startswith('On Test Stage, you were on both pedals for 1.5 s leaving the 3 left at 0.3 km, '
                                'the 3 left at 0.6 km and the 3 left at 0.9 km, which cost 0.9 s of exit time '
-                               'against your best clean run here (')
+                               'against your best run here (')
     assert tip.text.endswith('Come off the brake before the throttle goes down.')
     assert not run('tarmac', 2)                                   # two corners are not a habit
     assert not run('gravel', 4)                                   # on gravel it is how a Rally2 is driven
@@ -218,7 +218,7 @@ def test_coasting_into_a_corner_is_coached_on_tarmac_and_not_in_a_hairpin_or_on_
                 surface=surface, result_time=203.0)
         return h.by_id('coast.entry')
     [tip] = run('tarmac')
-    assert ('you coasted 0.6 s longer than in your best clean run here (' in tip.text
+    assert ('you coasted 0.6 s longer than in your best run here (' in tip.text
             and 'going into the 3 right at 0.6 km, which lost 0.4 s before the slowest point. Go from the brake to '
                 'the throttle without a gap.' in tip.text)
     assert not run('tarmac', 'hairpin')                           # rotated like a gravel corner
@@ -234,7 +234,7 @@ def test_the_gravel_entry_that_gained_is_praised_on_gravel_only(tmp_path):
         return h.by_id('corner.entry')
     [praise] = run('gravel')
     assert praise.kind == 'praise'
-    assert praise.text.startswith('On Test Stage, the 3 right at 0.6 km, 0.5 s up on your best clean run here (')
+    assert praise.text.startswith('On Test Stage, the 3 right at 0.6 km, 0.5 s up on your best run here (')
     assert praise.text.endswith('you braked 20 m earlier, took the same minimum speed and left 6 km/h faster.')
     assert not run('tarmac')
 
@@ -245,15 +245,15 @@ def test_the_best_run_yet_is_praised_with_where_it_was_won(tmp_path):
     h.drive(corners_with(second={'brake_d': 30.0, 'min_speed': 10.0, 'exit_speed': 20.0 + 5 * KMH,
                                  'loss': (-0.5, -1.4)}), result_time=197.0)
     [praise] = h.by_id('corner.best')
-    assert praise.text == ('On Test Stage, your best clean run yet in the Test car: 3.0 s quicker than {} (3:20.0). '
+    assert praise.text == ('On Test Stage, your best run yet in the Test car: 3.0 s quicker than {} (3:20.0). '
                            '1.9 s of it in the 3 right at 0.6 km, where you braked 20 m later, took the same '
                            'minimum speed and left 5 km/h faster.'.format(coach._date(h.t - DAY)))
     assert praise.kind == 'praise'
-    # not for a run that went off: it is not a reference, and the praise is for a clean run
+    # a run that went off is a PB all the same (marth, 2026-10-26: "pbs with offs are fine")
     h = Stage(tmp_path / 'u.db')
     h.drive(reference_corners(), result_time=200.0)
     h.drive(corners_with(), result_time=197.0, run_class='off')
-    assert not h.by_id('corner.best')
+    assert h.by_id('corner.best')
 
 
 def test_a_gain_beside_an_off_or_at_the_finish_is_not_praised_and_slower_numbers_are_not_credited(tmp_path):
@@ -296,7 +296,7 @@ def test_best_run_yet_needs_to_beat_every_earlier_clean_run_not_just_the_referen
     h.drive(timed(4.0, loss=(0.4, 0.5)), result_time=210.5)
     assert not h.by_id('corner.best:')
     texts = ' '.join(t.text for t in h.tips(show_all=True))
-    assert 'your best clean run' in texts and 'Test car, 3:28.3' in texts and 'your best clean run yet' not in texts
+    assert 'your best run' in texts and 'Test car, 3:28.3' in texts and 'your best run yet' not in texts
     # quicker than all of them is still praised, against the quickest run
     h.drive(timed(4.0), result_time=207.0)
     [praise] = h.by_id('corner.best:')
@@ -317,9 +317,9 @@ def test_a_learning_run_a_first_run_and_other_conditions_get_no_corner_tips(tmp_
     h.drive(corners_with(second=dict(loss)), result_time=203.0, wet='wet')
     assert not h.by_id('corner.section')
     h = Stage(tmp_path / 'w.db')
-    h.drive(reference_corners(), result_time=200.0, run_class='off')           # an off run is not a reference
+    h.drive(reference_corners(), result_time=200.0, run_class='off')           # an off run is a reference when quickest
     h.drive(corners_with(second=dict(loss)), result_time=203.0)
-    assert not h.by_id('corner.section')
+    assert h.by_id('corner.section')
 
 
 def test_a_restart_is_not_coached_and_the_run_before_it_is(tmp_path):
@@ -429,7 +429,7 @@ def test_the_speed_through_the_same_corner_varying_run_to_run_names_the_corners(
             events=[spread_event(150.0, 20.0, 60.0), spread_event(600.0, 13.0, 60.0), spread_event(1200.0, 9.0, 70.0)])
     [tip] = h.by_id('corner.spread')
     assert tip.text == ('On Test Stage, your speed through the 3 right at 0.6 km and the 3 left at 1.2 km varies from '
-                        'run to run, by 13 and 9 km/h over the last 6 runs. Your best clean run took them at 58 and 36 '
+                        'run to run, by 13 and 9 km/h over the last 6 runs. Your best run took them at 58 and 36 '
                         'km/h: aim for that each time.')
     assert tip.evidence == ['47 to 73 km/h through the 3 right at 0.6 km.', '61 to 79 km/h through the 3 left at '
                             '1.2 km.']
@@ -551,7 +551,7 @@ def test_a_held_straight_is_a_tip_only_when_the_reference_was_quicker_to_the_nex
     [tip] = h.by_id('limiter.held:')
     assert tip.ref and tip.cost > 2.0
     assert tip.text.startswith('On Test Stage, from 0.1 km you held 3rd on the limiter for 3.0 s with no corner to use '
-                               'it for: your best clean run was 2.')
+                               'it for: your best run was 2.')
     assert tip.text.endswith(' s quicker to the next braking, in 4th. Change up as the lights flash.')
     assert not [t for t in h.tips(show_all=True) if t.id == 'limiter.held']      # the per-km figure is not used here
     h = run(20.0, 3, 'same')                                                      # the reference held it too
@@ -704,7 +704,7 @@ def test_the_best_sections_put_together_and_the_section_where_this_run_was_best(
     [possible] = h.by_id('corner.possible')
     assert possible.kind == 'note'
     assert possible.text.startswith('On Test Stage, your best sections put together make ')
-    assert 'under your best clean run in the Test car (' in possible.text and ' left at 1.7 km, ' in possible.text
+    assert 'under your best run in the Test car (' in possible.text and ' left at 1.7 km, ' in possible.text
     # fewer than three runs: nothing to put together
     h = Stage(tmp_path / 'u.db')
     a = drive_traced(h, v2=14.0, v3=10.0)
@@ -721,7 +721,7 @@ def test_a_section_with_both_traces_is_diagnosed_on_the_same_metres(tmp_path):
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
     from oversteer.timefmt import span
     ref = 'Test car, {} on {}'.format(span(a[0][-1][C['t']]), coach._date(h.t - DAY))
-    assert tip.text == ('On Test Stage, the 2 right at 1.1 km, 1.3 s behind your best clean run here ({}): you braked at the '
+    assert tip.text == ('On Test Stage, the 2 right at 1.1 km, 1.3 s behind your best run here ({}): you braked at the '
                         'same place, took 64 km/h off on the brake where your best run took 50 km/h and were 14 km/h slower '
                         'at the slowest point (36 against 51). Keep that braking point and brake less: carry 14 km/h '
                         'more through the slowest point.'.format(ref))
@@ -754,7 +754,7 @@ def test_a_run_through_the_real_path_is_coached_section_by_section(tmp_path):
     # the sim's section lost 0.1 s with nothing to change that the numbers point at: a note, not a tip
     sections = [t for t in tips if t.id.startswith(('corner.section', 'corner.note'))]
     assert sections and all(t.ref or t.kind == 'note' for t in sections)
-    assert sections[0].text.startswith('On stage eawrc:4:12, the ') and 's behind your best clean run here (' in sections[0].text
+    assert sections[0].text.startswith('On stage eawrc:4:12, the ') and 's behind your best run here (' in sections[0].text
     assert not [t for t in tips if t.id.startswith('corner.loss')]     # the section tips replace the total
     learner.close()
 
@@ -789,7 +789,7 @@ def test_a_learning_run_has_its_spin_described_and_a_run_that_beat_the_reference
                          third={'brake_d': 30.0, 'exit_speed': 20.0 + 5 * KMH, 'loss': (-0.5, -1.4)}),
             result_time=197.0)
     [tip] = [t for t in h.tips(show_all=True) if t.id.startswith('corner.section')]
-    assert 's behind your previous best clean run here (Test car, 3:20.0 on ' in tip.text
+    assert 's behind your previous best run here (Test car, 3:20.0 on ' in tip.text
 
 
 def test_a_section_is_named_net_of_the_gain_right_before_it(tmp_path):
@@ -828,13 +828,13 @@ def test_a_rough_cost_is_not_weighed_against_seconds_from_a_reference_run():
     assert [t.id for t in out] == ['corner.spin:x:1']
 
 
-def test_a_quicker_run_that_was_not_clean_is_not_set_against_a_previous_best(tmp_path):
+def test_a_quicker_run_with_an_off_is_the_pb_and_is_set_against_the_previous_best(tmp_path):
     h = Stage(tmp_path / 't.db')
     h.drive(reference_corners(), result_time=200.0)
     h.drive(corners_with(second={'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}),
             result_time=197.0, run_class='off')
     [tip] = [t for t in h.tips() if t.id.startswith('corner.section')]
-    assert 'behind your best clean run here' in tip.text
+    assert 'behind your previous best run here' in tip.text
 
 
 def test_the_section_with_the_finish_is_not_praised(tmp_path):
@@ -975,3 +975,55 @@ def test_the_sector_bounds_of_a_stage_entry():
     assert stage_tables.sector_bounds({'sectors_km': [1.0, 2.0], 'length_m': 4800, 'pacenote_first_m': 100.0}) is None
     assert stage_tables.sector_bounds(stage_tables.entry('acr:wales:severn-afon-bidno')) is None   # 5100 against 4800
     assert stage_tables.sector_bounds({'sectors_km': [1.0, 2.0]}) is None and stage_tables.sector_bounds(None) is None
+
+
+OTHER_STAGE = 'acr:test:other'
+
+
+def test_only_the_stage_just_driven_is_coached(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    loss = {'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}
+    h.drive(reference_corners(), result_time=200.0)
+    h.drive(corners_with(second=dict(loss)), result_time=203.0)
+    assert h.by_id('corner.section:' + STAGE_KEY)
+    # a new stage with only a restart so far: nothing about the old one, one note about the new one
+    h.drive(corners_with(), run_class='restart', finished=0, stage=OTHER_STAGE)
+    tips = h.tips(show_all=True)
+    assert not [t for t in tips if STAGE_KEY in t.id]
+    assert [t.text for t in tips if t.id == 'scope.first:' + OTHER_STAGE] == [
+        'First full run of Test Stage gives the coach a reference.']
+    # its first classified runs: it is the stage coached, the old one stays out
+    h.drive(reference_corners(), result_time=190.0, stage=OTHER_STAGE)
+    h.drive(corners_with(second=dict(loss)), result_time=193.0, stage=OTHER_STAGE)
+    tips = h.tips(show_all=True)
+    assert [t for t in tips if OTHER_STAGE in t.id] and not [t for t in tips if STAGE_KEY in t.id]
+    assert not [t for t in tips if t.id.startswith('scope.first')]
+
+
+def test_a_learning_run_or_one_with_offs_can_be_the_pb(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    learning = h.drive(reference_corners(), run_class='learning', result_time=210.0)
+    assert cc.stage_pb_id(h.store, STAGE_KEY, h.car) == learning
+    off = h.drive(corners_with(), run_class='off', result_time=205.0)
+    assert cc.stage_pb_id(h.store, STAGE_KEY, h.car) == off
+    h.drive(corners_with(), run_class='clean', result_time=207.0)
+    h.drive(corners_with(), run_class='partial', finished=0)
+    assert cc.stage_pb_id(h.store, STAGE_KEY, h.car) == off
+
+
+def test_a_new_pb_is_set_against_the_previous_best_run_whatever_its_class(tmp_path):
+    loss = {'brake_d': 75.0, 'min_speed': 10.0 - 7 * KMH, 'loss': (0.4, 0.2)}
+    h = Stage(tmp_path / 't.db')
+    h.drive(reference_corners(), run_class='learning', result_time=206.0)
+    h.drive(corners_with(second=dict(loss)), result_time=202.4)
+    texts = ' '.join(t.text for t in h.tips(show_all=True))
+    assert 'previous best run here' in texts and 'best clean run' not in texts
+    assert coach._prior_best({'id': -1}, [{'id': 1, 'run_class': 'off', 'finished': 1, 'result_time': 205.0}]) is not None
+
+
+def test_the_sum_of_best_is_never_slower_than_the_pb(tmp_path):
+    h = Stage(tmp_path / 't.db')
+    a = drive_traced(h, v2=14.0, v3=10.0)
+    drive_traced(h, v2=10.0, v3=13.0, reference=a)
+    found = coach.splits(h.store, h.profile, h.car)
+    assert found['possible'] <= found['best'] + 1e-9

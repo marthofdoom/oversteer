@@ -1028,7 +1028,7 @@ class RunTracker:
                       if started is None or r['started'] <= started]
             last_started = before[0]['started'] if before else None
             ref = coach_context.reference_run(
-                [r for r in before if r['run_class'] in ('clean', 'learning')], wet=verdicts.get('wet'))
+                [r for r in before if r['run_class'] in coach_context.PB_CLASSES], wet=verdicts.get('wet'))
             if ref is not None:
                 ref_trace = store.trace(ref['id'])
                 ref_corners = store.corners(ref['id'])
