@@ -204,16 +204,20 @@ DISTANCE_BACK = 100.0            # m the distance along a stage goes back: the s
 SENT_LENGTH_TOLERANCE = 0.5      # m: a length the game sends against its own in the table
 FINISHED = 0.99                  # progress through the stage that counts as reaching the end
 CLOCK_STOPPED = 1.0              # s moving with the stage clock standing still: past the finish
+CLOCK_STEP_CAP = 1.5             # s: the longest step of the game's clock taken as its cadence (a longer stall is a hitch, not a rate)
+PACKET_GAP_CAP = 0.2              # s: feed() caps dt here, so a step this long is a gap in the packets
+CLOCK_COARSE_STEPS = 3           # coarse steps in a row before the clock is taken for a coarse one
+CLOCK_COARSE = 0.25              # s: a clock that steps this slowly (ACR's on one capture: once a second) is interpolated
+RESULTS_PROGRESS = 1.5           # DiRT: progress 2.0 is the results screen; nothing from there starts a run
 CLOCK_SETTLE = 0.25              # s of the run's own time the game's clock stands still, moving: it stopped (not a few frames repeated)
 FINISH_CLOCK_PAST = 100.0        # m past the table's finish line the game's clock may still stop at its own
 FINISH_CLOCK_BEFORE = 400.0      # m before the table's line (the last pace note, the stop control) the game's clock may have stopped
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
 # The game keeps sending after the finish (the results screen, the car rolling
-# out or parked), so a finished run is ended by what follows rather than by
-# the game: the car at rest, or this long / this far past the line
+# out or parked). A finish the game told ends the run at once (the guard keeps
+# the roll-out from starting one); where progress said finished before the
+# line, the rest of the stage is driven: the car at rest, or this long
 FINISH_STILL = 2.0               # s the car stands (under MOVING) after the finish: the run is over
-FINISH_GRACE = 15.0              # s after the finish at most
-FINISH_ROLLOUT = 400.0           # m driven past the finish at most (ACR: the stop control is ~230 m on)
 FINISH_GRACE_PROGRESS = 60.0     # s: where the finish is progress >= FINISHED, the last of the stage is still to drive
 # Their progress is the position around the lap, near 1 at the end of every
 # lap: a circuit session is not ended there
@@ -250,7 +254,8 @@ class RunClock:
     stopped (the last run's finish, not reset): t goes on by the run's own
     time until it does."""
 
-    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved', 'proven', 'fresh')
+    __slots__ = ('t', 'offset', 'exact', 'last', 'still', 'moved', 'proven', 'fresh', 'max_step', 'runup', 'coarse_n',
+                 'fine_n', 'cand')
 
     def __init__(self, stage_time):
         running = stage_time is not None and stage_time > 0.0
@@ -262,6 +267,26 @@ class RunClock:
         self.moved = running                         # it moved at the last packet
         self.fresh = True                            # the first tick is the packet the clock was made from
         self.proven = False                          # it has been seen to move: until then a clock standing still is not 'stopped'
+        self.runup = 0.0                             # s of the run's own time before the game's clock started (not in the game's time)
+        self.coarse_n = self.fine_n = 0              # steps in a row as long / as short as a coarse clock's
+        self.cand = 0.0
+        self.max_step = 0.0                          # s: the longest the clock stood between two steps while running (its cadence)
+
+    @property
+    def stopped_after(self):
+        """s of the clock standing still, moving, that make it stopped: a clock that steps once a second stands that
+        long between steps all the time."""
+        return max(CLOCK_STOPPED, 1.5 * self.max_step + 0.25) if self.max_step >= CLOCK_COARSE else CLOCK_STOPPED
+
+    @property
+    def result_offset(self):
+        """What the game's clock reading is put on to be the run's time at the finish: a lap's reset counts, the run-up
+        before a clock that started late does not (the game's time starts with its clock)."""
+        return (self.offset or 0.0) - self.runup
+
+    @property
+    def settle(self):
+        return max(CLOCK_SETTLE, 1.5 * self.max_step) if self.max_step >= CLOCK_COARSE else CLOCK_SETTLE
 
     def tick(self, stage_time, dt):
         last, self.last = self.last, stage_time
@@ -277,6 +302,7 @@ class RunClock:
                 # The game's clock has started: t takes it up from here
                 self.t += stage_time - last
                 self.offset = self.t - stage_time
+                self.runup = self.offset
                 self.moved = True
                 self.proven = True
             else:
@@ -289,18 +315,45 @@ class RunClock:
                 self.t += dt                         # frozen from the first packet (a finish not yet reset): not a stop
                 return
             self.still += dt
-            if self.still > CLOCK_STOPPED:
+            if self.still > self.stopped_after:
                 self.t += dt                         # stopped (past the finish): the run's own time goes on
+            elif self.max_step >= CLOCK_COARSE and last is not None:
+                # A clock that steps rarely: t goes on by the run's own time between its steps, no further than the
+                # next step is due, so the trace is not a staircase
+                self.t = min(self.t + dt, max(self.t, last + self.offset + self.max_step))
             return
         self.moved = True
+        if self.proven and last is not None and forward and dt < PACKET_GAP_CAP:
+            # (not from a step whose dt hit its cap: a gap in the packets, not the clock's rate)
+            gap = min(self.still + dt, CLOCK_STEP_CAP)
+            if gap >= CLOCK_COARSE:
+                self.coarse_n, self.fine_n = self.coarse_n + 1, 0
+                self.cand = max(self.cand, gap)
+                if self.coarse_n >= CLOCK_COARSE_STEPS:
+                    self.max_step = max(self.max_step, self.cand)    # several in a row: the rate, not a stall
+            else:
+                self.fine_n, self.coarse_n, self.cand = self.fine_n + 1, 0, 0.0
+                if self.fine_n >= CLOCK_COARSE_STEPS * 3:
+                    self.max_step = 0.0                              # it steps finely again
         self.proven = True
         self.still = 0.0
         candidate = stage_time + self.offset
-        if candidate >= self.t and (forward or last is None):
+        if self.max_step >= CLOCK_COARSE and forward and last is not None:
+            # t may have run ahead of the step (never back): it keeps its place and is not exact then
+            if candidate < self.t:
+                # t ran ahead (after a stall): the offset takes it up, so t goes on with the clock from here
+                self.exact = False
+                self.runup += self.t - stage_time - self.offset      # (that drift is not in the game's time either)
+                self.offset = self.t - stage_time
+            else:
+                self.t = candidate
+        elif candidate >= self.t and (forward or last is None):
             self.t = candidate
         else:
             # It went back (a lap's clock), or the run's own time ran ahead of it while it stood
             self.t += stage_time - last if forward else dt
+            if forward:
+                self.runup += self.t - stage_time - self.offset      # a stall's drift is not in the game's time
             self.offset = self.t - stage_time
             self.exact = False
 
@@ -362,6 +415,9 @@ class RunTracker:
         dt = min(0.2, max(0.0, now - self._last_t)) if self._last_t is not None else 0.0
         speed = sample.speed or 0.0
         if self.run is None:
+            if self._results_screen(sample):
+                self._remember(now, sample)
+                return                               # DiRT's results screen (progress 2.0): nothing starts a run there
             if self._guard is not None and self._guard_released(now, sample, session):
                 self._guard = None
             if self._guard is not None:
@@ -371,6 +427,10 @@ class RunTracker:
             if self._after_end and sample.packet != 'start':
                 self._remember(now, sample)
                 return                               # EA sent the end of the stage: wait for the next start
+            if sample.progress is not None and sample.progress >= FINISHED and sample.game not in LAP_SPLINE_GAMES \
+                    and sample.game != 'acr':
+                self._remember(now, sample)
+                return                               # at the end of a stage: the finish's roll-out is not a run
             if speed < START_MOVING:
                 if speed < MOVING:
                     self._stood += dt
@@ -396,18 +456,39 @@ class RunTracker:
             return
         if sample.packet == 'end':
             self.end(now, 'end')
-            self._after_end = True
+            if sample.game != 'dirt':                # (DiRT sends no start packet: its results screen is told by _results_screen)
+                self._after_end = True
+
+    @staticmethod
+    def _results_screen(sample):
+        return sample.game == 'dirt' and not (sample.laps and sample.laps > 1) \
+            and (sample.packet == 'end' or (sample.progress or 0.0) >= RESULTS_PROGRESS)
+
+    def _dirt_finish_packet(self, sample):
+        """DiRT Rally 2.0 says the stage is over on the finish packet: the lap counter goes up, progress is 2.0 (the
+        results screen) with the lap counter up, or the official stage time (field 62) is sent. Its stage clock reads
+        0 there."""
+        if sample.game != 'dirt' or (sample.laps and sample.laps > 1):
+            return False
+        # Progress 2.0 alone is not a finish: retiring half way shows the results screen too, with no official time
+        # and the lap counter at 0. The finish packet carries one of these two as well
+        if sample.last_lap is not None and sample.last_lap != self._dirt_last0:
+            return True
+        return sample.lap is not None and self._dirt_lap0 is not None and sample.lap > self._dirt_lap0
 
     def _post_over(self, now):
-        """Whether a finished run has gone on long enough past the line to
-        be ended: the car has stood, or the grace (time or road) is used up."""
+        """Whether a finished run is to be ended. Where the game's own clock or
+        line told the finish (not progress), at once: nothing driven past it
+        counts, and the guard keeps the roll-out from starting a run, so the
+        analysis need not wait for the car to stop. Where progress said
+        finished (before the line), the rest of the stage is still driven:
+        the car has stood, or the grace is used up."""
+        if not self._finish_counts:
+            return True
         if self._finish_t is None:
             self._finish_t = now
             return False
-        if self._finish_counts:
-            return self._still >= FINISH_STILL or now - self._finish_t >= FINISH_GRACE_PROGRESS
-        return (self._post_still >= FINISH_STILL or now - self._finish_t >= FINISH_GRACE
-                or self._post_d >= FINISH_ROLLOUT)
+        return self._still >= FINISH_STILL or now - self._finish_t >= FINISH_GRACE_PROGRESS
 
     def _guard_note(self, sample):
         guard = self._guard
@@ -484,6 +565,8 @@ class RunTracker:
             if distance is not None and last_distance is not None and distance < last_distance - DISTANCE_BACK:
                 return 'restart'
         stage_time, last_time = sample.stage_time, self._last_stage_time
+        if sample.game == 'dirt' and self._dirt_finish_packet(sample):
+            return None                              # the stage clock reads 0 on the finish packet: not a restart
         if stage_time is not None and last_time is not None and stage_time < last_time - RESTART_DROP:
             laps, lap = sample.laps, sample.lap
             if not (laps and laps > 1 and lap is not None and self._last_lap is not None and lap > self._last_lap) \
@@ -528,6 +611,7 @@ class RunTracker:
         self._susp_sq = 0.0
         self._susp_n = 0
         self._last_lap = sample.lap
+        self._dirt_lap0, self._dirt_last0 = sample.lap, sample.last_lap       # DiRT: the finish is the game's word on them
         self._lap_t0, self._lap_d0 = now, 0.0
         self._laps_done = 0
         self._progress = sample.progress
@@ -535,10 +619,9 @@ class RunTracker:
         self._result_time = None
         self._result_clock = None                    # 'game': the game's own clock stopped at its line; 'line': read at ours
         self._finish_d = None                        # where the run crossed the finish, as far as it can tell
+        self._finish_clock0 = None
         self._finish_counts = False                  # progress said finished (before the line): the rest is driven in the run
         self._finish_t = None                        # when the run's end was first seen to be due (after the finish)
-        self._post_still = 0.0                       # s the car has stood since the finish
-        self._post_d = 0.0                           # m driven since the finish
         self._clock_d = None                         # d at the last packet the stage clock moved
         self._clock_still = 0.0                      # s moving since it last did
         self._puddles = self._samples = 0
@@ -580,13 +663,13 @@ class RunTracker:
     def _clock(self, now, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
         stage clock stops at the line while the car rolls on."""
-        if self._finish_d is not None or sample.stage_time is None or sample.game == 'acr':
-            return                                   # (ACR's is told with the table's line: _line_finish, _clock_finish)
+        if self._finish_d is not None or sample.stage_time is None or sample.game in ('acr', 'dirt'):
+            return                                   # (ACR's is told with the table's line: _line_finish, _clock_finish; DiRT's by its own finish packet)
         if sample.stage_time != self._last_stage_time or self._clock_d is None:
             self._clock_d, self._clock_still = d, 0.0
         elif speed > START_MOVING and sample.stage_time > 0:
             self._clock_still += dt
-            if self._clock_still >= CLOCK_STOPPED and self._clock_d >= FINISH_AFTER:
+            if self._clock_still >= self._clock_run.stopped_after and self._clock_d >= FINISH_AFTER:
                 self._finish_d = self._clock_d
                 self.learner.live_run.finish(self.run, now, sample.stage_time, self._clock_d)
 
@@ -612,18 +695,18 @@ class RunTracker:
                 self._paused = True
             elif sample.packet in ('resume', 'update', 'start'):
                 self._paused = False
+        if self._finished is None and self._dirt_finish_packet(sample):
+            # The game's word: its official time (field 62), else the stage clock as it last read. Nothing from this
+            # packet on is the stage's (the clock reads 0, the car rolls on)
+            self._finished, self._result_clock = 1, 'game'
+            self._result_time = sample.last_lap if sample.last_lap is not None else self._last_stage_time
+            self._finish_d = self._d(sample)
+            self._progress = sample.progress
+            self.learner.live_run.finish(self.run, now, self._result_time, self._finish_d)
+            return
         # DiRT Rally repeats its last packet while paused: only the clock of
         # the game moves, the stage clock and the car do not
         frozen = (sample.stage_time is not None and sample.stage_time == self._last_stage_time and speed < 0.1)
-        if self._finish_t is not None and not self._finish_counts:
-            # Past the finish: only watch for the car at rest. Nothing driven
-            # here counts toward the run (its rows, distance, time)
-            if speed < MOVING:
-                self._post_still += dt
-            else:
-                self._post_still = 0.0
-                self._post_d += speed * dt
-            return
         if not self._paused and not frozen:
             self._clock_run.tick(sample.stage_time, dt)
             self._duration += dt
@@ -644,7 +727,7 @@ class RunTracker:
             if self._still - dt < STOP <= self._still:
                 self._stops += 1
         elif frozen and self._finish_counts and (
-                (sample.progress or 0.0) >= 1.0 or (sample.stage_time or 0.0) > (self._result_time or 0.0)):
+                (sample.progress or 0.0) >= 1.0 or (sample.stage_time or 0.0) > (self._finish_clock0 or 0.0)):
             # Past the finish the game repeats its last packet (DiRT): the car is at rest all the same. Not in a
             # pause just after progress says finished, which is before the line (progress under 1, the clock
             # where it was at the progress finish)
@@ -673,12 +756,20 @@ class RunTracker:
         if sample.progress is not None:
             # (a circuit's progress is the lap's: near 1 at the end of every lap, not the end of the run)
             if self._finished is None and sample.progress >= FINISHED and (self._progress or 0.0) < FINISHED \
-                    and sample.game not in LAP_SPLINE_GAMES:
+                    and sample.game not in LAP_SPLINE_GAMES and not (sample.game == 'dirt' and not (sample.laps and sample.laps > 1)):
                 self._finished, self._result_time = 1, sample.stage_time
                 self._finish_d = d
                 self._finish_counts = True
+                self._finish_clock0 = sample.stage_time      # (the result follows the clock on from here: this is where it was at the progress finish)
                 self.learner.live_run.finish(self.run, now, self._result_time, d)
             self._progress = sample.progress
+        if self._finish_counts and sample.stage_time is not None and (sample.progress or 0.0) < 1.0 \
+                and sample.stage_time > (self._result_time or 0.0) and self._clock_run.moved \
+                and self._clock_run.still < self._clock_run.stopped_after:
+            # The reading at 99 % of the stage is short of the game's time at its line: the clock goes on to the
+            # line, then stands still. The result follows it until it does
+            self._result_time, self._finish_d = sample.stage_time, d
+            self.learner.live_run.finish(self.run, now, self._result_time, d)
         self._clock(now, sample, d, dt, speed)
         if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
             stage = stage_tables.acr_stage(sample.track, self._acr_start, sample.stage_length)
@@ -755,7 +846,8 @@ class RunTracker:
         which may be a little before or after the table's; failing that
         within FINISH_CLOCK_PAST m, the clock interpolated at the table's
         line. Until then the run goes on (its rows are kept: the course cuts
-        them). Without it, the run's own clock at the line."""
+        them). The result is the game's clock, without the run-up before a clock that started late (RunClock.result_offset).
+        Without it, the run's own clock at the line."""
         clock = self._clock_run
         if self._line_clock is None:
             at = sample.stage_time
@@ -766,12 +858,12 @@ class RunTracker:
             self._line_clock = (d, at)
         if sample.stage_time is None or clock.offset is None:
             self._finish_at(now, d, self._duration, None)    # no clock from the game: the run's own
-        elif clock.still >= CLOCK_SETTLE and speed > MOVING and self._clock_stop_near_line():
+        elif clock.still >= clock.settle and speed > MOVING and self._clock_stop_near_line():
             self._finish_at(now, self._clock_moved_d if self._clock_moved_d is not None else d,
-                            sample.stage_time + clock.offset, 'game')
+                            sample.stage_time + clock.result_offset, 'game')
         elif sample.lap_distance > self._finish_line + FINISH_CLOCK_PAST:
             line_d, at = self._line_clock
-            self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.offset, 'line')
+            self._finish_at(now, line_d, (at if at is not None else sample.stage_time) + clock.result_offset, 'line')
 
     def _clock_stop_near_line(self):
         """The place the game's clock last moved is near the table's line (FINISH_CLOCK_BEFORE before it, up to
@@ -788,9 +880,9 @@ class RunTracker:
         if sample.stage_time is None or clock.offset is None or not clock.proven:
             return
         moved_d, at = self._clock_moved_d, self._clock_moved_ld
-        if clock.still >= CLOCK_STOPPED and speed > MOVING and moved_d is not None and moved_d >= FINISH_AFTER \
+        if clock.still >= clock.stopped_after and speed > MOVING and moved_d is not None and moved_d >= FINISH_AFTER \
                 and at is not None and at >= self._finish_line - FINISH_CLOCK_BEFORE:
-            self._finish_at(now, moved_d, sample.stage_time + clock.offset, 'game')
+            self._finish_at(now, moved_d, sample.stage_time + clock.result_offset, 'game')
 
     def _finish_at(self, now, d, result, clock):
         self._finished, self._result_time, self._result_clock = 1, result, clock
@@ -820,7 +912,8 @@ class RunTracker:
         summary = dict(self._summary)
         finished = self._finished
         if reason == 'end':
-            finished = 1 if (self._progress or 0.0) >= FINISHED - 0.01 else 0
+            finished = 1 if (self._progress or 0.0) >= FINISHED - 0.01 and self._summary['game'] != 'dirt' else (
+                finished or 0)       # (DiRT: only its own finish packet says finished; a retire's results screen does not)
         elif finished is None and reason in ('restart', 'teleport'):
             finished = 0
         summary.update(distance=self._distance, duration=self._duration, moving_time=self._moving,
@@ -839,7 +932,7 @@ class RunTracker:
         self.learner.log.post(self._write_end, self.run, self.learner.wall(self._last_t or now), summary, self._trace)
         self.learner.live_run.end_run(self.run, now, reason)
         guard = None
-        if reason == 'finish':
+        if reason == 'finish' or finished == 1:
             guard = {'session': self._session, 'track': self._last_track, 'ld': self._last_lap_distance,
                      'st': self._last_stage_time}
         self._reset()

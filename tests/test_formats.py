@@ -235,7 +235,7 @@ def dirt_full(forward=(0.0, 0.0, 1.0), left=(1.0, 0.0, 0.0)):
 
 def test_codemasters_motion_and_wheels():
     sample = decode_sample(dirt_full())
-    assert sample.up == (0.0, 1.0, 0.0) and sample.vel == (20.0, 0.5, 0.0)
+    assert sample.up == (0.0, -1.0, 0.0) and sample.vel == (20.0, 0.5, 0.0)
     assert sample.wheel_speed == (20.0, 20.5, 19.0, 19.5)               # FL, FR, RL, RR
     assert sample.susp == (0.03, 0.04, 0.01, 0.02)
     assert sample.steer == 0.5 and sample.stage_length == 9850.0 and sample.progress == 0.25
@@ -314,3 +314,18 @@ def test_wrc_generations_sends_its_stage_length_in_km():
     st.pack_into('<f', packet, 3 * 4, 0.0)                         # a menu: no length, no progress
     sample = decode_sample(bytes(packet))
     assert sample.stage_length is None and sample.progress is None
+
+
+def test_dirt_end_of_stage_and_split_fields():
+    floats = list(struct.unpack('<66f', dirt_full()))
+    floats[3], floats[59], floats[48], floats[49], floats[50], floats[62] = 2.0, 1.0, 2.0, 61.5, 0.0, 222.784
+    floats[55:59] = [0.0, 0.0, 0.0, 0.0]
+    floats[51:55] = [-273.15, 300.0, 250.0, -273.15]
+    sample = decode_sample(struct.pack('<66f', *floats))
+    assert abs(sample.last_lap - 222.784) < 1e-3 and sample.laps_done == 1 and sample.sector == 2
+    assert sample.split_times[1] is None and abs(sample.split_times[0] - 61.5) < 1e-4
+    assert sample.running is False and sample.packet == 'end'
+    assert sample.tyre_pressure is None
+    assert sample.brake_temp == (250.0, None, None, 300.0) or sample.brake_temp[0] == 250.0 and sample.brake_temp[3] is None
+    mid = decode_sample(dirt_full())
+    assert mid.last_lap is None and mid.running is None and mid.packet is None

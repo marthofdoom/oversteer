@@ -247,6 +247,14 @@ def course_samples(course, laps=1, game='dirt', car='dirt/7500-800-5', standing=
         last = out[-1][1]
         last.packet = 'end'
         last.progress = 1.0
+    elif game == 'dirt' and laps == 1:
+        # DiRT Rally 2.0 says the stage is over on one packet: the clock back to 0, progress 2.0 (the results
+        # screen), the lap counter up and the official stage time in field 62
+        import copy
+        end = copy.copy(out[-1][1])
+        end.last_lap, end.stage_time, end.progress, end.lap = lap_time, 0.0, 2.0, 1
+        end.running, end.packet = False, 'end'
+        out.append((out[-1][0] + dt, end, 0.0))
     return out
 
 
