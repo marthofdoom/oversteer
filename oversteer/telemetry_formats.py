@@ -325,7 +325,9 @@ def plan_xyz(game, pos):
     as well: on marth's captures (research/dr2/axes.py, dirt_signs.py) the heading rate of
     (x, z) correlates -0.86/-0.83 with the steering-side evidence (roll, lateral g, r
     +0.95/+0.94) and (x, -z) the same size the right way round, so the plan is (x, -z)
-    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y), and Richard Burns Rally is expected to (unchecked).
+    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y). So has Richard Burns Rally, checked on marth's captures (docs/richard-burns-rally.md):
+    a right-handed world, x east, y north, z up, and the compass yaw grows turning right; the heading rate of (x, y)
+    correlates +0.80 to +0.86 with the (negated) yaw rate and -0.87 to -0.89 with the lateral acceleration, the right way round.
     Other games: (x, z) with y up, as before (unchecked). None for no position."""
     if pos is None:
         return None
@@ -333,7 +335,7 @@ def plan_xyz(game, pos):
     if game in ('acr', 'dirt'):
         return (x, y, -z)
     if game in ('wrcg', 'rbr'):
-        return (x, z, y)                  # (RBR: z up expected, north's sign unchecked: verify on capture)
+        return (x, z, y)
     return (x, y, z)
 
 
@@ -838,7 +840,7 @@ def _rbr(data, n, recorded_car=None):
         sample.lap_distance = drive_line
         sample.stage_length = drive_line + to_end
     sample.dist_to_end = _finite(to_end)
-    sample.pos = _vector(t[16:19])               # world metres, z up expected (verify handedness)
+    sample.pos = _vector(t[16:19])               # world metres, x east, y north, z up (checked: plan_xyz)
     # yaw, pitch, roll as sent, in radians: the yaw is a compass angle (it grows turning right), pitch nose up, roll right side down
     sample.attitude = _vector(math.radians(a) for a in (t[21], t[20], t[19]))
     # Signs and units from marth's captures of 2026-10-26 (corner side from the positions against the wheel, the

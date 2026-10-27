@@ -48,10 +48,11 @@ G = cc.G
 ROAD_UNKNOWN_MAX = 0.2           # a stage whose road is unknown over more of its length than this gets no potential
 # Games whose plan axes (telemetry_formats.plan_xyz) are checked, so their positions give the road: ACR and DiRT
 # against the lateral g (DiRT: corner sides 98 % in agreement on marth's captures); WRC Generations sends no yaw, so
-# positions are its only road, and the replay supports (x, y) for it, weakly but with the right sign. The other games
+# positions are its only road, and the replay supports (x, y) for it, weakly but with the right sign; Richard Burns
+# Rally (x, y), z up, against the lateral g and the yaw rate (r 0.98 on marth's captures). The other games
 # keep the yaw-based road (their plan axes are unchecked).
-PLAN_VERIFIED = {'acr', 'dirt', 'wrcg'}
-ALGO = 7                         # bumps when the numbers a stored potential holds would change
+PLAN_VERIFIED = {'acr', 'dirt', 'wrcg', 'rbr'}
+ALGO = 8                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)

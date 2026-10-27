@@ -607,6 +607,15 @@ def test_a_game_whose_speed_is_unchecked_gets_no_launch_coaching(tmp_path):
     assert tip.text.startswith('5 of your last 5 launches bogged')
 
 
+def test_richard_burns_rally_speed_is_checked_so_its_launches_are_coached(tmp_path):
+    """Its speed is the length of the car-frame velocity vector and agrees with the positions' to 0.1 % on marth's
+    captures, its accelerations follow d(speed)/dt (r 0.95 to 0.99): no longer in LAUNCH_OUT."""
+    h = Stage(tmp_path / 't.db', game='rbr')
+    launches(h, [2.0, 2.4, 2.1, 2.5, 2.2], bog=1.0)
+    [tip] = [t for t in h.tips() if t.id == 'launch.bog']
+    assert tip.text.startswith('5 of your last 5 launches bogged')
+
+
 def test_holding_the_launch_gear_on_the_cut_is_a_late_change_and_a_brief_touch_is_not(tmp_path):
     h = Stage(tmp_path / 't.db')
     launches(h, [1.9] * 5, cut=[0.5, 0.5, 0.5, 0.0, 0.0])

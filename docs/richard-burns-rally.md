@@ -186,7 +186,7 @@ weeks of driving, could spell them).
 | stage_time | raceTime |
 | game_time | totalSteps / steps-per-second (720 if the capture agrees): freezes in a pause, goes back on a restart |
 | lap_distance, progress, stage_length | from driveLineLocation / progress / distanceToEnd, whichever the capture shows is metres along the stage; stage_length = start-of-run distanceToEnd + distance or the table's |
-| pos | (X, Y, Z) world; `plan_xyz('rbr')` = (x, z, y) or (x, z, −y) by handedness (heading rate vs yaw rate, as ACR was settled) |
+| pos | (X, Y, Z) world; `plan_xyz('rbr')` = (x, z, y), settled by the heading rate against the yaw rate (section 8, "Positions and channels checked") |
 | vel, accel, accel_kind | (surge, sway, heave) car frame, signs to ISO (x fwd, y left, z up); 'kinematic' |
 | ang_vel, yaw_rate, attitude | angular velocities and angles, deg → rad, signs to ISO |
 | susp, susp_vel | springDeflection, pistonVelocity (FL, FR, RL, RR; zero and sign verify) |
@@ -280,12 +280,12 @@ capture** where section 2 says so; each such place carries a "verify on capture"
 | Decoder `_rbr` | `oversteer/telemetry_formats.py` | `n == 664` before the Codemasters range, after the `OVST` magic check; `game = 'rbr'`. Whole packet decoded, per wheel FL, FR, RL, RR (= LF, RF, LB, RB). K to C, Pa to kPa, degrees to radians, gear − 1. |
 | New Sample slots | same | `steps`, `dist_to_end`, `drive_progress`, `radiator_temp`, `block_temp`, `pedal_pressure`, `susp_forces`, `helper_spring`, `damper_damage`, `brake_layer_temp`, `brake_wear`, `tyre_carcass_temp`, `tyre_tread_temp`, `tyre_seg_temp`, `tyre_seg_wear`, `tyre_contact`, `ang_accel`. Not stored in the drive log yet (it keeps what it keeps for every game); they are there for the engineer pages (P2.4). |
 | Speed | same | the length of the car-frame velocity vector (m/s); `car.speed` (km/h, see "Confirmed") only where the vector is not finite. |
-| Plan axes | `plan_xyz('rbr')` | (x, z, y), z up, north's sign unchecked. |
+| Plan axes | `plan_xyz('rbr')`, `potential.PLAN_VERIFIED` | (x, z, y): x east, y north, z up, **checked** ("Positions and channels checked" below); in `PLAN_VERIFIED`, so the potential's road comes from the positions (`potential.ALGO` 8). |
 | Port preset | `PORT_PRESETS` in `oversteer/telemetry.py` | `(6776, "Richard Burns Rally (RSF / NGP)")`; Auto listens on it too. A launcher that also sends to `127.0.0.1:5310` (marth's does) needs nothing else. |
 | Run lifecycle | `oversteer/drive_log.py` (`RunTracker`: `_rbr_loaded`, `_rbr_finish`, the repeated-step return in `feed`) | start: car moving **and the stage clock above 0** (a car rolling or spinning before the clock starts is no run). Restart: steps back by more than 720 (or another `stage.index`) ends the run unfinished, and the clock going back does as before. Finish: the clock stopped (`RunClock.settle`) with the car moving and `distanceToEnd` ≤ 10 m; or the clock stopped for 3 s well into the stage whatever `distanceToEnd` says. `result_time` = the frozen `raceTime` (game clock, `run_clock = 'game'`). Pause / results page: a packet with the same `totalSteps` as the last is ignored altogether; silence is no run boundary (a position is sent). After a finish the guard blocks the 20 s roll-on and is released by the steps going back, the clock reset, a stage change or 10 s of silence. |
 | Stage names | `data/telemetry/stages/rbr.json`, `oversteer/rbr_install.py`, `stage_tables.load()` | stage key `rbr:<map id>`; the shipped table (built by `research/rbr/stage_table.py`) names every RSF stage; the install's own list, where one is found, is merged over it. Without either: "RBR stage <id>", length = driveLineLocation + distanceToEnd at the start. BTB (`stage.index` 41) names no stage (the start-cell fingerprint takes over). |
 | Car names | `rbr_install.car_in_slot()` | from a found install only: `Cars/Cars.ini [Car<slot>] RSFCarID` -> `cars.json` name, key `rbr/<RSFCarID>`, `cars_data.json` drivetrain and gear count; checked every 2 s, read again when it changed. Otherwise `rbr/unknown`, "RBR car": a shared key, nothing learnt under it (no packet fingerprint tells the cars apart, see "Names without any setup"). |
-| Coach | `coach.LAUNCH_OUT`, `ATTITUDE_OUT`, `coach_context.UNCHECKED_GAMES` | `rbr` is in all three: no launch, spin or stall coaching and no speed-drop reads (the speed channel is not checked). The steering sign and the other signs of section 8 (sway, yaw rate, roll, pitch, heading) were verified on marth's session against the G29 axis and the positions. |
+| Coach | `coach.LAUNCH_OUT`, `ATTITUDE_OUT`, `coach_context.UNCHECKED_GAMES` | `rbr` is in none of them any more: speed and acceleration are checked ("Positions and channels checked" below), so launch, spin and stall coaching and the speed-drop reads apply. (`wrcg` stays in all three.) |
 | Tests | `tests/test_rbr.py` | the layout against `research/rbr/ngp_packet.py`, the doc's sample values, wheel order, units, a fake install (stage table, cache, cars, no write under the install), and synthetic packet sequences: finish, restart, pause (repeated steps and silence), retire, results page, no phantom runs. |
 
 Note on `research/rbr/ngp_packet.py`: it holds the layout but **no sample packet** (the doc's "sample" is
@@ -390,6 +390,39 @@ gives the same run starts, finishes, result times and restarts as the full-rate 
   shift, 0 driving), foot and hand brake pressures in Pa (up to 6.4e6, brake pressure tracks the pedal at r 1.0), gears
   1..7 (neutral to 6th), rpm 1220 idle to 8550 and a few negative values (clamped). The car slot is 5 or 6: it is the
   slot of `Cars.ini` that RSF used, read from the packet.
+### Positions and channels checked (2026-10-26, same five files; `rbr-channels` branch)
+
+Numbers from the Monster HC finish (191852, 2.5 km) and the two Bayanbulak legs (190639, 191420; the 35 s clock
+jump and restarts excluded), rows 0.1 s apart unless said.
+
+- **Up axis and handedness.** z is up (steps per row: x 3.8 m, y 1.4 m, z 0.4 m; speed from position differences is
+  0.9996 of the speed channel in 3-D, 0.995 in (x, y), 0.95 with a scatter down to 0.55 in (x, z)). The world is
+  right-handed, x east, y north: the heading of (dx, dy) as a compass angle follows `car.yaw` with a constant offset
+  (concentration R 0.94 on 309, 0.97 on 517; mirrored y: 0.50 and 0.24), and its rate correlates +0.86 (309) and
+  +0.80 (517) with the negated `yaw_rate` (slope 1.0), -0.89 and -0.87 with the lateral acceleration (left positive).
+  `plan_xyz('rbr')` = (x, z, y) is therefore right and not mirrored; `PLAN_VERIFIED` has `rbr`.
+- **Against the stage.** The `.trk` driveline of 309 (`track-309_M.trk`, 231 points, ~11 m apart) is in the same
+  coordinates as the car's positions: median distance of the run to the driveline 3.0 m (p95 10.9), with y mirrored
+  112 m, x mirrored 83 m, x and y swapped 81 m.
+- **Potential.** Run 191852 through the potential's own code (`potential.curvature` on the stored trace): road unknown
+  0.0 % (positions) and 0.0 % (yaw); the curvature from positions against the yaw-built one r 0.90, sign agreement
+  94 % where |k| > 0.005 (a mirrored plan: 6 %); the curvature's side against the run's lateral g (left positive)
+  agrees at 96.5 % of 548 grid points (r 0.74). `potential.stage` builds a 2506 m potential with 16 sections (grip
+  121.7 s against a PB of 145.0 s). The cars table (`rbr.json`) was not there yet, so no car layer.
+- **Speed.** `speed` is the length of the velocity vector; against the positions' speed (above 5 m/s): median ratio
+  1.0004 to 1.0008 on all four stage files, r 0.998 to 1.000 (5th to 95th percentile 0.972 to 1.029 where the position
+  rows are 0.1 s apart).
+- **Longitudinal acceleration** (m/s2, converted from g) against d(speed)/dt: over 0.5 to 1 s windows slope 0.94 to
+  0.99, r 0.95 to 0.99, sign agreement above 1 m/s2 97 to 100 % on three stages; over single 0.1 s steps r 0.55 to
+  0.95 (kerbs and ruts: noise in both).
+- **Lateral acceleration** against speed x heading rate from the positions: r 0.97 to 0.99, slope 0.96 to 1.0, with
+  left positive; against vx x yaw rate + d(vy)/dt (the kinematic form, sliding included) r 0.96 on 309; vx x yaw rate
+  alone has slope 0.6 because a sliding car's lateral acceleration is not that product. `steer` (left positive)
+  agrees with the heading rate's side in the same corners.
+- **Events on the four stage captures** with `rbr` out of the three lists: launches 2.1 s, 1.6 s, 1.6 s, 1.6 s (t50);
+  one spin on 309 (213 degrees of yaw, 1152-1188 m, speed 71 to 22 km/h), one on 517 (5780 m); hits at 2328 m
+  (70 to 0 km/h in one packet, the same place in both Bayanbulak files) and 6552 m (a crash to a stop). All
+  are real in the packets; no false spin, stall, hit or off.
 - Not checked: heave (velocity does not follow the position's z), the vertical axis (z is up by its range), `progress`.
 
 ### Pending, verify on capture

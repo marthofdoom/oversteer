@@ -954,6 +954,15 @@ def test_a_game_whose_speed_is_not_checked_has_no_hits_from_one_row_of_speed_and
     assert out['run_class'] != 'off'
 
 
+def test_richard_burns_rally_speed_is_checked_and_reads_hits_like_acr():
+    def speed(i, t):
+        return 2.0 if 120 <= i < 135 else (8.0 if i % 40 == 0 else 20.0)
+
+    tr = rows(300, speed=speed, gear=3.0)
+    assert 'rbr' not in cc.UNCHECKED_GAMES
+    assert cc.hits(tr, 'rbr') == cc.hits(tr, 'acr') and len(cc.hits(tr, 'rbr')) > 3
+
+
 def test_a_corners_call_ignores_a_crash_row_and_follows_the_reference():
     # 20 m/s through a 0.6 rad/s bend is a 33 m radius; one row at 3 m/s and 2 rad/s is no 1.5 m radius
     def yaw(i, t):
