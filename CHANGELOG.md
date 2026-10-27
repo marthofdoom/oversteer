@@ -17,6 +17,9 @@
   usual Lutris, Bottles or Wine prefix. Without the install a stage is "RBR stage <id>" and the car is shared
   ("RBR car"), so nothing is learnt about it. The coach treats the speed and steering signals as unchecked
   until a capture settles them.
+- RBR: the run tracker and the shift learner use 60 Hz rows and a steps-based clock, a run cannot start after a finish
+  whatever the pause, the finish at the line needs no speed, a stored "RBR stage <id>" is renamed once the install lists
+  the stage, and capture headers record the car (`rbr_car`).
 - **RBR captures are saved at 60 Hz** (the packets come at 720 a second; the live view and the coach use every
   packet): the recorder keeps one packet in 12 and every packet where the run's lifecycle changes (steps going
   back, the clock starting or stopping, a new stage, the first and last packet). The capture format is unchanged.

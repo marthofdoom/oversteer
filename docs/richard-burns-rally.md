@@ -313,13 +313,37 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
 - Stage 81 is not in `rsfdata/cache/stages_data.json` nor `Maps/Tracks.ini` (a stock map): "RBR stage 81", length from
   the packet.
 
+### Under the Flatpak, and where the install is
+
+The Flatpak cannot see a Wine prefix or a game folder outside its sandbox. Give it read-only access to the folder
+that holds `RichardBurnsRally.ini`, for example:
+
+    flatpak override --user --filesystem=/mnt/gaming/RBR/RBR:ro io.github.berarma.Oversteer
+
+and tell Oversteer where it is, by either `OVERSTEER_RBR_DIR=/mnt/gaming/RBR/RBR` in its environment or one line, the
+folder, in `<data>/oversteer/rbr/root` (`~/.var/app/io.github.berarma.Oversteer/data/oversteer/rbr/root` under the
+Flatpak). Installs in the usual Lutris, Bottles and Wine prefixes are found without either. Without the install a stage
+is "RBR stage <id>" and the car "RBR car" (`rbr/unknown`); when the table later has the stage, the stored fallback name
+(and only that exact form) is replaced, and the table is read again when the install's stage files change (checked at
+each run's start, at most every 30 s).
+
+### Per-packet cost at 720 packets a second
+
+The tracker and the shift learner use a smooth clock made from `totalSteps` (the arrival times come in bursts) and keep
+one packet in 12 steps (60 Hz) as segment rows and for the shift learner's windows; the lights, the live view, the finish
+and the lifecycle see every packet. The clock repeating on most packets is no stop (RBR is exempt from the "frozen clock"
+rule: its pauses are repeated steps or silence). A run starts only while the clock is moving, and after a finish only the
+stage loading again (steps back) or another stage releases the guard, however long the pause.
+
 ### Capture size
 
 The listener, the learner and the coach get every packet (720 a second). **RBR captures are saved at 60 Hz**: the
 recorder (`oversteer/telemetry_capture.py`, `THIN`: packet length -> maximum saved rate, here 664 -> 60) keeps one
 packet in every 12 steps and always the packets where a lifecycle field changes (steps going back, a new
 `stage.index`, the clock starting, stopping or jumping by over 0.5 s, `distanceToEnd` jumping by over 5 m) and the
-first and last of a file. The file format is unchanged; other formats are not thinned. A replay of a thinned capture
+first and last of a file. The file format is unchanged; other formats are not thinned. The header line also gets `rbr_car` (`key`, `id`,
+`name` of the car RSF had in the packet's slot when the file was opened), since the packets do not carry the car; a replay
+still names the car from today's `Cars.ini` (the decoder does not read the header). A replay of a thinned capture
 gives the same run starts, finishes, result times and restarts as the full-rate one (`tests/test_rbr.py`; the
 2026-10-26 run capture gave the same run both ways).
 

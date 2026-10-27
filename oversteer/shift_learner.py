@@ -59,6 +59,8 @@ POWER_KEEP = 40                  # samples kept per band (most recent)
 POWER_MIN = 4                    # samples a band needs to count (slope taken out, or the game's power)...
 POWER_MIN_SLOPED = 8             # ...and with hills left in: more, as each carries its gradient
 RATIO_KEEP = 200
+RBR_STEPS_PER_S = 720.0            # Richard Burns Rally's packet clock (telemetry_formats.RBR_STEPS_PER_S)
+RBR_FEED_STEPS = 12                # the shift learner takes one RBR packet in this many: 60 a second
 RATIO_MIN = 20
 RATIO_TOLERANCE = 0.04           # a sample off its gear's ratio by more is spin or a jump
 RETUNE_SAMPLES = 90              # part-throttle samples agreeing on a new ratio: the gear was re-tuned
@@ -1056,6 +1058,9 @@ class ShiftLearner:
         self._session_batch = {}            # session number -> the drive log's batch its row was written in
         self._session_lost = False          # its row was rolled back: start the session again
         self._last_feed = None              # monotonic time of the last packet fed
+        self._rbr_anchor = None             # Richard Burns Rally: (arrival time, steps) its smooth clock runs from
+        self._rbr_last = 0.0
+        self._rbr_fed = None                # and the steps of the last packet the shift learner took
         self._pending = collections.deque()  # changes of gear waiting DOUBLE_TAP_REVERT before they are written
         self._wheels = DrivenWheels()
         from .drive_log import RunTracker
@@ -1564,6 +1569,8 @@ class ShiftLearner:
         if not self.enabled or sample.car is None:
             return
         with self.lock:
+            if sample.game == 'rbr' and sample.steps is not None:
+                now = self._rbr_time(now, sample.steps)
             if self.session is not None and self._last_feed is not None and now - self._last_feed > SESSION_GAP:
                 self._end_session_locked()
             if self._session_lost:
@@ -1590,9 +1597,34 @@ class ShiftLearner:
             self._press = press
             if not shared_car(car.key) and car.set_limiter(limiter, limiter_source):
                 self._dirty = True
+            if sample.game == 'rbr' and not self._rbr_due(sample.steps):
+                return                  # the shift learner's windows are made for 60 packets a second, not 720
             self._feed_locked(car, now, sample, throttle, clutch)
             if self._dirty and now - self._saved_at > SAVE_EVERY:
                 self._save_locked()
+
+    def _rbr_time(self, now, steps):
+        """Richard Burns Rally's packets come in bursts that share one arrival time: its own clock, the physics
+        steps (720 a second), carries the time between them. The arrival time anchors it and takes over again after
+        a pause, a stage load or a drift of over a second."""
+        anchor = self._rbr_anchor
+        if anchor is not None and steps >= anchor[1]:
+            smooth = anchor[0] + (steps - anchor[1]) / RBR_STEPS_PER_S
+            if abs(smooth - now) <= 1.0:
+                self._rbr_last = smooth
+                return smooth
+        now = max(now, self._rbr_last)           # (never back in time)
+        self._rbr_anchor = (now, steps)
+        self._rbr_last = now
+        return now
+
+    def _rbr_due(self, steps):
+        """Whether the shift learner takes this RBR packet: one in RBR_FEED_STEPS steps (60 Hz)."""
+        last = self._rbr_fed
+        if last is None or steps < last or steps - last >= RBR_FEED_STEPS:
+            self._rbr_fed = steps
+            return True
+        return False
 
     def _feed_locked(self, car, now, sample, throttle, clutch):
         gear, speed, rpm = sample.gear, sample.speed, sample.rpm

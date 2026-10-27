@@ -164,6 +164,11 @@ def _fingerprint(root, rels):
 STAGE_FILES = ('rsfdata/cache/stages_data.json', 'Maps/Tracks.ini')
 
 
+def stage_fingerprint(root):
+    """What stage_table() caches against: the install's path and its two stage files' sizes and times."""
+    return _fingerprint(root, STAGE_FILES)
+
+
 def _surface_parts(row):
     """({surface: share 0..1}, the one surface or 'mixed') of a stages_data.json row."""
     shares = {s: (_int(row.get(s), 0) or 0) / 100.0 for s in ('tarmac', 'gravel', 'snow')}
@@ -183,8 +188,10 @@ def build_stages(root):
     path = resolve(root, STAGE_FILES[0])
     if path:
         for row in _json(path):
+            if not isinstance(row, dict):
+                continue
             sid = _int(row.get('stage_id', row.get('id')))
-            if sid is None or not isinstance(row, dict) or not row.get('name'):
+            if sid is None or not row.get('name'):
                 continue
             parts, surface = _surface_parts(row)
             entry = {'id': sid, 'location': row.get('short_country') or None, 'stage': str(row['name']),
@@ -270,7 +277,9 @@ def _car_list(root):
         for row in _json(path) if path else []:
             cid = _int(row.get('car_id')) if isinstance(row, dict) else None
             if cid in cars:
-                drive = DRIVETRAINS.get(str(row.get('drive_train') or '').strip().lower())
+                # "AWD with torque split", "AWD w/o torque split (50:50)", "FWD", "RWD": the first word
+                word = re.match(r'\s*([A-Za-z0-9]+)', str(row.get('drive_train') or ''))
+                drive = DRIVETRAINS.get(word.group(1).lower()) if word else None
                 if drive:
                     cars[cid]['drivetrain'] = drive
                 match = re.match(r'\s*(\d+)\s*gear', str(row.get('transmission') or ''), re.I)

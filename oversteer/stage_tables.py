@@ -131,6 +131,8 @@ def load(directory=None):
     local = directory is None
     directory = directory or find_dir()
     tables = {}
+    if local:
+        _local['print'] = None
     if directory:
         for name in sorted(os.listdir(directory)):
             if not name.endswith('.json'):
@@ -146,9 +148,40 @@ def load(directory=None):
             table = rbr_install.stage_table()
             if table:
                 _add_table(tables, table, 'rbr (local)')
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            logging.warning("stage tables: the local Richard Burns Rally table not loaded: %s", e)
+                _local['print'] = table.get('fingerprint')
+        except Exception:                # whatever RSF's files hold, the app starts
+            logging.exception("stage tables: the local Richard Burns Rally table not loaded")
     return tables
+
+
+_local = {'print': None, 'checked': 0.0}     # the fingerprint of the install files the loaded RBR table came from
+LOCAL_RECHECK = 30.0                         # s between looks at them
+
+
+def refresh_local(now=None):
+    """Read the local Richard Burns Rally table again if the install's files changed since it was loaded (looked
+    at most every LOCAL_RECHECK s: two stats). True if the loaded tables changed."""
+    import time
+    from . import rbr_install
+    now = time.monotonic() if now is None else now
+    if _tables is None or now - _local['checked'] < LOCAL_RECHECK:
+        return False
+    _local['checked'] = now
+    try:
+        root = rbr_install.find_root()
+        current = rbr_install.stage_fingerprint(root) if root else None
+        if current == _local['print']:
+            return False
+        table = rbr_install.stage_table(root) if root else None
+    except Exception:
+        logging.exception("stage tables: the local Richard Burns Rally table not read again")
+        return False
+    _tables.pop('rbr', None)
+    _local['print'] = None
+    if table:
+        _add_table(_tables, table, 'rbr (local)')
+        _local['print'] = table.get('fingerprint')
+    return True
 
 
 def tables():

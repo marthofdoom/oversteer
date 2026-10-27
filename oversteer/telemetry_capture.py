@@ -68,6 +68,20 @@ THIN_DISTANCE_JUMP = 5.0    # m the distance to the end may jump
 THIN_FROZEN = 0.1           # s of the packets' own clock the stage clock must stand still to count as stopped (it steps in threes)
 
 
+def rbr_meta(first):
+    """Header keys for a file whose first packet is Richard Burns Rally's (664 bytes): the car RSF has put in the
+    slot the packet names, `rbr_car` (key, id, name). The car is not in the packets, and a replay later reads
+    today's Cars.ini: the header keeps the one that was driven. None for any other packet."""
+    if first is None or len(first) != 664:
+        return None
+    try:
+        from . import rbr_install
+        car = rbr_install.car_in_slot(struct.unpack_from('<i', first, 56)[0])
+    except Exception:
+        return None
+    return {'rbr_car': {k: car[k] for k in ('key', 'id', 'name')}} if car else None
+
+
 def _ipv4(address):
     try:
         return struct.unpack('!I', socket.inet_aton(address))[0]
@@ -80,12 +94,13 @@ class CaptureWriter:
     seconds (the listener's monotonic one); times are stored from the first
     packet on."""
 
-    def __init__(self, path, port=None, note='', version=None, started=None):
+    def __init__(self, path, port=None, note='', version=None, started=None, extra=None):
         self.path = path
         self._file = gzip.open(path, 'wb')
         self._file.write(MAGIC)
         meta = {'started': time.time() if started is None else started, 'port': port, 'oversteer': version,
                 'note': note}
+        meta.update(extra or {})                     # more keys of the header line: a reader takes the ones it knows
         self._file.write(json.dumps(meta).encode() + b'\n')
         # Readable at once: labelling a session reads when a capture still
         # being written started
@@ -138,6 +153,7 @@ class CaptureWriter:
             if self._held is not None:
                 self._put(*self._held)
                 self._held = None
+                self.thinned -= 1                    # (saved after all)
             self._file.close()
             self._file = None
 
@@ -541,7 +557,7 @@ class Recorder:
             if self._writer is None and port in self._side:
                 self._promote(port, now)          # that port's file goes on as the main one
             if self._writer is None:
-                self._open(port)
+                self._open(port, data)
             first = self._writer.packets == 0
             self._writer.write(now, addr, data)
             if first:
@@ -558,7 +574,7 @@ class Recorder:
             self._close_side(port)
             side = None
         if side is None:
-            writer, path, started = self._new_file(port)
+            writer, path, started = self._new_file(port, data)
             side = self._side[port] = [writer, path, now, started]
         side[0].write(now, addr, data)
         side[2] = now
@@ -595,7 +611,8 @@ class Recorder:
     def _open_paths(self):
         return [p for p in [self.path] + [side[1] for side in self._side.values()] if p]
 
-    def _new_file(self, port):
+    def _new_file(self, port, first=None):
+        extra = rbr_meta(first)
         os.makedirs(self.folder, exist_ok=True)
         started = self.clock()
         base = time.strftime('%Y%m%d-%H%M%S', time.localtime(started))
@@ -605,12 +622,12 @@ class Recorder:
             path = os.path.join(self.folder, '{}-{}{}'.format(base, n, SUFFIX))
         # Room for the new file before it grows: the cap holds while recording
         prune(self.folder, self.cap, keep=self._open_paths())
-        writer = CaptureWriter(path, port=port, version=self.version, started=started)
+        writer = CaptureWriter(path, port=port, version=self.version, started=started, extra=extra)
         logging.info("telemetry capture: recording UDP %s to %s", port, os.path.basename(path))
         return writer, path, started
 
-    def _open(self, port=None):
-        self._writer, self.path, self._started = self._new_file(port)
+    def _open(self, port=None, first=None):
+        self._writer, self.path, self._started = self._new_file(port, first)
         self._file_port = port
 
     def _start_wheel(self, origin):

@@ -163,7 +163,7 @@ TRACKS_INI = ('[Map71]\r\nTrackName = "Maps\\track-71"\r\n\r\n***\r\n'
               '[Map500]\r\nStageName = "Only In Tracks"\r\nLength = 3.4\r\nSurface = 2\r\nCountryCode = "SE"\r\n')
 CARS = [{"id": "91", "name": "Abarth Grande Punto S2000", "path": "x"},
         {"id": "5", "name": "Subaru Impreza S12 WRC", "path": "y"}]
-CARS_DATA = [{"car_id": "5", "drive_train": "AWD", "transmission": "6 gears", "power": "300bhp"}]
+CARS_DATA = [{"car_id": "5", "drive_train": "AWD with torque split", "transmission": "6 gears", "power": "300bhp"}]
 
 
 @pytest.fixture
@@ -601,3 +601,136 @@ def test_the_pedals_and_the_suspension_of_a_real_stage():
     load = np.array([s.tyre_load[0] for s in samples])
     assert _corr(susp, load) > 0.5                                                 # more compression, more load
     assert all(s.gear >= -1 for s in samples)
+
+
+# -- review fixes --
+
+def test_the_drivetrain_is_the_first_word_of_rsfs_text(install):
+    rows = [("AWD with torque split", 'awd'), ("AWD w/o torque split (50:50)", 'awd'), ("FWD", 'fwd'),
+            ("RWD", 'rwd'), ("4WD", 'awd'), ("something else", None), (None, None)]
+    cars = [{"id": str(i), "name": "Car %d" % i} for i in range(len(rows))]
+    data = [{"car_id": str(i), "drive_train": text, "transmission": "5 gears"} for i, (text, _) in enumerate(rows)]
+    (install / 'rsfdata' / 'cache' / 'cars.json').write_text(json.dumps(cars))
+    (install / 'rsfdata' / 'cache' / 'cars_data.json').write_text(json.dumps(data))
+    listed = rbr_install._car_list(str(install))
+    assert [listed[i].get('drivetrain') for i in range(len(rows))] == [d for _, d in rows]
+
+
+def test_malformed_rsf_json_never_fails_the_tables(install):
+    (install / 'rsfdata' / 'cache' / 'stages_data.json').write_text(json.dumps(["x", 5, None, {"id": "9"}, STAGES[0]]))
+    rbr_install.forget()
+    assert {e['id'] for e in rbr_install.stage_table()['stages']} == {71, 500}
+    (install / 'rsfdata' / 'cache' / 'stages_data.json').write_text('{ not json')
+    rbr_install.forget()
+    assert stage_tables.load()                     # logged, not raised
+
+
+def test_the_stored_fallback_name_gives_way_to_the_tables_and_nothing_else_does(tmp_path):
+    from oversteer.telemetry_store import open_store
+    store = open_store(str(tmp_path / 's.db'))
+    store.upsert_stage('rbr:71', 'rbr', 2263.0, 'RBR stage 71')
+    store.upsert_stage('rbr:12', 'rbr', 9000.0, 'My own name')
+    for key, name in (('rbr:71', 'Rally School Stage'), ('rbr:12', 'Sikakama')):
+        store.name_rbr_stage(key, {'stage': name, 'location': 'GB', 'length_m': 2200})
+    assert store.stage('rbr:71')['name'] == 'Rally School Stage' and store.stage('rbr:71')['length'] == 2200
+    assert store.stage('rbr:12')['name'] == 'My own name' and store.stage('rbr:12')['length'] == 9000.0
+
+
+def test_the_table_is_read_again_when_the_install_changes(install, monkeypatch):
+    assert 'rbr:71' in stage_tables.tables()['rbr']
+    stage_tables.refresh_local(now=2e9)                            # nothing changed
+    assert stage_tables.refresh_local(now=3e9) is False
+    (install / 'rsfdata' / 'cache' / 'stages_data.json').write_text(json.dumps(STAGES + [dict(STAGES[0], id="81", stage_id="81", name="Eighty-one")]))
+    assert stage_tables.refresh_local(now=4e9) is True
+    assert stage_tables.tables()['rbr']['rbr:81']['stage'] == 'Eighty-one'
+
+
+def test_a_later_table_renames_a_stage_driven_without_it(install, tmp_path):
+    install_stages = install / 'rsfdata' / 'cache' / 'stages_data.json'
+    install_stages.write_text(json.dumps(STAGES[1:]))                 # 71 missing
+    rbr_install.forget()
+    stage_tables.set_tables(None)
+    stage = Stage().countdown().drive(LENGTH).finish()
+    learner, reader, runs = runs_of(tmp_path, stage)
+    assert learner.log.store.stage('rbr:71')['name'] == 'RBR stage 71'
+    install_stages.write_text(json.dumps(STAGES))
+    assert stage_tables.refresh_local(now=1e12) is True
+    learner.log.store.seed_stages({'rbr': stage_tables.tables()['rbr']})
+    assert learner.log.store.stage('rbr:71')['name'] == 'Rally School Stage'
+    learner.close()
+
+
+def test_a_720_hz_stage_loses_no_distance_to_its_segments(tmp_path):
+    stage = Stage(hz=720, length=1500.0).countdown(0.5).drive(1500.0).finish(roll_on=2.0, results=0.5)
+    learner, reader, runs = runs_of(tmp_path, stage)
+    [run] = runs
+    total = learner.log.store.db.execute('SELECT SUM(d1 - d0), COUNT(*) FROM segments WHERE run = ?', (run['id'],)).fetchone()
+    assert run['finished'] == 1 and total[0] > run['distance'] - 60.0 and 6 <= total[1] <= 8    # 200 m segments (not one every 5 s of 3600 rows)
+    learner.close()
+
+
+def test_the_duration_counts_a_car_at_rest_and_bursty_arrival_times(tmp_path):
+    """Packets in bursts of three that share an arrival time, the clock stepping in threes: the run lasts as long as
+    the stage did, a stop of six seconds included."""
+    stage = Stage(hz=720, length=1200.0).countdown(0.5)
+    stage.drive(400.0)
+    for _ in range(int(6.0 * 720)):                                    # at rest, the clock running
+        stage.clock += stage.dt
+        stage.send(0.0, stage.clock, stage.s)
+    stage.drive(1200.0).finish(roll_on=2.0, results=0.5)
+    out = []
+    for i, (t, data) in enumerate(stage.out):
+        values = list(struct.unpack(ngp.FORMAT, data))
+        clock_at = ngp.OFFSETS['stage.raceTime'] // 4
+        if values[clock_at] > 0 and i % 3:
+            values[clock_at] = struct.unpack(ngp.FORMAT, stage.out[i - i % 3][1])[clock_at]   # the clock steps in threes
+        out.append((t - (i % 3) * stage.dt, struct.pack(ngp.FORMAT, *values)))               # and so does the arrival time
+    stage.out = out
+    learner, reader, runs = runs_of(tmp_path, stage)
+    [run] = runs
+    elapsed = stage.clock
+    assert abs(run['duration'] - elapsed) < 0.02 * elapsed + 0.5 and run['finished'] == 1
+    learner.close()
+
+
+def test_no_run_starts_after_a_finish_whatever_the_pause(tmp_path):
+    stage = Stage().countdown().drive(LENGTH)
+    result = stage.clock
+    stage.finish(roll_on=5.0, results=0.0)
+    stage.t += 40.0                                                    # a pause of 40 s during the roll-on
+    for _ in range(int(10.0 / stage.dt)):                              # and the car goes on with the clock frozen
+        stage.s += SPEED * stage.dt
+        stage.send(SPEED, result, stage.s)
+    learner, reader, runs = runs_of(tmp_path, stage)
+    [run] = runs
+    assert run['finished'] == 1 and run['result_time'] == pytest.approx(result, abs=1e-3)
+    learner.close()
+
+
+def test_the_clock_stopping_at_the_line_is_the_finish_with_the_car_at_rest(tmp_path):
+    stage = Stage().countdown().drive(LENGTH)
+    result = stage.clock
+    for _ in range(int(3.0 / stage.dt)):                               # braked to a stop at the line
+        stage.send(0.0, result, stage.length, to_end=0.0)
+    learner, reader, runs = runs_of(tmp_path, stage)
+    [run] = runs
+    assert run['finished'] == 1 and run['result_time'] == pytest.approx(result, abs=1e-3)
+    learner.close()
+
+
+def test_a_capture_records_the_car_in_its_header_and_counts_the_last_packet_once(install, tmp_path):
+    from oversteer import telemetry_capture as tc
+    packets = capture_packets('rbr-clock-start.ovcap.gz')
+    recorder = tc.Recorder(str(tmp_path), version='test', threaded=False, clock=lambda: 1.7e9)
+    for t, addr, data in packets:
+        recorder.packet(t, addr, data, 5310)
+    recorder.close()
+    [path] = [os.path.join(tmp_path, n) for n in os.listdir(tmp_path) if n.endswith('.ovcap.gz')]
+    meta, records = tc.read_capture(path)
+    assert meta['rbr_car'] == {'key': 'rbr/5', 'id': 5, 'name': 'Subaru Impreza S12 WRC'}
+    kept = list(records)
+    w = tc.CaptureWriter(str(tmp_path / 'x.ovcap.gz'))
+    for t, addr, data in packets:
+        w.write(t, addr, data)
+    w.close()
+    assert w.packets == len(kept) and w.packets + w.thinned == len(packets)
