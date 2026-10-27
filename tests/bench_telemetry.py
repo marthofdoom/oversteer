@@ -32,7 +32,25 @@ def measure(packets, threaded=True):
     return statistics.mean(costs) * 1000, costs[int(len(costs) * 0.99)] * 1000, max(costs) * 1000, dropped
 
 
+def rbr_packets(seconds=100.0):
+    """(t, packet): Richard Burns Rally at its real 720 packets a second, a stage of 25 m/s driving, finish and
+    roll-on (the NGP packet; synthetic, tests/test_rbr.py's Stage)."""
+    from tests.test_rbr import Stage
+    length = seconds * 20.0
+    stage = Stage(hz=720, length=length).countdown(2.0).drive(length)
+    stage.finish(roll_on=seconds * 0.1, results=1.0)
+    return stage.out
+
+
 def main():
+    if 'rbr' in sys.argv[1:]:
+        packets = rbr_packets()
+        mean, p99, worst, dropped = measure(packets)
+        seconds = packets[-1][0] - packets[0][0]
+        print("RBR %d packets (%.0f/s): mean %.3f ms, p99 %.3f ms, worst %.1f ms, %d events dropped; "
+              "CPU %.1f %% of one core" % (len(packets), len(packets) / seconds, mean, p99, worst, dropped,
+                                           mean * len(packets) / 1000 / seconds * 100))
+        return
     packets = stage_packets(10.0)
     mean, p99, worst, dropped = measure(packets)
     print("%d packets: mean %.3f ms, p99 %.3f ms, worst %.1f ms, %d events dropped" % (
