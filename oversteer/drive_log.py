@@ -57,6 +57,14 @@ class DriveLog:
         # The shipped stage tables, so a stage has its name, location and
         # surface from its first run
         self.post(self.store.seed_stages, stage_tables.tables())
+        # Then the data an older build worked out wrong, once (data_repair: gated by the store's data version), before
+        # any run is written
+        self.post(self._repair_data)
+
+    def _repair_data(self):
+        from . import data_repair
+        data_repair.migrate(self.store)
+        return True
 
     def post(self, fn, *args):
         if self._thread is None:
@@ -1188,8 +1196,11 @@ def _car_model(learner, store, car_id, key):
     return car
 
 
-# The metrics the backfill cannot work out again (the launch is not in the trace)
+# The metrics the backfill cannot work out again (the launch is not in the trace): these and every launch.* metric,
+# and the launch's event
 BACKFILL_KEEP = ('launch.t50', 'launch.stall', 'launch.slip')
+BACKFILL_KEEP_PREFIX = 'launch.'
+BACKFILL_KEEP_EVENTS = ('launch',)
 BACKFILL_FAILED = 'unclassified'
 
 
@@ -1471,6 +1482,33 @@ def backfill_step(learner, limit=3):
         learner._repaired = True
         repair_shipped(store)
     done = 0
+    # A data repair's queue first (data_repair: the reference runs first, oldest first): a queued run keeps its
+    # class until it is rewritten, so it stays a PB and a reference meanwhile
+    for run in store.runs_to_reanalyse(limit):
+        if done >= limit:
+            break
+        store.savepoint('reanalyse')
+        try:
+            if store.trace_runs([run]):                    # never classed 'unclassified' for a missing trace
+                _backfill_run(learner, store, run)
+            store.reanalysed(run)
+            store.release_savepoint('reanalyse')
+        except Exception:
+            # Left as it was (its earlier analysis, class and all), out of the queue so the traces can be pruned again
+            logging.exception("drive log: working run %s over again; it keeps its earlier analysis", run)
+            store.rollback_savepoint('reanalyse')
+            store.reanalysed(run)
+        else:
+            logging.info("data repair: run %s worked over again (%d to go)", run, store.reanalysis_pending())
+        done += 1
+        if not store.reanalysis_pending():
+            # The potentials built while the queue was worked read runs not yet rewritten: all are built again
+            # from the rewritten ones (potentials_missing, below and in the next steps)
+            from .data_repair import drop_potentials
+            dropped = drop_potentials(store)
+            learner.__dict__.pop('_potential_tried', None)
+            logging.info("data repair: every queued run worked over; %d potentials and %d envelopes to build again",
+                         *dropped)
     for run in store.runs_to_backfill(limit + len(failed)):
         if run in failed:
             continue
@@ -1519,7 +1557,7 @@ def _backfill_run(learner, store, run):
     summary = {'game': (car_key or '').split('/')[0] or None, 'stage': row['stage'], 'distance': row['distance'] or 0.0,
                'duration': row['duration'], 'moving_time': row['moving_time'], 'finished': row['finished'],
                'result_time': row['result_time'], 'course': course, 'car': car_key, 'launch': 0.0}
-    store.clear_derived(run, BACKFILL_KEEP)
+    store.clear_derived(run, BACKFILL_KEEP, BACKFILL_KEEP_PREFIX, BACKFILL_KEEP_EVENTS)
     verdicts = {'surface': row['surface'], 'discipline': row['discipline'], 'wet': row['wet']}
     if row['stage'] and row['discipline'] in (None, 'unknown'):
         found = drive_detect.table_discipline(row['stage'])

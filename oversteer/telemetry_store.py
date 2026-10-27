@@ -8,7 +8,9 @@ read-only connection (Reader).
 
 Schema versions, in PRAGMA user_version: 0 with a `cars` table is the
 first schema (v1), 1 is v1 with DiRT's rpm units fixed, 2 is this one.
-Opening a Store migrates, after copying the file aside once.
+Opening a Store migrates, after copying the file aside once. The data
+has a version of its own (DATA_VERSION, in store_meta): what older code
+worked out wrong is repaired in place by data_repair.migrate, once.
 """
 
 import json
@@ -27,6 +29,10 @@ from array import array
 from . import stage_tables
 
 VERSION = 3
+# The stored data's version (store_meta 'data_version'), apart from the schema's: it goes up when what older code
+# worked out from the runs is wrong enough to be repaired in place (data_repair.migrate, once, on the drive-log thread).
+# A file made by this code starts at it; a file from before has none (0).
+DATA_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE cars (
@@ -265,6 +271,23 @@ STAGE_LINES_DDL = """
 CREATE TABLE IF NOT EXISTS stage_lines (
     stage TEXT PRIMARY KEY,
     fingerprint TEXT NOT NULL
+)"""
+
+# Bookkeeping of the store itself, as (key, value) text: 'data_version' (DATA_VERSION) and what a data repair did
+# (data_repair). A table of its own for the reason run_finish is one.
+STORE_META_DDL = """
+CREATE TABLE IF NOT EXISTS store_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+)"""
+
+# The runs a data repair queued to be worked over again (drive_log.backfill_step), in `rank` order. Unlike a cleared
+# run_class (runs_to_backfill), a queued run keeps its class, so it stays a PB, a reference and a kept trace until the
+# backfill has rewritten it. Traces are not pruned while any run is queued (Store.prune_traces).
+REANALYSE_DDL = """
+CREATE TABLE IF NOT EXISTS reanalyse (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    rank INTEGER NOT NULL
 )"""
 
 # -- potential time (oversteer/potential.py, docs/telemetry-extrapolation.md section 6.1) --
@@ -667,6 +690,11 @@ def open_store(path):
     db.execute(STAGE_LINES_DDL)
     for ddl in POTENTIAL_DDL:
         db.execute(ddl)
+    db.execute(STORE_META_DDL)
+    db.execute(REANALYSE_DDL)
+    if not has_cars:
+        # a new file holds nothing an older build worked out: no repair is due
+        db.execute("INSERT OR IGNORE INTO store_meta (key, value) VALUES ('data_version', ?)", (str(DATA_VERSION),))
     store = Store(db, path)
     store.learn_finishes()
     return store
@@ -986,6 +1014,37 @@ class Reader:
         return [r[0] for r in self._rows(
             'SELECT r.id FROM runs r JOIN traces t ON t.run = r.id WHERE r.run_class IS NULL '
             'AND r.ended IS NOT NULL ORDER BY r.id LIMIT ?', (limit,))]
+
+    def runs_to_reanalyse(self, limit=3):
+        """The first runs a data repair queued to be worked over again (REANALYSE_DDL), in their order, at most
+        `limit`: run ids."""
+        try:
+            return [r[0] for r in self._rows('SELECT q.run FROM reanalyse q JOIN runs r ON r.id = q.run '
+                                             'ORDER BY q.rank, q.run LIMIT ?', (limit,))]
+        except sqlite3.OperationalError:                      # a file the writer has not opened since the table
+            return []
+
+    def reanalysis_pending(self):
+        """The number of runs still queued to be worked over again (REANALYSE_DDL)."""
+        try:
+            return self._rows('SELECT COUNT(*) FROM reanalyse')[0][0]
+        except sqlite3.OperationalError:
+            return 0
+
+    def meta(self, key, default=None):
+        """A value of store_meta (STORE_META_DDL), or `default`."""
+        try:
+            rows = self._rows('SELECT value FROM store_meta WHERE key = ?', (key,))
+        except sqlite3.OperationalError:
+            return default
+        return rows[0][0] if rows else default
+
+    def data_version(self):
+        """The stored data's version (DATA_VERSION): 0 for a file from before it was kept."""
+        try:
+            return int(self.meta('data_version', 0))
+        except (TypeError, ValueError):
+            return 0
 
     def car_row(self, car_id):
         """(profile, key) of a car id, or None."""
@@ -1513,6 +1572,10 @@ class Store(Reader):
         total = self._do('SELECT COALESCE(SUM(LENGTH(data)), 0) FROM traces').fetchone()[0]
         if total <= cap:
             return 0
+        if self.reanalysis_pending():
+            # A data repair is working the runs over: the classes and times the kept set is chosen by are not all
+            # rewritten yet, so nothing goes until they are (a PB's trace must never go)
+            return 0
         best = {}
         for run, stage, car, wet, result, first in self._do(
                 'SELECT r.id, r.stage, s.car, r.wet, r.result_time, (SELECT c.section_t FROM corners c WHERE '
@@ -1534,13 +1597,15 @@ class Store(Reader):
             if result < records.get((stage, car), float('inf')):
                 records[(stage, car)] = result
                 kept.add(run)
-        # the PB as stage_pb_id ranks it (once a car has a run on the game's own clock on a stage, only its clock runs)
+        # the PB as stage_pb_id ranks it (once a car has a run on the game's own clock on a stage, only its clock runs;
+        # of two equal times the newer, as stage_pb_id picks it)
         pbs = {}
         for run, stage, car, result in self._do(
                 'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
                 'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                "AND r.run_class IN ('clean', 'learning', 'off') AND " + self.ON_CLOCK).fetchall():
-            if result < pbs.get((stage, car), (float('inf'),))[0]:
+                "AND r.run_class IN ('clean', 'learning', 'off') AND " + self.ON_CLOCK +
+                ' ORDER BY r.started, r.id').fetchall():
+            if result <= pbs.get((stage, car), (float('inf'),))[0]:
                 pbs[(stage, car)] = (result, run)
         kept.update(run for _, run in pbs.values())
         dropped = 0
@@ -1577,15 +1642,22 @@ class Store(Reader):
                 ', '.join(EVENT_FIELDS), ', '.join('?' * len(EVENT_FIELDS))),
                 (run,) + tuple(_json(detail) if n == 'detail' else e.get(n) for n in EVENT_FIELDS))
 
-    def clear_derived(self, run, keep_metrics=()):
+    def clear_derived(self, run, keep_metrics=(), keep_prefix=None, keep_events=()):
         """Forget what the context layer works out from a run's trace
         (its corners, events and metrics, but the metrics named in
-        `keep_metrics`): the backfill writes them again."""
+        `keep_metrics` or whose name starts with `keep_prefix`, and the
+        events of the kinds in `keep_events`): the backfill writes them again."""
         self._do('DELETE FROM corners WHERE run = ?', (run,))
-        self._do('DELETE FROM events WHERE run = ?', (run,))
+        kinds = ', '.join('?' * len(keep_events))
+        self._do('DELETE FROM events WHERE run = ?{}'.format(' AND kind NOT IN ({})'.format(kinds) if keep_events else ''),
+                 (run,) + tuple(keep_events))
         marks = ', '.join('?' * len(keep_metrics))
-        self._do('DELETE FROM metrics WHERE run = ?{}'.format(' AND name NOT IN ({})'.format(marks) if keep_metrics else ''),
-                 (run,) + tuple(keep_metrics))
+        sql = 'DELETE FROM metrics WHERE run = ?{}'.format(' AND name NOT IN ({})'.format(marks) if keep_metrics else '')
+        args = (run,) + tuple(keep_metrics)
+        if keep_prefix:
+            sql += " AND substr(name, 1, ?) != ?"
+            args += (len(keep_prefix), keep_prefix)
+        self._do(sql, args)
 
     def stage_keys(self):
         """The stage keys any run was on."""
@@ -1692,6 +1764,20 @@ class Store(Reader):
 
     def set_stage_fingerprint(self, stage, fingerprint):
         self._do('INSERT OR REPLACE INTO stage_lines (stage, fingerprint) VALUES (?, ?)', (stage, fingerprint))
+
+    def set_meta(self, key, value):
+        self._do('INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)', (key, None if value is None else str(value)))
+
+    def queue_reanalysis(self, runs):
+        """Queue runs (ids, in the order to work them) to be worked over again, after any already queued; a run
+        queued already keeps its place. See REANALYSE_DDL."""
+        rank = self._do('SELECT COALESCE(MAX(rank), -1) + 1 FROM reanalyse').fetchone()[0]
+        for n, run in enumerate(runs):
+            self._do('INSERT OR IGNORE INTO reanalyse (run, rank) VALUES (?, ?)', (run, rank + n))
+
+    def reanalysed(self, run):
+        """A queued run was worked over again (or is left as it was): out of the queue."""
+        self._do('DELETE FROM reanalyse WHERE run = ?', (run,))
 
     def drop_stage_potentials(self, stage):
         """Forget every car's stored potential of a stage: potentials_missing() offers them for building again."""
