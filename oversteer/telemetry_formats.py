@@ -326,8 +326,8 @@ def plan_xyz(game, pos):
     (x, z) correlates -0.86/-0.83 with the steering-side evidence (roll, lateral g, r
     +0.95/+0.94) and (x, -z) the same size the right way round, so the plan is (x, -z)
     (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y). So has Richard Burns Rally, checked on marth's captures (docs/richard-burns-rally.md):
-    a right-handed world, x east, y north, z up, and the compass yaw grows turning right; the heading rate of (x, y)
-    correlates +0.80 to +0.86 with the (negated) yaw rate and -0.87 to -0.89 with the lateral acceleration, the right way round.
+    a right-handed world, x east, y north, z up, and the compass yaw grows turning right; the compass heading rate of (x, y)
+    (positive right) correlates +0.80 to +0.86 with the (negated) yaw rate and -0.87 to -0.89 with the lateral acceleration, the right way round.
     Other games: (x, z) with y up, as before (unchecked). None for no position."""
     if pos is None:
         return None

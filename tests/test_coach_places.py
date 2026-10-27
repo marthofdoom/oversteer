@@ -607,6 +607,12 @@ def test_a_game_whose_speed_is_unchecked_gets_no_launch_coaching(tmp_path):
     assert tip.text.startswith('5 of your last 5 launches bogged')
 
 
+def test_richard_burns_rally_attitude_is_checked_so_a_spin_is_coached(tmp_path):
+    h = Stage(tmp_path / 'r.db', game='rbr')
+    h.drive(corners_with(), events=[event('spin', 580.0, 620.0, value=230.0)])
+    assert len(h.by_id('corner.spin')) == 1
+
+
 def test_richard_burns_rally_speed_is_checked_so_its_launches_are_coached(tmp_path):
     """Its speed is the length of the car-frame velocity vector and agrees with the positions' to 0.1 % on marth's
     captures, its accelerations follow d(speed)/dt (r 0.95 to 0.99): no longer in LAUNCH_OUT."""

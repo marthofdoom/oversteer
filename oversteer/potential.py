@@ -52,7 +52,8 @@ ROAD_UNKNOWN_MAX = 0.2           # a stage whose road is unknown over more of it
 # Rally (x, y), z up, against the lateral g and the yaw rate (r 0.98 on marth's captures). The other games
 # keep the yaw-based road (their plan axes are unchecked).
 PLAN_VERIFIED = {'acr', 'dirt', 'wrcg', 'rbr'}
-ALGO = 8                         # bumps when the numbers a stored potential holds would change
+ALGO = 8                         # bumps when the numbers a stored potential holds would change (a stored one is rebuilt on the
+                                 # next run on that stage, not at once; the 0.17 data repair drops RBR's, built from yaw before ALGO 8)
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)

@@ -398,7 +398,7 @@ jump and restarts excluded), rows 0.1 s apart unless said.
 - **Up axis and handedness.** z is up (steps per row: x 3.8 m, y 1.4 m, z 0.4 m; speed from position differences is
   0.9996 of the speed channel in 3-D, 0.995 in (x, y), 0.95 with a scatter down to 0.55 in (x, z)). The world is
   right-handed, x east, y north: the heading of (dx, dy) as a compass angle follows `car.yaw` with a constant offset
-  (concentration R 0.94 on 309, 0.97 on 517; mirrored y: 0.50 and 0.24), and its rate correlates +0.86 (309) and
+  (concentration R 0.94 on 309, 0.97 on 517; mirrored y: 0.50 and 0.24), and its rate (the compass heading rate, positive right) correlates +0.86 (309) and
   +0.80 (517) with the negated `yaw_rate` (slope 1.0), -0.89 and -0.87 with the lateral acceleration (left positive).
   `plan_xyz('rbr')` = (x, z, y) is therefore right and not mirrored; `PLAN_VERIFIED` has `rbr`.
 - **Against the stage.** The `.trk` driveline of 309 (`track-309_M.trk`, 231 points, ~11 m apart) is in the same
