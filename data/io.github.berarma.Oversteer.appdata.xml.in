@@ -58,6 +58,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.17.0" date="2026-10-26">
+      <description>
+        <ul>
+          <li>Richard Burns Rally: real sectors from the stage files, the car recognised from its gearing with no setup, rev lights and best upshift from the game's own car data, and coaching, stage map and potential lap from the positions.</li>
+          <li>A one-off repair of the stored RBR runs on the first start, with a backup made first.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-10-26">
       <description>
         <ul>
