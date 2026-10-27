@@ -105,7 +105,9 @@ the game and nothing needs setting up in Countersteer:
   - Where Countersteer ships a car's engine and gearbox, the limiter, torque curve and gear ratios come
     from the game's own physics files, so the rev lights and the best upshift are right from the first
     drive, as in ACR.
-  - Two cars with the same gearbox are shown under both names.
+  - A gearbox that other RSF cars may share is named "by gearing" ("Skoda Fabia RS Rally2 (by gearing,
+    car slot 5)"). Two shipped cars with the same gearbox are shown under both names. Learning is kept per
+    car slot.
   - Any other car gets a name of its own ("RBR car #1"), and its shift points, coaching and PBs are
     learnt for that car.
 - **Coaching, the stage map and the potential lap**, using the car's positions, speed and accelerations, all
