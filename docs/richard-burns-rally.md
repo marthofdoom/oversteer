@@ -51,7 +51,7 @@ rear left, rear right). Four blocks: `totalSteps`, `Stage` (20 bytes), `Control`
 | 28–40 | f32 ×4 | throttle, brake, handbrake, clutch | 0..1 | high |
 | 44 | s32 | control.gear | **0 reverse, 1 neutral, 2 first …** (sample: 1, car at the start line) | high (mika-n, Race-Element, groybe; simapi says −1/0/1: wrong) |
 | 48, 52 | f32 | footbrakePressure, handbrakePressure | unit unknown (0 in the sample) | low |
-| 56 | s32 | car.index | the **slot** 0..7, not the car: **RSF always loads the chosen car into slot 5** (sample: 5) | high (ReRBR, sample) |
+| 56 | s32 | car.index | the **slot** 0..7, not the car (sample: 5; marth's captures: 5 for the Fiesta, 6 for the i20, each its own Cars.ini section: RSF does not always use slot 5) | high (ReRBR, sample, captures) |
 | 60 | f32 | car.speed | **km/h or mph, following the game's unit setting**; Race-Element's comment says m/s | medium (mika-n, pmfrlyn, SliProSuperPro `speedKph`; Race-Element disagrees) |
 | 64–72 | f32 ×3 | positionX, Y, Z | world m; sample (7.5, 45.1, 4.1); **z up** expected (RBR's driveline is z-up), handedness **verify** | medium |
 | 76–84 | f32 ×3 | roll, pitch, yaw | **degrees** (sample yaw 91.5); SpaceMonkey and Race-Element convert deg → rad | medium |
@@ -284,7 +284,7 @@ capture** where section 2 says so; each such place carries a "verify on capture"
 | Port preset | `PORT_PRESETS` in `oversteer/telemetry.py` | `(6776, "Richard Burns Rally (RSF / NGP)")`; Auto listens on it too. A launcher that also sends to `127.0.0.1:5310` (marth's does) needs nothing else. |
 | Run lifecycle | `oversteer/drive_log.py` (`RunTracker`: `_rbr_loaded`, `_rbr_finish`, the repeated-step return in `feed`) | start: car moving **and the stage clock above 0** (a car rolling or spinning before the clock starts is no run). Restart: steps back by more than 720 (or another `stage.index`) ends the run unfinished, and the clock going back does as before. Finish: the clock stopped (`RunClock.settle`) with the car moving and `distanceToEnd` ≤ 10 m; or the clock stopped for 3 s well into the stage whatever `distanceToEnd` says. `result_time` = the frozen `raceTime` (game clock, `run_clock = 'game'`). Pause / results page: a packet with the same `totalSteps` as the last is ignored altogether; silence is no run boundary (a position is sent). After a finish the guard blocks the 20 s roll-on and is released by the steps going back, the clock reset, a stage change or 10 s of silence. |
 | Stage names | `data/telemetry/stages/rbr.json`, `oversteer/rbr_install.py`, `stage_tables.load()` | stage key `rbr:<map id>`; the shipped table (built by `research/rbr/stage_table.py`) names every RSF stage; the install's own list, where one is found, is merged over it. Without either: "RBR stage <id>", length = driveLineLocation + distanceToEnd at the start. BTB (`stage.index` 41) names no stage (the start-cell fingerprint takes over). |
-| Car names | `rbr_install.car_in_slot()` | from a found install only: `Cars/Cars.ini [Car<slot>] RSFCarID` -> `cars.json` name, key `rbr/<RSFCarID>`, `cars_data.json` drivetrain and gear count; checked every 2 s, read again when it changed. Otherwise `rbr/unknown`, "RBR car": a shared key, nothing learnt under it (no packet fingerprint tells the cars apart, see "Names without any setup"). |
+| Car names | `rbr_install.car_in_slot()`, `rbr_fingerprint` | from a found install: `Cars/Cars.ini [Car<slot>] RSFCarID` -> `cars.json` name, key `rbr/<RSFCarID>`, `cars_data.json` drivetrain and gear count; checked every 2 s, read again when it changed. Otherwise from the gearing (see "Cars from their gearing"); `rbr/unknown`, "RBR car" until then: a shared key, nothing learnt under it. |
 | Coach | `coach.LAUNCH_OUT`, `ATTITUDE_OUT`, `coach_context.UNCHECKED_GAMES` | `rbr` is in all three: no launch, spin or stall coaching and no speed-drop reads (the speed channel is not checked). The steering sign and the other signs of section 8 (sway, yaw rate, roll, pitch, heading) were verified on marth's session against the G29 axis and the positions. |
 | Tests | `tests/test_rbr.py` | the layout against `research/rbr/ngp_packet.py`, the doc's sample values, wheel order, units, a fake install (stage table, cache, cars, no write under the install), and synthetic packet sequences: finish, restart, pause (repeated steps and silence), retire, results page, no phantom runs. |
 
@@ -322,13 +322,26 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
 - **Cars**: the packets cannot name the car. `car.index` is the slot (5 or 6 on the captures), and nothing else in the
   packet identifies it that a table could carry: the two cars captured (Fiesta WRC 2019, i20 Coupe WRC 2021) have the same
   mass (1390 kg, measured 1361-1394 kg at rest, so +-15 kg of noise), balance (49%), idle (1214 rpm), redline (about 8530
-  rpm) and gear count (6); over RSF's 103 cars only half are unique even by published mass, balance and gears. So without
-  the install the key is the shared `rbr/unknown` ("RBR car"): runs and PBs are kept, nothing is learnt per car.
-  Where Oversteer finds an install by itself, `Cars.ini [Car05/06] RSFCarID` gives the exact car (`rbr/<id>`, name,
+  rpm) and gear count (6); over RSF's 103 cars only half are unique even by published mass, balance and gears.
+  Where Oversteer finds an install by itself, `Cars.ini [Car<slot>] RSFCarID` gives the exact car (`rbr/<id>`, name,
   drivetrain, gears).
-  The best further step, not built: identify the car from its gear ratios once shifted (the ratios between gears do not
-  depend on the tyre radius; the shift learner already learns them per gear), against ratios from the physics packs'
-  `common.lsp`. Only the 9 packs installed locally have them, not RSF's 103 cars.
+- **Cars from their gearing** (`oversteer/rbr_fingerprint.py`, no install, no setup). `car.speed` reads the wheels, so
+  rpm / (car.speed / 3.6) in each gear, clutch up, is the gearing itself (wheelspin and slides included: within 0.3 % of
+  the physics files on the captures, 0.1-0.3 % between gears; the ground-speed vector reads 4-9 % off). The steps
+  between the gears (the drop gear and a setup's drop gear option scale every gear alike: 19:18 reads 0.914) are matched,
+  once 3 gears have 30 samples each (half a second of driving in each), against: the gearing the install named in that
+  car slot before; the car table (one car fits: `rbr/<id>`; several: the candidate set in that slot, `rbr/11+104@6`,
+  "Ford Fiesta WRC 2019 / Hyundai i20 Coupe WRC 2021 (car slot 6)", with the table's data where all candidates' agree,
+  as the Fiesta's and i20's do: one gear list, drop gear, limiter, torque within 2 %); the cars met before in that slot
+  (`<data>/oversteer/rbr/cars.json`); else a car of its own, `rbr/g<n>`, "RBR car #n (6 gears)", from 4 gears. A car
+  is changed only in the menus: a stage loaded after 30 s of silence, another stage or another slot begins an epoch; the
+  car before carries on as provisional (lights yes, learning no) until its gearing confirms or corrects it, and the
+  session of an epoch is re-keyed when its car becomes known (`ShiftLearner.recognise`). On the captures (no install,
+  replayed in order): the Fiesta (slot 5) is `rbr/11+104@5` after 118 and 141 m (19:02, 19:04; 18:54 and 18:57 never
+  leave 1st gear: unknown), the i20 (slot 6) `rbr/11+104@6` after 82, 45 and 50 m (19:06, 19:14, 19:18, the last on
+  the 0.914 drop gear); the same keys replayed against a read-only library. With the Fiesta alone in the table every
+  capture is `rbr/11` (the i20 too: a car the table lacks that shares a gearbox with one it has is taken for it); with
+  no table the i20 is `rbr/g1` in all three, the Fiesta's three gears are too few for a key of its own.
 - **The car table** (`data/telemetry/cars/rbr.json`, built by `research/rbr/car_table.py`): a name for every RSF car id
   (`names`, key `rbr/<RSFCarID>`, 102 cars, with path, year, drivetrain and gear count; `car_data.display_name`, which the
   decoder uses when the install gave the key but no name), and for the cars whose NGP physics the install has held (today

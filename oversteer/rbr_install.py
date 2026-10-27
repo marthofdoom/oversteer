@@ -4,10 +4,9 @@
 Where an install is found without being told (the usual Lutris, Bottles, Heroic, Steam and Wine places, and the
 game path in Lutris' game files; no setting, no environment variable) it adds what no shipped table can:
 
-- `Cars/Cars.ini` `[Car05]` `RSFCarID` (RSF writes it when a stage loads) with `rsfdata/cache/cars.json` (name) and
-  `cars_data.json` (drivetrain, gearbox): the exact car. Without an install the packets give no reliable car (the
-  slot is always 5 or 6, and cars with the same mass, balance, idle and redline cannot be told apart), so the car
-  key is the shared `rbr/unknown`.
+- `Cars/Cars.ini` `[Car<slot>]` `RSFCarID` (RSF writes it when a stage loads) with `rsfdata/cache/cars.json` (name)
+  and `cars_data.json` (drivetrain, gearbox): the exact car. Without an install the packets name no car: the key is
+  the shared `rbr/unknown` until rbr_fingerprint tells the car from its gearing.
 - `rsfdata/cache/stages_data.json` and `Maps/Tracks.ini`: custom stages the shipped table lacks, and corrections;
   built into `<data>/oversteer/rbr/stages.json` (the format of data/telemetry/stages) until the install's files
   change, then merged over the shipped table by stage_tables.load.
@@ -31,7 +30,7 @@ SLOT = 5                                             # RSF puts the chosen car i
 SURFACE_RSF = {1: 'tarmac', 2: 'gravel', 3: 'snow'}  # stages_data.json surface_id
 SURFACE_TRACKS_INI = {0: 'tarmac', 1: 'gravel', 2: 'snow'}   # Maps/Tracks.ini Surface
 ROOT_RECHECK = 30.0                                  # s between looks for an install that was not found
-UNKNOWN_CAR = 'rbr/unknown'                          # a car the files do not name: shared, so nothing is learnt under it
+UNKNOWN_CAR = 'rbr/unknown'                          # a car not known (yet): shared, so nothing is learnt under it
 CAR_RECHECK = 2.0                                    # s between looks at Cars.ini (RSF rewrites it at a stage load)
 _FOLDERS = ('Richard Burns Rally', 'RBR', 'Games/Richard Burns Rally', 'Games/RBR', 'RallySimFans',
             'Program Files (x86)/Richard Burns Rally', 'Program Files/Richard Burns Rally')

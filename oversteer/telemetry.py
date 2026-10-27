@@ -793,6 +793,16 @@ class Telemetry:
                              source[2] or 'telemetry', self._source[2] or 'telemetry')
                 logging.debug("telemetry: ignored source %s, active source %s", source[1], self._source[1])
             return
+        recognise = getattr(self.learner, 'recognise', None) if sample.game == 'rbr' else None
+        if recognise is not None:
+            # Richard Burns Rally names no car: the learner tells it from the gearing (rbr_fingerprint) before
+            # anything here reads sample.car
+            try:
+                recognise(now, sample)
+            except Exception:
+                if self._learner_error_at is None or now - self._learner_error_at >= LEARNER_ERROR_EVERY:
+                    self._learner_error_at = now
+                    logging.exception("rbr car recognition")
         rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
         self.live = sample
         self.last_packet = now

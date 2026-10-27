@@ -1264,6 +1264,58 @@ class Store(Reader):
             self._do('DELETE FROM cars WHERE id = ?', (car,))
         return not learnt
 
+    def _drop_car_potentials(self, cars):
+        """Forget the stored potentials and envelopes of `cars` (ids): their runs moved, so they are built again from
+        the runs they have now (potentials_missing, potential.recompute)."""
+        for car in cars:
+            for table in ('stage_potential', 'envelopes'):
+                try:
+                    self._do('DELETE FROM {} WHERE car = ?'.format(table), (car,))
+                except sqlite3.OperationalError:
+                    pass                                  # (a file without the potential tables yet)
+
+    def move_session(self, session, car):
+        """The session (its runs, changes of gear and metrics with it) belongs to another car: a Richard Burns Rally
+        car told from its gearing only after the session began (rbr_fingerprint). Nothing is deleted."""
+        row = self._do('SELECT car FROM sessions WHERE id = ?', (session,)).fetchone()
+        if row is None or row[0] == car:
+            return
+        self._do('UPDATE sessions SET car = ? WHERE id = ?', (car, session))
+        self._drop_car_potentials((row[0], car))
+
+    def merge_car(self, profile, old_key, new_key, name=None):
+        """Everything of the car `old_key` becomes `new_key`'s (a Richard Burns Rally car known by a key of ours that
+        the shipped table now names): its sessions with their runs, tunes and coaching state move, the richer of the
+        two models is kept, then the emptied row goes. With no row of `new_key` the row is renamed. Returns the
+        number of sessions moved. Runs, traces and PBs are moved, never deleted."""
+        old = self._do('SELECT id, model, name, user_named FROM cars WHERE profile = ? AND key = ?',
+                       (profile, old_key)).fetchone()
+        if old is None:
+            return 0
+        new = self._do('SELECT id, model FROM cars WHERE profile = ? AND key = ?', (profile, new_key)).fetchone()
+        sessions = self._do('SELECT COUNT(*) FROM sessions WHERE car = ?', (old[0],)).fetchone()[0]
+        game = new_key.split('/', 1)[0]
+        if new is None:
+            self._do('UPDATE cars SET key = ?, game = ?, name = CASE WHEN user_named THEN name ELSE ? END '
+                     'WHERE id = ?', (new_key, game, name, old[0]))
+            self._drop_car_potentials((old[0],))
+            return sessions
+
+        def samples(text):
+            try:
+                return sum(len(v) for v in (json.loads(text).get('ratios') or {}).values())
+            except (ValueError, AttributeError, TypeError):
+                return 0
+        if samples(old[1]) > samples(new[1]):
+            self._do('UPDATE cars SET model = ? WHERE id = ?', (old[1], new[0]))
+        self._do('UPDATE sessions SET car = ? WHERE car = ?', (new[0], old[0]))
+        self._do('UPDATE tunes SET car = ? WHERE car = ?', (new[0], old[0]))
+        self._do('UPDATE OR IGNORE coach_state SET car = ? WHERE car = ?', (new[0], old[0]))
+        self._drop_car_potentials((old[0], new[0]))
+        self._do('DELETE FROM coach_state WHERE car = ?', (old[0],))
+        self._do('DELETE FROM cars WHERE id = ?', (old[0],))
+        return sessions
+
     def rename_car(self, profile, key, name):
         self._do('UPDATE cars SET name = ?, user_named = 1, updated = ? WHERE profile = ? AND key = ?',
                  (name, time.time(), profile, key))

@@ -51,7 +51,7 @@ import statistics
 import threading
 import time
 
-from . import car_data
+from . import car_data, rbr_fingerprint, rbr_install
 from .telemetry_formats import plan_xyz
 
 POWER_BIN = 100                  # rpm per power band
@@ -153,6 +153,11 @@ def shared_car(key):
     would drive the lights in the next, so nothing about the car is
     learnt under such a key."""
     return key is not None and key.endswith('/unknown')
+
+
+def model_samples(car):
+    """How much a model has learnt (its ratio samples): of two models of one car, the richer is kept."""
+    return sum(len(v) for v in car.ratios.values())
 
 
 def _median(values):
@@ -1079,6 +1084,11 @@ class ShiftLearner:
         self._lights = None                 # publish(): (car key, surface, {gear: best_for()}) for the listener
         self._bands = {}                    # key -> (monotonic time, best_bands())
         self.run_surface = {}               # run number -> its surface, once its stage is known (drive-log thread)
+        # Richard Burns Rally names no car: its gearing does (rbr_fingerprint). The library is only read here; the app
+        # makes it writable (replays and tests must not change the user's)
+        self.rbr_cars = rbr_fingerprint.Recogniser()
+        self._rbr_epoch = None              # the epoch of the last RBR packet fed
+        self._provisional = False           # its car is the last epoch's, not confirmed: nothing is learnt
         if database is not None:
             self.open(database)
 
@@ -1203,7 +1213,24 @@ class ShiftLearner:
         return name or car.name
 
     def _load_locked(self, key, name, game=None):
+        self.car = self._model_locked(key, name, game)
+        self._reset_motion()
+        self.session_limiter_time = 0.0
+        self.session_held_time = 0.0
+
+    def _stored_model(self, key):
+        reader = self._reader()
+        try:
+            row = reader.car(self.profile, key) if reader is not None else None
+            return CarModel.from_dict(dict(row['model'], key=key)) if row is not None and row['model'] else None
+        except Exception as e:
+            logging.warning("shift learner: can't read %s: %s", key, e)
+            return None
+
+    def _model_locked(self, key, name, game=None):
+        """The model of `key`: the one in memory, the stored one, or a new one; kept in memory."""
         car = self._models.get(key)
+        row = None
         reader = self._reader() if car is None else None
         if reader is not None:
             try:
@@ -1220,14 +1247,13 @@ class ShiftLearner:
                     logging.warning("shift learner: can't read %s: %s", key, e)
         if car is None:
             car = CarModel(key, name)
+        elif name and rbr_fingerprint.fingerprint_key(key) and not (row or {}).get('user_named'):
+            car.name = name                                  # 'RBR car #2 (6 gears)': the gear count grows
         car.game = car.game or game
         if self.car is None or self.car.key != key:
             logging.info("car recognised: %s (%s)", key, car.game or 'unknown game')
         self._models[key] = car
-        self.car = car
-        self._reset_motion()
-        self.session_limiter_time = 0.0
-        self.session_held_time = 0.0
+        return car
 
     def _save_locked(self, force=False):
         """Have the drive log write the current car's model (at most every
@@ -1341,6 +1367,10 @@ class ShiftLearner:
         """End the session and write everything (quitting, a profile
         switch): waits for the drive log."""
         with self.lock:
+            self._rbr_events_locked(self.rbr_cars.close())
+            if self.runs.run is not None and self._provisional:
+                self.runs.end(self._last_feed or 0.0, 'session')
+            self._unconfirmed_locked()
             self._end_session_locked()
             self._save_locked()
         if self.log is not None:
@@ -1576,6 +1606,10 @@ class ShiftLearner:
             if self._session_lost:
                 self._session_lost = False
                 self._end_session_locked()
+            if sample.car_epoch is not None:
+                self._rbr_epoch_locked(now, sample)
+            else:
+                self._provisional = False
             if self.car is None or self.car.key != sample.car:
                 self._end_session_locked()
                 self._save_locked()
@@ -1595,13 +1629,106 @@ class ShiftLearner:
             if self.log is not None:
                 self.runs.feed(now, sample, throttle, self.session, self.profile)
             self._press = press
-            if not shared_car(car.key) and car.set_limiter(limiter, limiter_source):
+            if self._learns(car) and car.set_limiter(limiter, limiter_source):
                 self._dirty = True
             if sample.game == 'rbr' and not self._rbr_due(sample.steps):
                 return                  # the shift learner's windows are made for 60 packets a second, not 720
             self._feed_locked(car, now, sample, throttle, clutch)
             if self._dirty and now - self._saved_at > SAVE_EVERY:
                 self._save_locked()
+
+    def _learns(self, car):
+        """Whether what the car does is learnt into its model: not under a key cars share, nor while a Richard
+        Burns Rally car is only carried over from the last epoch (it may be another one)."""
+        return not shared_car(car.key) and not self._provisional
+
+    # -- Richard Burns Rally: the car from its gearing (rbr_fingerprint) --
+
+    def recognise(self, now, sample):
+        """The listener, for each decoded RBR packet before anything reads its car: sample.car, car_name, car_epoch
+        and car_provisional set from the gearing. The library's writes and the adoption of a car the table now
+        names go to the drive log."""
+        with self.lock:
+            events = self.rbr_cars.identify(now, sample)
+            self._rbr_events_locked(events)
+
+    def _rbr_events_locked(self, events):
+        for event in events:
+            if event[0] == 'save':
+                library = self.rbr_cars.library
+                if not library.writable:
+                    continue
+                if self.log is not None:
+                    self.log.post(library.write, event[1])
+                else:
+                    library.write(event[1])
+            elif event[0] == 'adopt':
+                old, new = event[1], event[2]
+                # What was learnt under our key carries on under the table's, as the store keeps the richer model
+                was = self._models.pop(old, None) or self._stored_model(old)
+                there = self._models.get(new) or self._stored_model(new)
+                if was is not None and (there is None or model_samples(was) > model_samples(there)):
+                    car = was.copy()
+                    car.key, car.name = new, car_data.display_name(new) or new
+                    self._models[new] = car
+                if self.log is not None:
+                    self.log.post(self._write_adopt, self.profile, old, new)
+
+    def _rbr_epoch_locked(self, now, sample):
+        """A new epoch (the car may have changed in RSF's menus) ends the session: the next one is re-keyed on its
+        own when its car is known. Within an epoch a new key is the same car told at last (or told right): the
+        session and run go on under it (_rekey_locked)."""
+        epoch, self._rbr_epoch = self._rbr_epoch, sample.car_epoch
+        if epoch is not None and epoch != sample.car_epoch:
+            if self.runs.run is not None:
+                self.runs.end(now, 'restart')                # a stage load: as the run tracker would have ended it
+            self._unconfirmed_locked()
+            self._end_session_locked()
+        elif epoch == sample.car_epoch and self.car is not None and self.car.key != sample.car:
+            self._rekey_locked(sample.car, sample.car_name, sample.game, sample.gears)
+        self._provisional = bool(sample.car_provisional)
+
+    def _unconfirmed_locked(self):
+        """An epoch ends with its car still provisional (never driven far enough in three gears to confirm it):
+        its session is kept apart under the shared key, as it may have been another car."""
+        if self._provisional and self.car is not None and not shared_car(self.car.key):
+            self._rekey_locked(rbr_install.UNKNOWN_CAR, 'RBR car', 'rbr')
+        self._provisional = False
+
+    def _rekey_locked(self, key, name, game, gears=None):
+        old = self.car
+        car = self._model_locked(key, name, game)
+        self.car = car
+        self._shift_cache, self._lights = {}, None
+        logging.info("rbr car: session %s re-keyed from %s to %s", self.session, old.key, car.key)
+        if self.log is not None and self.session is not None:
+            self.log.post(self._write_rekey, self.session, self.profile, car, old.key)
+        self.runs.rekey(car.key, gears)
+
+    def _write_rekey(self, number, profile, car, old_key):
+        """Drive-log thread: the session (its runs, changes of gear, metrics) is the car's now. The stored
+        potentials of both cars on its stages go, to be built again (potentials_missing); the old car's row goes if
+        nothing is left in it."""
+        row = self._session_rows.get(number)
+        if row is None:
+            return
+        store = self.log.store
+        with self.lock:
+            data = car.to_dict()
+        car_id = store.car_id(profile, car.key, car.game or 'rbr', car.name, data)
+        store.move_session(row[0], car_id)
+        self._session_rows[number] = (row[0], car_id)
+        store.drop_car_if_empty(row[1])
+        return True
+
+    def _write_adopt(self, profile, old_key, new_key):
+        """Drive-log thread: a car known under a key of ours that the shipped table now names alone: its sessions,
+        tunes and model move to the table's key (Store.merge_car); nothing of it is lost."""
+        moved = self.log.store.merge_car(profile, old_key, new_key, car_data.display_name(new_key))
+        if moved:
+            logging.info("rbr car: %s is %s now, %d sessions moved", old_key, new_key, moved)
+        self.history_changed += 1
+        return True
 
     def _rbr_time(self, now, steps):
         """Richard Burns Rally's packets come in bursts that share one arrival time: its own clock, the physics
@@ -1691,7 +1818,7 @@ class ShiftLearner:
 
         clutch_out = clutch is None or clutch <= CLUTCH_OUT
         settled = now - self._gear_since >= SETTLED
-        if gear < 1 or speed < MIN_SPEED or not clutch_out or not settled or shared_car(car.key):
+        if gear < 1 or speed < MIN_SPEED or not clutch_out or not settled or not self._learns(car):
             return
         if flat_out and rpm > car.top_seen:
             car.top_seen = rpm
@@ -1817,7 +1944,7 @@ class ShiftLearner:
         start, peak, throttle, left_at, via_neutral, slip = left
         up = to > start
         flat_out = up and (throttle is None or throttle >= SHIFT_THROTTLE)
-        if up and to == start + 1 and flat_out:
+        if up and to == start + 1 and flat_out and not self._provisional:
             shifts = car.upshifts.setdefault(start, [])
             shifts.append(peak)
             del shifts[:-SHIFTS_KEEP]

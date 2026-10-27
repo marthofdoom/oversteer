@@ -109,8 +109,15 @@ def set_cars(value):
 
 def entry(key):
     """The shipped entry of a car key ('acr/Skoda Fabia RS Rally2'), or
-    None."""
-    return cars().get(key) if key else None
+    None. A Richard Burns Rally candidate set ('rbr/11+104@6': cars one
+    gearbox fits) has the data its candidates share (rbr_fingerprint)."""
+    if not key:
+        return None
+    found = cars().get(key)
+    if found is None and key.startswith('rbr/') and '@' in key:
+        from . import rbr_fingerprint
+        found = rbr_fingerprint.shared_entry(key)
+    return found
 
 
 def torque(entry, rpm):
