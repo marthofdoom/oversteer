@@ -355,9 +355,11 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
   share. A gear set neither fitting nor missing counts as a miss 1 km into an epoch. A car is changed only in the menus:
   a stage loaded after 30 s of silence, another stage or another slot begins an epoch; the car before carries on as
   provisional (lights yes, learning no) until its gearing confirms or corrects it, every session of the epoch is
-  re-keyed when its car becomes known (`ShiftLearner.recognise`), and back to `rbr/unknown` if it never is; a known
-  car's gearing is checked again after each stage load, and a miss (a quicker trip to the menus) begins an epoch. A PB
-  whose run moves keeps its trace (`pb_keep`). On the captures (no install,
+  re-keyed when its car becomes known (`ShiftLearner.recognise`), and back to `rbr/unknown` if it never is; after a
+  stage load within an epoch (a restart, or a trip to the menus quicker than 30 s) the car is provisional again until
+  the gearing since the load fits it (nothing learnt meanwhile), and a miss begins an epoch with the runs since the
+  load moved to `rbr/unknown`. A PB whose run moves keeps its trace (`pb_keep`, ported by the merge script, a
+  duplicate's mark kept on the copy that stays). On the captures (no install,
   replayed in order): the Fiesta (slot 5) is `rbr/11+104@5` after 118 and 141 m (19:02, 19:04; 18:54 and 18:57 never
   leave 1st gear: unknown), the i20 (slot 6) `rbr/11+104@6` after 82, 45 and 50 m (19:06, 19:14, 19:18, the last on
   the 0.914 drop gear); the same keys replayed against a read-only library. With the Fiesta alone in the table the

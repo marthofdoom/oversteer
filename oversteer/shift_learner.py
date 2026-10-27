@@ -1090,6 +1090,8 @@ class ShiftLearner:
         self._rbr_epoch = None              # the epoch of the last RBR packet fed
         self._provisional = False           # its car is the last epoch's, not confirmed: nothing is learnt
         self._epoch_sessions = []           # the session numbers begun in that epoch: what a re-key moves
+        self._recheck_from = None           # the stage was loaded again in the epoch: the runs numbered past this
+                                            # are re-checked (provisional), and go apart if they were another car's
         self._session_ids = {}              # session number -> sessions.id, kept after its end; drive-log thread only
         self._rbr_posts = collections.deque()   # re-keys, adoptions, library writes the drive log's full queue refused
         if database is not None:
@@ -1315,6 +1317,7 @@ class ShiftLearner:
             del self._session_batch[number]
         for number in [n for n, b in runs.run_batch.items() if b == batch]:
             runs.run_rows.pop(number, None)
+            runs.run_ids.pop(number, None)
             del runs.run_batch[number]
         if lost:
             self._session_lost = True
@@ -1381,6 +1384,7 @@ class ShiftLearner:
             if self.runs.run is not None and self._provisional:
                 self.runs.end(self._last_feed or 0.0, 'session')
             self._unconfirmed_locked()
+            self._rbr_flush_locked()
             self._end_session_locked()
             self._save_locked()
         if self.log is not None:
@@ -1694,7 +1698,7 @@ class ShiftLearner:
                 continue                                 # a replay or a test: the user's library and cars stay
             if event[0] == 'save':
                 if self.log is not None:
-                    self._rbr_post_locked(library.write, event[1])
+                    self._rbr_post_locked(self._write_library, event[1])
                 else:
                     library.write(event[1])
             elif event[0] == 'adopt':
@@ -1721,14 +1725,40 @@ class ShiftLearner:
             self._epoch_sessions = []
         elif epoch == sample.car_epoch and self.car is not None and self.car.key != sample.car:
             self._rekey_locked(sample.car, sample.car_name, sample.game, sample.gears)
+        elif epoch == sample.car_epoch and sample.car_provisional and not self._provisional:
+            # The stage was loaded again within the epoch: the car is re-checked; what is driven from here is kept
+            # apart if it turns out to be another car's
+            if self.runs.run is not None:
+                self.runs.end(now, 'restart')                # (as the run tracker would have ended it on this packet)
+            self._recheck_from = self.runs._runs
+        if not sample.car_provisional:
+            self._recheck_from = None                        # (confirmed again)
         self._provisional = bool(sample.car_provisional)
 
     def _unconfirmed_locked(self):
         """An epoch ends with its car still provisional (never driven far enough in three gears to confirm it):
-        its sessions are kept apart under the shared key, as it may have been another car."""
+        its sessions are kept apart under the shared key, as it may have been another car. Where the car was known
+        and only re-checked after a stage load, only the runs since that load go apart (_write_split)."""
         if self._provisional and self.car is not None and not shared_car(self.car.key):
-            self._rekey_locked(rbr_install.UNKNOWN_CAR, 'RBR car', 'rbr')
+            if self._recheck_from is not None:
+                numbers = list(range(self._recheck_from + 1, self.runs._runs + 1))
+                logging.info("rbr car: runs %s since the stage load kept apart from %s", numbers, self.car.key)
+                if numbers:
+                    self._rbr_post_locked(self._write_split, numbers, self.profile)
+            else:
+                self._rekey_locked(rbr_install.UNKNOWN_CAR, 'RBR car', 'rbr')
         self._provisional = False
+        self._recheck_from = None
+
+    def _write_split(self, numbers, profile):
+        """Drive-log thread: the runs `numbers` (driven since a stage load, then found to be another car's) go to a
+        session of their own under the shared key (Store.split_runs; their PBs keep their traces)."""
+        store = self.log.store
+        runs = [self.runs.run_ids[n] for n in numbers if n in self.runs.run_ids]
+        if runs:
+            car = store.car_id(profile, rbr_install.UNKNOWN_CAR, 'rbr', 'RBR car', {})
+            store.split_runs(runs, car)
+        return True
 
     def _rekey_locked(self, key, name, game, gears=None):
         old = self.car
@@ -1760,6 +1790,13 @@ class ShiftLearner:
                 emptied.add(old)
         for old in emptied:
             store.drop_car_if_empty(old)
+        return True
+
+    def _write_library(self, data):
+        """Drive-log thread: the library is written once what was posted before it (an adoption's merge) is
+        committed; if that commit fails it is not written, so the adoption is done again at the next start."""
+        library = self.rbr_cars.library
+        self.log.after_commit(lambda: library.write(data))
         return True
 
     def _write_adopt(self, profile, old_key, new_key):

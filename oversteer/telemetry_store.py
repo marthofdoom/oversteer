@@ -1277,15 +1277,16 @@ class Store(Reader):
             self._do('DELETE FROM cars WHERE id = ?', (car,))
         return not learnt
 
-    def _drop_potentials_of(self, sessions, cars):
-        """Forget the stored potentials of `cars` (ids) on the stages the runs of `sessions` were driven on, and their
-        envelopes on those runs' surfaces: those runs moved, so they are built again from the runs each car has now
-        (potentials_missing, potential.recompute). Nothing else is touched."""
+    def _drop_potentials_of(self, sessions, cars, column='session'):
+        """Forget the stored potentials of `cars` (ids) on the stages the runs of `sessions` (or, with column 'id',
+        the runs of those ids) were driven on, and their envelopes on those runs' surfaces: those runs moved, so they
+        are built again from the runs each car has now (potentials_missing, potential.recompute). Nothing else is
+        touched."""
         marks = ', '.join('?' * len(sessions))
-        stages = [r[0] for r in self._do('SELECT DISTINCT stage FROM runs WHERE stage IS NOT NULL AND session IN ({})'
-                                         .format(marks), tuple(sessions)).fetchall()]
-        surfaces = [r[0] for r in self._do('SELECT DISTINCT surface FROM runs WHERE surface IS NOT NULL AND session '
-                                           'IN ({})'.format(marks), tuple(sessions)).fetchall()]
+        stages = [r[0] for r in self._do('SELECT DISTINCT stage FROM runs WHERE stage IS NOT NULL AND {} IN ({})'
+                                         .format(column, marks), tuple(sessions)).fetchall()]
+        surfaces = [r[0] for r in self._do('SELECT DISTINCT surface FROM runs WHERE surface IS NOT NULL AND {} '
+                                           'IN ({})'.format(column, marks), tuple(sessions)).fetchall()]
         for car in cars:
             try:
                 for stage in stages:
@@ -1314,6 +1315,26 @@ class Store(Reader):
         self._do('UPDATE sessions SET car = ? WHERE id = ?', (car, session))
         self._drop_potentials_of((session,), (row[0], car))
         return row[0]
+
+    def split_runs(self, runs, car):
+        """The runs (ids, of one session) go to a session of their own under `car` (an id): driven after a stage load
+        in a car that turned out not to be the session's (rbr_fingerprint's re-check). Their changes of gear and
+        metrics go with them; every PB of either car keeps its trace (protect_pbs). Returns the new session's id, or
+        None where there was nothing to move."""
+        marks = ', '.join('?' * len(runs))
+        rows = self._do('SELECT r.session, s.car, MIN(r.started) FROM runs r JOIN sessions s ON s.id = r.session '
+                        'WHERE r.id IN ({}) GROUP BY r.session'.format(marks), tuple(runs)).fetchall()
+        if len(rows) != 1:
+            return None
+        old, old_car, started = rows[0]
+        self.protect_pbs((old_car, car))
+        self._drop_potentials_of(runs, (old_car, car), column='id')
+        new = self._do('INSERT INTO sessions (profile, car, game, started, ended, track, stage) SELECT profile, ?, '
+                       'game, ?, ended, track, stage FROM sessions WHERE id = ?', (car, started, old)).lastrowid
+        for table, column in (('runs', 'id'), ('shifts', 'run'), ('metrics', 'run')):
+            self._do('UPDATE {} SET session = ? WHERE {} IN ({})'.format(table, column, marks), (new,) + tuple(runs))
+        self.summarise_session(new)
+        return new
 
     def merge_car(self, profile, old_key, new_key, name=None):
         """Everything of the car `old_key` becomes `new_key`'s (a Richard Burns Rally car known by a key of ours that

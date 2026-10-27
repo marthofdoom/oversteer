@@ -384,6 +384,7 @@ class RunTracker:
         self.run = None                  # the run going on: a number, its row id is the drive log's
         self._runs = 0
         self.run_rows = {}               # run number -> runs.id; drive-log thread only
+        self.run_ids = {}                # the same, kept after the run's end (a re-check's split); drive-log thread only
         self.end_mono = {}               # run number -> time.monotonic() when it ended, for the analysis latency log
         self.run_batch = {}              # run number -> the drive log's batch its row was written in
         self._live_loaded = set()        # run numbers whose live reference was looked up; drive-log thread only
@@ -1059,6 +1060,9 @@ class RunTracker:
             # No RSF install to name it from: "RBR stage <map id>", its length from the packet (distanceToEnd at the start)
             store.upsert_stage(stage, game, stage_length, name='RBR stage {}'.format(stage.split(':', 1)[1]))
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
+        self.run_ids[number] = self.run_rows[number]
+        for old in [k for k in self.run_ids if k < number - 64]:
+            del self.run_ids[old]
         if spline is not None and game in ('acr', 'rbr'):    # only ACR's and RBR's lap_distance is a place on the road
             store.set_run_start(self.run_rows[number], spline)
         self.run_batch[number] = learner.log.batch

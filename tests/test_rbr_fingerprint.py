@@ -253,7 +253,9 @@ def test_a_restart_keeps_the_car_and_a_trip_to_the_menus_makes_it_provisional(ta
     assert sample.car == 'rbr/11' and sample.car_epoch == 1
     drive.load(gap=15.0)                                                   # a restart from the pause menu
     sample, _ = identify(rec, drive, drive.through([1], 1.5))
-    assert sample.car == 'rbr/11' and sample.car_epoch == 1 and not sample.car_provisional
+    assert sample.car == 'rbr/11' and sample.car_epoch == 1 and sample.car_provisional     # re-checked...
+    sample, _ = identify(rec, drive, drive.through([2, 3], 1.0))
+    assert sample.car == 'rbr/11' and sample.car_epoch == 1 and not sample.car_provisional  # ...and fits again
     drive.load(gap=fp.MENU_GAP + 1)                                        # the menus: the car may have changed
     sample, _ = identify(rec, drive, drive.through([1], 0.2))
     assert sample.car == 'rbr/11' and sample.car_epoch == 2 and sample.car_provisional
@@ -587,3 +589,75 @@ def test_merging_a_car_keeps_every_pb(tmp_path):
     assert store._do('SELECT COUNT(*) FROM runs').fetchone()[0] == 2
     assert store.prune_traces(cap=1) == 0
     assert {r[0] for r in store._do('SELECT run FROM traces')} == {runs['a1'], runs['b1']}
+
+
+# -- the re-review's fixes --
+
+def test_after_a_quick_restart_nothing_is_learnt_until_the_gearing_fits_and_another_cars_runs_go_apart(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC), 'rbr/106': entry('106', OTHER, 7500)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/11' and not learner._provisional
+    fiesta = learner.car
+    learnt = {g: len(v) for g, v in fiesta.ratios.items()}
+    drive.load(gap=15.0)                                                   # a quick trip: the Fabia, the same stage
+    drive.gears = OTHER
+    feed(telemetry, drive, drive.through([1], 8.0) + drive.through([2], 2.5))
+    assert learner.car is fiesta and learner._provisional                  # the lights still use it...
+    assert {g: len(v) for g, v in fiesta.ratios.items()} == learnt         # ...nothing is learnt under it
+    feed(telemetry, drive, drive.through([3, 2, 1, 2, 3], 2.5))
+    assert learner.car.key == 'rbr/106'
+    assert {g: len(v) for g, v in fiesta.ratios.items()} == learnt
+    learner.close()
+    # the Fiesta's run stays; the run driven since the load (before the miss) goes to the shared key
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/106', 1, 1), ('rbr/11', 1, 1), ('rbr/unknown', 1, 1)]
+
+
+def test_a_quick_restart_in_the_same_car_learns_again_once_it_fits(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    drive.load(gap=15.0)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/11' and not learner._provisional and learner._recheck_from is None
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/11', 1, 2)]       # one session, both runs
+
+
+def test_with_no_names_read_no_lone_fit_is_taken_for_the_car(table):
+    table.set({'rbr/11': entry('11', WRC)})
+    fp.set_names({})                                                       # the table's names could not be read
+    rec, drive = fp.Recogniser(fp.Library()), Drive(slot=6)
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11@6'
+
+
+def test_the_library_is_written_only_once_the_writes_before_it_are_committed(table, tmp_path):
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    learner.rbr_cars.library.writable = True
+    data = fp.Library().snapshot()
+    learner.log._handle(learner._write_library, (data,))
+    assert not os.path.exists(fp.library_path())                           # not before the commit...
+    learner.log._run_after_commit()
+    assert json.loads(open(fp.library_path()).read())['version'] == fp.VERSION    # ...after it
+    learner.log._handle(learner._write_library, (dict(data, last={'key': 'x', 'slot': 1}),))
+    learner.log._after_commit = []                                         # a commit that failed drops it
+    assert json.loads(open(fp.library_path()).read())['last'] is None
+    learner.close()
+
+
+def test_split_runs_move_with_their_shifts_and_metrics_and_keep_every_pb(tmp_path):
+    store, a, b, sa, sb, runs = _store_with_runs(tmp_path)
+    store._do('INSERT INTO shifts (session, run, at, gear, gear_to, direction, rpm) VALUES (?, ?, 1.0, 2, 3, '
+              "'up', 7000.0)", (sa, runs['a1']))
+    store._do("INSERT INTO metrics (session, run, name, value, count) VALUES (?, ?, 'x', 1.0, 1)", (sa, runs['a1']))
+    new = store.split_runs([runs['a1']], b)
+    assert store._do('SELECT car FROM sessions WHERE id = ?', (new,)).fetchone()[0] == b
+    for table in ('runs', 'shifts', 'metrics'):
+        column = 'id' if table == 'runs' else 'run'
+        assert store._do('SELECT session FROM {} WHERE {} = ?'.format(table, column), (runs['a1'],)).fetchone()[0] == new
+    assert {r[0] for r in store._do('SELECT run FROM pb_keep')} == {runs['a1'], runs['b1']}
+    assert store.prune_traces(cap=1) == 0
+    assert store.split_runs([], b) is None
