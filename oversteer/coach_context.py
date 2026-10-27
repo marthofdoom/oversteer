@@ -1010,6 +1010,7 @@ def steer_before(t, steer, lag, first, last):
 COUNTER_DELTA = 0.15             # share of a corner steered against the yaw, more than the reference's: over-rotated
 SECTION_MIN = 0.1                # s a section must lose, or gain, to be named
 START_SLACK = 5.0                # m a run may start past the grid's first section's start and still be timed through it
+GO_WITHIN = 1.0                  # s: a game-clock run whose first row is this near the clock's 0 began at the go (RBR's sectors)
 END_SLACK = 15.0                 # m a run may stop short of the grid's last section and still be timed through it
 EXIT_REACH = 150.0               # m past a section's yaw window that its exit is timed to at most (the rest is a straight)
 
@@ -1595,7 +1596,25 @@ def analyse(summary, rows, corners, shifts, context, started=None, reference=Non
             'spreads': spreads}
 
 
-def sector_times(trace, bounds, shift=0.0, game_clock=False, result_time=None):
+def began_at_go(trace):
+    """Whether a run on the game's clock began at the go: its first row is within GO_WITHIN of the clock's 0."""
+    return bool(trace) and _fin(trace[0][CH['t']]) and trace[0][CH['t']] <= GO_WITHIN
+
+
+def sector_go(stage, trace, recorded):
+    """(usable, from_go) for a run's sectors: ACR's are (True, None), judged by distance. RBR's are judged by the
+    clock: `from_go` is began_at_go(trace), and a run with no recorded start (`recorded`) that did not begin at the go
+    is not usable (its distance 0 is not the start line, and nothing else says where it is)."""
+    if not (stage or '').startswith('rbr:'):
+        return True, None
+    go = began_at_go(trace)
+    return recorded is not None or go, go
+
+
+LAST_SECTOR_STOP = 0.5           # s: the result ends the last sector when it is this close after the line's crossing (a row and the clock's step)
+
+
+def sector_times(trace, bounds, shift=0.0, game_clock=False, result_time=None, from_go=None):
     """{sector index: seconds} of the sectors `bounds` ([(d0, d1)] m driven from the stage's start line) a run
     covered end to end (it may stop END_SLACK m short of the last bound), from where its distance crosses each
     line (time_at). `shift`: how much further along the road the run's trace began than the start line (its
@@ -1603,22 +1622,27 @@ def sector_times(trace, bounds, shift=0.0, game_clock=False, result_time=None):
     row, and the last, where the trace stops short of its line (END_SLACK m at most: a 10 Hz row is up to a row's
     distance short), ends at the run's `result_time` where given, else where the last row's speed would have taken it
     there, so the sectors add up to the run's time on either clock (`game_clock`: the trace's t is the game's own
-    stage clock, which starts at the first sector's start too)."""
+    stage clock, which starts at the first sector's start too). `from_go` (RBR: began_at_go of the trace; None for
+    ACR): whether the run began at the go, which says by the clock, not by the distance, whether the first sector is
+    covered: it starts at 0 when so, and is not timed when not."""
     track = along(trace)
     if not track:
         return {}
     out = {}
     for i, (a, b) in enumerate(bounds):
         a, b = a - shift, b - shift
-        if b > track[-1] + END_SLACK or a < track[0] - END_SLACK:
+        if i == 0 and from_go is not None:
+            if not from_go or b > track[-1] + END_SLACK:
+                continue
+        elif b > track[-1] + END_SLACK or a < track[0] - END_SLACK:
             continue
-        if i == 0 and a <= track[0] + END_SLACK:
+        if i == 0 and (from_go if from_go is not None else a <= track[0] + END_SLACK):
             start = 0.0
         else:
             start = time_at(trace, track, a)
         end = time_at(trace, track, min(b, track[-1]))
-        if i == len(bounds) - 1 and game_clock and result_time is not None and end is not None and result_time >= end \
-                and b <= track[-1]:
+        if i == len(bounds) - 1 and game_clock and result_time is not None and end is not None \
+                and 0.0 <= result_time - end <= LAST_SECTOR_STOP and b <= track[-1]:
             end = result_time        # (the game's clock stops at its line: the sparse rows past it would stretch the crossing short)
         elif i == len(bounds) - 1 and b > track[-1] and end is not None:
             speed = trace[-1][CH['speed']]

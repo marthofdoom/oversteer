@@ -47,6 +47,7 @@ import sys
 import unicodedata
 
 GAMES = ('dirt', 'wrcg', 'acr')
+LINES_LENGTH_TOLERANCE = 0.10    # the shipped lines' span against a local entry's length (RSF's, rounded) for the lines to stay
 SINGLE = ('tarmac', 'gravel', 'snow', 'ice')
 MIXED_SHARE = 0.25               # a second surface below this share leaves the stage one surface (section 8.6)
 TRACK_CHARS = 31                 # the bridge sends the shared memory's track name in 32 bytes, NUL included
@@ -127,7 +128,10 @@ def _add_table(tables, table, name, replace=False):
         old = entries.get(key)
         if old and old.get('sector_lines_m') and not entry.get('sector_lines_m'):
             # the install's own list (built from RSF's lists) holds no lines: the shipped ones, read from the .dls, stay
-            entry.update({k: v for k, v in old.items() if k.startswith('sector_lines_')})
+            # while its length agrees with them (a custom stage of the same id is another road)
+            lines, length = old['sector_lines_m'], entry.get('length_m')
+            if not length or abs((lines[-1] - lines[0]) - length) <= LINES_LENGTH_TOLERANCE * length:
+                entry.update({k: v for k, v in old.items() if k.startswith('sector_lines_')})
         entries[key] = entry
 
 

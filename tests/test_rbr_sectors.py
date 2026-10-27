@@ -5,6 +5,7 @@ import pytest
 
 from oversteer import coach_context as cc, run_analysis, stage_tables
 from oversteer.telemetry_formats import decode_sample
+from oversteer.telemetry_store import TRACE_CHANNELS
 from tests.test_drive_log import drive_runs
 from tests.test_rbr import Stage, capture_packets, runs_of
 
@@ -89,3 +90,55 @@ def test_a_synthetic_stage_crossing_the_lines_gives_sectors_that_add_up(tmp_path
     assert found[0]['time'] == pytest.approx((717.0 - 1.5) / speed, abs=0.1)
     assert found[1]['time'] == pytest.approx((1572.7 - 717.0) / speed, abs=0.1)
     learner.close()
+
+
+# -- judged by the clock, not the distance --
+
+LINES = [2695.0, 3295.0, 3895.0, 4495.0]         # a stage whose start marker is far from the driveline's 0 at the go
+
+
+def _rows(first_t, origin=0.0, speed=20.0, dt=0.1, end=4500.0):
+    rows, t = [], first_t
+    while origin + speed * (t - first_t) <= end:
+        rows.append(tuple(t if n == 't' else speed * (t - first_t) if n == 'distance' else
+                          speed if n == 'speed' else 0.0 for n in TRACE_CHANNELS))
+        t += dt
+    return rows
+
+
+def test_a_rbr_run_that_began_at_the_go_is_timed_from_zero_wherever_the_start_marker_is():
+    bounds = [(a - LINES[0], b - LINES[0]) for a, b in zip(LINES, LINES[1:])]
+    rows = _rows(0.3)
+    assert cc.began_at_go(rows) and not cc.began_at_go(_rows(40.0))
+    usable, go = cc.sector_go('rbr:900', rows, None)
+    assert usable and go
+    times = cc.sector_times(rows, bounds, shift=0.0 - LINES[0], game_clock=True, from_go=go)
+    assert times[0] == pytest.approx(0.3 + 3295.0 / 20.0, abs=0.1)           # S1 from the clock's 0, 2695 m from the marker
+    # the distance rule would have started S1 at the marker's crossing, 135 s in
+    assert cc.sector_times(rows, bounds, shift=0.0 - LINES[0], game_clock=True)[0] == pytest.approx(30.0, abs=0.1)
+
+
+def test_a_rbr_run_with_no_recorded_start_that_began_mid_stage_has_no_sectors():
+    rows = _rows(70.0)
+    assert cc.sector_go('rbr:900', rows, None) == (False, False)
+    assert cc.sector_go('rbr:900', rows, 500.0) == (True, False)             # a recorded start: placed, but not through S1
+    bounds = [(0.0, 600.0), (600.0, 1200.0)]
+    assert 0 not in cc.sector_times(rows, bounds, shift=0.0, game_clock=True, from_go=False)
+    assert cc.sector_go('acr:x:y', rows, None) == (True, None)               # ACR as before
+
+
+def test_the_result_ends_the_last_sector_only_when_it_is_the_clock_stopping_at_the_line():
+    bounds = [(0.0, 500.0), (500.0, 1000.0)]
+    rows = _rows(0.0, end=1010.0)
+    line = 1000.0 / 20.0
+    assert cc.sector_times(rows, bounds, game_clock=True, result_time=line + 0.2)[1] == pytest.approx(line + 0.2 - 25.0, abs=0.01)
+    assert cc.sector_times(rows, bounds, game_clock=True, result_time=line + 3.0)[1] == pytest.approx(25.0, abs=0.01)
+
+
+def test_the_local_table_drops_the_shipped_lines_of_a_stage_of_another_length():
+    shipped = {'rbr:9': {'id': 9, 'sector_lines_m': [0.0, 700.0, 1500.0, 2300.0], 'sector_lines_source': 's',
+                         'sector_lines_confidence': 'high'}}
+    for length, kept in ((2200, True), (2500, True), (5000, False)):
+        tables = {'rbr': {k: dict(v) for k, v in shipped.items()}}
+        stage_tables._add_table(tables, {'game': 'rbr', 'stages': [{'id': 9, 'length_m': length}]}, 'local', replace=True)
+        assert ('sector_lines_m' in tables['rbr']['rbr:9']) is kept, length

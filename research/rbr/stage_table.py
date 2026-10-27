@@ -41,7 +41,7 @@ def dls_files(root):
 def sector_lines(files):
     """(lines, confidence) of one stage from its .dls variants, or None: [start, split..., finish] when the files
     hold a finish and at least one split in rising order. A .dls with no start marker puts the start at 0 m
-    ('medium'). Variants that disagree are reported on stderr and the first (M, N, E, O, S order) is used."""
+    ('medium'). Variants that disagree are reported on stderr and the first in sorted letter order (E, M, N, O, S) is used."""
     read = {}
     for letter, path in sorted(files.items()):
         try:
