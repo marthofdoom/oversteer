@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Telemetry
+- **Richard Burns Rally (RallySimFans, NGP plugin) telemetry, first cut, built from the research in
+  `docs/richard-burns-rally.md` and checked against two short captures (a full stage is still to come).** The 664-byte packet is decoded
+  (Auto and the port drop-down now also listen on 6776, the usual NGP port; a game that sends to 5310 works
+  as well): pedals, steering, gear, rpm, speed, position and attitude, velocities and accelerations,
+  per-wheel suspension, forces, tyre temperatures (surface, carcass, tread, 8 segments), pressures and wear,
+  brake temperatures and wear, engine temperatures. A run starts when the car moves, ends unfinished when the
+  stage is loaded again (the step counter goes back), and finishes when the stage clock stops at the line
+  (the result is the game's own time, penalties included). A pause or the results page starts no run.
+  Stages and cars are named from your own install (stage list from `rsfdata/cache/stages_data.json` and
+  `Maps/Tracks.ini`, car from `Cars/Cars.ini` and `cars.json`), read-only and cached in your data folder, never
+  shipped; set `OVERSTEER_RBR_DIR` or put the install's folder in `<data>/oversteer/rbr/root` if it is not in a
+  usual Lutris, Bottles or Wine prefix. Without the install a stage is "RBR stage <id>" and the car is shared
+  ("RBR car"), so nothing is learnt about it. The coach treats the speed and steering signals as unchecked
+  until a capture settles them.
+- **RBR captures are saved at 60 Hz** (the packets come at 720 a second; the live view and the coach use every
+  packet): the recorder keeps one packet in 12 and every packet where the run's lifecycle changes (steps going
+  back, the clock starting or stopping, a new stage, the first and last packet). The capture format is unchanged.
+
 ## 0.15.5 — 2026-10-26
 
 ### Telemetry

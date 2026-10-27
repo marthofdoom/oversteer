@@ -57,6 +57,16 @@ CAPTURE_GAP = 60.0          # seconds without telemetry that close a capture fil
 RECORD_QUEUE = 4096         # packets waiting for the writer (about 30 s at 120 a second)
 DEFAULT_CAP = 1 << 30       # bytes kept in the folder; the oldest unlabelled captures go first
 
+# A format that sends faster than a capture needs is thinned when saved (the listener still gets every packet):
+# packet length -> (max saved packets a second, the packet's own steps a second, struct of its head:
+# steps, stage id, ?, clock, ?, distance to the end). Richard Burns Rally's NGP packet (664 bytes) comes at 720 a
+# second, in bursts that share one arrival time, so its own step counter is the clock. The packets where
+# something changes are always kept (CaptureWriter._keep); the file format is unchanged.
+THIN = {664: (60.0, 720.0, struct.Struct('<Iiffff'))}
+THIN_CLOCK_JUMP = 0.5       # s the stage clock may jump between two packets before both are kept (a penalty, a restart)
+THIN_DISTANCE_JUMP = 5.0    # m the distance to the end may jump
+THIN_FROZEN = 0.1           # s of the packets' own clock the stage clock must stand still to count as stopped (it steps in threes)
+
 
 def _ipv4(address):
     try:
@@ -82,16 +92,52 @@ class CaptureWriter:
         self._file.flush()
         self._first = None
         self.packets = 0
+        self.thinned = 0                  # packets not saved (THIN)
+        self._seen = None                 # the last packet's (steps, stage, clock, distance to the end, frozen)
+        self._moved = None                # steps at which the stage clock last changed
+        self._kept = None                 # steps of the last packet saved
+        self._held = None                 # the last packet not saved: written on close, the session's last stays
 
     def write(self, now, addr, data):
+        if len(data) in THIN and not self._keep(now, addr, data):
+            return
+        self._put(now, addr, data)
+
+    def _put(self, now, addr, data):
         if self._first is None:
             self._first = now
         self._file.write(RECORD.pack(now - self._first, _ipv4(addr[0]), len(data)))
         self._file.write(data)
         self.packets += 1
 
+    def _keep(self, now, addr, data):
+        """Whether a packet of a THIN format is saved: one in every 1/rate of its own steps, and every one where
+        a lifecycle field changes: the steps going back, the stage, the clock starting or stopping (0 against
+        above, standing still against running, a jump), the distance to the end jumping; the first packet."""
+        rate, steps_per_s, head = THIN[len(data)]
+        steps, stage, _p, clock, _d, to_end = head.unpack_from(data)
+        prev = self._seen
+        if prev is None or clock != prev[2] or steps < prev[0]:
+            self._moved = steps
+        frozen = clock > 0 and steps - self._moved >= THIN_FROZEN * steps_per_s
+        keep = prev is None or self._kept is None or steps < self._kept or steps - self._kept >= steps_per_s / rate
+        if prev is not None and not keep:
+            keep = (steps < prev[0] or stage != prev[1] or (clock == 0) != (prev[2] == 0) or frozen != prev[4]
+                    or abs(clock - prev[2]) > THIN_CLOCK_JUMP or abs(to_end - prev[3]) > THIN_DISTANCE_JUMP)
+        self._seen = (steps, stage, clock, to_end, frozen)
+        if keep:
+            self._held = None
+            self._kept = steps
+            return True
+        self._held = (now, addr, data)
+        self.thinned += 1
+        return False
+
     def close(self):
         if self._file is not None:
+            if self._held is not None:
+                self._put(*self._held)
+                self._held = None
             self._file.close()
             self._file = None
 

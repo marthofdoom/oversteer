@@ -25,7 +25,7 @@ SURFACES = ('tarmac', 'gravel', 'snow', 'ice')
 GAMES = {'forza-fh': 'Forza Horizon', 'forza-fm': 'Forza Motorsport', 'forza': 'Forza', 'dirt': 'DiRT Rally',
          'wrcg': 'WRC Generations', 'eawrc': 'EA SPORTS WRC', 'acpmf': 'Assetto Corsa', 'beamng': 'BeamNG.drive',
          'lfs': 'Live for Speed', 'acr': 'Assetto Corsa Rally', 'acc': 'Assetto Corsa Competizione',
-         'ac': 'Assetto Corsa'}
+         'ac': 'Assetto Corsa', 'rbr': 'Richard Burns Rally'}
 
 MIN_TIME = 90.0                  # s moving a run needs before its shape says anything
 MIN_DISTANCE = 2000.0            # m
@@ -163,8 +163,8 @@ def classify_discipline(summary, trace, channels):
     # 1. The game's own word
     laps, length = summary.get('laps') or 0, summary.get('stage_length')
     verdict = None
-    if game == 'eawrc':
-        verdict = Verdict('rally-stage', 'game', ['EA SPORTS WRC sends telemetry from its stages only.'])
+    if game in ('eawrc', 'rbr'):
+        verdict = Verdict('rally-stage', 'game', ['{} sends telemetry from its stages only.'.format(_game(summary))])
     elif game in ('dirt', 'wrcg') and laps > 1:
         kind = 'rallycross' if length and length < 1500.0 else 'circuit'
         verdict = Verdict(kind, 'game', ['{} sends {} laps{}.'.format(

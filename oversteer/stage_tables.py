@@ -27,8 +27,14 @@ WRC Generations' come from the game's files (scripts/stage-tables.py):
 `descent_m`, `kind`, `rally`, `surface_source` and `name_source`.
 
 Each entry gets a stage key: DiRT's is the key a measured run would get
-(`dirt:<length>:<start z>`), so a run matches it by tolerance; the others
-are `<game>:<location>:<stage>` in lower-case words.
+(`dirt:<length>:<start z>`), so a run matches it by tolerance; Richard Burns
+Rally's is `rbr:<map id>` (the id the game sends); the others are
+`<game>:<location>:<stage>` in lower-case words.
+
+Richard Burns Rally has no shipped table: RallySimFans' stage list has no
+licence, so rbr_install builds one from the player's own install and keeps
+it in the user's data folder; load() adds it to the tables it reads from
+the default folder.
 """
 
 import json
@@ -76,6 +82,8 @@ def bridge_track(name):
 
 
 def stage_key(game, entry):
+    if game == 'rbr' and entry.get('id') is not None:
+        return 'rbr:{}'.format(int(entry['id']))
     if game == 'dirt' and entry.get('length_m') and entry.get('start_z') is not None:
         return 'dirt:{:.0f}:{:.0f}'.format(round(entry['length_m']), round(entry['start_z'], -1))
     return '{}:{}:{}'.format(game, _slug(entry['location']), _slug(entry['stage']))
@@ -103,30 +111,43 @@ def surface_of(entry):
     return None, None
 
 
+def _add_table(tables, table, name):
+    """The stages of one table file's contents into `tables` ({game: {key: entry}})."""
+    game = table['game']
+    entries = tables.setdefault(game, {})
+    for entry in table['stages']:
+        entry = dict(entry)
+        entry['key'] = key = stage_key(game, entry)
+        if key in entries:
+            logging.warning("stage tables: %s: %s twice, the first kept", name, key)
+            continue
+        entries[key] = entry
+
+
 def load(directory=None):
     """{game: {key: entry}} from every table in `directory` (found when
-    None). A table that does not parse is logged and skipped."""
+    None; then the local Richard Burns Rally table is added). A table that
+    does not parse is logged and skipped."""
+    local = directory is None
     directory = directory or find_dir()
     tables = {}
-    if not directory:
-        return tables
-    for name in sorted(os.listdir(directory)):
-        if not name.endswith('.json'):
-            continue
+    if directory:
+        for name in sorted(os.listdir(directory)):
+            if not name.endswith('.json'):
+                continue
+            try:
+                with open(os.path.join(directory, name), encoding='utf-8') as f:
+                    _add_table(tables, json.load(f), name)
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                logging.warning("stage tables: %s not loaded: %s", name, e)
+    if local:
         try:
-            with open(os.path.join(directory, name), encoding='utf-8') as f:
-                table = json.load(f)
-            game = table['game']
-            entries = tables.setdefault(game, {})
-            for entry in table['stages']:
-                entry = dict(entry)
-                entry['key'] = key = stage_key(game, entry)
-                if key in entries:
-                    logging.warning("stage tables: %s: %s twice, the first kept", name, key)
-                    continue
-                entries[key] = entry
+            from . import rbr_install
+            table = rbr_install.stage_table()
+            if table:
+                _add_table(tables, table, 'rbr (local)')
         except (OSError, ValueError, KeyError, TypeError) as e:
-            logging.warning("stage tables: %s not loaded: %s", name, e)
+            logging.warning("stage tables: the local Richard Burns Rally table not loaded: %s", e)
     return tables
 
 

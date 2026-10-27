@@ -72,7 +72,7 @@ def _fds():
 
 
 def test_auto_holds_the_presets_and_never_forza_horizon_6s_range():
-    assert module.auto_ports() == [5310, 20777, 4444]
+    assert module.auto_ports() == [5310, 20777, 4444, 6776]
     assert module.LEGACY_PORT in module.FORZA_OWN and 5200 in module.FORZA_OWN
     assert not any(p in module.FORZA_OWN for p in module.auto_ports())
 
@@ -283,14 +283,14 @@ def test_capture_records_every_port_while_unlocked_then_the_active_one(tmp_path)
 
 
 def test_unknown_packets_on_several_ports_make_one_file_per_port(tmp_path):
-    """RBR's 664-byte NGP packets (not decoded yet) next to another tool's: captured, without a file per packet."""
+    """an unknown 700-byte packet next to another tool's: captured, without a file per packet."""
     from oversteer import telemetry_capture as tc
     recorder = tc.Recorder(str(tmp_path), version='test', threaded=False, clock=lambda: 1.7e9)
     t = Telemetry(FakeLeds(), port=AUTO)
     t.recorder = recorder
     addr = ('127.0.0.1', 40000)
     for i in range(50):
-        t.handle(100.0 + i * 0.01, b'\x01' * 664, addr, 5310)
+        t.handle(100.0 + i * 0.01, b'\x01' * 700, addr, 5310)
         t.handle(100.0 + i * 0.01, b'\x02' * 10, addr, 4444)
     assert t.locked is None
     recorder.check(100.5 + tc.CAPTURE_GAP + 1)               # both go quiet: both closed

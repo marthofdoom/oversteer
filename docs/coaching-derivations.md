@@ -204,6 +204,23 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `laps_done` | sample | int |  | packet |  |
 | `sector` | sample | int |  | packet |  |
 | `split_times` | sample | s |  | packet |  |
+| `steps` | sample | int |  | packet |  |
+| `dist_to_end` | sample | m |  | packet |  |
+| `drive_progress` | sample | unknown |  | packet |  |
+| `radiator_temp` | sample | C |  | packet |  |
+| `block_temp` | sample | C |  | packet |  |
+| `pedal_pressure` | sample | unknown | foot brake, handbrake | packet |  |
+| `susp_forces` | sample | N | per wheel ordered FL, FR, RL, RR, each (rollbar, spring, damper, strut) | packet |  |
+| `helper_spring` | sample | 0/1 | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `damper_damage` | sample | unknown | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `brake_layer_temp` | sample | C | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `brake_wear` | sample | unknown | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_carcass_temp` | sample | C | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_tread_temp` | sample | C | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_seg_temp` | sample | C | per wheel ordered FL, FR, RL, RR, each 8 values | packet |  |
+| `tyre_seg_wear` | sample | unknown | per wheel ordered FL, FR, RL, RR, each 8 values | packet |  |
+| `tyre_contact` | sample | int | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `ang_accel` | sample | rad/s^2 | x forward, y left, z up | packet |  |
 
 ### Games
 
@@ -332,6 +349,23 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `laps_done` | - | - | - | - | - | - | - | - | - | - |
 | `sector` | - | - | - | - | - | - | - | - | - | - |
 | `split_times` | - | - | - | - | - | - | - | - | - | - |
+| `steps` | - | - | - | - | - | - | - | - | - | - |
+| `dist_to_end` | - | - | - | - | - | - | - | - | - | - |
+| `drive_progress` | - | - | - | - | - | - | - | - | - | - |
+| `radiator_temp` | - | - | - | - | - | - | - | - | - | - |
+| `block_temp` | - | - | - | - | - | - | - | - | - | - |
+| `pedal_pressure` | - | - | - | - | - | - | - | - | - | - |
+| `susp_forces` | - | - | - | - | - | - | - | - | - | - |
+| `helper_spring` | - | - | - | - | - | - | - | - | - | - |
+| `damper_damage` | - | - | - | - | - | - | - | - | - | - |
+| `brake_layer_temp` | - | - | - | - | - | - | - | - | - | - |
+| `brake_wear` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_carcass_temp` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_tread_temp` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_seg_temp` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_seg_wear` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_contact` | - | - | - | - | - | - | - | - | - | - |
+| `ang_accel` | - | - | - | - | - | - | - | - | - | - |
 
 ### Games: static data
 

@@ -29,6 +29,10 @@ None. The formats:
   328). Versions 1 to 3 have one length each; from version 4 on a version
   only appends, so a longer packet of version 4 or later is read as far as
   this decoder knows it.
+- Richard Burns Rally (RallySimFans) through the NGP plugin's UDP telemetry:
+  664 bytes, little-endian, no header (docs/richard-burns-rally.md). No
+  capture existed when it was written: what the packet does not settle is
+  marked "verify on capture" in _rbr().
 """
 
 import json
@@ -36,7 +40,7 @@ import logging
 import math
 import struct
 
-from . import car_data
+from . import car_data, rbr_install
 
 RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
 FORZA_SIZES = (232, 311, 324, 331)
@@ -52,6 +56,18 @@ OVST3_SIZE = OVST2_SIZE + struct.calcsize(OVST3_FORMAT)   # + wheels, suspension
 OVST3_GAMES = {1: 'ac', 2: 'acc', 3: 'acr'}
 OVST_LATEST = 4                                      # the newest version decoded in full
 OVST4_SIZE = OVST3_SIZE + 4                          # + the graphics page's clock, in seconds (328)
+
+# Richard Burns Rally, NGP's rbr::telemetry::data::TelemetryData (#pragma pack 1): totalSteps, stage (index,
+# progress, raceTime, driveLineLocation, distanceToEnd), control (steering, throttle, brake, handbrake, clutch,
+# gear, footbrake and handbrake pressure), car (slot, speed, position, roll/pitch/yaw, velocities, accelerations,
+# engine rpm and three temperatures), then four wheels (LF, RF, LB, RB) of 32 four-byte fields each
+RBR_WHEEL_FORMAT = 'fffff' + 'i' + 'ff' + 'fff' + 'f' + 'fff' + 'I' + 'f' * 16
+RBR_FORMAT = '<Iiffff' + 'fffff' + 'iff' + 'i' + 'f' + 'f' * 3 + 'f' * 3 + 'f' * 6 + 'f' * 6 + 'f' * 4 + RBR_WHEEL_FORMAT * 4
+RBR_SIZE = struct.calcsize(RBR_FORMAT)               # 664
+RBR_STEPS_PER_S = 720.0                              # NGP's physics step is 1/720 s and every step is sent (marth's captures: 720 packets a second, steps +1)
+RBR_BTB = 41                                         # the map id of every Beyond the Box stage: it names no stage
+RBR_WHEEL0, RBR_WHEEL_FIELDS = 38, 32                # index of the first wheel's fields in the unpacked packet, and fields per wheel
+KELVIN = 273.15
 
 # EA SPORTS WRC: the game sends whatever a packet structure file (JSON, in
 # its Documents/My Games/WRC/telemetry/udp folder) lists, channel by
@@ -173,7 +189,16 @@ class Sample:
       oil_pressure, lap_time, best_lap, last_lap (s), driving_line and
       ai_brake_diff (Forza, -1..1), cylinders, laps_done (DiRT: laps
       finished), sector (DiRT: the split being driven, 0-based) and
-      split_times (DiRT: the first two splits' times, None until set)."""
+      split_times (DiRT: the first two splits' times, None until set).
+    - Richard Burns Rally only (None elsewhere; per wheel FL, FR, RL, RR):
+      steps (NGP's physics step counter: goes back on a stage load, repeats in
+      a pause), dist_to_end (m), drive_progress (stage.progress as sent: unit
+      unknown), radiator_temp and block_temp (C), pedal_pressure (foot brake,
+      handbrake: unit unknown), susp_forces (rollbar, spring, damper, strut; N),
+      helper_spring (0/1), damper_damage, brake_layer_temp (C), brake_wear,
+      tyre_carcass_temp and tyre_tread_temp (C), tyre_seg_temp (C) and
+      tyre_seg_wear (8 per wheel, around the tyre), tyre_contact (which of
+      the 8 segments touches the road), ang_accel (roll, pitch, yaw; rad/s^2)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -186,7 +211,10 @@ class Sample:
                  'tyre_pressure', 'brake_temp', 'susp_max', 'hub_pos', 'hub_vel', 'ride_height', 'ang_vel', 'attitude',
                  'surface_grip', 'brake_bias', 'session', 'fuel', 'torque', 'transmission_speed', 'engine_temp',
                  'oil_temp', 'oil_pressure', 'lap_time', 'best_lap', 'last_lap', 'driving_line', 'ai_brake_diff',
-                 'cylinders', 'laps_done', 'sector', 'split_times')
+                 'cylinders', 'laps_done', 'sector', 'split_times',
+                 'steps', 'dist_to_end', 'drive_progress', 'radiator_temp', 'block_temp', 'pedal_pressure',
+                 'susp_forces', 'helper_spring', 'damper_damage', 'brake_layer_temp', 'brake_wear',
+                 'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -210,6 +238,10 @@ class Sample:
         self.lap_time = self.best_lap = self.last_lap = self.driving_line = self.ai_brake_diff = None
         self.cylinders = None
         self.laps_done = self.sector = self.split_times = None
+        self.steps = self.dist_to_end = self.drive_progress = self.radiator_temp = self.block_temp = None
+        self.pedal_pressure = self.susp_forces = self.helper_spring = self.damper_damage = None
+        self.brake_layer_temp = self.brake_wear = self.tyre_carcass_temp = self.tyre_tread_temp = None
+        self.tyre_seg_temp = self.tyre_seg_wear = self.tyre_contact = self.ang_accel = None
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -264,7 +296,8 @@ def _finite(x):
 
 def _vector(values):
     """A tuple of floats, or None when any of them is not finite."""
-    return tuple(values) if all(math.isfinite(v) for v in values) else None
+    values = tuple(values)
+    return values if all(math.isfinite(v) for v in values) else None
 
 
 def _dot(a, b):
@@ -292,15 +325,15 @@ def plan_xyz(game, pos):
     as well: on marth's captures (research/dr2/axes.py, dirt_signs.py) the heading rate of
     (x, z) correlates -0.86/-0.83 with the steering-side evidence (roll, lateral g, r
     +0.95/+0.94) and (x, -z) the same size the right way round, so the plan is (x, -z)
-    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y).
+    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y), and Richard Burns Rally is expected to (unchecked).
     Other games: (x, z) with y up, as before (unchecked). None for no position."""
     if pos is None:
         return None
     x, y, z = pos
     if game in ('acr', 'dirt'):
         return (x, y, -z)
-    if game == 'wrcg':
-        return (x, z, y)
+    if game in ('wrcg', 'rbr'):
+        return (x, z, y)                  # (RBR: z up expected, north's sign unchecked: verify on capture)
     return (x, y, z)
 
 
@@ -755,6 +788,89 @@ def _eawrc(data, n):
     return sample
 
 
+def _celsius(k):
+    return k - KELVIN if math.isfinite(k) else None
+
+
+def _rbr_speed(velocity, packet_speed):
+    """The speed in m/s: the length of the car-frame velocity vector. marth's captures (2026-10-26): car.speed is
+    km/h (it is 3.6 to 3.7 times the vector's length at speed) but it reads the wheels, not the ground: 62 km/h
+    with the car held and the wheels spinning while the vector says 5 m/s. So the vector is the speed, and
+    car.speed (km/h) only where the vector is not finite."""
+    if all(math.isfinite(c) for c in velocity):
+        return math.sqrt(sum(c * c for c in velocity))
+    return packet_speed / 3.6 if math.isfinite(packet_speed) else None
+
+
+def _rbr(data, n):
+    """Richard Burns Rally (RallySimFans) through NGP's UDP telemetry. Wheels LF, RF, LB, RB are Sample's FL, FR,
+    RL, RR. Units follow docs/richard-burns-rally.md: kelvin to C, Pa to kPa, angles in degrees to radians, gear
+    0 reverse / 1 neutral / 2 first. Everything the doc marks verify is converted as it reads and waits for a
+    capture: the sign of steering, sway and the angular rates, springDeflection's zero and sign, the unit of
+    stage.progress and driveLineLocation, the send rate, the accelerations' unit, tyre wear's scale."""
+    t = struct.unpack_from(RBR_FORMAT, data, 0)
+    (steps, stage_index, progress, race_time, drive_line, to_end, steering, throttle, brake, handbrake, clutch,
+     gear, foot_pressure, hand_pressure, slot, speed_raw) = t[:16]
+    rpm = t[34]
+    if not (math.isfinite(rpm) and -100.0 < rpm < RPM_LIMIT):
+        return None
+    wheels = [t[RBR_WHEEL0 + RBR_WHEEL_FIELDS * w: RBR_WHEEL0 + RBR_WHEEL_FIELDS * (w + 1)] for w in range(4)]
+    car = rbr_install.car_in_slot(slot) if 0 <= slot < 8 else None
+    sample = Sample(max(0.0, rpm), None, gear=gear - 1 if 0 <= gear <= 10 else None,
+                    speed=_rbr_speed(t[22:25], speed_raw),
+                    car=(car or {}).get('key') or rbr_install.UNKNOWN_CAR,
+                    car_name=(car or {}).get('name') or 'RBR car',
+                    throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake), game='rbr')
+    sample.drivetrain = (car or {}).get('drivetrain')
+    sample.gears = (car or {}).get('gears')
+    sample.handbrake = _finite(handbrake)
+    sample.steer = _finite(-steering)            # verify on capture: assumed positive right as sent
+    sample.steps = steps
+    sample.game_time = steps / RBR_STEPS_PER_S   # (verify the rate) freezes in a pause, goes back on a stage load
+    sample.stage = 'rbr:{}'.format(stage_index) if stage_index >= 0 and stage_index != RBR_BTB else None
+    sample.stage_time = _finite(race_time)
+    sample.drive_progress = _finite(progress)    # verify on capture: unit unknown
+    # driveLineLocation: metres along the stage's driveline is the hypothesis (1.5 at the start of the sample's
+    # 2.2 km stage, with distanceToEnd 2261.7 beside it); then their sum is the stage's length. Verify on capture
+    if math.isfinite(drive_line) and math.isfinite(to_end) and drive_line >= 0.0 and to_end >= 0.0 \
+            and 100.0 < drive_line + to_end < 200000.0:
+        sample.lap_distance = drive_line
+        sample.stage_length = drive_line + to_end
+    sample.dist_to_end = _finite(to_end)
+    sample.pos = _vector(t[16:19])               # world metres, z up expected (verify handedness)
+    sample.attitude = _vector(math.radians(a) for a in (t[21], t[20], t[19]))     # yaw, pitch, roll (sent degrees)
+    sample.vel = _vector(t[22:25])               # surge, sway, heave (m/s); sway positive left is what readers imply
+    sample.ang_vel = _vector(math.radians(a) for a in t[25:28])                   # roll, pitch, yaw rates (deg/s; signs: verify)
+    sample.yaw_rate = _finite(math.radians(t[27]))
+    sample.accel = _vector(t[28:31])             # m/s^2 (verify; mika-n calls sway "G"): kinematic, 0 at rest
+    sample.accel_kind = 'kinematic'
+    sample.ang_accel = _vector(math.radians(a) for a in t[31:34])                 # deg/s^2 assumed (verify)
+    sample.radiator_temp, sample.engine_temp, sample.block_temp = _celsius(t[35]), _celsius(t[36]), _celsius(t[37])
+    sample.pedal_pressure = _vector((foot_pressure, hand_pressure))
+    sample.susp = _vector(w[0] for w in wheels)  # springDeflection, m: 0.195 at rest, so zero and sign: verify on capture
+    sample.susp_vel = _vector(w[7] for w in wheels)                                # damper pistonVelocity, m/s (sign: verify)
+    forces = tuple(_vector(w[1:5]) for w in wheels)                                # rollbar, spring, damper, strut (N)
+    sample.susp_forces = forces if None not in forces else None
+    sample.tyre_load = _vector(-w[4] for w in wheels)                              # at rest strut = -(spring + rollbar + damper): verify
+    sample.helper_spring = tuple(w[5] for w in wheels)
+    sample.damper_damage = _vector(w[6] for w in wheels)                           # 0 = none (scale: verify)
+    sample.brake_layer_temp = _vector(w[8] - KELVIN for w in wheels)
+    sample.brake_temp = _vector(w[9] - KELVIN for w in wheels)
+    sample.brake_wear = _vector(w[10] for w in wheels)
+    sample.tyre_pressure = _vector(w[11] / 1000.0 for w in wheels)                 # Pa to kPa
+    sample.tyre_temp = _vector(w[12] - KELVIN for w in wheels)                     # the surface
+    sample.tyre_carcass_temp = _vector(w[13] - KELVIN for w in wheels)
+    sample.tyre_tread_temp = _vector(w[14] - KELVIN for w in wheels)
+    sample.tyre_contact = tuple(w[15] for w in wheels)
+    seg_temp = tuple(_vector(x - KELVIN for x in w[16:32:2]) for w in wheels)     # 8 {temperature K, wear} per wheel
+    seg_wear = tuple(_vector(w[17:32:2]) for w in wheels)
+    sample.tyre_seg_temp = seg_temp if None not in seg_temp else None
+    if None not in seg_wear:
+        sample.tyre_seg_wear = seg_wear
+        sample.tyre_wear = tuple(sum(x) / len(x) for x in seg_wear)               # mean over the segments (scale: verify)
+    return sample
+
+
 def decode_sample(data):
     """A Sample, or None if the packet isn't a telemetry format we know
     (or carries nonsense)."""
@@ -778,6 +894,9 @@ def decode_sample(data):
             logging.warning("telemetry: EA SPORTS WRC packet of %d bytes, Oversteer's structure makes %d: "
                             "copy the structure file into the game again", n, EAWRC_SIZE)
         return None
+    if n == RBR_SIZE:
+        # 664 is above every Codemasters length (CODEMASTERS_MAX) and no other format's
+        return _rbr(data, n)
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
         return _codemasters(data, n)
     return None
