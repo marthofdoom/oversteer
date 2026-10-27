@@ -198,7 +198,12 @@ class Sample:
       helper_spring (0/1), damper_damage, brake_layer_temp (C), brake_wear,
       tyre_carcass_temp and tyre_tread_temp (C), tyre_seg_temp (C) and
       tyre_seg_wear (8 per wheel, around the tyre), tyre_contact (which of
-      the 8 segments touches the road), ang_accel (roll, pitch, yaw; rad/s^2)."""
+      the 8 segments touches the road), ang_accel (roll, pitch, yaw; rad/s^2),
+      car_slot (car.index, the Cars.ini slot 0..7), wheels_speed (car.speed
+      in m/s: the speed the wheels read, wheelspin included, which with the
+      rpm gives the gearing), and from rbr_fingerprint car_epoch (numbers the
+      stretches in which the car cannot have changed) and car_provisional
+      (the car is the last one's, not confirmed yet: nothing is learnt)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -214,7 +219,8 @@ class Sample:
                  'cylinders', 'laps_done', 'sector', 'split_times',
                  'steps', 'dist_to_end', 'drive_progress', 'radiator_temp', 'block_temp', 'pedal_pressure',
                  'susp_forces', 'helper_spring', 'damper_damage', 'brake_layer_temp', 'brake_wear',
-                 'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel')
+                 'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel',
+                 'car_slot', 'wheels_speed', 'car_epoch', 'car_provisional')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -242,6 +248,8 @@ class Sample:
         self.pedal_pressure = self.susp_forces = self.helper_spring = self.damper_damage = None
         self.brake_layer_temp = self.brake_wear = self.tyre_carcass_temp = self.tyre_tread_temp = None
         self.tyre_seg_temp = self.tyre_seg_wear = self.tyre_contact = self.ang_accel = None
+        self.car_slot = self.wheels_speed = self.car_epoch = None
+        self.car_provisional = False
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -325,7 +333,9 @@ def plan_xyz(game, pos):
     as well: on marth's captures (research/dr2/axes.py, dirt_signs.py) the heading rate of
     (x, z) correlates -0.86/-0.83 with the steering-side evidence (roll, lateral g, r
     +0.95/+0.94) and (x, -z) the same size the right way round, so the plan is (x, -z)
-    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y), and Richard Burns Rally is expected to (unchecked).
+    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y). So has Richard Burns Rally, checked on marth's captures (docs/richard-burns-rally.md):
+    a right-handed world, x east, y north, z up, and the compass yaw grows turning right; the compass heading rate of (x, y)
+    (positive right) correlates +0.80 to +0.86 with the (negated) yaw rate and -0.87 to -0.89 with the lateral acceleration, the right way round.
     Other games: (x, z) with y up, as before (unchecked). None for no position."""
     if pos is None:
         return None
@@ -333,7 +343,7 @@ def plan_xyz(game, pos):
     if game in ('acr', 'dirt'):
         return (x, y, -z)
     if game in ('wrcg', 'rbr'):
-        return (x, z, y)                  # (RBR: z up expected, north's sign unchecked: verify on capture)
+        return (x, z, y)
     return (x, y, z)
 
 
@@ -816,13 +826,18 @@ def _rbr(data, n, recorded_car=None):
         return None
     wheels = [t[RBR_WHEEL0 + RBR_WHEEL_FIELDS * w: RBR_WHEEL0 + RBR_WHEEL_FIELDS * (w + 1)] for w in range(4)]
     car = recorded_car or (rbr_install.car_in_slot(slot) if 0 <= slot < 8 else None)
+    key = (car or {}).get('key') or rbr_install.UNKNOWN_CAR
     sample = Sample(max(0.0, rpm), None, gear=gear - 1 if 0 <= gear <= 10 else None,
                     speed=_rbr_speed(t[22:25], speed_raw),
-                    car=(car or {}).get('key') or rbr_install.UNKNOWN_CAR,
-                    car_name=(car or {}).get('name') or 'RBR car',
+                    car=key,
+                    car_name=(car or {}).get('name') or car_data.display_name(key) or 'RBR car',    # cars/rbr.json names every RSF id
                     throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake), game='rbr')
     sample.drivetrain = (car or {}).get('drivetrain')
     sample.gears = (car or {}).get('gears')
+    sample.car_slot = slot
+    # car.speed reads the wheels (km/h; mph with the game set so, which scales every gear alike): rpm over it is the
+    # gearing within 0.3 % of the physics files on marth's captures, slides and wheelspin included
+    sample.wheels_speed = abs(speed_raw) / 3.6 if math.isfinite(speed_raw) else None
     sample.handbrake = _finite(handbrake)
     sample.steer = _finite(-steering)            # positive right as sent (it equals the G29's axis, high to the right): negated
     sample.steps = steps
@@ -838,7 +853,7 @@ def _rbr(data, n, recorded_car=None):
         sample.lap_distance = drive_line
         sample.stage_length = drive_line + to_end
     sample.dist_to_end = _finite(to_end)
-    sample.pos = _vector(t[16:19])               # world metres, z up expected (verify handedness)
+    sample.pos = _vector(t[16:19])               # world metres, x east, y north, z up (checked: plan_xyz)
     # yaw, pitch, roll as sent, in radians: the yaw is a compass angle (it grows turning right), pitch nose up, roll right side down
     sample.attitude = _vector(math.radians(a) for a in (t[21], t[20], t[19]))
     # Signs and units from marth's captures of 2026-10-26 (corner side from the positions against the wheel, the

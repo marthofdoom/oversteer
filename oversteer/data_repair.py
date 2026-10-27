@@ -1,4 +1,5 @@
-"""Repairs of the stored telemetry data that older code worked out wrong (data version 1, Oversteer 0.16).
+"""Repairs of the stored telemetry data that older code worked out wrong (data version 1, Oversteer 0.16; data version
+2, Oversteer 0.17: Richard Burns Rally, below).
 
 Since 0.15.4 the runs are analysed differently: the finish and its time (ACR's coarse clock, DiRT's and WRC
 Generations' official time, no post-finish phantom runs), the PB (any finished run, offs too), DiRT's plan (it was
@@ -50,8 +51,10 @@ from .telemetry_store import (CODEMASTERS_NAME, DATA_VERSION, REANALYSE_DDL, RUN
 T = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 
 REPAIR = 'repair-0.16'          # store_meta: what migrate() did (JSON)
+REPAIR_RBR = 'repair-0.17'      # store_meta: what the data version 2 step did (JSON)
 RETIMED = 'retime-0.16'         # store_meta: the runs retime_from_captures() re-timed, {run: [old, new, capture]}
 BACKUP_TAG = 'pre-0.16'
+BACKUP_TAG_RBR = 'pre-0.17'     # the backup of a file at data version 1 (repaired by 0.16) brought to 2
 RETIME_BACKUP_TAG = 'pre-retime'
 
 # A DiRT run that began where the finished run before it in the session ended (the game resets its clock on the
@@ -241,6 +244,30 @@ def drop_potentials(store):
     return potentials, envelopes
 
 
+def rbr_runs(store):
+    """The Richard Burns Rally runs: on an rbr: stage, or of an RBR car."""
+    return [r[0] for r in store._do("SELECT r.id FROM runs r JOIN sessions s ON s.id = r.session JOIN cars c ON "
+                                    "c.id = s.car WHERE r.stage LIKE 'rbr:%' OR c.game = 'rbr' ORDER BY r.id")]
+
+
+def repair_rbr(store):
+    """Data version 2 (0.17): Richard Burns Rally's runs were worked out before its sectors (real split lines),
+    channels and car identity: what was derived from them is stale. The stored potentials of rbr: stages and the
+    envelopes of RBR cars are dropped (built again: potentials_missing), and every RBR run with a trace is queued to
+    be worked over again (requeue: it keeps its class, so its PB stays one, and no trace is pruned while the queue
+    holds runs). Runs, traces and PBs are never touched; the runs stored under rbr/unknown stay there (their traces
+    have no wheel speed to tell the car from). Returns (potentials, envelopes, runs queued)."""
+    potentials = store._do("DELETE FROM stage_potential WHERE stage LIKE 'rbr:%'").rowcount
+    envelopes = store._do("DELETE FROM envelopes WHERE game = 'rbr' OR car IN (SELECT id FROM cars WHERE game = 'rbr')"
+                          ).rowcount
+    runs = rbr_runs(store)
+    requeue(store, runs)
+    queued = store._do("SELECT COUNT(*) FROM reanalyse WHERE run IN (SELECT r.id FROM runs r JOIN sessions s ON "
+                       "s.id = r.session JOIN cars c ON c.id = s.car WHERE r.stage LIKE 'rbr:%' OR c.game = 'rbr')"
+                       ).fetchone()[0]
+    return potentials, envelopes, queued
+
+
 def queue_order(store, runs=None):
     """The runs with a trace (all, or those in `runs`) in the order to work them over: first the reference runs (each
     finished run of a class that ranks quicker than every earlier one of its car on its stage, overall or in its
@@ -318,7 +345,8 @@ def migrate(store):
         # One backup per repair (per transition and time: a file repaired, then merged with an older one, is
         # repaired again after a backup of its own); recorded, so a repair that crashed part way reuses its own
         store.commit()
-        dest = '{}.{}-v{}-v{}-{}.bak'.format(path, BACKUP_TAG, version, DATA_VERSION, time.strftime('%Y%m%d-%H%M%S'))
+        tag = BACKUP_TAG if version < 1 else BACKUP_TAG_RBR
+        dest = '{}.{}-v{}-v{}-{}.bak'.format(path, tag, version, DATA_VERSION, time.strftime('%Y%m%d-%H%M%S'))
         try:
             _backup(store.db, dest)
         except (OSError, sqlite3.Error) as e:
@@ -337,20 +365,29 @@ def migrate(store):
     store.savepoint('data_repair')
     try:
         runs_before = store._do('SELECT COUNT(*) FROM runs').fetchone()[0]
-        phantoms = delete_phantoms(store)
-        moved, deleted = rekey_dirt_stages(store)
-        cars = rename_dirt_cars(store)
-        potentials, envelopes = drop_potentials(store)
-        store._do('DELETE FROM reanalyse')
-        order = queue_order(store)
-        store.queue_reanalysis(order)
-        suspects = suspect_times(store)
-        summary = {'at': time.time(), 'runs_before': runs_before, 'phantoms_deleted': phantoms,
-                   'stages_moved': moved, 'stages_deleted': deleted,
-                   'cars_renamed': {str(k): v for k, v in cars.items()}, 'potentials_dropped': potentials,
-                   'envelopes_dropped': envelopes, 'queued': len(order),
-                   'times_not_fixed': [list(s) for s in suspects], 'backup': dest}
-        store.set_meta(REPAIR, json.dumps(summary))
+        summary = None
+        phantoms, moved, deleted, cars, order, suspects = [], {}, [], {}, [], []
+        potentials = envelopes = 0
+        if version < 1:
+            phantoms = delete_phantoms(store)
+            moved, deleted = rekey_dirt_stages(store)
+            cars = rename_dirt_cars(store)
+            potentials, envelopes = drop_potentials(store)
+            store._do('DELETE FROM reanalyse')
+            order = queue_order(store)
+            store.queue_reanalysis(order)
+            suspects = suspect_times(store)
+            summary = {'at': time.time(), 'runs_before': runs_before, 'phantoms_deleted': phantoms,
+                       'stages_moved': moved, 'stages_deleted': deleted,
+                       'cars_renamed': {str(k): v for k, v in cars.items()}, 'potentials_dropped': potentials,
+                       'envelopes_dropped': envelopes, 'queued': len(order),
+                       'times_not_fixed': [list(s) for s in suspects], 'backup': dest}
+            store.set_meta(REPAIR, json.dumps(summary))
+        rbr_potentials, rbr_envelopes, rbr_queued = repair_rbr(store)
+        rbr = {'at': time.time(), 'from': version, 'potentials_dropped': rbr_potentials,
+               'envelopes_dropped': rbr_envelopes, 'rbr_runs_queued': rbr_queued, 'backup': dest}
+        store.set_meta(REPAIR_RBR, json.dumps(rbr))
+        summary = dict(summary or {}, rbr=rbr)
         store.set_meta(BACKUP_META, None)
         store.set_meta('data_version', DATA_VERSION)
         store.release_savepoint('data_repair')
@@ -359,12 +396,15 @@ def migrate(store):
         store.rollback_savepoint('data_repair')
         return None
     store.commit()
-    logging.info("data repair to data version %d done in %.1f s: %d phantom DiRT runs deleted (%s), %d DiRT stages "
-                 "moved (%s), %d stage rows deleted, %d cars renamed, %d potentials and %d envelopes dropped, %d runs "
-                 "queued to be worked over again", DATA_VERSION, time.monotonic() - started, len(phantoms),
-                 ', '.join(map(str, phantoms)) or '-', len(moved),
-                 ', '.join('{} -> {}'.format(a, b) for a, b in moved.items()) or '-', len(deleted), len(cars),
-                 potentials, envelopes, len(order))
+    if version < 1:
+        logging.info("data repair to data version 1: %d phantom DiRT runs deleted (%s), %d DiRT stages moved (%s), "
+                     "%d stage rows deleted, %d cars renamed, %d potentials and %d envelopes dropped, %d runs queued "
+                     "to be worked over again", len(phantoms), ', '.join(map(str, phantoms)) or '-', len(moved),
+                     ', '.join('{} -> {}'.format(a, b) for a, b in moved.items()) or '-', len(deleted), len(cars),
+                     potentials, envelopes, len(order))
+    logging.info("data repair to data version %d done in %.1f s; Richard Burns Rally: %d potentials and %d envelopes "
+                 "dropped, %d runs queued to be worked over again", DATA_VERSION, time.monotonic() - started,
+                 rbr_potentials, rbr_envelopes, rbr_queued)
     for run, stage, result, why in suspects:
         logging.warning("data repair: run %s on %s keeps its time %s (%s): run 'oversteer --retime-from-captures' "
                         "(Flatpak: 'flatpak run io.github.berarma.Oversteer --retime-from-captures') with Oversteer closed "

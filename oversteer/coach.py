@@ -575,8 +575,8 @@ LAUNCH_CUT = 0.3                 # s on the limiter in the launch gear: a late c
 LAUNCH_CUTS = 3                  # of the last five launches
 LAUNCH_GAME = 0.02               # s: five launches within this of each other are the game's launch, not a driver's (they never repeat to a hundredth)
 LAUNCH_STEADY = 0.1              # s: the last five launches within this of each other and of the best: praise
-LAUNCH_OUT = ('wrcg', 'rbr')     # games whose speed channel is not checked: no launch rules
-ATTITUDE_OUT = ('wrcg', 'rbr')   # games whose steer and yaw signals are not checked: no spin or stall coaching
+LAUNCH_OUT = ('wrcg',)            # games whose speed channel is not checked: no launch rules
+ATTITUDE_OUT = ('wrcg',)          # games whose steer and yaw signals are not checked: no spin or stall coaching
 
 # Rough seconds each costs per 10 km, only to rank what to work on first
 # where no reference gives seconds (calibrate): a second held on the limiter
@@ -2104,9 +2104,12 @@ def _peak_yaw(trace, d0, d1):
     return max(values) if values else None
 
 
-def _began_mid_stage(reader, run_id, stage):
+def _began_mid_stage(reader, run_id, stage, trace=None):
     """Whether an ACR run began further along the road than the start line (run_start more than
-    stage_tables.START_LINE_PAST past it): its trace's distances are not the reference grid's."""
+    stage_tables.START_LINE_PAST past it): its trace's distances are not the reference grid's. An RBR run is judged
+    by its clock: it began mid-stage unless its first row is at the go (coach_context.began_at_go of `trace`)."""
+    if (stage or '').startswith('rbr:'):
+        return not coach_context.began_at_go(trace if trace is not None else reader.trace(run_id))
     line = stage_tables.start_line(stage_tables.entry(stage))
     start = reader.run_start(run_id)
     return line is not None and start is not None and start > line + stage_tables.START_LINE_PAST
@@ -2137,7 +2140,7 @@ def stitch(reader, run, ref, ref_corners, before):
         if trace and found:
             loaded.append({'run': r['id'], 'trace': coach_context.stage_rows(
                 trace, r['course'], r['finished'] == 1, r['result_time']), 'corners': found,
-                'mid_stage': _began_mid_stage(reader, r['id'], run['stage'])})
+                'mid_stage': _began_mid_stage(reader, r['id'], run['stage'], trace)})
     # a run that began mid-stage keeps to `loaded` (the game's sectors place it from where it began) but is
     # not on the grid: its distance 0 is not the line
     best = coach_context.stitched(ref_rows, [x for x in loaded if not x['mid_stage']])
@@ -2294,11 +2297,14 @@ def _sectors(stage, run, ref_rows, loaded, classes, starts=None, clocks=None, re
 
     def times(trace, run_id=None, clean=False):
         origin = (starts or {}).get(run_id)
+        usable, from_go = coach_context.sector_go(stage, trace, origin)
+        if not usable:
+            return {}
         if origin is None:
             origin = stage_tables.run_origin(entry)
         shift = 0.0 if origin is None else origin - placed['start_m']
         found = coach_context.sector_times(trace, bounds, shift, (clocks or {}).get(run_id) == 'game',
-                                           (results or {}).get(run_id))
+                                           (results or {}).get(run_id), from_go)
         if clean:       # a sector with an off, spin or hit in it or within SECTOR_REACH of it is no fair best (as grid_times)
             reach = SECTOR_REACH
             found = {i: t for i, t in found.items() if not any(

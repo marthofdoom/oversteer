@@ -1044,6 +1044,34 @@
    "description": "Angular acceleration in the car frame: roll, pitch, yaw (Richard Burns Rally, degrees/s^2 assumed: verify on capture).",
    "convention": "x forward, y left, z up",
    "rate": "packet"
+  },
+  "car_slot": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "The car slot the packet names, car.index (Richard Burns Rally: the Cars.ini slot 0..7; another slot is another car).",
+   "convention": "",
+   "rate": "packet"
+  },
+  "wheels_speed": {
+   "kind": "sample",
+   "unit": "m/s",
+   "description": "The speed the wheels read, car.speed as sent (Richard Burns Rally): with the rpm, the gearing, wheelspin included.",
+   "convention": "",
+   "rate": "packet"
+  },
+  "car_epoch": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Numbers the stretches in which the car cannot have changed (Richard Burns Rally, rbr_fingerprint).",
+   "convention": "",
+   "rate": "packet"
+  },
+  "car_provisional": {
+   "kind": "sample",
+   "unit": "bool",
+   "description": "The car is the last stretch's, not yet confirmed by its gearing: nothing is learnt under it (Richard Burns Rally, rbr_fingerprint).",
+   "convention": "",
+   "rate": "packet"
   }
  },
  "rig": {

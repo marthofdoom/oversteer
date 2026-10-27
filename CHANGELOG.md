@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.17.0 — 2026-10-26
+
+### Richard Burns Rally: the same features as Assetto Corsa Rally
+- **Real sectors.** The stage's own split lines from RSF's stage files (480 stages) give S1, S2, S3 that add up to
+  the game's result, with splits, sum of best and sector bests as in ACR. A run is judged to start at the go by the
+  game's clock; an older run that began mid-stage gets no sectors rather than false sector bests.
+- **The car is recognised from its gearing**, with no setup and no access to the install (the packet has no car id).
+  After a few seconds of driving the steps between gears are matched against a shipped car table built from RSF's
+  own physics files (Ford Fiesta WRC 2019, Hyundai i20 Coupe WRC 2021, Skoda Fabia RS Rally2, Toyota GR Yaris
+  Rally2; names for all 102 RSF cars). A gearbox other RSF cars may share is named "by gearing" and kept per car
+  slot; two shipped cars with one gearbox are shown under both names; any other car gets a name of its own
+  ("RBR car #1"). Shift points, coaching and PBs are then learnt per car. Runs driven before the car is recognised
+  are moved to it, PBs included; nothing is deleted.
+- **Rev lights and the best upshift from the game's own data** for the shipped cars: limiter, torque curve, gear
+  ratios and drop gear. The best upshift worked out from them matches RSF's own automatic gearbox within 50 rpm.
+- **Coaching, the stage map and the potential lap from the positions.** The positions, speed and accelerations were
+  checked on real runs, so RBR now gets launch, spin and stall coaching, the speed-drop reads and the potential lap
+  built from the road the car drove.
+
+### Stored data
+- **One-off repair on the first start of 0.17** (backup `telemetry.db.pre-0.17-...bak` first): RBR runs are worked over
+  again with the new rules and their potentials rebuilt; every game's potentials are rebuilt once when that is
+  done. Nothing is deleted; PB runs keep their place.
+- A run that was a PB stays protected from trace pruning when its runs move to another car.
+
+### Store listing
+- The app's description now covers the telemetry and the coach, not only the wheel settings.
+
 ## 0.16.0 — 2026-10-26
 
 ### Telemetry

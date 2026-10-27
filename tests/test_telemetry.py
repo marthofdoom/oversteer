@@ -427,6 +427,7 @@ def test_plan_xy_is_one_map_for_every_game():
     # WRC Generations: z is up, the plan is (x, y)
     assert plan_xy('wrcg', (120.0, 30.0, 5.0)) == (120.0, 30.0)
     assert plan_xyz('wrcg', (120.0, 30.0, 5.0)) == (120.0, 5.0, 30.0)
+    assert plan_xy('rbr', (120.0, 30.0, 5.0)) == (120.0, 30.0) and plan_xyz('rbr', (120.0, 30.0, 5.0)) == (120.0, 5.0, 30.0)   # z up, checked
     # the other games: as they were, (x, z) with y up
     assert plan_xy('dirt', (1.0, 2.0, 3.0)) == (1.0, -3.0) and plan_xyz('dirt', (1.0, 2.0, 3.0)) == (1.0, 2.0, -3.0)   # left-handed like ACR
     assert plan_xy('forza', (1.0, 2.0, 3.0)) == (1.0, 3.0) and plan_xyz(None, (1.0, 2.0, 3.0)) == (1.0, 2.0, 3.0)

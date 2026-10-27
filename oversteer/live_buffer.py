@@ -136,9 +136,10 @@ def load_reference(store, stage, car, exclude=None):
     entry = stage_tables.entry(stage)
     placed = stage_tables.sector_bounds(entry)
     origin = store.run_start(ref['id'])
+    usable, _ = coach_context.sector_go(stage, rows, origin)      # (RBR: a reference with no recorded start that began mid-stage)
     if origin is None:
         origin = stage_tables.run_origin(entry)
-    if placed is not None:
+    if placed is not None and usable:
         # from where the reference began (its trace's distance 0), as coach._sectors places a run's lines
         start = sector_start = placed['start_m'] if origin is None else origin
         sectors = tuple(('S{}'.format(i + 1), a - start, b - start) for i, (a, b) in enumerate(placed['bounds']))
@@ -223,7 +224,8 @@ class LiveBuffer:
         self.clock = clock
         self._slots = [None] * self.capacity
         self._seq = 0
-        self._offer = None              # (run number, Reference or None, stage dict or None, run id): drive-log thread
+        self._offer = None              # (run number, Reference or None, stage dict or None, run id, n): drive-log thread
+        self._offers = 0                # numbers the offers: one offered again for the same run is taken again
         self._run = None                # listener-thread state of the run, below
         self._error_at = None
         self.state = self._publish_idle()
@@ -233,8 +235,11 @@ class LiveBuffer:
     @_guarded
     def offer_reference(self, number, reference, stage=None, run_id=None):
         """The reference (or None: there is none) of run `number`, with its
-        stage ({key, name, length}) and runs.id as the database has them."""
-        self._offer = (number, reference, stage, run_id)
+        stage ({key, name, length}) and runs.id as the database has them.
+        Offered again for the same run (its car known only after it began:
+        RunTracker.rekey), the new one replaces the first."""
+        self._offers += 1
+        self._offer = (number, reference, stage, run_id, self._offers)
 
     # -- the listener thread --
 
@@ -245,7 +250,7 @@ class LiveBuffer:
         along the game's road the run began (ACR's spline)."""
         self._run = {'n': number, 'id': None, 'game': game, 'first': self._seq + 1, 'at': now,
                      'stage': {'key': stage, 'name': track, 'length': stage_length} if (stage or track) else None,
-                     'ref': None, 'ref_status': 'pending', 'adopted': False, 'last': None, 'delta': None, 'd0': None,
+                     'ref': None, 'ref_status': 'pending', 'adopted': None, 'last': None, 'delta': None, 'd0': None,
                      'mid': False, 'spline': start_d, 'off': 0.0,
                      'splits': _Splits(()), 'sectors': _Splits(()), 'final': None}
         self._adopt()
@@ -364,12 +369,12 @@ class LiveBuffer:
 
     def _adopt(self):
         """Take the reference the drive-log thread offered for this run
-        (once; `_offer` is only ever written by that thread)."""
+        (once per offer; `_offer` is only ever written by that thread)."""
         offer, run = self._offer, self._run
-        if offer is None or run is None or offer[0] != run['n'] or run['adopted']:
+        if offer is None or run is None or offer[0] != run['n'] or run['adopted'] == offer[4]:
             return
-        run['adopted'] = True
-        _, ref, stage, run_id = offer
+        run['adopted'] = offer[4]
+        _, ref, stage, run_id, _ = offer
         run['ref'] = ref
         run['ref_status'] = ('mid_stage' if run['mid'] else 'ready') if ref is not None else 'none'
         if stage is not None:

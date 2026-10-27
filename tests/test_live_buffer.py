@@ -455,3 +455,25 @@ def test_the_live_reference_says_whether_it_is_the_pb(tmp_path):
     ref = live_buffer.load_reference(store, stage, car, exclude=quick)       # the PB is the run shown: the next best
     assert ref.run == slow and ref.view['pb'] is False and ref.view['n'] is not None
     store.close()
+
+
+def test_a_rbr_reference_that_began_mid_stage_with_no_recorded_start_gives_no_sectors(tmp_path):
+    from oversteer.telemetry_store import open_store, TRACE_CHANNELS
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    stage = 'rbr:309'
+    car = store.car_id('p', 'rbr/x', 'rbr', 'X')
+    session = store.start_session('p', car, 'rbr', 1.0, stage=stage)
+    runs = []
+    for first_t in (0.5, 60.0):                                  # began at the go; began a minute into the clock
+        run = store.start_run(session, len(runs) + 1, 1.0, stage)
+        store.update_run(run, finished=1, result_time=first_t + 250.0, course=2500.0, run_class='clean', ended=2.0)
+        store.add_trace(run, [tuple(first_t + i / 10.0 if n == 't' else float(i) if n == 'distance' else 0.0
+                                    for n in TRACE_CHANNELS) for i in range(0, 2501)])
+        runs.append(run)
+    assert [len(live_buffer.load_reference(store, stage, car).sectors)] == [3]          # the quicker is picked: the go
+    store.update_run(runs[0], result_time=900.0)                                         # now the mid-stage one is the best
+    ref = live_buffer.load_reference(store, stage, car)
+    assert ref.run == runs[1] and ref.sectors == ()
+    store.set_run_start(runs[1], 1200.0)                                                 # a recorded start places it
+    assert len(live_buffer.load_reference(store, stage, car).sectors) == 3
+    store.close()

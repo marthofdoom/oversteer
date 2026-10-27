@@ -1,6 +1,6 @@
 import pytest
 
-from oversteer import rbr_install, stage_tables
+from oversteer import rbr_fingerprint, rbr_install, stage_tables
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +24,15 @@ def _no_real_rbr_install(monkeypatch):
     rbr_install.forget()
     yield
     rbr_install.forget()
+
+
+@pytest.fixture(autouse=True)
+def _own_rbr_car_library(tmp_path):
+    """The RBR cars told from their gearing (rbr_fingerprint) are read from a library of the test's own, never the
+    user's."""
+    rbr_fingerprint.set_library_path(str(tmp_path / 'rbr-cars.json'))
+    yield
+    rbr_fingerprint.set_library_path(None)
 
 
 @pytest.fixture

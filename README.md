@@ -1,6 +1,6 @@
 # Countersteer
 
-**A steering-wheel manager and rally coach for Linux, built for Assetto Corsa Rally.**
+**A steering-wheel manager and rally coach for Linux, built for Assetto Corsa Rally and Richard Burns Rally (RallySimFans).**
 Shift lights learnt from the game's own car data, a launch limiter, coaching that names the
 corner where you lost time, speedrun-style splits, and a stage page for your phone.
 
@@ -92,6 +92,33 @@ prefix and forwards it to Countersteer over UDP (port 5310 by default).
 Logs: `<steam library>/steamapps/compatdata/<appid>/oversteer-run.log` (launcher and Proton output)
 and `oversteer-shm-bridge.log` next to it (what the bridge found and sent).
 
+## For Richard Burns Rally players (RallySimFans)
+
+The same features as for Assetto Corsa Rally, from RSF's NGP telemetry. Nothing is installed in
+the game and nothing needs setting up in Countersteer:
+
+- **Every RSF stage named** (661), with its surface. Times come from the game's own stage clock,
+  penalties included.
+- **Real sectors** from the stage's own split lines (480 stages have them), so S1, S2 and S3 add up to the
+  game's result. Splits, sum of best and the potential lap work as they do for ACR.
+- **The car recognised from its gearing** after a few seconds of driving (the packet has no car id).
+  - Where Countersteer ships a car's engine and gearbox, the limiter, torque curve and gear ratios come
+    from the game's own physics files, so the rev lights and the best upshift are right from the first
+    drive, as in ACR.
+  - A gearbox that other RSF cars may share is named "by gearing" ("Skoda Fabia RS Rally2 (by gearing,
+    car slot 5)"). Two shipped cars with the same gearbox are shown under both names. Learning is kept per
+    car slot.
+  - Any other car gets a name of its own ("RBR car #1"), and its shift points, coaching and PBs are
+    learnt for that car.
+- **Coaching, the stage map and the potential lap**, using the car's positions, speed and accelerations, all
+  checked against the author's runs. Rev lights and the launch limiter work as for every game.
+
+Setup:
+1. In the **RSF Launcher**, turn on Advanced options, open **Telemetry**, tick **UDP Telemetry**
+   and add `127.0.0.1:5310`. Port `6776` also works: most RBR tools use it, and Countersteer's Auto
+   port setting listens on both.
+2. In Countersteer, turn on the rev lights in **Telemetry → Settings**.
+
 ## For Logitech owners: the new-lg4ff driver fork
 
 Logitech wheels need a driver that exposes more than the kernel's `hid-logitech`. Countersteer
@@ -147,11 +174,11 @@ Pedals are inverted at the driver by default so games read them the right way ro
 ### Other games (secondary)
 
 The telemetry side also reads Forza Horizon / Motorsport "Data Out", BeamNG and Live for Speed
-(OutGauge), the Codemasters layout (DiRT Rally 2.0, DiRT 4, WRC Generations), EA SPORTS WRC and
-Richard Burns Rally (RSF).
-Rev lights and shift learning work for all of them; coaching, stage tables and splits are built
-and checked on Assetto Corsa Rally first and WRC Generations second, and the rest are less
-exercised. Assetto Corsa and Assetto Corsa Competizione use the same `oversteer-run` bridge.
+(OutGauge), the Codemasters layout (DiRT Rally 2.0, DiRT 4, WRC Generations) and EA SPORTS WRC.
+Richard Burns Rally has its own section above.
+Rev lights and shift learning work for all of them. Coaching, stage tables and splits are built
+and checked on Assetto Corsa Rally and Richard Burns Rally first and WRC Generations second; the
+rest are less exercised. Assetto Corsa and Assetto Corsa Competizione use the same `oversteer-run` bridge.
 *Experimental:* anything not named above, and the web page's remote use beyond a trusted LAN.
 
 `scripts/probe-device.py`, `scripts/telemetry-capture.py` and `scripts/telemetry-replay.py` help

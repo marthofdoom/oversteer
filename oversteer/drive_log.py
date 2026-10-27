@@ -384,6 +384,7 @@ class RunTracker:
         self.run = None                  # the run going on: a number, its row id is the drive log's
         self._runs = 0
         self.run_rows = {}               # run number -> runs.id; drive-log thread only
+        self.run_ids = {}                # the same, kept after the run's end (a re-check's split); drive-log thread only
         self.end_mono = {}               # run number -> time.monotonic() when it ended, for the analysis latency log
         self.run_batch = {}              # run number -> the drive log's batch its row was written in
         self._live_loaded = set()        # run numbers whose live reference was looked up; drive-log thread only
@@ -702,6 +703,23 @@ class RunTracker:
         # the run's row, which names the stage)
         learner.log.post(self._live_reference, self.run, session, sample.game, sample.track, sample.stage_length,
                          self._acr_start)
+
+    def rekey(self, car, gears=None):
+        """The run's car is known now (rbr_fingerprint: told from its gearing after the run began): the summary
+        names it, and the live delta's reference is looked up again for it once the session row is re-keyed
+        (ShiftLearner._write_rekey, posted before)."""
+        if self.run is None:
+            return
+        self._summary['car'] = car
+        if gears:
+            self._summary['gears'] = gears
+        summary = self._summary
+        self.learner.log.post(self._reload_reference, self.run, self._session, summary['game'], summary['track'],
+                              summary['stage_length'], self._acr_start)
+
+    def _reload_reference(self, number, session, game, track, stage_length, start_d):
+        self._live_loaded.discard(number)
+        self._live_reference(number, session, game, track, stage_length, start_d)
 
     def _clock(self, now, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
@@ -1042,7 +1060,10 @@ class RunTracker:
             # No RSF install to name it from: "RBR stage <map id>", its length from the packet (distanceToEnd at the start)
             store.upsert_stage(stage, game, stage_length, name='RBR stage {}'.format(stage.split(':', 1)[1]))
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
-        if spline is not None and game == 'acr':             # only ACR's lap_distance is a place on the road
+        self.run_ids[number] = self.run_rows[number]
+        for old in [k for k in self.run_ids if k < number - 64]:
+            del self.run_ids[old]
+        if spline is not None and game in ('acr', 'rbr'):    # only ACR's and RBR's lap_distance is a place on the road
             store.set_run_start(self.run_rows[number], spline)
         self.run_batch[number] = learner.log.batch
         surface = stage_surface(store, game, stage)
