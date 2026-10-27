@@ -138,7 +138,8 @@ def test_runs_are_ported_with_their_rows_remapped(files):
     assert len(runs) == 4
     ported = runs[1]
     assert ported['car'] == cars['acr/Car'] and ported['profile'] == 'AC Rally'
-    assert ported['run_class'] is None                               # the backfill works it over
+    assert ported['run_class'] == 'clean'                            # kept while it waits for the backfill
+    assert db.execute('SELECT COUNT(*) FROM reanalyse WHERE run = ?', (ported['id'],)).fetchone()[0] == 1
     assert runs[3]['run_class'] == 'restart'                         # no trace: kept as it was
     pid = ported['id']
     assert db.execute('SELECT clock FROM run_clock WHERE run = ?', (pid,)).fetchone()[0] == 'game'
@@ -336,6 +337,24 @@ def test_backfill_works_the_ported_runs_over_before_the_target_is_written(files)
                        backup_dir=str(tmp / 'backup'), out=lines.append, backfill_profile='AC Rally')
     assert any(line.startswith('backfill') for line in lines)
     db = connect(target)
-    assert db.execute('SELECT COUNT(*) FROM runs r JOIN traces t ON t.run = r.id WHERE r.run_class IS NULL'
-                      ).fetchone()[0] == 0
+    assert db.execute('SELECT COUNT(*) FROM reanalyse').fetchone()[0] == 0          # the backfill worked them all
     assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+
+
+def test_a_source_not_yet_repaired_lowers_the_targets_data_version(files):
+    target, source, tmp = files
+    s = sqlite3.connect(source)
+    s.execute("DELETE FROM store_meta WHERE key = 'data_version'")         # a file from before the 0.16 repair
+    s.execute("INSERT INTO events (run, kind) SELECT id, 'launch' FROM runs WHERE id IN (SELECT run FROM traces)")
+    s.execute("INSERT INTO metrics (session, run, name, value, count) SELECT session, id, 'launch.g', 0.5, 1 FROM runs "
+              "WHERE id IN (SELECT run FROM traces)")
+    s.commit()
+    s.close()
+    run(files)
+    db = connect(target)
+    assert merge_db.data_version(db) == 0                                  # the app repairs the merged file
+    ported = [r[0] for r in db.execute('SELECT run FROM reanalyse')]
+    assert ported
+    for pid in ported:
+        assert db.execute("SELECT COUNT(*) FROM events WHERE run = ? AND kind = 'launch'", (pid,)).fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM metrics WHERE run = ? AND name = 'launch.g'", (pid,)).fetchone()[0] == 1
