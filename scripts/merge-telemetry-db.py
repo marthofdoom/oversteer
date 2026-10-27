@@ -35,7 +35,7 @@ Every table of the schema, and what the merge does with it:
                   target's was not). `runs` counts the runs ported onto it
     sessions      matched by (profile, car, start within DUP_SECONDS), else inserted; a session whose runs are all
                   duplicates goes to the session of the first one's copy
-    runs          inserted in start order unless a duplicate (below). run_class is cleared on a run with a trace,
+    runs          inserted in start order unless a duplicate (below). A run with a trace is queued (reanalyse),
                   so the backfill works it over (its corners, events, metrics, class) as the app does after an
                   upgrade; a run with no trace keeps its class and its derived rows (nothing could make them again)
     traces, laps, segments, labels, run_start, run_clock, run_stop, run_finish
@@ -45,7 +45,8 @@ Every table of the schema, and what the merge does with it:
                   session that was inserted, and skipped where the session was matched (recorded in both)
     captures      by path (unique): inserted when the target has none, its session mapped
   partly primary
-    metrics       the launch metrics the backfill cannot work out again (drive_log.BACKFILL_KEEP) are ported; the
+    metrics       the launch metrics the backfill cannot work out again (drive_log.BACKFILL_KEEP, every launch.*) are
+                  ported, and so is the launch's event (BACKFILL_KEEP_EVENTS); the
                   rest is derived (below). A run without a trace keeps all of its metrics
   derived (worked out again from the primary rows: not ported)
     corners, events, metrics   the backfill (drive_log.backfill_step) writes them from the trace
@@ -59,6 +60,11 @@ Every table of the schema, and what the merge does with it:
                   earliest, last_shown the latest, times the larger (not the sum: re-running stays the same), value
                   and quiet the more recently shown's
     calibration   per (game, kind): the target's is kept; the source's inserted only where the target has none
+    store_meta    not ported; where runs are ported from a source at a lower data version (data_repair: not yet
+                  repaired), the target's data version is lowered to it, so the app repairs the merged file at its
+                  next start
+    reanalyse     not ported; the ported runs with a trace are queued in the target's, their classes kept until
+                  the backfill rewrites them (a cleared class would drop a PB out of the PB lookups meanwhile)
 
 Duplicates: the same drive recorded by both files, a source run of the same game and car key (any profile) with a
 start within DUP_SECONDS of a target run and the same stage (or either unknown), or a byte-identical trace. One copy
@@ -77,7 +83,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 from oversteer import telemetry_store                                     # noqa: E402
-from oversteer.drive_log import BACKFILL_KEEP                              # noqa: E402
+from oversteer.drive_log import BACKFILL_KEEP, BACKFILL_KEEP_EVENTS, BACKFILL_KEEP_PREFIX  # noqa: E402
 
 DUP_SECONDS = 2.0
 
@@ -85,7 +91,7 @@ PRIMARY = ('cars', 'tunes', 'stages', 'sessions', 'runs', 'traces', 'laps', 'seg
            'captures', 'run_finish', 'run_start', 'run_clock', 'run_stop')
 PARTLY = ('metrics',)
 DERIVED = ('corners', 'events', 'envelopes', 'stage_potential')
-STATE = ('stage_lines', 'coach_state', 'calibration')
+STATE = ('stage_lines', 'coach_state', 'calibration', 'store_meta', 'reanalyse')
 KNOWN = set(PRIMARY + PARTLY + DERIVED + STATE)
 RUN_TABLES = ('run_start', 'run_clock', 'run_stop', 'run_finish')      # one row per run, keyed by it
 PRIOR_RANK = {'user': 2}
@@ -431,8 +437,6 @@ def merge(tdb, sdb, profile_map=None, plan=None):
         row = {k: v for k, v in r.items() if k != 'id' and not k.startswith('_')}
         row['session'] = session_map[r['session']]
         has_trace = sdb.execute('SELECT 1 FROM traces WHERE run = ?', (r['id'],)).fetchone() is not None
-        if has_trace:
-            row['run_class'] = None                  # the backfill works it over
         new = insert(tdb, 'runs', row)
         run_map[r['id']] = new
         ported.append((r['id'], new, has_trace))
@@ -457,12 +461,17 @@ def merge(tdb, sdb, profile_map=None, plan=None):
                 plan.add(table, 'insert')
         if has_trace:
             n = sdb.execute('SELECT COUNT(*) FROM corners WHERE run = ?', (old,)).fetchone()[0]
-            m = sdb.execute('SELECT COUNT(*) FROM events WHERE run = ?', (old,)).fetchone()[0]
             plan.add('corners', 'skip', n)
-            plan.add('events', 'skip', m)
+            for row in sdb.execute('SELECT * FROM events WHERE run = ? ORDER BY id', (old,)).fetchall():
+                if row['kind'] not in BACKFILL_KEEP_EVENTS:
+                    plan.add('events', 'skip')
+                    continue
+                row = {k: v for k, v in dict(row).items() if k != 'id'}
+                insert(tdb, 'events', dict(row, run=new))            # the launch's: the backfill cannot make it again
+                plan.add('events', 'insert')
         for row in sdb.execute('SELECT * FROM metrics WHERE run = ? ORDER BY id', (old,)).fetchall():
             row = dict(row)
-            if has_trace and row['name'] not in BACKFILL_KEEP:
+            if has_trace and row['name'] not in BACKFILL_KEEP and not row['name'].startswith(BACKFILL_KEEP_PREFIX):
                 plan.add('metrics', 'skip')
                 continue
             row.pop('id')
@@ -553,10 +562,34 @@ def merge(tdb, sdb, profile_map=None, plan=None):
         n = sdb.execute('SELECT COUNT(*) FROM {}'.format(table)).fetchone()[0]
         if n:
             plan.add(table, 'skip', n)
+    # a ported run with a trace is worked over again by the backfill, keeping its class (and so its PB) meanwhile
+    traced = [new for _, new, has_trace in ported if has_trace]
+    if traced:
+        store = telemetry_store.Store(tdb, None)
+        tdb.execute(telemetry_store.REANALYSE_DDL)
+        tdb.execute(telemetry_store.STORE_META_DDL)
+        from oversteer import data_repair
+        data_repair.requeue(store, traced)
+        plan.add('reanalyse', 'insert', len(traced))
+    versions = [data_version(db) for db in (sdb, tdb)]
+    if ported and versions[0] < versions[1]:
+        tdb.execute("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('data_version', ?)", (str(versions[0]),))
+        plan.add('store_meta', 'update')
+        plan.note('the source is at data version {}, the target at {}: the target is set to {}, so the app repairs '
+                  'the merged file at its next start'.format(versions[0], versions[1], versions[0]))
     if ported:
-        plan.note('{} run(s) ported; {} with a trace queued for the backfill (run_class cleared); stages receiving '
+        plan.note('{} run(s) ported; {} with a trace queued for the backfill (their classes kept); stages receiving '
                   'runs: {}'.format(len(ported), sum(1 for p in ported if p[2]), ', '.join(sorted(touched_stages))))
     return plan
+
+
+def data_version(db):
+    """A file's data version (telemetry_store.DATA_VERSION; 0 for a file from before it was kept)."""
+    try:
+        row = db.execute("SELECT value FROM store_meta WHERE key = 'data_version'").fetchone()
+        return int(row[0]) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        return 0
 
 
 def check(tdb):
@@ -588,7 +621,7 @@ def check(tdb):
 def backfill(path, profile, out=print):
     """The re-analysis the app runs at its next start, run now on `path`: drive_log.repair_shipped (the stages' and
     cars' shipped data, the clock stops, the moved lines, the re-timing) and the backfill of every run with a trace
-    and no class, then the potential of every stage and car that has none (ShiftLearner.backfill, which the app runs a
+    queued (reanalyse) or with no class, then the potential of every stage and car that has none (ShiftLearner.backfill, which the app runs a
     few runs at a time; a stage and car whose potential comes to nothing ends a pass there, so passes go on until
     every one was tried). `profile` is the learner's (the app's current profile). Returns (steps, failed runs)."""
     from oversteer.shift_learner import ShiftLearner
@@ -602,7 +635,7 @@ def backfill(path, profile, out=print):
                 break
             steps += learner.backfill()
         failed = sorted(learner.__dict__.get('_backfill_failed', ()))
-        left = store.runs_to_backfill(1000)
+        left = store.runs_to_backfill(1000) + store.runs_to_reanalyse(1000)
         classes = store.db.execute("SELECT COALESCE(run_class, '-'), COUNT(*) FROM runs GROUP BY 1").fetchall()
         potentials = store.db.execute('SELECT COUNT(*) FROM stage_potential').fetchone()[0]
     finally:

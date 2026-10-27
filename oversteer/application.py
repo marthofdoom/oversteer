@@ -68,6 +68,11 @@ class Application:
         parser.add_argument('--debug', action='store_true', help=_("enable debug output"))
         parser.add_argument('--diagnostics-bundle', metavar='PATH',
                 help=_("write a zip of the logs, the latest captures and the versions to PATH, for a bug report"))
+        parser.add_argument('--retime-from-captures', action='store_true',
+                help=_("re-time the stored runs from the captures with the current finish rules, then exit "
+                       "(close Oversteer first; the database is backed up)"))
+        parser.add_argument('--retime-dry-run', action='store_true',
+                help=_("with --retime-from-captures: only say what would change"))
         parser.add_argument('--proxy-list', action='store_true', help=_("list proxy devices and their state"))
         parser.add_argument('--proxy-run', metavar='ID', action='append',
                 help=_("run a proxy in the foreground (for testing; repeatable)"))
@@ -99,6 +104,11 @@ class Application:
 
         if args.diagnostics_bundle:
             exit(self.write_diagnostics_bundle(args.diagnostics_bundle))
+
+        if args.retime_from_captures:
+            from . import data_repair
+            exit(data_repair.run_retime(os.path.join(diagnostics.data_home(), 'oversteer', 'telemetry.db'),
+                                        dry_run=args.retime_dry_run))
 
         if proxy_command:
             exit(self.run_proxy_command(args, argv))
