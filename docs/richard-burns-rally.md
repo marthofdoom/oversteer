@@ -230,6 +230,21 @@ still to add `127.0.0.1:5310` to RSF's list (no profile change, other tools keep
 - **P2.1 Real sectors**: the `.dls` lines (P1.3) crossed by the run's along-stage distance give S1..SN with the
   game's clock, as ACR's `sector_lines_m` do (`stage_tables.sector_lines`). Acceptance: the sum equals the official
   time; the split times equal the in-game split display.
+  **Built (branch `rbr-sectors`).** `research/rbr/stage_table.py` reads every `Maps/**/track-<id>_<L>.dls` and
+  ships `sector_lines_m` [start, split..., finish] (+ `sector_lines_source`, `sector_lines_confidence`) for the
+  480 of 661 stages with a finish and at least one split (the other `.dls` files, 100-500 m SSS and service-area
+  maps, have none and keep none). The five time-of-day variants of all 506 stages agree exactly (785 files). 14 files
+  have no start marker (Falstone, Rally School, Akagi 2, Sweet Lamb 2...): the start is 0 m, confidence `medium`;
+  the others are `high`. Nothing is gated to a game: `stage_tables.sector_lines` (data present) switches on the
+  sectors, the finish line (`finish_m` = last line, beats a learnt one), the splits, sector bests and sum of best
+  for RBR as for ACR. Changes beyond the table: a local install's table (built from RSF's lists, which hold no
+  lines) keeps the shipped lines (`stage_tables._add_table`); RBR runs record their start (`run_start`, the
+  driveline where the run began), as ACR's do; on the game's clock the last sector ends at the result, because the
+  trace's last row (clock stopped, car rolling on) is further along than the clock's stop and stretches the
+  interpolated crossing short (23 ms on the real run).
+  **Verified** on marth's capture 20261026-191852 (Monster HC 309, 2:25.6): lines 2.1 / 633.5 / 1850.9 / 2503.5,
+  S1 31.553 s, S2 74.702 s, S3 39.380 s, sum 145.636 s = the game's result 145.636 s. The in-game split display
+  has not been compared.
 - **P2.2 Map and potential**: the `.trk` driveline as the stage spline (z up) for projection, curvature and the
   potential layers; car layer from `common.lsp` (power curve, ratios) where readable.
 - **P2.3 Slip without wheel speeds**: driven-wheel speed from rpm and the `common.lsp` ratios, or `currentSegment`

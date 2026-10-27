@@ -124,6 +124,10 @@ def _add_table(tables, table, name, replace=False):
         if key in entries and not replace:
             logging.warning("stage tables: %s: %s twice, the first kept", name, key)
             continue
+        old = entries.get(key)
+        if old and old.get('sector_lines_m') and not entry.get('sector_lines_m'):
+            # the install's own list (built from RSF's lists) holds no lines: the shipped ones, read from the .dls, stay
+            entry.update({k: v for k, v in old.items() if k.startswith('sector_lines_')})
         entries[key] = entry
 
 
@@ -219,8 +223,8 @@ _learnt = {}
 
 
 def sector_lines(entry):
-    """The game's real lines of an ACR stage along the road spline, [start, split..., finish] (`sector_lines_m`,
-    from its level data: scripts/acr-sectors.py), or None where the entry has none (or is a circuit's, whose lines
+    """The game's real lines of a stage along the road spline (ACR) or the driveline (RBR), [start, split...,
+    finish] (`sector_lines_m`, from its level data: scripts/acr-sectors.py; RBR's from the .dls: research/rbr/stage_table.py), or None where the entry has none (or is a circuit's, whose lines
     are the lap line and the splits)."""
     lines = (entry or {}).get('sector_lines_m')
     if not lines or entry.get('sector_lines_circuit') or len(lines) < 2:

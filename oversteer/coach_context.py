@@ -1617,7 +1617,10 @@ def sector_times(trace, bounds, shift=0.0, game_clock=False, result_time=None):
         else:
             start = time_at(trace, track, a)
         end = time_at(trace, track, min(b, track[-1]))
-        if i == len(bounds) - 1 and b > track[-1] and end is not None:
+        if i == len(bounds) - 1 and game_clock and result_time is not None and end is not None and result_time >= end \
+                and b <= track[-1]:
+            end = result_time        # (the game's clock stops at its line: the sparse rows past it would stretch the crossing short)
+        elif i == len(bounds) - 1 and b > track[-1] and end is not None:
             speed = trace[-1][CH['speed']]
             if result_time is not None and result_time >= end:
                 end = result_time

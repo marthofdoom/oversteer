@@ -1042,7 +1042,7 @@ class RunTracker:
             # No RSF install to name it from: "RBR stage <map id>", its length from the packet (distanceToEnd at the start)
             store.upsert_stage(stage, game, stage_length, name='RBR stage {}'.format(stage.split(':', 1)[1]))
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
-        if spline is not None and game == 'acr':             # only ACR's lap_distance is a place on the road
+        if spline is not None and game in ('acr', 'rbr'):    # only ACR's and RBR's lap_distance is a place on the road
             store.set_run_start(self.run_rows[number], spline)
         self.run_batch[number] = learner.log.batch
         surface = stage_surface(store, game, stage)
