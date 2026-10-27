@@ -19,7 +19,6 @@ import math
 import numpy as np
 
 from . import coach_context as cc
-from . import drive_log
 from . import potential
 from .telemetry_formats import plan_xy
 
@@ -128,6 +127,7 @@ class Run:
         self.YAW = potential.resample(arr, 'yaw_rate', G)
         self.T = potential.elapsed(arr, G)
         self.pos = None
+        self.game = game
         if game is not None and potential.has_positions(arr):
             x, y = plan_xy(game, (potential.resample(arr, 'x', G), potential.resample(arr, 'y', G),
                                    potential.resample(arr, 'z', G)))
@@ -147,13 +147,15 @@ def _grip(run, i, env):
 
 
 def _counter(run, i0, i1):
-    """Share of the corner's steering that is against the yaw, the yaw taken drive_log.STEER_LAG_S after the steer (the
-    car follows the wheel; at the same instant the wheel unwinding reads as counter-steer)."""
-    s, y = run.STEER[i0:i1 + 1], run.YAW[i0:i1 + 1]
-    t, yaw = run.T, run.YAW
-    known = np.isfinite(t) & np.isfinite(yaw)
-    if known.sum() > 1 and np.all(np.isfinite(t[i0:i1 + 1])):
-        y = np.interp(t[i0:i1 + 1] + drive_log.STEER_LAG_S, t[known], yaw[known])
+    """Share of the corner's steering that is against the yaw, the steer taken cc.steer_lag(game) s before the yaw (the
+    car follows the wheel; at the same instant the wheel unwinding reads as counter-steer). None where the clock is
+    unknown."""
+    t, steer = run.T, run.STEER
+    known = np.isfinite(t) & np.isfinite(steer)
+    if known.sum() < 2 or not np.all(np.isfinite(t[i0:i1 + 1])):
+        return None
+    s = np.interp(t[i0:i1 + 1] - cc.steer_lag(run.game), t[known], steer[known], left=np.nan)
+    y = run.YAW[i0:i1 + 1]
     ok = np.isfinite(s) & np.isfinite(y) & (np.abs(s) > 0.02)
     if ok.sum() < 3:
         return None
@@ -302,7 +304,7 @@ def measures_section(run_arr, ref_arr, sec, env=None):
         m = measures(run_arr, ref_arr, dict(sec, key=cs[0]), env)
         return [] if m is None else [(cs[0], m)]
     G = np.arange(math.floor(sec['lo']), math.ceil(sec['b']) + 1, 1.0)
-    R = Run(ref_arr, G)
+    R = Run(ref_arr, G, sec.get('game'))
     if np.isnan(R.V).any():
         return []
     mins = []

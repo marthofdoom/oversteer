@@ -321,8 +321,8 @@ def strips(cr, w, h, data, view, cursor, scale=1.0):
                 _rect(cr, GUT, Y(f), width, 1, GRID, 0.35)
                 _rect(cr, GUT, Y(-f), width, 1, GRID, 0.35)
             text(cr, '% lock', 4, top + 23, 8.5, FAINT)
-            text(cr, 'L', 24, top + 10, 9.5, FAINT)
-            text(cr, 'R', 24, bot - 3, 9.5, FAINT)
+            text(cr, 'L', GUT + 3, top + 10, 9.5, FAINT)               # in the plot, clear of the STEER title
+            text(cr, 'R', GUT + 3, bot - 3, 9.5, FAINT)
             if cmp_:
                 _line(cr, pts(cmp_['steer'], Y), REF, 1, 0.8)
             _line(cr, pts(this['steer'], Y), STEER, 1.75)
@@ -670,7 +670,8 @@ def live_rolling(cr, w, h, rows, now):
     label(y, 'STEERING % lock', 'L ▲ · R ▼')
     y += 16
     sh = LV_STRIPS_H[1]
-    grid(y, sh, (0.5,) + tuple(0.5 + sgn * steer_scale(f) / 2.0 for f in STEER_GRID[:-1] for sgn in (1, -1)))
+    inset = 2.0 / sh                                    # the trace's 2 px margin: full lock is the line's top and bottom
+    grid(y, sh, (0.5,) + tuple(0.5 + sgn * steer_scale(f) * (0.5 - inset) for f in STEER_GRID[:-1] for sgn in (1, -1)))
     pts = _live_series(rows, now, lambda r: None if r.get('steer') is None
                        else y + sh / 2.0 - steer_scale(r['steer']) * (sh / 2.0 - 2), x_of)
     _live_path(cr, pts, LV_STEER, 1.75)

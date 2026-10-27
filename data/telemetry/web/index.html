@@ -1924,7 +1924,7 @@ function rvDrawStrips() {
       g.save(); g.globalAlpha = .35;
       for (const f of STEER_GRID) for (const s of [f, -f]) { g.beginPath(); g.moveTo(RV_GUT, Y(s)); g.lineTo(RV_GUT + W, Y(s)); g.stroke(); }
       g.restore();
-      g.fillStyle = C.faint; g.fillText("% lock", 4, top + 23); g.fillText("L", 24, top + 10); g.fillText("R", 24, bot - 3);
+      g.fillStyle = C.faint; g.font = "8.5px " + C.mono; g.fillText("% lock", 4, top + 23); g.font = "9.5px " + C.mono; g.fillText("L", RV_GUT + 3, top + 10); g.fillText("R", RV_GUT + 3, bot - 3);
       if (D.cmp) rvLine(g, pts(D.cmp.steer, Y), C.ref, 1, .8);
       rvLine(g, pts(D.this.steer, Y), C.steer, 1.75);
     } else if (key === "gear") {

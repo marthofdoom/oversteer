@@ -105,8 +105,7 @@ def test_more_steering_against_the_yaw_than_the_reference_is_a_slide_and_states_
     ref = run([(430.0, 28.0), (500.0, 10.0), (600.0, 28.0)], steer=WITH)
     m, d = check(run([(430.0, 28.0), (500.0, 8.0), (600.0, 28.0)], steer=AGAINST), 'SLIDE', ref=ref)
     assert d['fix'] == 'Keep the car straighter through it, as your best run did.'
-    # the yaw is read 0.3 s after the steer, so the last rows of a step-shaped corner meet the yaw already gone (not counted)
-    assert d['facts'][0] == 'steered against the slide for 95 % of the corner (your best run 0 %)'
+    assert d['facts'][0] == 'steered against the slide for 100 % of the corner (your best run 0 %)'
 
 
 def test_slower_with_no_braking_and_no_cornering_load_is_lost_speed_with_no_fix():

@@ -243,7 +243,7 @@ def trace_metrics(summary, trace, channels, corners, context, analysis=None):
             if spun:
                 out.append({'name': 'exit.spin', 'value': sum(spun) / len(spun), 'count': len(spun), 'gear': gear_n})
 
-    balance = balance_gradient(trace, c)
+    balance = balance_gradient(trace, c, summary.get('game'))
     if balance is not None:
         out.append({'name': 'balance.gradient', 'value': balance[0], 'count': balance[1]})
     return out
@@ -304,20 +304,24 @@ def corner_exits(trace, c, corners, band_low, slip=None):
     return found
 
 
-def balance_gradient(trace, c):
+def balance_gradient(trace, c, game=None):
     """(K, rows): the fit steer = a * curvature + K * lateral g over the
     cornering rows where the driver steers into the turn. K > 0 means the
     car asks for more lock as the grip used rises (understeer), K < 0 less
     (oversteer). Its unit is the wheel's lock per g, which depends on the
     wheel's rotation setting: compare it with itself (between tunes), not
     with a number. None without steering, yaw rate and lateral
-    acceleration."""
+    acceleration. A row counts as catching a slide when the steer of
+    coach_context.steer_lag(game) seconds before is against the yaw."""
     xs, ys, zs = [], [], []
-    for row in trace:
+    t = [row[c['t']] for row in trace]
+    earlier = coach_context.steer_before(t, [row[c['steer']] for row in trace], coach_context.steer_lag(game),
+                                         0, len(trace) - 1)
+    for row, before in zip(trace, earlier):
         steer, yaw, lateral, v = row[c['steer']], row[c['yaw_rate']], row[c['a_lat']], row[c['speed']]
         if not (_finite(steer) and _finite(yaw) and _finite(lateral)) or v < BALANCE_SPEED:
             continue
-        if abs(yaw) < BALANCE_YAW or steer * yaw <= 0:
+        if abs(yaw) < BALANCE_YAW or steer * yaw <= 0 or before * yaw < 0:
             continue                                   # straight, or catching a slide
         sign = 1.0 if yaw > 0 else -1.0
         xs.append(abs(yaw) / v)

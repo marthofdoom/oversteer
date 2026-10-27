@@ -2,6 +2,7 @@
 gears, and drives that exercise them (docs/telemetry-coaching.md, §13)."""
 import math
 
+from oversteer.coach_context import steer_lag
 from oversteer.shift_learner import DRAG_C0, DRAG_C2
 from oversteer.telemetry import Sample
 
@@ -198,7 +199,7 @@ def course_samples(course, laps=1, game='dirt', car='dirt/7500-800-5', standing=
         sm.pos = (x, y, z)
         sm.forward = (math.cos(heading), grade, -math.sin(heading))
         sm.yaw_rate = v * curvature
-        steer = max(-1.0, min(1.0, course.at(min(course.length - 1.0, s + v * 0.3))[5] * 15.0))     # the wheel leads the yaw
+        steer = max(-1.0, min(1.0, course.at(min(course.length - 1.0, s + v * steer_lag(game)))[5] * 15.0))     # the wheel leads the yaw
         if slide and curvature > 0 and v > 5:
             piece_start = s
             while piece_start > 0 and course.at(piece_start - 1)[5] == curvature:
