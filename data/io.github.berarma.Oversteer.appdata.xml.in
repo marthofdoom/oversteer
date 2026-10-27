@@ -6,7 +6,7 @@
     </replaces>
   <launchable type="desktop-id">io.github.berarma.Oversteer.desktop</launchable>
   <name>Oversteer</name>
-  <summary>A steering wheel manager</summary>
+  <summary>A steering wheel manager and rally coach</summary>
   <developer id="io.github.berarma">
     <name>Bernat Arlandis</name>
   </developer>
@@ -17,9 +17,20 @@
     <color type="primary" scheme_preference="dark">#77767b</color>
   </branding>
   <description>
-    <p>Oversteer manages steering wheels on Linux using the features provided by the loaded modules.</p>
-    <p>Features:</p>
+    <p>Countersteer (this fork of Oversteer) manages steering wheels on Linux and coaches rally driving from the game's telemetry. It is built for Assetto Corsa Rally and Richard Burns Rally (RallySimFans), with nothing to install in the game.</p>
+    <p>Telemetry and coaching:</p>
       <ul>
+        <li>Rev lights on the wheel's LEDs at each gear's best upshift, worked out from the game's own engine and gearing data where it ships with the app, or learnt from your driving otherwise; a launch limiter.</li>
+        <li>Every run kept with its corners and gear changes: the coach picks up to three tips and says where you lost time, against your own best.</li>
+        <li>Stages recognised with their surface and times taken from the game's own clock; the game's real sectors, splits, sum of best and a potential lap.</li>
+        <li>Live and Run views: delta to your best, speed, pedals, steering, gear and revs over the stage, a stage map and where the time went.</li>
+        <li>An optional read-only web page for a phone or laptop next to the rig.</li>
+        <li>Richard Burns Rally: every RSF stage named, the car recognised from its gearing, no setup beyond the RSF launcher's UDP telemetry.</li>
+        <li>Also reads Forza Data Out, OutGauge (BeamNG, Live for Speed), the Codemasters layout (DiRT Rally 2.0, DiRT 4, WRC Generations) and EA SPORTS WRC.</li>
+      </ul>
+    <p>Wheel settings:</p>
+      <ul>
+        <li>Pedal response curves (with the new-lg4ff driver fork), hotkeys while driving, and one combined device for games that only listen to one.</li>
         <li>Change rotation range.</li>
         <li>Change emulation/working modes.</li>
         <li>Combine accelerator/brakes pedals for games that use just one axis.</li>
