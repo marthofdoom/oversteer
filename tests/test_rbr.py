@@ -232,7 +232,8 @@ def test_no_install_needs_no_setup(monkeypatch, tmp_path):
     assert entries['rbr:71']['stage'] == 'Rally School Stage' and entries['rbr:71']['length_m'] == 2200
     assert entries['rbr:309']['stage'] == 'Monster HC' and entries['rbr:517']['stage'] == 'Bayanbulak-Pegasus 2'
     assert len(entries) > 600 and 'rbr:41' not in entries and 'rbr:81' not in entries
-    assert all(e.keys() <= {'id', 'location', 'stage', 'length_m', 'surface', 'surface_parts', 'confidence', 'key'} for e in entries.values())
+    assert all(e.keys() <= {'id', 'location', 'stage', 'length_m', 'surface', 'surface_parts', 'confidence', 'key',
+                            'sector_lines_m', 'sector_lines_source', 'sector_lines_confidence'} for e in entries.values())
     assert stage_tables.surface_of(entries['rbr:71']) == ('gravel', None)
 
 
