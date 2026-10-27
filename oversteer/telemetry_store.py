@@ -1317,24 +1317,33 @@ class Store(Reader):
         return row[0]
 
     def split_runs(self, runs, car):
-        """The runs (ids, of one session) go to a session of their own under `car` (an id): driven after a stage load
-        in a car that turned out not to be the session's (rbr_fingerprint's re-check). Their changes of gear and
-        metrics go with them; every PB of either car keeps its trace (protect_pbs). Returns the new session's id, or
-        None where there was nothing to move."""
+        """The runs (ids) go, per session they are in, to a session of their own under `car` (an id): driven after a
+        stage load in a car that turned out not to be the session's (rbr_fingerprint's re-check). Their changes of
+        gear and metrics go with them, and the changes of gear of no run made in the old session since the first of
+        them; every PB of either car keeps its trace (protect_pbs). Both sessions are summarised again. Returns the
+        new sessions' ids."""
+        out = []
+        if not runs:
+            return out
         marks = ', '.join('?' * len(runs))
-        rows = self._do('SELECT r.session, s.car, MIN(r.started) FROM runs r JOIN sessions s ON s.id = r.session '
-                        'WHERE r.id IN ({}) GROUP BY r.session'.format(marks), tuple(runs)).fetchall()
-        if len(rows) != 1:
-            return None
-        old, old_car, started = rows[0]
-        self.protect_pbs((old_car, car))
-        self._drop_potentials_of(runs, (old_car, car), column='id')
-        new = self._do('INSERT INTO sessions (profile, car, game, started, ended, track, stage) SELECT profile, ?, '
-                       'game, ?, ended, track, stage FROM sessions WHERE id = ?', (car, started, old)).lastrowid
-        for table, column in (('runs', 'id'), ('shifts', 'run'), ('metrics', 'run')):
-            self._do('UPDATE {} SET session = ? WHERE {} IN ({})'.format(table, column, marks), (new,) + tuple(runs))
-        self.summarise_session(new)
-        return new
+        rows = self._do('SELECT r.session, s.car, MIN(r.started), MAX(r.ended) FROM runs r JOIN sessions s ON '
+                        's.id = r.session WHERE r.id IN ({}) GROUP BY r.session ORDER BY r.session'.format(marks),
+                        tuple(runs)).fetchall()
+        for old, old_car, started, ended in rows:
+            moved = tuple(r[0] for r in self._do('SELECT id FROM runs WHERE session = ? AND id IN ({})'.format(marks),
+                                                 (old,) + tuple(runs)).fetchall())
+            these = ', '.join('?' * len(moved))
+            self.protect_pbs((old_car, car))
+            self._drop_potentials_of(moved, (old_car, car), column='id')
+            new = self._do('INSERT INTO sessions (profile, car, game, started, ended, track, stage) SELECT profile, ?, '
+                           'game, ?, ?, track, stage FROM sessions WHERE id = ?', (car, started, ended, old)).lastrowid
+            self._do('UPDATE shifts SET session = ? WHERE session = ? AND run IS NULL AND at >= ?', (new, old, started))
+            for table, column in (('runs', 'id'), ('shifts', 'run'), ('metrics', 'run')):
+                self._do('UPDATE {} SET session = ? WHERE {} IN ({})'.format(table, column, these), (new,) + moved)
+            self.summarise_session(new)
+            self.summarise_session(old)
+            out.append(new)
+        return out
 
     def merge_car(self, profile, old_key, new_key, name=None):
         """Everything of the car `old_key` becomes `new_key`'s (a Richard Burns Rally car known by a key of ours that

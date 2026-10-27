@@ -1094,6 +1094,7 @@ class ShiftLearner:
                                             # are re-checked (provisional), and go apart if they were another car's
         self._session_ids = {}              # session number -> sessions.id, kept after its end; drive-log thread only
         self._rbr_posts = collections.deque()   # re-keys, adoptions, library writes the drive log's full queue refused
+        self._readopted = False             # the library's adoptions were checked against the store
         if database is not None:
             self.open(database)
 
@@ -1665,6 +1666,13 @@ class ShiftLearner:
         with self.lock:
             self._rbr_flush_locked()
             events = self.rbr_cars.identify(now, sample)
+            if not self._readopted and self.rbr_cars.library.writable:
+                # Adoptions the library marked whose merge may not have been committed (the app stopped between the
+                # two): done again, which changes nothing where it was
+                self._readopted = True
+                pairs = [(e['key'], e['adopted']) for e in self.rbr_cars.library.cars if e.get('adopted')]
+                if pairs:
+                    self._rbr_post_locked(self._write_readopt, pairs)
             self._rbr_events_locked(events)
 
     def _taken_keys(self):
@@ -1797,6 +1805,17 @@ class ShiftLearner:
         committed; if that commit fails it is not written, so the adoption is done again at the next start."""
         library = self.rbr_cars.library
         self.log.after_commit(lambda: library.write(data))
+        return True
+
+    def _write_readopt(self, pairs):
+        """Drive-log thread: Store.merge_car again, in every profile, for each (old key, adopted key) whose old key
+        still has a row."""
+        store = self.log.store
+        for old, new in pairs:
+            for (profile,) in store._do('SELECT DISTINCT profile FROM cars WHERE key = ?', (old,)).fetchall():
+                moved = store.merge_car(profile, old, new, car_data.display_name(new))
+                logging.info("rbr car: %s (%s) is %s, adopted again: %d sessions moved", old, profile, new, moved)
+        self.history_changed += 1
         return True
 
     def _write_adopt(self, profile, old_key, new_key):
