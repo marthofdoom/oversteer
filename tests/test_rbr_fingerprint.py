@@ -653,11 +653,55 @@ def test_split_runs_move_with_their_shifts_and_metrics_and_keep_every_pb(tmp_pat
     store._do('INSERT INTO shifts (session, run, at, gear, gear_to, direction, rpm) VALUES (?, ?, 1.0, 2, 3, '
               "'up', 7000.0)", (sa, runs['a1']))
     store._do("INSERT INTO metrics (session, run, name, value, count) VALUES (?, ?, 'x', 1.0, 1)", (sa, runs['a1']))
-    new = store.split_runs([runs['a1']], b)
+    [new] = store.split_runs([runs['a1']], b)
     assert store._do('SELECT car FROM sessions WHERE id = ?', (new,)).fetchone()[0] == b
     for table in ('runs', 'shifts', 'metrics'):
         column = 'id' if table == 'runs' else 'run'
         assert store._do('SELECT session FROM {} WHERE {} = ?'.format(table, column), (runs['a1'],)).fetchone()[0] == new
     assert {r[0] for r in store._do('SELECT run FROM pb_keep')} == {runs['a1'], runs['b1']}
     assert store.prune_traces(cap=1) == 0
-    assert store.split_runs([], b) is None
+    assert store.split_runs([], b) == []
+
+
+def test_split_runs_of_two_sessions_each_get_their_own_with_their_times(tmp_path):
+    store, a, b, sa, sb, runs = _store_with_runs(tmp_path)
+    a2 = store.start_run(sa, 2, 2500.0, 'rbr:1', 'rbr', 1000.0)
+    store.end_run(a2, ended=2620.0, finished=1, result_time=120.0, distance=900.0)
+    sc = store.start_session('p', a, 'rbr', 3000.0)
+    c1 = store.start_run(sc, 1, 3000.0, 'rbr:2', 'rbr', 1000.0)
+    store.end_run(c1, ended=3100.0, finished=0, distance=500.0)
+    for session, at in ((sa, 2100.0), (sa, 2550.0), (sc, 3050.0)):        # changes of gear of no run
+        store._do("INSERT INTO shifts (session, run, at, gear, gear_to, direction, rpm) VALUES (?, NULL, ?, 2, 3, "
+                  "'up', 7000.0)", (session, at))
+    store.summarise_session(sa)
+    new = store.split_runs([a2, c1], b)
+    assert len(new) == 2
+    rows = {r[0]: r[1:] for r in store._do('SELECT id, car, started, ended, distance FROM sessions WHERE id IN (?, ?)',
+                                           tuple(new))}
+    assert sorted(rows.values()) == [(b, 2500.0, 2620.0, 900.0), (b, 3000.0, 3100.0, 500.0)]
+    assert store._do('SELECT distance FROM sessions WHERE id = ?', (sa,)).fetchone()[0] == 1000.0   # summarised again
+    assert sorted(r[0] for r in store._do('SELECT at FROM shifts WHERE session = ?', (sa,))) == [2100.0]
+    assert sorted(r[0] for r in store._do('SELECT at FROM shifts WHERE session IN (?, ?)', tuple(new))) == [2550.0, 3050.0]
+
+
+def test_an_adoption_whose_merge_was_not_committed_is_done_again_at_the_start(table, tmp_path):
+    table.set({'rbr/104': entry('104', WRC)})
+    learner = ShiftLearner(str(tmp_path / 't.db'))
+    store = learner.log.store
+    g1 = store.car_id('p', 'rbr/g1', 'rbr', 'RBR car #1 (6 gears)')
+    store.start_session('p', g1, 'rbr', 1000.0)
+    store.commit()
+    learner.close()
+    library = fp.Library(fp.library_path(), writable=True)
+    library.cars = [{'key': 'rbr/g1', 'kind': 'local', 'slot': 6, 'gears': {2: 316.0, 3: 255.6, 4: 209.4}, 'n': 1,
+                     'adopted': 'rbr/104'}]
+    library.write(library.snapshot())                                      # marked, but the merge never committed
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=6)
+    feed(telemetry, drive, drive.through([2], 0.5))
+    learner.close()
+    db = sqlite3.connect(str(tmp_path / 't.db'))
+    assert db.execute("SELECT key FROM cars WHERE profile = 'p'").fetchall() == [('rbr/104',)]
+    assert db.execute("SELECT COUNT(*) FROM sessions s JOIN cars c ON c.id = s.car WHERE c.key = 'rbr/104'"
+                      ).fetchone()[0] == 1
+    db.close()
