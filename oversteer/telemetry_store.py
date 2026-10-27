@@ -290,6 +290,8 @@ CREATE TABLE IF NOT EXISTS reanalyse (
     rank INTEGER NOT NULL
 )"""
 
+REBUILD_META = 'reanalyse_rebuild'       # store_meta: runs were queued; every potential is built again once it is empty
+
 # -- potential time (oversteer/potential.py, docs/telemetry-extrapolation.md section 6.1) --
 # Two tables made when a file is opened, for the reason run_finish is one. `envelopes`: the driver's g-g envelope per
 # car and surface (the P98 and the car's P99.5 bins of lateral, braking and drive acceleration by speed, as JSON),
@@ -1588,12 +1590,14 @@ class Store(Reader):
                 best[key] = (result, run)
         kept = {run for _, run in best.values()}
         # every PB, now and at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the
-        # wetness or the time after the first section): each finished run quicker than all the runs before it
+        # wetness or the time after the first section): each finished run quicker than all the runs before it. A
+        # finished run with no class yet (cleared by an older build, waiting for the backfill) counts here and below
         records = {}
         for run, stage, car, result in self._do(
                 'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
                 'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                "AND r.run_class IN ('clean', 'learning', 'off') ORDER BY r.started, r.id").fetchall():
+                "AND (r.run_class IN ('clean', 'learning', 'off') OR r.run_class IS NULL) "
+                "ORDER BY r.started, r.id").fetchall():
             if result < records.get((stage, car), float('inf')):
                 records[(stage, car)] = result
                 kept.add(run)
@@ -1603,7 +1607,7 @@ class Store(Reader):
         for run, stage, car, result in self._do(
                 'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
                 'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                "AND r.run_class IN ('clean', 'learning', 'off') AND " + self.ON_CLOCK +
+                "AND (r.run_class IN ('clean', 'learning', 'off') OR r.run_class IS NULL) AND " + self.ON_CLOCK +
                 ' ORDER BY r.started, r.id').fetchall():
             if result <= pbs.get((stage, car), (float('inf'),))[0]:
                 pbs[(stage, car)] = (result, run)
@@ -1735,13 +1739,13 @@ class Store(Reader):
 
     def forget_unknown_finishes_without_course(self):
         """A run marked as not re-timable (a run_finish row with no finish) for want of a course (NULL in a database
-        migrated from version 2) is no failure: the mark goes and its class is cleared for the backfill. Returns
+        migrated from version 2) is no failure: the mark goes and it is queued for the backfill (requeue_runs). Returns
         the number of runs."""
         runs = [r[0] for r in self._do('SELECT f.run FROM run_finish f JOIN runs r ON r.id = f.run '
                                        'WHERE f.finish_m IS NULL AND r.course IS NULL').fetchall()]
         for run in runs:
             self._do('DELETE FROM run_finish WHERE run = ?', (run,))
-            self._do('UPDATE runs SET run_class = NULL WHERE id = ?', (run,))
+        self.requeue_runs(runs)
         return len(runs)
 
     def forget_unknown_finishes(self, stage):
@@ -1754,8 +1758,17 @@ class Store(Reader):
         return len(runs)
 
     def queue_stage_runs(self, stage):
-        """Queue the finished runs of a stage for the backfill (run_class cleared)."""
-        self._do('UPDATE runs SET run_class = NULL WHERE finished = 1 AND stage = ?', (stage,))
+        """Queue the finished runs of a stage for the backfill (requeue_runs)."""
+        self.requeue_runs([r[0] for r in self._do('SELECT id FROM runs WHERE finished = 1 AND stage = ?',
+                                                  (stage,)).fetchall()])
+
+    def requeue_runs(self, runs):
+        """Queue runs to be worked over again by the backfill (the reanalyse queue, in data_repair.queue_order): unlike
+        a cleared run_class, a queued run keeps its class until it is rewritten, so it stays a PB and a reference
+        meanwhile. A run without a trace is not queued: nothing could rewrite it, and it keeps what it has."""
+        from . import data_repair
+        if runs:
+            data_repair.requeue(self, runs)
 
     def stage_fingerprint(self, stage):
         """The lines of `stage` as the last start saw them (see STAGE_LINES_DDL), None where none were stored."""
@@ -1774,6 +1787,8 @@ class Store(Reader):
         rank = self._do('SELECT COALESCE(MAX(rank), -1) + 1 FROM reanalyse').fetchone()[0]
         for n, run in enumerate(runs):
             self._do('INSERT OR IGNORE INTO reanalyse (run, rank) VALUES (?, ?)', (run, rank + n))
+        if runs:
+            self.set_meta(REBUILD_META, 1)       # the potentials are built again once the queue is empty
 
     def reanalysed(self, run):
         """A queued run was worked over again (or is left as it was): out of the queue."""

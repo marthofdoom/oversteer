@@ -6,7 +6,8 @@ mirrored), DiRT's stage keys (by the length the game sends) and car names, and t
 lag before the yaw). What was stored before is stale. Two parts mend it:
 
 - `migrate(store)`: in the app, on the drive-log thread, once (gated by the store's data_version), first thing after
-  the store is opened. A backup of the file is taken first, through SQLite (`<db>.pre-0.16-<date>.bak`, kept). Then,
+  the store is opened. A backup of the file is taken first, through SQLite (`<db>.pre-0.16-v<from>-v<to>-<date-time>.bak`,
+  kept; one per repair, recorded in store_meta so a repair that crashed part way reuses its own). Then,
   in one transaction: the DiRT phantom runs go, the DiRT stages are matched again and their runs moved to the new
   key, the DiRT cars get their shipped names, every stored potential and envelope goes (potentials_missing and the
   backfill build them again), and every run with a trace is queued to be worked over again (corners, events,
@@ -18,11 +19,14 @@ lag before the yaw). What was stored before is stale. Two parts mend it:
 - `retime_from_captures(path)`: the result times. A trace does not hold the finish exactly (DiRT's traces end up to
   0.1 s before the official time or run on 30 s past it; ACR's run 170 stops 360 m before the line), so the times
   are taken from the captures, which hold every packet: each capture that holds a finished run is replayed through
-  the current code (telemetry_capture.replay, the live path) into a scratch store, and a stored run that the replay
-  started at the same moment takes the replay's result time, course and finish rows (run_clock, run_stop,
-  run_start, run_finish), and its trace where the stored one stops short of the replay's finish. It writes the live
-  file, so it is a command for when the app is closed (it takes the file's exclusive lock and refuses otherwise),
-  after a backup (`<db>.pre-retime-<date>.bak`). A run it cannot match keeps its time and is listed.
+  the current code (telemetry_capture.replay, the live path) into a scratch store, on the live file's learnt finish
+  lines, and a stored run that the replay started at the same moment takes the replay's result time, course and
+  finish rows (run_clock, run_stop, run_start, run_finish), and its trace where the stored one stops short of the
+  replay's finish; every matched run gets the replay's game-clock row (run_clock), whatever its time, so the ranking
+  (Reader.ON_CLOCK) never leaves one out. A run the replay timed at another finish line is left alone. It writes the
+  live file, so it is a command for when the app is closed (it takes the file's exclusive lock and refuses
+  otherwise), after a backup (`<db>.pre-retime-<date-time>.bak`); a dry run only reads. A run it cannot match keeps
+  its time and is listed.
 """
 
 import argparse
@@ -36,6 +40,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+import urllib.parse
 
 from . import car_data, coach_context, stage_tables
 from .telemetry_store import (CODEMASTERS_NAME, DATA_VERSION, REANALYSE_DDL, RUN_CLOCK_DDL, RUN_FINISH_DDL,
@@ -65,12 +70,7 @@ STOP_SHORT = 25.0               # m: an ACR clock stop this far before the stage
 
 # -- the version-gated migration (in the app) --
 
-def _backup_path(path, tag):
-    return '{}.{}-{}.bak'.format(path, tag, time.strftime('%Y%m%d'))
-
-
-def _backed_up(path, tag):
-    return bool(glob.glob(glob.escape(path) + '.{}-*.bak'.format(tag)))
+BACKUP_META = 'repair_backup'   # store_meta: the backup taken for the repair under way (a crash part way reuses it)
 
 
 def _key_parts(key):
@@ -309,12 +309,16 @@ def migrate(store):
     """Bring the stored data to DATA_VERSION (see the module's docstring), once: nothing when the store says it is
     there. The drive-log thread runs it first after the store is opened (DriveLog). Returns the summary dict, or None
     when nothing was done (already done, or the backup or the repair failed: tried again on the next start)."""
-    if store.data_version() >= DATA_VERSION:
+    version = store.data_version()
+    if version >= DATA_VERSION:
         return None
     path = store.path
-    if path and not _backed_up(path, BACKUP_TAG):
+    dest = store.meta(BACKUP_META)
+    if path and not (dest and os.path.exists(dest)):
+        # One backup per repair (per transition and time: a file repaired, then merged with an older one, is
+        # repaired again after a backup of its own); recorded, so a repair that crashed part way reuses its own
         store.commit()
-        dest = _backup_path(path, BACKUP_TAG)
+        dest = '{}.{}-v{}-v{}-{}.bak'.format(path, BACKUP_TAG, version, DATA_VERSION, time.strftime('%Y%m%d-%H%M%S'))
         try:
             _backup(store.db, dest)
         except (OSError, sqlite3.Error) as e:
@@ -324,6 +328,9 @@ def migrate(store):
             except OSError:
                 pass
             return None
+        store.begin()
+        store.set_meta(BACKUP_META, dest)
+        store.commit()
         logging.info("data repair: the database was backed up to %s", dest)
     started = time.monotonic()
     store.begin()
@@ -342,8 +349,9 @@ def migrate(store):
                    'stages_moved': moved, 'stages_deleted': deleted,
                    'cars_renamed': {str(k): v for k, v in cars.items()}, 'potentials_dropped': potentials,
                    'envelopes_dropped': envelopes, 'queued': len(order),
-                   'times_not_fixed': [list(s) for s in suspects]}
+                   'times_not_fixed': [list(s) for s in suspects], 'backup': dest}
         store.set_meta(REPAIR, json.dumps(summary))
+        store.set_meta(BACKUP_META, None)
         store.set_meta('data_version', DATA_VERSION)
         store.release_savepoint('data_repair')
     except Exception:
@@ -383,19 +391,39 @@ def _open_exclusive(path):
         db.close()
         raise Locked(str(e))
     db.execute('PRAGMA foreign_keys = ON')
-    version = db.execute('PRAGMA user_version').fetchone()[0]
-    if version != VERSION:
-        db.close()
-        raise sqlite3.DatabaseError('{} is at schema version {}, not {}: open it in Oversteer once first'.format(
-            path, version, VERSION))
+    _check_version(db, path)
     for ddl in (RUN_FINISH_DDL, RUN_START_DDL, RUN_CLOCK_DDL, RUN_STOP_DDL, STORE_META_DDL, REANALYSE_DDL):
         db.execute(ddl)                                  # as open_store makes them (a file this build never opened)
     return db
 
 
+def _open_read_only(path):
+    """The file for a dry run: read only, no lock and no table made (it may be open in the app: WAL lets it read)."""
+    db = sqlite3.connect('file:{}?mode=ro'.format(urllib.parse.quote(path)), uri=True, isolation_level=None,
+                         timeout=5.0)
+    _check_version(db, path)
+    return db
+
+
+def _check_version(db, path):
+    version = db.execute('PRAGMA user_version').fetchone()[0]
+    if version != VERSION:
+        db.close()
+        raise sqlite3.DatabaseError('{} is at schema version {}, not {}: open it in Oversteer once first'.format(
+            path, version, VERSION))
+
+
+def _row(db, table, run):
+    """The value of a run's row in one of FINISH_TABLES, as a 1-tuple, or None (no row, or no such table)."""
+    try:
+        return db.execute('SELECT {} FROM {} WHERE run = ?'.format(FINISH_COLUMNS[table], table), (run,)).fetchone()
+    except sqlite3.OperationalError:
+        return None
+
+
 def capture_files(folders):
-    """[(path, started, ended)] of the captures in `folders`, oldest first: started from the file's header, ended
-    its last change."""
+    """[(path, started, ended, bytes)] of the captures in `folders`, oldest first: started from the file's header,
+    ended its last change."""
     from .telemetry_capture import read_capture
     out = []
     for folder in folders:
@@ -408,17 +436,21 @@ def capture_files(folders):
             started = meta.get('started')
             if started is None:
                 continue
-            out.append((path, float(started), os.path.getmtime(path)))
+            out.append((path, float(started), os.path.getmtime(path), os.path.getsize(path)))
     return sorted(out, key=lambda c: c[1])
 
 
 FINISH_TABLES = ('run_clock', 'run_stop', 'run_start', 'run_finish')
 FINISH_COLUMNS = {'run_clock': 'clock', 'run_stop': 'stop_m', 'run_start': 'start_m', 'run_finish': 'finish_m'}
+REPLAY_RATE = 1.0e6             # bytes of capture (gzip) replayed a second, about (marth's 200 MB: 3.5 min)
+LINE_MOVED = 0.5                # m: a replay timed at a finish line this far from the stored run's is another line
 
 
-def _replay_runs(path, scratch):
+def _replay_runs(path, scratch, learnt=None):
     """The runs the current code makes of a capture: [dict of started, finished, result_time, course, game, distance,
-    trace (rows), and per FINISH_TABLES its value or None (no row)], from a replay into the scratch file."""
+    trace (rows), and per FINISH_TABLES its value or None (no row)], from a replay into the scratch file. `learnt`:
+    the live file's learnt finish lines (Store.learn_finishes), which the replay runs on as the app would; the
+    scratch store's own (from the replayed runs alone) are not used."""
     from .shift_learner import ShiftLearner
     from .telemetry_capture import read_capture, replay
     for f in (scratch, scratch + '-wal', scratch + '-shm'):
@@ -426,11 +458,17 @@ def _replay_runs(path, scratch):
             os.remove(f)
     meta, records = read_capture(path)
     learner = ShiftLearner(scratch)
+    lines = dict(learnt or {})
+
+    def live_lines():
+        stage_tables.set_learnt(lines)
+        return lines
+    learner.log.store.learn_finishes = live_lines        # a replayed clock stop must not move the live lines
+    live_lines()
     try:
         replay(records, learner, started=meta.get('started'))
     finally:
         learner.close()
-        stage_tables.set_learnt({})                     # the scratch store's learnt lines are not the live one's
     db = sqlite3.connect(scratch)
     try:
         out = []
@@ -440,9 +478,7 @@ def _replay_runs(path, scratch):
             row = {'started': started, 'finished': finished, 'result_time': result, 'course': course,
                    'distance': distance, 'game': game}
             for table in FINISH_TABLES:
-                found = db.execute('SELECT {} FROM {} WHERE run = ?'.format(FINISH_COLUMNS[table], table),
-                                   (run,)).fetchone()
-                row[table] = found
+                row[table] = _row(db, table, run)
             blob = db.execute('SELECT version, data FROM traces WHERE run = ?', (run,)).fetchone()
             row['trace'] = (blob[0], blob[1]) if blob else None
             out.append(row)
@@ -451,33 +487,52 @@ def _replay_runs(path, scratch):
         db.close()
 
 
+def _other_line(db, run, new):
+    """The stored run was timed at a finish line (run_finish) other than the replay's: (stored, replay's) in m."""
+    old, replayed = _row(db, 'run_finish', run), new['run_finish']
+    if old and old[0] is not None and replayed and replayed[0] is not None and abs(old[0] - replayed[0]) > LINE_MOVED:
+        return old[0], replayed[0]
+    return None
+
+
 def retime_from_captures(path, folders=None, dry_run=False, out=print):
     """Re-time the finished runs of the database at `path` from the captures (see the module's docstring). `folders`:
-    where the captures are (default: the `captures` folder next to the file). With `dry_run` nothing is written and
-    no backup taken. Raises Locked when the file is open elsewhere. Returns {'retimed': [(run, old, new, capture)],
-    'unmatched': [(run, stage, result, why)], 'backup': path or None}."""
+    where the captures are (default: the `captures` folder next to the file). With `dry_run` the file is only read
+    (no lock, no table made, no backup). Raises Locked when the file is open elsewhere. Returns {'retimed': [(run,
+    old, new, capture)], 'clocked': [runs given the game's clock row], 'unmatched': [(run, stage, result, why)],
+    'backup': path or None}."""
     folders = folders or [os.path.join(os.path.dirname(os.path.abspath(path)), 'captures')]
-    db = _open_exclusive(path)
+    db = _open_read_only(path) if dry_run else _open_exclusive(path)
     store = Store(db, path)
-    report = {'retimed': [], 'unmatched': [], 'backup': None}
+    report = {'retimed': [], 'clocked': [], 'unmatched': [], 'backup': None}
     scratch_dir = tempfile.mkdtemp(prefix='oversteer-retime-')
     try:
         runs = db.execute("SELECT r.id, r.started, r.stage, r.result_time, r.course, c.game FROM runs r "
                           "JOIN sessions s ON s.id = r.session JOIN cars c ON c.id = s.car WHERE r.finished = 1 "
                           "AND r.result_time IS NOT NULL ORDER BY r.started").fetchall()
+        try:
+            learnt = store.learn_finishes()                 # the live file's lines, for the replays
+        except sqlite3.OperationalError:
+            learnt = {}
         captures = capture_files(folders)
-        by_capture = {}
+        by_capture, sizes = {}, {}
         for run in runs:
             found = [c for c in captures if c[1] - 1.0 <= run[1] <= c[2] + 1.0]
             if found:
                 by_capture.setdefault(found[-1][0], []).append(run)
+                sizes[found[-1][0]] = found[-1][3]
             else:
                 report['unmatched'].append((run[0], run[2], run[3], 'no capture holds it'))
+        if by_capture:
+            minutes = max(1, int(math.ceil(sum(sizes.values()) / REPLAY_RATE / 60.0)))
+            out("Replaying {} captures: about {} minute{}.{}".format(
+                len(by_capture), minutes, '' if minutes == 1 else 's',
+                '' if dry_run else " Don't start Oversteer while this runs."))
         changes = []
         for capture, wanted in sorted(by_capture.items()):
             out('replaying {} ({} finished runs)'.format(os.path.basename(capture), len(wanted)))
             try:
-                replayed = _replay_runs(capture, os.path.join(scratch_dir, 'replay.db'))
+                replayed = _replay_runs(capture, os.path.join(scratch_dir, 'replay.db'), learnt)
             except Exception as e:
                 logging.exception("retime: replaying %s", capture)
                 report['unmatched'].extend((r[0], r[2], r[3], 'the replay failed: {}'.format(e)) for r in wanted)
@@ -491,19 +546,31 @@ def retime_from_captures(path, folders=None, dry_run=False, out=print):
                 if new['finished'] != 1 or new['result_time'] is None:
                     report['unmatched'].append((run, stage, result, 'the current code does not finish it'))
                     continue
+                other = _other_line(db, run, new)
+                if other is not None:
+                    report['unmatched'].append((run, stage, result, 'the replay timed it at another finish line '
+                                                '({:.1f} m, stored {:.1f} m)'.format(other[1], other[0])))
+                    continue
                 changes.append((run, stage, result, course, new, os.path.basename(capture)))
-        store.learn_finishes()                          # the live file's learnt lines again, after the replays'
+        stage_tables.set_learnt(learnt)                  # the live file's learnt lines again, after the replays
         todo = [c for c in changes if abs(c[4]['result_time'] - c[2]) >= RETIME_MIN]
-        if dry_run or not todo:
+        # the game's own clock, for every run the replay finished on it, whatever the time: once a car has a run on
+        # the game's clock on a stage only its clock runs rank (Reader.ON_CLOCK), so a matched run without the row
+        # would drop out of the ranking (the PB) next to a re-timed one with it
+        clocked = [c for c in changes if c not in todo and c[4]['run_clock'] is not None
+                   and _row(db, 'run_clock', c[0]) != c[4]['run_clock']]
+        report['clocked'] = [c[0] for c in clocked]
+        if dry_run or not (todo or clocked):
             report['retimed'] = [(c[0], c[2], c[4]['result_time'], c[5]) for c in todo]
             return report
-        dest = _backup_path(path, RETIME_BACKUP_TAG)
-        if not os.path.exists(dest):
-            _backup(db, dest)
+        dest = '{}.{}-{}.bak'.format(path, RETIME_BACKUP_TAG, time.strftime('%Y%m%d-%H%M%S'))
+        _backup(db, dest)
         report['backup'] = dest
         retimed = _retimed(store)
         db.execute('BEGIN')
         try:
+            for run, stage, old, course, new, capture in clocked:
+                db.execute('INSERT OR REPLACE INTO run_clock (run, clock) VALUES (?, ?)', (run, new['run_clock'][0]))
             for run, stage, old, course, new, capture in todo:
                 store.update_run(run, result_time=new['result_time'], course=new['course'])
                 for table in FINISH_TABLES:
@@ -526,7 +593,7 @@ def retime_from_captures(path, folders=None, dry_run=False, out=print):
                 retimed[str(run)] = [old, new['result_time'], capture]
                 report['retimed'].append((run, old, new['result_time'], capture))
             store.set_meta(RETIMED, json.dumps(retimed))
-            requeue(store, [c[0] for c in todo])
+            requeue(store, [c[0] for c in todo + clocked])
             db.execute('COMMIT')
         except Exception:
             db.execute('ROLLBACK')
@@ -556,22 +623,27 @@ def run_retime(path, folders=None, dry_run=False, out=print):
     verb = 'would be re-timed' if dry_run else 're-timed'
     for run, old, new, capture in report['retimed']:
         out('run {} {}: {:.3f} s -> {:.3f} s ({:+.3f} s) from {}'.format(run, verb, old, new, new - old, capture))
+    if report['clocked']:
+        out('{} on the game\'s clock: runs {}'.format('would be marked' if dry_run else 'marked',
+                                                     ', '.join(map(str, report['clocked']))))
     for run, stage, result, why in report['unmatched']:
         out('run {} on {} keeps {}: {}'.format(run, stage, 'no time' if result is None else '{:.3f} s'.format(result),
                                                why))
+    changed = report['retimed'] or report['clocked']
     out('{} runs {}, {} kept as they were.{}'.format(
         len(report['retimed']), verb, len(report['unmatched']),
-        '' if dry_run or not report['retimed'] else ' Oversteer works them over again when it next starts.'))
+        '' if dry_run or not changed else ' Oversteer works them over again when it next starts.'))
     return 0
 
 
 def main(argv=None):
+    from . import diagnostics
     parser = argparse.ArgumentParser(prog='python3 -m oversteer.data_repair',
                                      description='Repairs of the stored telemetry (Oversteer 0.16).')
     sub = parser.add_subparsers(dest='command', required=True)
     retime = sub.add_parser('retime', help='re-time the finished runs from the captures (Oversteer closed)')
-    retime.add_argument('--db', default=os.path.join(os.environ.get('XDG_DATA_HOME') or os.path.expanduser(
-        '~/.local/share'), 'oversteer', 'telemetry.db'), help='the telemetry database')
+    retime.add_argument('--db', default=os.path.join(diagnostics.data_home(), 'oversteer', 'telemetry.db'),
+                        help="the telemetry database (default: the app's, as Oversteer finds it)")
     retime.add_argument('--captures', action='append', help='a folder of captures (default: next to the database)')
     retime.add_argument('--dry-run', action='store_true', help='say what would change, write nothing')
     args = parser.parse_args(argv)

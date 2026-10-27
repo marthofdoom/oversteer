@@ -324,7 +324,7 @@ def test_an_acr_run_timed_to_the_old_line_is_timed_again_once_and_queued(tmp_pat
     row = store.run(run)
     # the trace takes 0.1 s a metre
     assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and abs(row['course'] - (entry['finish_m'] - stage_tables.run_origin(entry))) < 1e-6
-    assert row['run_class'] is None and run in store.runs_to_backfill(10)
+    assert row['run_class'] is not None and run in store.runs_to_reanalyse(10)    # queued, its class kept meanwhile
     assert store.run(other)['result_time'] == 230.0 and store.run(other)['run_class'] == 'clean'
     store.update_run(run, run_class='clean')
     assert retime_finishes(store) == 0                   # once
@@ -408,7 +408,7 @@ def test_a_run_is_moved_when_the_finish_line_is_refined_since_it_was_timed(tmp_p
     assert retime_finishes(store) == 1
     row = store.run(run)
     assert abs(row['result_time'] - 195.0) < 0.01 and abs(row['course'] - (flying - stage_tables.run_origin(stage_tables.entry(stage)))) < 1e-6   # 0.1 s a metre
-    assert row['run_class'] is None and retime_finishes(store) == 0       # once, and queued for the backfill
+    assert run in store.runs_to_reanalyse(10) and retime_finishes(store) == 0       # once, and queued for the backfill
     far = _timed_run(store, stage, result=200.0, course=5000.0, end_speed=40.0)
     store.set_run_finish(far, flying - 100.0)              # the line is on from the trace's end: left as it was
     assert retime_finishes(store) == 0 and store.run(far)['result_time'] == 200.0
@@ -514,7 +514,7 @@ def test_a_trace_that_ends_a_row_short_of_the_old_line_is_still_re_timed(tmp_pat
     stage_tables.set_learnt({PETIT_BALLON: {'finish_m': 5740.0, 'finish_runs': 2, 'finish_spread_m': 1.0}})
     assert retime_finishes(store) == 1
     row = store.run(run)
-    assert abs(row['result_time'] - (230.0 - (d_old - (5740.0 - start)) / 10.0)) < 0.35 and row['run_class'] is None
+    assert abs(row['result_time'] - (230.0 - (d_old - (5740.0 - start)) / 10.0)) < 0.35 and run in store.runs_to_reanalyse(10)
     assert store.finish_unknown(run) is False
     learner.close()
 
@@ -566,19 +566,21 @@ def test_a_stage_whose_lines_changed_since_the_last_start_is_worked_over_again(t
     for key in (stage, other):
         store.save_potential(key, car, 'v1', 12.0, pot)
     repair_shipped(store)                                    # nothing was fingerprinted yet: every stage is new
-    assert all(store.run(r)['run_class'] is None for r in (run, clock, elsewhere))
+    assert set(store.runs_to_reanalyse(10)) == {run, clock, elsewhere}
     assert store.potential(stage, car) is None and store.potential(other, car) is None
     for r in (run, clock, elsewhere):
         store.update_run(r, run_class='clean')
+        store.reanalysed(r)                                  # as the backfill leaves them
     store.save_potential(stage, car, 'v1', 12.0, pot)
     repair_shipped(store)                                    # the same lines: left alone
     assert all(store.run(r)['run_class'] == 'clean' for r in (run, clock, elsewhere))
+    assert store.runs_to_reanalyse(10) == []
     assert store.potential(stage, car) is not None
     stage_tables.set_learnt({stage: {'finish_m': stage_tables.entry(stage)['finish_m'] + 6.7, 'finish_runs': 3,
                                      'finish_spread_m': 0.5}})
     try:
         repair_shipped(store)                                # the finish moved on one stage only
-        assert store.run(run)['run_class'] is None and store.run(clock)['run_class'] is None
+        assert set(store.runs_to_reanalyse(10)) == {run, clock}
         assert store.run(elsewhere)['run_class'] == 'clean'
         assert store.potential(stage, car) is None
     finally:
@@ -681,7 +683,7 @@ def test_game_clock_runs_with_no_recorded_stop_teach_the_finish_and_are_re_class
     stops = dict(store.db.execute('SELECT run, stop_m FROM run_stop').fetchall())
     assert set(stops) == set(runs) and abs(stops[runs[2]] - 5740.0) < 1e-6      # the gate leaves the far one out
     assert abs(stage_tables.entry(PETIT_BALLON)['finish_m'] - 5740.0) < 1e-6
-    assert all(store.run(r)['run_class'] is None for r in runs + [far])          # queued for the backfill
+    assert set(store.runs_to_reanalyse(10)) >= set(runs + [far])                  # queued for the backfill
     learner.close()
     stage_tables.set_learnt({})
 
@@ -699,7 +701,7 @@ def test_a_run_with_no_course_is_re_timed_from_the_traces_last_distance(tmp_path
     store.update_run(run, course=None, run_class=None)
     assert retime_finishes(store) == 1
     row = store.run(run)
-    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and row['run_class'] is None
+    assert abs(row['result_time'] - (230.0 - gap / 10.0)) < 0.01 and run in store.runs_to_reanalyse(10)
     assert not store.finish_unknown(run)
     learner.close()
 
@@ -729,6 +731,6 @@ def test_runs_a_v2_database_marked_unknown_for_want_of_a_course_are_re_timed(tmp
     store.update_run(other, run_class='partial')
     store.set_stage_fingerprint(stage, drive_log._lines_fingerprint(stage_tables.entry(stage)))      # the lines are as seen
     repair_shipped(store)
-    assert store.run(run)['result_time'] < 230.0 and store.run(run)['run_class'] is None
+    assert store.run(run)['result_time'] < 230.0 and run in store.runs_to_reanalyse(10)
     assert store.finish_unknown(other) and store.run(other)['run_class'] == 'partial'
     learner.close()

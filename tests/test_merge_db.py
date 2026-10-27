@@ -138,7 +138,8 @@ def test_runs_are_ported_with_their_rows_remapped(files):
     assert len(runs) == 4
     ported = runs[1]
     assert ported['car'] == cars['acr/Car'] and ported['profile'] == 'AC Rally'
-    assert ported['run_class'] is None                               # the backfill works it over
+    assert ported['run_class'] == 'clean'                            # kept while it waits for the backfill
+    assert db.execute('SELECT COUNT(*) FROM reanalyse WHERE run = ?', (ported['id'],)).fetchone()[0] == 1
     assert runs[3]['run_class'] == 'restart'                         # no trace: kept as it was
     pid = ported['id']
     assert db.execute('SELECT clock FROM run_clock WHERE run = ?', (pid,)).fetchone()[0] == 'game'
@@ -336,8 +337,7 @@ def test_backfill_works_the_ported_runs_over_before_the_target_is_written(files)
                        backup_dir=str(tmp / 'backup'), out=lines.append, backfill_profile='AC Rally')
     assert any(line.startswith('backfill') for line in lines)
     db = connect(target)
-    assert db.execute('SELECT COUNT(*) FROM runs r JOIN traces t ON t.run = r.id WHERE r.run_class IS NULL'
-                      ).fetchone()[0] == 0
+    assert db.execute('SELECT COUNT(*) FROM reanalyse').fetchone()[0] == 0          # the backfill worked them all
     assert db.execute('PRAGMA foreign_key_check').fetchall() == []
 
 
@@ -353,7 +353,7 @@ def test_a_source_not_yet_repaired_lowers_the_targets_data_version(files):
     run(files)
     db = connect(target)
     assert merge_db.data_version(db) == 0                                  # the app repairs the merged file
-    ported = [r[0] for r in db.execute('SELECT id FROM runs WHERE run_class IS NULL')]
+    ported = [r[0] for r in db.execute('SELECT run FROM reanalyse')]
     assert ported
     for pid in ported:
         assert db.execute("SELECT COUNT(*) FROM events WHERE run = ? AND kind = 'launch'", (pid,)).fetchone()[0] == 1

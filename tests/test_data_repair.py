@@ -325,10 +325,10 @@ def test_dirt_cars_named_by_the_decoder_get_their_shipped_names(tmp_path):
 
 def _fake_captures(monkeypatch, tmp_path, replayed):
     capture = str(tmp_path / 'captures' / 'x.ovcap.gz')
-    monkeypatch.setattr(data_repair, 'capture_files', lambda folders: [(capture, 1000.0, 1e6)])
+    monkeypatch.setattr(data_repair, 'capture_files', lambda folders: [(capture, 1000.0, 1e6, 1000)])
     calls = []
 
-    def replay(path, scratch):
+    def replay(path, scratch, learnt=None):
         calls.append(path)
         return replayed()
     monkeypatch.setattr(data_repair, '_replay_runs', replay)
@@ -393,3 +393,120 @@ def test_the_retime_refuses_an_open_database(tmp_path, monkeypatch):
     assert 'close Oversteer' in out[0]
     d.store.close()
     assert data_repair.run_retime(str(tmp_path / 'telemetry.db'), out=out.append) == 0
+
+
+# -- the review's should-fixes --
+
+def _acr_runs(tmp_path, specs):
+    """ACR runs of one car on one stage, oldest first: (result_time, run_class). Returns (store, ids, trace size)."""
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'acr/a', 'acr')
+    session = store.start_session('p', car, 'acr', 1.0)
+    rows = [tuple(float(i + c) for c in range(len(TRACE_CHANNELS))) for i in range(100)]
+    ids = []
+    for n, (result, klass) in enumerate(specs, 1):
+        run = store.start_run(session, n, float(n), 'acr:x:y', 'acr', 5000.0)
+        store.end_run(run, ended=300.0, distance=5000.0, finished=1, result_time=result, course=4900.0,
+                      run_class=klass, wet='dry')
+        store.add_trace(run, rows)
+        ids.append(run)
+    store.commit()
+    size = store.db.execute('SELECT LENGTH(data) FROM traces WHERE run = ?', (ids[0],)).fetchone()[0]
+    return store, ids, size
+
+
+def test_a_pb_whose_class_an_older_build_cleared_keeps_its_trace_past_the_cap(tmp_path):
+    store, ids, size = _acr_runs(tmp_path, [(210.0, 'clean'), (220.0, 'clean'), (200.0, None), (230.0, 'clean')])
+    assert store.prune_traces(cap=size * 2) > 0
+    assert store.trace(ids[2]) is not None                         # the PB, waiting for the backfill
+    assert store.trace(ids[0]) is not None                         # the PB history
+    store.close()
+
+
+def test_the_old_requeue_paths_keep_the_class_while_the_run_waits(tmp_path):
+    store, ids, size = _acr_runs(tmp_path, [(210.0, 'clean'), (200.0, 'off')])
+    store.queue_stage_runs('acr:x:y')
+    assert [store.run(r)['run_class'] for r in ids] == ['clean', 'off']
+    assert set(store.runs_to_reanalyse(10)) == set(ids)
+    assert coach_context.stage_pb_id(store, 'acr:x:y', store.run(ids[0])['car']) == ids[1]
+    assert store.prune_traces(cap=1) == 0                          # nothing pruned while they wait
+    store.close()
+
+
+def test_every_repair_makes_its_own_backup(tmp_path):
+    d = Dirt(tmp_path)
+    d.run(EL_RODEO, EL_RODEO_LENGTH, 1, 175.0, 2860.0, (0, 0), (500, 500), 'clean')
+    _old(d.store)
+    assert data_repair.migrate(d.store)['backup']
+    d.store._do("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('data_version', '0')")   # as a merge lowers it
+    d.store.commit()
+    import time as _time
+    _time.sleep(1.1)                                               # another second in the name
+    summary = data_repair.migrate(d.store)
+    assert summary is not None
+    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.16-*.bak'))) == 2
+    assert d.store.meta(data_repair.BACKUP_META) is None
+    d.store.close()
+
+
+def test_the_potentials_are_built_again_when_the_queue_empties_by_deletion(tmp_path):
+    learner, reader = drive_stages(tmp_path, (30.0, 26.0))
+    store = learner.log.store
+    _old(store)
+    data_repair.migrate(store)
+    store._do("INSERT INTO stage_potential (stage, car, data_version, sections, profile) VALUES ('x', "
+              "(SELECT MIN(id) FROM cars), 'v', '[]', '{}')")
+    for run in store.runs_to_reanalyse(10):
+        store.drop_run(run)                                        # gone before they were worked
+    store.commit()
+    from oversteer.drive_log import backfill_step
+    backfill_step(learner, 3)
+    assert store.db.execute("SELECT COUNT(*) FROM stage_potential WHERE stage = 'x'").fetchone()[0] == 0
+    assert not store.meta(telemetry_store.REBUILD_META)
+    learner.close()
+
+
+def test_the_retime_marks_every_matched_run_on_the_games_clock_and_skips_another_line(tmp_path, monkeypatch):
+    d = Dirt(tmp_path)
+    same = d.run(EL_RODEO, EL_RODEO_LENGTH, 1, 180.0, 2837.0, (0, 0), (500, 500), 'learning')
+    other = d.run(EL_RODEO, EL_RODEO_LENGTH, 1, 190.0, 2837.0, (0, 0), (500, 500), 'learning')
+    d.store.set_run_finish(other, 2800.0)
+    d.store.commit()
+    rows = {r: d.store.run(r) for r in (same, other)}
+    d.store.close()
+    seen = []
+
+    def replayed():
+        return [_replay(rows[same], 180.01, 2837.0, 'game', 2845.6),
+                dict(_replay(rows[other], 185.0, 2837.0), run_finish=(2845.6,))]
+    _fake_captures(monkeypatch, tmp_path, replayed)
+
+    def spy(path, scratch, learnt=None):
+        seen.append(learnt)
+        return replayed()
+    monkeypatch.setattr(data_repair, '_replay_runs', spy)
+    report = data_repair.retime_from_captures(str(tmp_path / 'telemetry.db'), out=lambda *a: None)
+    assert report['retimed'] == [] and report['clocked'] == [same]
+    assert [(r[0], r[3][:42]) for r in report['unmatched']] == [(other, 'the replay timed it at another finish line')]
+    assert seen == [{}]                                            # the live file's (here no) learnt lines go in
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    assert store.run_clock(same) == 'game' and store.run(same)['result_time'] == 180.0
+    assert store.run(other)['result_time'] == 190.0
+    assert store.db.execute('SELECT finish_m FROM run_finish WHERE run = ?', (other,)).fetchone()[0] == 2800.0
+    assert store.runs_to_reanalyse(10) == [same]
+    store.close()
+
+
+def test_a_dry_run_only_reads_and_works_while_the_app_has_the_file(tmp_path, monkeypatch):
+    d = Dirt(tmp_path)
+    run = d.run(EL_RODEO, EL_RODEO_LENGTH, 1, 174.0, 2837.0, (0, 0), (500, 500), 'learning')
+    row = d.store.run(run)
+    d.store.db.execute('DROP TABLE reanalyse')                     # as a file this build never opened
+    d.store.commit()
+    _fake_captures(monkeypatch, tmp_path, lambda: [_replay(row, 175.0, 2860.0, 'game')])
+    out = []
+    assert data_repair.run_retime(str(tmp_path / 'telemetry.db'), dry_run=True, out=out.append) == 0  # still open
+    assert any('would be re-timed' in line for line in out) and any('about 1 minute' in line for line in out)
+    assert not d.store.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'reanalyse'").fetchone()
+    assert d.store.run(run)['result_time'] == 174.0 and glob.glob(str(tmp_path / '*.bak')) == []
+    d.store.close()

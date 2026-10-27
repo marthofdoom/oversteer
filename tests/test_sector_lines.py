@@ -74,7 +74,7 @@ def test_afon_bidno_finishes_at_the_line_and_a_run_timed_at_the_old_estimate_is_
     origin = stage_tables.run_origin(stage_tables.entry(BIDNO))                      # 238.2, where its runs were measured
     assert row['course'] == pytest.approx(5294.1 - origin)
     assert row['result_time'] == pytest.approx(200.0 + (5294.1 - 5287.4) / 10.0, abs=0.01)    # 0.1 s a metre
-    assert row['run_class'] is None and retime_finishes(store) == 0                  # once
+    assert run in store.runs_to_reanalyse(10) and retime_finishes(store) == 0       # once, queued
     learner.close()
 
 

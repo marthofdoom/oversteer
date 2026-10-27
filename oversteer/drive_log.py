@@ -21,7 +21,7 @@ import time
 from . import car_data, coach, coach_context, drive_detect, live_buffer, potential, stage_tables
 from .telemetry_formats import plan_xy
 from .shift_learner import DRIVEN, SURFACES, CarModel, drive_slip
-from .telemetry_store import open_store, TRACE_CHANNELS
+from .telemetry_store import open_store, REBUILD_META, TRACE_CHANNELS
 
 QUEUE_SIZE = 8192
 COMMIT_EVERY = 5.0               # seconds a batch of writes may wait
@@ -1309,7 +1309,7 @@ def learn_missing_stops(store):
     """A run on the game's clock recorded by a build that kept run_clock but not run_stop has no clock stop: the
     stop is where it began plus its course, taken when that is within the clock's range of the table's line
     (FINISH_CLOCK_BEFORE, FINISH_CLOCK_PAST). The stages' finish lines are learnt again (Store.learn_finishes) and the
-    finished runs of a stage whose line was newly learnt or moved are queued for the backfill (run_class cleared), so
+    finished runs of a stage whose line was newly learnt or moved are queued for the backfill (Store.requeue_runs), so
     their classes and potentials are worked out with the finish. Returns the number of stops added."""
     added, stages = 0, set()
     for run, stage, start, course in store.clock_runs_without_stop('acr'):
@@ -1342,9 +1342,9 @@ def _lines_fingerprint(entry):
 
 def requeue_moved_stages(store):
     """A stage whose start line, finish or road length is not what the last start saw (the shipped table or a learnt
-    line moved: STAGE_LINES) has all its finished runs, the game-clock ones too, queued for the backfill (run_class
-    cleared), their classes, sectors and potentials worked out on the new lines, its stored potentials dropped to
-    be built again, and the runs marked as not re-timable (retime_finishes) marked no more, to be tried once more. A
+    line moved: STAGE_LINES) has all its finished runs, the game-clock ones too, queued for the backfill (requeue_runs:
+    classes kept until then), their classes, sectors and potentials worked out on the new lines, its stored
+    potentials dropped to be built again, and the runs marked as not re-timable (retime_finishes) marked no more, to be tried once more. A
     stage not seen before counts as moved (a database from before the fingerprints). Returns the number of stages
     queued."""
     moved = 0
@@ -1368,7 +1368,7 @@ def retime_finishes(store):
     finish (finish_m) is timed again to it, once: the driven distance between
     the lines is pacenote_last_m - finish_m, so the new finish is that much
     before the run's course, and the time shortens by what the trace took to
-    drive it. The run is queued for the backfill (run_class cleared) to
+    drive it. The run is queued for the backfill (Store.requeue_runs, keeping its class) to
     recompute its corners, sections, losses and metrics with the new course.
     A run timed by the new code, or handled here, has a run_finish row. Runs
     without a trace or whose trace does not span the new line are marked
@@ -1427,7 +1427,8 @@ def retime_finishes(store):
                 continue
             if own:
                 store.set_run_start(run, start)
-            store.update_run(run, result_time=result_new, course=new, run_class=None)
+            store.update_run(run, result_time=result_new, course=new)
+            store.requeue_runs([run])            # keeps its class until worked over again
             store.set_run_finish(run, flying)
             done += 1
         except Exception:
@@ -1459,7 +1460,8 @@ def retime_finishes(store):
             if own:
                 store.set_run_start(run, start)
             store.update_run(run, result_time=t_new - trace[0][T['t']] if own else result - (t_old - t_new),
-                             course=new, run_class=None)
+                             course=new)
+            store.requeue_runs([run])
             store.set_run_finish(run, flying)
             done += 1
         except Exception:
@@ -1501,14 +1503,16 @@ def backfill_step(learner, limit=3):
         else:
             logging.info("data repair: run %s worked over again (%d to go)", run, store.reanalysis_pending())
         done += 1
-        if not store.reanalysis_pending():
-            # The potentials built while the queue was worked read runs not yet rewritten: all are built again
-            # from the rewritten ones (potentials_missing, below and in the next steps)
-            from .data_repair import drop_potentials
-            dropped = drop_potentials(store)
-            learner.__dict__.pop('_potential_tried', None)
-            logging.info("data repair: every queued run worked over; %d potentials and %d envelopes to build again",
-                         *dropped)
+    if store.meta(REBUILD_META) and not store.reanalysis_pending():
+        # The potentials built while the queue was worked read runs not yet rewritten: all are built again from the
+        # rewritten ones (potentials_missing, below and in the next steps). Checked on every step, by the flag the
+        # queue set, so a queue emptied by its last runs being deleted rather than worked does it too
+        from .data_repair import drop_potentials
+        dropped = drop_potentials(store)
+        store.set_meta(REBUILD_META, None)
+        learner.__dict__.pop('_potential_tried', None)
+        logging.info("data repair: every queued run worked over; %d potentials and %d envelopes to build again",
+                     *dropped)
     for run in store.runs_to_backfill(limit + len(failed)):
         if run in failed:
             continue
@@ -1539,8 +1543,10 @@ def _potentials_step(learner, store):
     for stage, car, run in store.potentials_missing():
         if (stage, car) in tried:
             continue
-        tried.add((stage, car))
-        return 1 if potential.after_run(store, run) is not None else 0
+        if potential.after_run(store, run) is not None:
+            return 1
+        tried.add((stage, car))                          # came to nothing: not again until the next start
+        return 0
     return 0
 
 
