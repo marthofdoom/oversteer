@@ -1731,14 +1731,14 @@ def find_corners(trace, game=None):
         j = i
         while j + 1 < n and smooth[j + 1] * sign > CORNER_YAW:
             j += 1
-        corner = _corner(trace, smooth, i, j, sign)
+        corner = _corner(trace, smooth, i, j, sign, game)
         if corner is not None:
             corners.append(corner)
         i = j + 1
     return corners
 
 
-def _corner(trace, yaw, i, j, sign):
+def _corner(trace, yaw, i, j, sign, game=None):
     t = [row[T['t']] for row in trace]
     duration = t[j] - t[i]
     heading = abs(sum(yaw[k] * (t[k + 1] - t[k]) for k in range(i, j) if k + 1 < len(t)))
@@ -1754,7 +1754,9 @@ def _corner(trace, yaw, i, j, sign):
             k -= 1
         return speed[k]
     gears = [row[T['gear']] for row in trace[i:j + 1] if not math.isnan(row[T['gear']]) and row[T['gear']] >= 1]
-    steer = [(row[T['steer']], yaw[i + k]) for k, row in enumerate(trace[i:j + 1]) if not math.isnan(row[T['steer']])]
+    # the steer STEER_LAG_S before each row of the corner, against that row's yaw (the car follows the wheel)
+    before = coach_context.steer_before(t, [row[T['steer']] for row in trace], coach_context.steer_lag(game), i, j)
+    steer = [(s, yaw[i + k]) for k, s in enumerate(before) if not math.isnan(s)]
     against = [s for s, y in steer if abs(s) > 0.02]
     handbrake = [row[T['handbrake']] for row in trace[i:j + 1] if not math.isnan(row[T['handbrake']])]
     spin = [row[T['slip_drive']] for row in trace if t[apex] <= row[T['t']] <= t[apex] + CORNER_SIDE
@@ -1770,7 +1772,7 @@ def _corner(trace, yaw, i, j, sign):
         'entry_speed': at(-CORNER_SIDE), 'min_speed': speed[apex], 'exit_speed': at(CORNER_SIDE),
         'gear_min': int(min(gears)) if gears else None,
         'heading_change': math.degrees(heading), 'duration': duration,
-        # Steering against the turn (steer and yaw rate both positive left)
+        # Steering against the turn (steer and yaw rate both positive left; the steer from steer_lag(game) before the yaw)
         'counter_steer': (sum(1 for s, y in steer if abs(s) > 0.02 and s * y < 0) / len(against)) if against else None,
         'handbrake': int(max(handbrake) > 0.5) if handbrake else None,
         'exit_spin': max(spin) if spin else None,

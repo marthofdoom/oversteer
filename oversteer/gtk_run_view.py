@@ -411,7 +411,7 @@ class RunView(Gtk.Box):
                             pair('brake', 'brk', lambda v: '{:.0f}'.format(v * 100), plot.BRAKE),
                             pair('gear', 'gear', lambda v: 'N' if v == 0 else 'R' if v < 0 else '{}'.format(v), plot.GEAR),
                             pair('rpm', 'rpm', lambda v: '{:.1f}k'.format(v / 1000.0), plot.RPM),
-                            pair('steer', 'steer', lambda v: '{:.0f}'.format(v * 100), plot.STEER)))
+                            pair('steer', 'steer % lock', lambda v: '{:.0f}'.format(v * 100), plot.STEER)))
         self._readout.set_markup(line1 + '\n' + line2)
         tips = self._advice.get(k) or []
         self._readout_advice.set_markup(advice_markup(tips[:1], '') if tips else '')

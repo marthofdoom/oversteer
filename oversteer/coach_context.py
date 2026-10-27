@@ -971,6 +971,39 @@ def spread(sections, others):
 BRAKE_DELTA = 10.0               # m: a braking point further than this from the reference's is earlier or later (calibrate)
 SPEED_DELTA = 3.0 / 3.6          # m/s (3 km/h): a speed this far from the reference's is lower or higher (calibrate)
 THROTTLE_DELTA = 0.2             # s: the throttle this much later than the reference's (calibrate)
+STEER_LAG_S = {'acr': 0.3, 'dirt': 0.6}     # s the yaw follows the wheel, per game; the steer is read this long before the yaw.
+                                             # ACR measured on marth's captures (steer_kinematics.py): best steer-to-curvature lag
+                                             # 0.15-0.31 s (Fabia 0.27-0.31, i20N 0.15-0.28, 208 0.15-0.21); at 0 s the wheel
+                                             # unwinding counts as counter-steer. DiRT's yaw is worked out from positions (a
+                                             # 3-point stencil, one row late): its best lag is 0.6-0.7 s once un-mirrored
+STEER_LAG_DEFAULT = 0.3
+
+
+def steer_lag(game):
+    """Seconds the game's yaw follows the steer."""
+    return STEER_LAG_S.get(game, STEER_LAG_DEFAULT)
+
+
+def steer_before(t, steer, lag, first, last):
+    """The steer `lag` s before each of the rows first..last (inclusive) of a trace: `t` the rows' clock, `steer`
+    their steer (NaN unknown), interpolated in time (the trace is not an even rate). NaN where the lagged time is
+    before the trace or an end of the interval is unknown."""
+    out = []
+    for k in range(first, last + 1):
+        target = t[k] - lag
+        h = bisect.bisect_right(t, target)
+        if h == 0 or target < t[0]:
+            out.append(float('nan'))
+        elif h >= len(t):
+            out.append(steer[-1])
+        else:
+            a, b = h - 1, h
+            span = t[b] - t[a]
+            f = (target - t[a]) / span if span > 0 else 0.0
+            out.append(steer[a] + f * (steer[b] - steer[a]))     # NaN stays NaN
+    return out
+
+
 COUNTER_DELTA = 0.15             # share of a corner steered against the yaw, more than the reference's: over-rotated
 SECTION_MIN = 0.1                # s a section must lose, or gain, to be named
 START_SLACK = 5.0                # m a run may start past the grid's first section's start and still be timed through it
