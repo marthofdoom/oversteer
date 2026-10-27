@@ -13,7 +13,7 @@ HERE = os.path.dirname(__file__)
 TABLE = os.path.join(HERE, '..', 'data', 'telemetry', 'cars', 'rbr.json')
 FIESTA = 'rbr/11'
 # rpm per m/s in each gear from marth's captures of 2026-10-26 (the packet's wheel speed, clutch up, the mode of ~100k
-# packets), the Fiesta WRC 2019 on the install's default setup
+# packets): verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3; same gear list), default setup
 FIESTA_RPM_PER_MS = [398, 316, 256, 209, 175, 149]
 
 
@@ -26,6 +26,7 @@ def test_the_shipped_rbr_cars_load_under_the_rsf_car_id_and_every_rsf_car_is_nam
     # rpm per m/s = gear x drop gear x 60 / (2 pi r) is what the game's wheel speed gave, in every gear
     for gear, measured in zip(gears, FIESTA_RPM_PER_MS):
         assert abs(gear * fiesta['final_drive'] * 60 / (2 * math.pi * 0.315) / measured - 1) < 0.005
+    assert 'turbo' not in fiesta                             # NGP's Turbo 0 is the stock flag, not a statement
     assert max(fiesta['torque_curve'], key=lambda p: p[1]) == (5500.0, 450.0)          # 450 Nm at 5500 rpm, RSF's figure
     assert {'rbr/104', 'rbr/106', 'rbr/107'} <= set(cars)
     with open(TABLE, encoding='utf-8') as f:
@@ -134,7 +135,13 @@ def test_the_rbr_car_table_reads_the_physics_of_an_install(tmp_path):
     sets = {s['id']: s for s in entry['gear_sets']}
     assert sets['gravel+snow']['gears'] == [3.0, 2.0, 1.5, 1.2, 1.0] and sets['gravel+snow']['default']
     assert sets['tarmac']['gears'] == [2.0, 2.0, 1.5, 1.2, 1.0] and not sets['tarmac']['default']
-    assert sets['gravel+snow']['reverse'] == 3.0
+    assert sets['gravel+snow']['reverse'] == 3.0 and 'turbo' not in entry
+    no_drop = tmp_path / 'nodrop'
+    write(no_drop)
+    (no_drop / 'setups' / 'd_gravel.lsp').write_text(setup.replace('DropGearId 8\n', ''))
+    for surface in ('tarmac', 'snow'):
+        (no_drop / 'setups' / ('d_%s.lsp' % surface)).unlink()
+    assert table.build_car(cars[3], {'torque': '300Nm / 4000rpm'}, table.Dir(str(no_drop), 'x'))[0] is None
     two, _ = table.build_car(cars[1], {'torque': '300Nm / 4000rpm'}, found['2'])
     assert [s['id'] for s in two['gear_sets']] == ['gravel+tarmac+snow']
     assert found['3'].label.endswith('s_i2003')

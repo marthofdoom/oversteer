@@ -137,7 +137,9 @@ def setup_gearing(source, surface, forward):
     reverse = ratio(options, int(setup['GearId0'])) if 'GearId0' in setup else None
     final = ratio(options, int(setup['FinalDriveId'])) if setup.get('FinalDriveId') else None
     drop = ratio(options, int(setup['DropGearId']), invert=True) if setup.get('DropGearId') else None
-    return {'gears': gears, 'reverse': abs(reverse) if reverse else None, 'final': drop or 1.0, 'transfer': final,
+    if not drop:
+        return None                              # no drop gear, no overall ratio: not shipped
+    return {'gears': gears, 'reverse': abs(reverse) if reverse else None, 'final': drop, 'transfer': final,
             'loss': options.get('DriveTrainLoss_NGP')}
 
 
@@ -175,7 +177,7 @@ def build_car(row, data, source):
         if gearing:
             sets[surface] = gearing
     if not sets:
-        return None, 'no readable default setup'
+        return None, 'no readable default setup with a drop gear'
     base = sets.get('gravel') or sets[next(iter(sets))]
     groups = []                                  # surfaces whose gearing is the same share a set
     for surface, g in sets.items():
@@ -205,7 +207,7 @@ def build_car(row, data, source):
         'transfer_ratio': round(base['transfer'], 4) if base['transfer'] else None,
         'gearbox_efficiency': round(1.0 - base['loss'] / 100.0, 3) if base['loss'] is not None else None,
         'tyre_radius_m': {s: [radius, radius] for s in sets} if radius else None,
-        'turbo': bool(common.get('Turbo')),
+        'turbo': True if common.get('Turbo') == 1 else None,          # NGP's Turbo 0 is the stock flag: boost is in the curve
         'auto_upshift_rpm': [int(u) for u in uppers] if all(uppers) else None,
         'sources': ['%s: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car '
                     'InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp '
@@ -223,7 +225,7 @@ def build_car(row, data, source):
 
 
 def _revision(source, row):
-    marker = next((n for n in source.names() if n == row['name']), None)
+    marker = next((n for n in source.names() if n.lower() == row['name'].lower()), None)
     text = source.read(marker) if marker else None
     m = re.search(r'revision\s+(.+)', text or '')
     return m.group(1).strip() if m else (row.get('rev') or '?')
@@ -273,7 +275,7 @@ def main():
         'notes': "Derived numbers only, read from RSF's physics files of the cars on marth's install, %s; built by "
                  "research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve "
                  "(Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve "
-                 "peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm the Fiesta was seen to reach is 0.5 %% "
+                 "peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm seen reached is up to 0.6 %% "
                  "above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are "
                  "joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) "
                  "as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way "
@@ -285,7 +287,7 @@ def main():
                  "1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: "
                  "ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. A slot folder "
                  "of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard "
-                 "Burns Rally cars and are not shipped. Verified on the Fiesta WRC 2019 against marth's captures of "
+                 "Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of "
                  "2026-10-26 (docs/richard-burns-rally.md)." % datetime.date.today().isoformat(),
         'cars': [built[k] for k in sorted(built, key=int)],
         'names': names,

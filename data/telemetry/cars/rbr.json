@@ -2,7 +2,7 @@
  "game": "rbr",
  "title": "Richard Burns Rally (RallySimFans) car names, engines and gearing",
  "keys": "name is the RSFCarID as a string: the car key is rbr/<RSFCarID>, the one Oversteer makes from the install's Cars/Cars.ini [Car05] (rbr_install.car_in_slot). screen_name is RSF's name of the car. `names` lists every car RSF's car list (rsfdata/cache/cars.json) has, with the facts cars_data.json holds (path, year, drivetrain, gear count); `cars` only those whose NGP physics have been on the install.",
- "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-10-26; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm the Fiesta was seen to reach is 0.5 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the Fiesta WRC 2019 against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
+ "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-10-26; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm seen reached is up to 0.6 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
  "cars": [
   {
    "name": "11",
@@ -101,7 +101,6 @@
      0.315
     ]
    },
-   "turbo": false,
    "auto_upshift_rpm": [
     7300,
     7240,
@@ -215,7 +214,6 @@
      0.315
     ]
    },
-   "turbo": false,
    "auto_upshift_rpm": [
     7330,
     7240,
@@ -325,7 +323,6 @@
      0.315
     ]
    },
-   "turbo": false,
    "auto_upshift_rpm": [
     7000,
     6650,
@@ -421,7 +418,6 @@
      0.315
     ]
    },
-   "turbo": false,
    "auto_upshift_rpm": [
     6510,
     6340,

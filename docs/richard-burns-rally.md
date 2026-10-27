@@ -370,7 +370,7 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
   it within 0.3 %): it is kept as `transfer_ratio` and left out of the overall ratio. The capture of 19:18 (slot 6) reads 0.912
   of these in every gear = drop gear option 12 (32 / 8 = 4.0, 0.914): RSF's own setup differs from the default, so the
   overall ratio differs with the setup (the steps between gears, which the best upshift needs, do not; the learner's
-  `gearing_aside` and `match_set` take it from the learnt steps). Wheel speed under the ground-speed vector the decoder uses
+  `gearing_aside` and `match_set` take it from the learnt steps). A non-default drop gear scales every gear (e.g. 0.914), so `slip_rpm` turns off (ZERO_PLAUSIBLE) and the car envelope uses the default drop gear for that run. Wheel speed under the ground-speed vector the decoder uses
   for `speed` is what reads the driveline; the vector reads 5-9 % off in the low gears from wheelspin.
 - **The optional install**: `rbr_install.find_root()` looks, with no setting, in the usual Lutris (including the game path
   in Lutris' game files), Bottles, Heroic, Steam (Proton prefixes, and the exe/StartDir of non-Steam shortcuts in `userdata/*/config/shortcuts.vdf`, read-only, at most 20 files of 1 MB) and Wine places. The search runs once on a thread of its own and again, the same way, only when an RBR run starts and the last one found nothing (30 s apart at most); the packet path never searches. When found it adds the exact car and
