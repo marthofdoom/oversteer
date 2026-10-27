@@ -358,3 +358,60 @@ def test_a_source_not_yet_repaired_lowers_the_targets_data_version(files):
     for pid in ported:
         assert db.execute("SELECT COUNT(*) FROM events WHERE run = ? AND kind = 'launch'", (pid,)).fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM metrics WHERE run = ? AND name = 'launch.g'", (pid,)).fetchone()[0] == 1
+
+
+# -- pb_keep (a PB of a car its runs left: rbr_fingerprint) follows its run, and its duplicate --
+
+def _pb_file(path, rows, keep=()):
+    s = open_store(path)
+    s.begin()
+    out = [drive(s, 'P', key, started, seed=seed)[1] for key, started, seed in rows]
+    for i in keep:
+        s._do('INSERT INTO pb_keep (run) VALUES (?)', (out[i],))
+    s.commit()
+    s.db.close()
+    return out
+
+
+def test_a_ported_run_keeps_its_pb_mark(tmp_path):
+    t, s = str(tmp_path / 't.db'), str(tmp_path / 's.db')
+    _pb_file(t, [('acr/Car', 1000.0, 1)])
+    _pb_file(s, [('acr/Car', 9000.0, 2)], keep=[0])
+    run((t, s, tmp_path))
+    db = connect(t)
+    assert [r['started'] for r in db.execute('SELECT r.started FROM pb_keep k JOIN runs r ON r.id = k.run')] == [9005.0]
+    assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+
+
+def test_the_kept_target_copy_of_a_duplicate_takes_the_sources_pb_mark(tmp_path):
+    t, s = str(tmp_path / 't.db'), str(tmp_path / 's.db')
+    [target] = _pb_file(t, [('acr/Car', 1000.0, 7)])                    # the same drive: the target's copy kept
+    _pb_file(s, [('acr/Car', 1000.5, 7)], keep=[0])
+    run((t, s, tmp_path))
+    assert [r[0] for r in connect(t).execute('SELECT run FROM pb_keep')] == [target]
+
+
+def test_the_sources_copy_that_replaces_a_target_run_takes_its_pb_mark(tmp_path):
+    t, s = str(tmp_path / 't.db'), str(tmp_path / 's.db')
+    _pb_file(t, [('acr/Car', 1000.0, 1)], keep=[0])
+    st = open_store(s)
+    st.begin()
+    drive(st, 'P', 'acr/Car', 1001.0, seed=1, clock=True)                 # richer (on the game's clock): replaces it
+    st.commit()
+    st.db.close()
+    plan, _ = run((t, s, tmp_path))
+    db = connect(t)
+    assert plan.counts['runs']['replace'] == 1
+    assert db.execute('SELECT COUNT(*) FROM pb_keep k JOIN runs r ON r.id = k.run').fetchone()[0] == 1
+
+
+def test_a_source_from_before_pb_keep_merges(tmp_path):
+    t, s = str(tmp_path / 't.db'), str(tmp_path / 's.db')
+    _pb_file(t, [('acr/Car', 1000.0, 1)])
+    _pb_file(s, [('acr/Car', 9000.0, 2)])
+    db = sqlite3.connect(s)
+    db.execute('DROP TABLE pb_keep')
+    db.commit()
+    db.close()
+    run((t, s, tmp_path))
+    assert connect(t).execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 2

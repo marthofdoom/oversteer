@@ -21,8 +21,9 @@ gearbox, read after 40-150 m of driving. With the gear count seen and the highes
 
 A set or a car of ours that the install, or a lone fit no other car could share, later names is adopted: its
 sessions, model and PBs move to that key (Store.merge_car), once. A gear set that neither fits nor misses counts as
-a miss DECIDED_M into an epoch, so the wait ends. Once a car is known its gearing is checked again every MATCH_EVERY
-s since the stage was last loaded: a miss is another car (a quick trip to the menus), a new epoch.
+a miss DECIDED_M into an epoch, so the wait ends. A stage loaded again within the epoch (a restart, or a trip to
+the menus quicker than MENU_GAP) makes the known car provisional until the gearing since the load fits it again; a
+miss is another car: a new epoch, and the runs since the load go to the shared key (ShiftLearner._write_split).
 
 The library, `<data>/oversteer/rbr/cars.json`, is {"version": 1, "cars": [entry, ...], "last": {"key", "slot"}}; an
 entry is {"key", "kind" ('local', 'set' or 'install'), "slot" (the packet's car.index, 0..7), "gears" ({gear: rpm per
@@ -116,11 +117,14 @@ def impostors(key):
     """The RSF cars the table has no gearing for that could have the gearbox of the shipped car `key`: the same
     forward gear count and drivetrain (or not known). One gearbox can serve many cars (the Fiesta's and the i20's are
     one), so a lone fit names its car only where no such car exists."""
+    names = rsf_cars()
+    if not names:
+        return ['(the table names no cars: any could)']    # nothing tells the fit apart from a car not in the table
     shipped = car_data.cars()
     entry = shipped.get(key) or {}
     gears = len(car_data.default_set(entry)['gears']) if entry.get('gear_sets') else None
     drive = entry.get('drivetrain')
-    return sorted(k for k, v in rsf_cars().items() if k != key and k not in shipped
+    return sorted(k for k, v in names.items() if k != key and k not in shipped
                   and (v.get('gears') is None or gears is None or v['gears'] == gears)
                   and (v.get('drivetrain') is None or drive is None or v['drivetrain'] == drive))
 
@@ -331,6 +335,7 @@ class Recogniser:
         self._match_at = None
         self._recorded = None    # (key, epoch): its fingerprint went into the library
         self._force = False      # the known car's gearing missed: the next packet begins an epoch, car unknown
+        self.rechecking = False  # the stage was loaded again within the epoch: the car is provisional until `check` fits
 
     # -- per packet --
 
@@ -357,6 +362,7 @@ class Recogniser:
                 else:
                     carry = self.key if slot == self.slot else None          # another slot is another car
             self.epoch += 1
+            self.rechecking = False
             self.fp, self.check = Fingerprint(), Fingerprint()
             self._fed = self._match_at = None
             self.slot, self.exact = slot, exact
@@ -369,7 +375,11 @@ class Recogniser:
                 self.key = self.name = None
                 self.provisional = False
         elif loaded:
-            self.check = Fingerprint()                   # a restart: the car is checked again from here
+            # A restart, or a quicker trip to the menus than MENU_GAP: the car is checked again from here, and until
+            # its gearing fits nothing is learnt under it (the lights go on using it)
+            self.check = Fingerprint()
+            if self.key is not None and self.exact is None and not self.provisional:
+                self.provisional = self.rechecking = True
         if sample.stage is not None:
             self.stage = sample.stage
         self._steps, self._arrived = steps, now
@@ -378,13 +388,14 @@ class Recogniser:
             t = steps / STEPS_PER_S
             self.fp.feed(t, sample)
             self.check.feed(t, sample)
-            due = self.fp.grew or self._match_at is None or t < self._match_at or t - self._match_at >= MATCH_EVERY
+            due = (self.fp.grew or self.check.grew or self._match_at is None or t < self._match_at
+                   or t - self._match_at >= MATCH_EVERY)
             if due:
                 self._match_at = t
-                if self.key is None or self.provisional or exact is not None:
-                    events += self._match(exact)
-                else:
+                if self.rechecking:
                     self._check()
+                elif self.key is None or self.provisional or exact is not None:
+                    events += self._match(exact)
         if self.key is not None:
             sample.car, sample.car_name = self.key, self.name or sample.car_name
         sample.car_epoch, sample.car_provisional = self.epoch, self.provisional
@@ -466,17 +477,19 @@ class Recogniser:
         return refs
 
     def _check(self):
-        """The car is known: since the stage was last loaded its gearing must still fit. A miss is another car
-        (changed in the menus quicker than MENU_GAP): a new epoch, car unknown."""
-        if self.exact is not None:
-            return
+        """The stage was loaded again within the epoch: the gearing driven since must fit the known car again (GEARS_MIN
+        gears) before anything is learnt under it. A miss (or no fit DECIDED_M on) is another car, changed in the menus
+        quicker than MENU_GAP: a new epoch, car unknown, and only what was driven since the load goes with it."""
         est = self.check.estimates()
         if len(est) < GEARS_MIN:
             return
-        refs = self._references(self.key)
-        verdicts = [compare(r, est)[0] for r in refs]
-        if verdicts and all(v == 'miss' for v in verdicts):
-            logging.info("rbr car: the gearing no longer fits %s (%s): another car", self.key,
+        verdicts = [compare(r, est)[0] for r in self._references(self.key)]
+        if 'match' in verdicts:
+            self.provisional = self.rechecking = False
+            logging.info("rbr car: %s confirmed again by its gearing after the stage load, %.0f m", self.key,
+                         self.check.distance)
+        elif (verdicts and all(v == 'miss' for v in verdicts)) or self._decided(self.check):
+            logging.info("rbr car: the gearing since the stage load does not fit %s (%s): another car", self.key,
                          ', '.join('%d: %.1f' % (g, v) for g, v in sorted(est.items())))
             self._force = True
 

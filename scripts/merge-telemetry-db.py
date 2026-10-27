@@ -413,12 +413,19 @@ def merge(tdb, sdb, profile_map=None, plan=None):
 
     # runs
     run_map, ported, touched_stages = {}, [], set()
+    src_tables = tables(sdb)
+    protected = set()               # target runs that keep their trace as a PB (pb_keep): a duplicate's mark follows it
+
+    def kept_pb(db, run):
+        return 'pb_keep' in tables(db) and db.execute('SELECT 1 FROM pb_keep WHERE run = ?', (run,)).fetchone()
     for r in src_runs:
         if r['id'] in dup:
             target, keep_source = dup[r['id']]
             if not keep_source:
                 run_map[r['id']] = target
                 plan.add('runs', 'skip')
+                if kept_pb(sdb, r['id']):
+                    protected.add(target)            # the source protected its copy: the kept target copy is
                 label = sdb.execute('SELECT * FROM labels WHERE run = ?', (r['id'],)).fetchone()
                 if label is not None and not tdb.execute('SELECT 1 FROM labels WHERE run = ?', (target,)).fetchone():
                     insert(tdb, 'labels', dict(dict(label), run=target))
@@ -428,19 +435,22 @@ def merge(tdb, sdb, profile_map=None, plan=None):
             label = tdb.execute('SELECT * FROM labels WHERE run = ?', (target,)).fetchone()
             label = dict(zip(columns(tdb, 'labels'), label)) if label else None
             stage = tdb.execute('SELECT stage FROM runs WHERE id = ?', (target,)).fetchone()[0]
+            carry = kept_pb(tdb, target)                 # the target protected its copy: the source's that replaces it is
             tdb.execute('DELETE FROM shifts WHERE run = ?', (target,))
             tdb.execute('DELETE FROM runs WHERE id = ?', (target,))
             if stage is not None:
                 tdb.execute('UPDATE stages SET runs = MAX(runs - 1, 0) WHERE key = ?', (stage,))
             plan.add('runs', 'replace')
         else:
-            label = None
+            label = carry = None
         row = {k: v for k, v in r.items() if k != 'id' and not k.startswith('_')}
         row['session'] = session_map[r['session']]
         has_trace = sdb.execute('SELECT 1 FROM traces WHERE run = ?', (r['id'],)).fetchone() is not None
         new = insert(tdb, 'runs', row)
         run_map[r['id']] = new
         ported.append((r['id'], new, has_trace))
+        if carry:
+            protected.add(new)
         plan.add('runs', 'insert')
         if r['stage'] is not None:
             tdb.execute('UPDATE stages SET runs = runs + 1 WHERE key = ?', (r['stage'],))
@@ -452,6 +462,8 @@ def merge(tdb, sdb, profile_map=None, plan=None):
     # what comes with a ported run
     for old, new, has_trace in ported:
         for table in ('traces', 'labels') + RUN_TABLES:
+            if table not in src_tables:
+                continue                                 # (a source from before the table)
             for row in sdb.execute('SELECT * FROM {} WHERE run = ?'.format(table), (old,)).fetchall():
                 insert(tdb, table, dict(dict(row), run=new))
                 plan.add(table, 'insert')
@@ -479,6 +491,9 @@ def merge(tdb, sdb, profile_map=None, plan=None):
             row.update(run=new, session=session_map[row['session']])
             insert(tdb, 'metrics', row)
             plan.add('metrics', 'insert')
+    for run in sorted(protected):
+        if tdb.execute('INSERT OR IGNORE INTO pb_keep (run) VALUES (?)', (run,)).rowcount:
+            plan.add('pb_keep', 'insert')
     ported_ids = {old for old, _, _ in ported}
 
     # shifts
