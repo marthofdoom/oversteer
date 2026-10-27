@@ -40,8 +40,9 @@ def learn(records, db, profile, started=None, recorded_car=None):
             best = 'top gear' if row['last'] else ('%.0f' % row['best'] if row['best'] else 'learning')
             mine = '%.0f (%d)' % (row['average_shift'], row['shifts']) if row['average_shift'] else '-'
             per_method = ', '.join('%s %.0f (%d)' % (m, v[0], v[1]) for m, v in sorted(methods.get(row['gear'], {}).items()))
-            print("  gear %d: %.1f rpm per km/h, best %s, you %s%s" % (
-                row['gear'], row['ratio'] / 3.6, best, mine, '; ' + per_method if per_method else ''))
+            ratio = '%.1f' % (row['ratio'] / 3.6) if row['ratio'] else '-'     # none learnt (a provisional car learns nothing)
+            print("  gear %d: %s rpm per km/h, best %s, you %s%s" % (
+                row['gear'], ratio, best, mine, '; ' + per_method if per_method else ''))
         for tip in snapshot['advice']:
             print("  - " + tip)
         reader = learner._reader()
