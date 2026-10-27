@@ -575,8 +575,8 @@ LAUNCH_CUT = 0.3                 # s on the limiter in the launch gear: a late c
 LAUNCH_CUTS = 3                  # of the last five launches
 LAUNCH_GAME = 0.02               # s: five launches within this of each other are the game's launch, not a driver's (they never repeat to a hundredth)
 LAUNCH_STEADY = 0.1              # s: the last five launches within this of each other and of the best: praise
-LAUNCH_OUT = ('wrcg', 'rbr')     # games whose speed channel is not checked: no launch rules
-ATTITUDE_OUT = ('wrcg', 'rbr')   # games whose steer and yaw signals are not checked: no spin or stall coaching
+LAUNCH_OUT = ('wrcg',)            # games whose speed channel is not checked: no launch rules
+ATTITUDE_OUT = ('wrcg',)          # games whose steer and yaw signals are not checked: no spin or stall coaching
 
 # Rough seconds each costs per 10 km, only to rank what to work on first
 # where no reference gives seconds (calibrate): a second held on the limiter

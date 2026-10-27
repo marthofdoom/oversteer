@@ -454,6 +454,20 @@ def test_positions_give_the_road_in_any_game_and_an_unknown_road_gets_no_potenti
     assert potential.stage(runs, None, 'gravel', 'dirt', cols, 3) is None
 
 
+def test_richard_burns_rally_positions_give_the_road_with_x_east_y_north_z_up():
+    """RBR's world is x east, y north, z up (checked on marth's captures: the heading rate of (x, y) against the yaw
+    rate +0.86, against the lateral g -0.89, the Monster HC driveline in the same coordinates): an arc that bends
+    north is a left turn, and a game outside PLAN_VERIFIED would have read it by its yaw."""
+    arr, total = _path_arr(30.0)
+    rbr = {name: np.array(value) for name, value in arr.items()}
+    rbr['y'], rbr['z'] = -arr['z'], arr['y']                               # (east, north, height) from ACR's (east, height, -north)
+    grid = np.arange(0.0, total, potential.DS)
+    assert 'rbr' in potential.PLAN_VERIFIED
+    k = potential.curvature(rbr, grid, 'rbr')
+    assert 1 / np.nanmax(np.abs(k)) == pytest.approx(30.0, rel=0.12) and k[np.nanargmax(np.abs(k))] > 0
+    assert np.isnan(potential.curvature(rbr, grid, 'rbr')).mean() < potential.ROAD_UNKNOWN_MAX
+
+
 def test_the_car_mass_scales_with_the_car():
     from oversteer import car_data
     i20 = car_data.entry('acr/Hyundai i20N Rally2')
