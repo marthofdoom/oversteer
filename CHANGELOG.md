@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.5 — 2026-10-26
 
 ### Telemetry
 - The UDP port in Settings -> Telemetry is now a drop-down with the games' ports (5310 Oversteer
