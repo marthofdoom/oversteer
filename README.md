@@ -147,7 +147,8 @@ Pedals are inverted at the driver by default so games read them the right way ro
 ### Other games (secondary)
 
 The telemetry side also reads Forza Horizon / Motorsport "Data Out", BeamNG and Live for Speed
-(OutGauge), the Codemasters layout (DiRT Rally 2.0, DiRT 4, WRC Generations) and EA SPORTS WRC.
+(OutGauge), the Codemasters layout (DiRT Rally 2.0, DiRT 4, WRC Generations), EA SPORTS WRC and
+Richard Burns Rally (RSF).
 Rev lights and shift learning work for all of them; coaching, stage tables and splits are built
 and checked on Assetto Corsa Rally first and WRC Generations second, and the rest are less
 exercised. Assetto Corsa and Assetto Corsa Competizione use the same `oversteer-run` bridge.
