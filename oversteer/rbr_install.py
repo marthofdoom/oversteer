@@ -1,26 +1,19 @@
-"""Richard Burns Rally (RallySimFans, RSF) install: the stage and car names
-the telemetry packet does not carry (docs/richard-burns-rally.md, sections 2
-and 3).
+"""Richard Burns Rally (RallySimFans, RSF) install, found on its own and optional: the shipped tables
+(data/telemetry/stages/rbr.json) name every stage RSF lists, and nothing has to be set up.
 
-The packet has the map id of the stage and the slot (always 5 under RSF) of
-the car, nothing more. RSF's own files name both:
+Where an install is found without being told (the usual Lutris, Bottles, Heroic, Steam and Wine places, and the
+game path in Lutris' game files; no setting, no environment variable) it adds what no shipped table can:
 
-- `rsfdata/cache/stages_data.json` (and `Maps/Tracks.ini` for what it
-  lacks): id, name, length, surface and its shares, country.
-- `Cars/Cars.ini` `[Car05]` `RSFCarID`, with `rsfdata/cache/cars.json`
-  (name) and `cars_data.json` (drivetrain, gearbox).
+- `Cars/Cars.ini` `[Car05]` `RSFCarID` (RSF writes it when a stage loads) with `rsfdata/cache/cars.json` (name) and
+  `cars_data.json` (drivetrain, gearbox): the exact car. Without an install the packets give no reliable car (the
+  slot is always 5 or 6, and cars with the same mass, balance, idle and redline cannot be told apart), so the car
+  key is the shared `rbr/unknown`.
+- `rsfdata/cache/stages_data.json` and `Maps/Tracks.ini`: custom stages the shipped table lacks, and corrections;
+  built into `<data>/oversteer/rbr/stages.json` (the format of data/telemetry/stages) until the install's files
+  change, then merged over the shipped table by stage_tables.load.
 
-RSF's json has no licence, so nothing of it is shipped: the stage table is
-built here, from the install, read-only, and kept as
-`<data>/oversteer/rbr/stages.json` (the format of data/telemetry/stages,
-read by stage_tables.load) until the install's files change. Under the
-Flatpak the prefix must be readable (flatpak override --user
---filesystem=<prefix path>:ro).
-
-The install is found from $OVERSTEER_RBR_DIR, a `root` file in
-`<data>/oversteer/rbr/` (one line: the folder holding RichardBurnsRally.ini)
-or the usual Wine prefixes of Lutris, Bottles and plain Wine. Nothing is
-ever written under the install.
+Nothing is ever written under the install. A sandbox (the Flatpak) that cannot see it simply finds none.
+$OVERSTEER_RBR_DIR points at an install for development; it is not a setting.
 """
 
 import glob
@@ -33,23 +26,28 @@ import time
 from . import diagnostics
 
 ENV = 'OVERSTEER_RBR_DIR'
-ROOT_FILE = 'root'
 SLOT = 5                                             # RSF puts the chosen car in this slot (packet car.index)
 SURFACE_RSF = {1: 'tarmac', 2: 'gravel', 3: 'snow'}  # stages_data.json surface_id
 SURFACE_TRACKS_INI = {0: 'tarmac', 1: 'gravel', 2: 'snow'}   # Maps/Tracks.ini Surface
 ROOT_RECHECK = 30.0                                  # s between looks for an install that was not found
 UNKNOWN_CAR = 'rbr/unknown'                          # a car the files do not name: shared, so nothing is learnt under it
 CAR_RECHECK = 2.0                                    # s between looks at Cars.ini (RSF rewrites it at a stage load)
-CANDIDATES = (
-    '~/Games/*/drive_c/Richard Burns Rally', '~/Games/*/*/drive_c/Richard Burns Rally',
-    '~/Games/*/drive_c/Games/Richard Burns Rally', '~/.wine/drive_c/Richard Burns Rally',
-    '~/.wine/drive_c/Games/Richard Burns Rally',
-    '~/.local/share/bottles/bottles/*/drive_c/Richard Burns Rally',
-    '~/.var/app/com.usebottles.bottles/data/bottles/bottles/*/drive_c/Richard Burns Rally',
+_FOLDERS = ('Richard Burns Rally', 'RBR', 'Games/Richard Burns Rally', 'Games/RBR', 'RallySimFans',
+            'Program Files (x86)/Richard Burns Rally', 'Program Files/Richard Burns Rally')
+_PREFIXES = (
+    '~/Games/*/drive_c', '~/Games/*/*/drive_c', '~/Games/Heroic/Prefixes/*/*/drive_c', '~/Games/Heroic/*/drive_c',
+    '~/.wine/drive_c', '~/.local/share/bottles/bottles/*/drive_c',
+    '~/.var/app/com.usebottles.bottles/data/bottles/bottles/*/drive_c',
+    '~/.local/share/Steam/steamapps/compatdata/*/pfx/drive_c', '~/.steam/steam/steamapps/compatdata/*/pfx/drive_c',
+    '~/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata/*/pfx/drive_c',
+    '~/.local/share/lutris/runners/wine/*/drive_c',
 )
+CANDIDATES = tuple('{}/{}'.format(prefix, folder) for prefix in _PREFIXES for folder in _FOLDERS)
+LUTRIS_GAMES = ('~/.config/lutris/games', '~/.var/app/net.lutris.Lutris/config/lutris/games')
 
 _root = None
 _root_at = None
+recorded = None          # a replay: the car the capture's header recorded ({'key', 'id', 'name'}), over today's Cars.ini
 
 
 def data_dir():
@@ -87,19 +85,32 @@ def find_root(refresh=False):
     _root_at = now
     found = None
     candidates = [os.environ.get(ENV)]
-    try:
-        with open(os.path.join(data_dir(), ROOT_FILE), encoding='utf-8') as f:
-            candidates.append(f.readline().strip())
-    except OSError:
-        pass
     for pattern in CANDIDATES:
         candidates += sorted(glob.glob(os.path.expanduser(pattern)))
+    candidates += _lutris_roots()
     for path in candidates:
         if _is_root(path):
             found = path
             break
     _root = found
     return _root
+
+
+def _lutris_roots():
+    """The folders of Lutris games whose executable is Richard Burns Rally's (its game files hold `exe: <path>`)."""
+    found = []
+    for folder in LUTRIS_GAMES:
+        for path in sorted(glob.glob(os.path.join(os.path.expanduser(folder), '*.yml')))[:200]:
+            try:
+                with open(path, encoding='utf-8', errors='replace') as f:
+                    text = f.read(20000)
+            except OSError:
+                continue
+            for match in re.finditer(r'^\s*exe:\s*[\'"]?(.+?)[\'"]?\s*$', text, re.M):
+                exe = match.group(1)
+                if 'richardburnsrally' in exe.lower().replace(' ', ''):
+                    found.append(os.path.dirname(exe))
+    return found
 
 
 def forget():
@@ -199,8 +210,6 @@ def build_stages(root):
                      'sources': ['stages_data.json']}
             if parts:
                 entry['surface_parts'] = parts
-            if row.get('author'):
-                entry['author'] = row['author']
             out[sid] = entry
     path = resolve(root, 'Maps/Tracks.ini')
     if path:
@@ -296,6 +305,8 @@ def car_in_slot(slot=SLOT, root=None):
     UNKNOWN_CAR where the slot has no RSFCarID), 'name', 'id', 'drivetrain', 'gears'} (the last two where
     cars_data.json has them). Cars.ini is looked at again at most every CAR_RECHECK s, and read again only when it
     changed: RSF writes it when a stage loads."""
+    if recorded is not None:
+        return dict({'drivetrain': None, 'gears': None}, **recorded)
     now = time.monotonic()
     cached = _slot_cache.get(slot)
     if cached is not None and now - cached[0] < CAR_RECHECK:

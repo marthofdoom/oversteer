@@ -1,0 +1,7265 @@
+{
+ "game": "rbr",
+ "title": "Richard Burns Rally (RallySimFans) stage names",
+ "keys": "The stage key is rbr:<map id>, the id the NGP telemetry sends as stage.index. A stage not listed (a custom one added later) is shown as 'RBR stage <id>' with the length the packet gives, or named from the player's own install where Oversteer finds it.",
+ "notes": "Facts only (id, name, length in m, surface and its shares, country code), read once from a RallySimFans install: rsfdata/cache/stages_data.json and Maps/Tracks.ini, 2026-10-26; built by research/rbr/stage_table.py. Lengths are RSF's, mostly rounded to 100 m; the packet's driveline length is the exact one.",
+ "stages": [
+  {
+   "id": 10,
+   "location": "FI",
+   "stage": "Kaihuavaara",
+   "length_m": 6100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 11,
+   "location": "FI",
+   "stage": "Mustaselka",
+   "length_m": 7900,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 12,
+   "location": "FI",
+   "stage": "Sikakama",
+   "length_m": 10200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 13,
+   "location": "FI",
+   "stage": "Autiovaara",
+   "length_m": 6100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 14,
+   "location": "FI",
+   "stage": "Kaihuavaara II",
+   "length_m": 6100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 15,
+   "location": "FI",
+   "stage": "Mustaselka II",
+   "length_m": 7700,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 20,
+   "location": "GB",
+   "stage": "Harwood Forest",
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 21,
+   "location": "GB",
+   "stage": "Falstone",
+   "length_m": 6600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 22,
+   "location": "GB",
+   "stage": "Chirdonhead",
+   "length_m": 7000,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 23,
+   "location": "GB",
+   "stage": "Shepherds Shield",
+   "length_m": 4800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 24,
+   "location": "GB",
+   "stage": "Harwood Forest II",
+   "length_m": 5900,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 25,
+   "location": "GB",
+   "stage": "Chirdonhead II",
+   "length_m": 6900,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 31,
+   "location": "AU",
+   "stage": "NewBobs",
+   "length_m": 10100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 32,
+   "location": "AU",
+   "stage": "Greenhills",
+   "length_m": 6000,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 33,
+   "location": "AU",
+   "stage": "Mineshaft",
+   "length_m": 8200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 34,
+   "location": "AU",
+   "stage": "East-West",
+   "length_m": 9500,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 35,
+   "location": "AU",
+   "stage": "NewBobs II",
+   "length_m": 10000,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 36,
+   "location": "AU",
+   "stage": "East-West II",
+   "length_m": 9600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 42,
+   "location": "FR",
+   "stage": "Joux Verte",
+   "length_m": 7900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 43,
+   "location": "FR",
+   "stage": "Bisanne",
+   "length_m": 5600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 44,
+   "location": "FR",
+   "stage": "Joux Plane",
+   "length_m": 11100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 45,
+   "location": "FR",
+   "stage": "Joux Verte II",
+   "length_m": 7800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 46,
+   "location": "FR",
+   "stage": "Cote D'Arbroz II",
+   "length_m": 4300,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 51,
+   "location": "JP",
+   "stage": "Noiker",
+   "length_m": 13800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 52,
+   "location": "JP",
+   "stage": "Sipirkakim",
+   "length_m": 8700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 53,
+   "location": "JP",
+   "stage": "Pirka Menoko",
+   "length_m": 6700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 54,
+   "location": "JP",
+   "stage": "Tanner",
+   "length_m": 3900,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 55,
+   "location": "JP",
+   "stage": "Noiker II",
+   "length_m": 13700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 56,
+   "location": "JP",
+   "stage": "Tanner II",
+   "length_m": 4000,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 61,
+   "location": "US",
+   "stage": "Fraizer Wells",
+   "length_m": 5000,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 62,
+   "location": "US",
+   "stage": "Prospect Ridge",
+   "length_m": 7800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 63,
+   "location": "US",
+   "stage": "Diamond Creek",
+   "length_m": 7100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 64,
+   "location": "US",
+   "stage": "Hualapai Nation",
+   "length_m": 8600,
+   "surface": "gravel",
+   "confidence": "high"
+  },
+  {
+   "id": 65,
+   "location": "US",
+   "stage": "Prospect Ridge II",
+   "length_m": 7900,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 66,
+   "location": "US",
+   "stage": "Diamond Creek II",
+   "length_m": 6800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 71,
+   "location": "GB",
+   "stage": "Rally School Stage",
+   "length_m": 2200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 101,
+   "location": "FI",
+   "stage": "Autiovaara II",
+   "length_m": 6100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 102,
+   "location": "FI",
+   "stage": "Sikakama II",
+   "length_m": 10200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 103,
+   "location": "GB",
+   "stage": "Falstone II",
+   "length_m": 6600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 104,
+   "location": "GB",
+   "stage": "Shepherds Shield II",
+   "length_m": 4800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 105,
+   "location": "AU",
+   "stage": "Greenhills II",
+   "length_m": 6000,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 106,
+   "location": "AU",
+   "stage": "Mineshaft II",
+   "length_m": 8200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 107,
+   "location": "FR",
+   "stage": "Joux Plane II",
+   "length_m": 11100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 108,
+   "location": "FR",
+   "stage": "Bisanne II",
+   "length_m": 5600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 109,
+   "location": "JP",
+   "stage": "Sipirkakim II",
+   "length_m": 8700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 110,
+   "location": "JP",
+   "stage": "Pirka Menoko II",
+   "length_m": 6700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 111,
+   "location": "US",
+   "stage": "Fraizer Wells II",
+   "length_m": 5100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 112,
+   "location": "US",
+   "stage": "Hualapai Nation II",
+   "length_m": 8600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 113,
+   "location": "GB",
+   "stage": "Rally School Stage II",
+   "length_m": 2200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 114,
+   "location": "IT",
+   "stage": "Castrezzato",
+   "length_m": 8060,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 115,
+   "location": "IT",
+   "stage": "SS Daniel Bonara",
+   "length_m": 5780,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 116,
+   "location": "CZ",
+   "stage": "Rally School Czech II",
+   "length_m": 3100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 117,
+   "location": "FR",
+   "stage": "Courcelle Val d'Esnoms",
+   "length_m": 7900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 118,
+   "location": "UA",
+   "stage": "Livadija",
+   "length_m": 5560,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 119,
+   "location": "SE",
+   "stage": "Karlstad II",
+   "length_m": 1983,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 120,
+   "location": "JP",
+   "stage": "Akagi 2",
+   "length_m": 3450,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 121,
+   "location": "GB",
+   "stage": "Sweet Lamb 2",
+   "length_m": 5150,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 122,
+   "location": "DE",
+   "stage": "Bruchsal Unteröwisheim",
+   "length_m": 8400,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 123,
+   "location": "CZ",
+   "stage": "Rally School Czech",
+   "length_m": 3000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 124,
+   "location": "FI",
+   "stage": "Humalamaki 2",
+   "length_m": 4580,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 125,
+   "location": "US",
+   "stage": "Sardian",
+   "length_m": 5059,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 126,
+   "location": "US",
+   "stage": "Sardian Night",
+   "length_m": 5059,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 127,
+   "location": "GB",
+   "stage": "Loch Ard",
+   "length_m": 8440,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 128,
+   "location": "GB",
+   "stage": "Loch Ard 2",
+   "length_m": 8375,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 129,
+   "location": "FR",
+   "stage": "Peyregrosse Mandagout",
+   "length_m": 12800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 130,
+   "location": "LT",
+   "stage": "Versme RallyCross",
+   "length_m": 3260,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 131,
+   "location": "SK",
+   "stage": "Peklo",
+   "length_m": 8400,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 132,
+   "location": "SK",
+   "stage": "Peklo R",
+   "length_m": 8400,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 133,
+   "location": "SK",
+   "stage": "Peklo Snow",
+   "length_m": 8400,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 134,
+   "location": "SK",
+   "stage": "Peklo Snow R",
+   "length_m": 8400,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 135,
+   "location": "SK",
+   "stage": "Mlynky",
+   "length_m": 7050,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 136,
+   "location": "SK",
+   "stage": "Mlynky Snow",
+   "length_m": 7050,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 137,
+   "location": "GB",
+   "stage": "Sweet Lamb",
+   "length_m": 5100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 138,
+   "location": "IE",
+   "stage": "RSI 1",
+   "length_m": 1527,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 139,
+   "location": "IE",
+   "stage": "RSI 2",
+   "length_m": 1086,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 140,
+   "location": "IE",
+   "stage": "RSI 3",
+   "length_m": 1874,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 141,
+   "location": "GB",
+   "stage": "ROC 2008",
+   "length_m": 1900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 142,
+   "location": "NL",
+   "stage": "PTD RallySprint",
+   "length_m": 5100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 143,
+   "location": "PT",
+   "stage": "Portugal SS18 2007",
+   "length_m": 2350,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 144,
+   "location": "SK",
+   "stage": "Mlynky Snow R",
+   "length_m": 7090,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 145,
+   "location": "SI",
+   "stage": "Sorica",
+   "length_m": 15030,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 146,
+   "location": "JP",
+   "stage": "Shomaru Pass",
+   "length_m": 5750,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 147,
+   "location": "JP",
+   "stage": "Shomaru Pass II",
+   "length_m": 5771,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 149,
+   "location": "CZ",
+   "stage": "Pribram",
+   "length_m": 9100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 150,
+   "location": "CZ",
+   "stage": "Pribram R",
+   "length_m": 9039,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 151,
+   "location": "DE",
+   "stage": "Bergheim",
+   "length_m": 7830,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 152,
+   "location": "SK",
+   "stage": "Mlynky R",
+   "length_m": 7000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 153,
+   "location": "PL",
+   "stage": "RP 2009 Shakedown",
+   "length_m": 4460,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 154,
+   "location": "PL",
+   "stage": "RP 2009 Shakedown R",
+   "length_m": 4580,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 155,
+   "location": "FR",
+   "stage": "Puy Du Lac",
+   "length_m": 5090,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 156,
+   "location": "FI",
+   "stage": "Humalamaki",
+   "length_m": 4580,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 157,
+   "location": "ES",
+   "stage": "Gran Canaria ROC 2000",
+   "length_m": 3800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 158,
+   "location": "CH",
+   "stage": "Swiss Gravel",
+   "length_m": 5600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 159,
+   "location": "CH",
+   "stage": "Swiss Tarmac",
+   "length_m": 5600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 160,
+   "location": "FR",
+   "stage": "Foron",
+   "length_m": 9200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 161,
+   "location": "FR",
+   "stage": "Foron II",
+   "length_m": 9200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 162,
+   "location": "SE",
+   "stage": "Karlstad",
+   "length_m": 1990,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 163,
+   "location": "DE",
+   "stage": "Sieversdorf",
+   "length_m": 7980,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 164,
+   "location": "CZ",
+   "stage": "Stryckovy-Zadni Porici",
+   "length_m": 6900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 165,
+   "location": "CZ",
+   "stage": "Osli-Stryckovy",
+   "length_m": 10700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 166,
+   "location": "CZ",
+   "stage": "Hradek 1",
+   "length_m": 6000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 167,
+   "location": "CZ",
+   "stage": "Hradek 2",
+   "length_m": 6000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 168,
+   "location": "CZ",
+   "stage": "Liptakov 1",
+   "length_m": 6007,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 169,
+   "location": "CZ",
+   "stage": "Liptakov 2",
+   "length_m": 5911,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 170,
+   "location": "AU",
+   "stage": "Greenhills II Snow",
+   "length_m": 6000,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 171,
+   "location": "AU",
+   "stage": "Mineshaft II Snow",
+   "length_m": 8200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 172,
+   "location": "FR",
+   "stage": "Joux Plane II Snow",
+   "length_m": 11383,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 173,
+   "location": "FR",
+   "stage": "Bisanne II Snow",
+   "length_m": 5600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 174,
+   "location": "US",
+   "stage": "Fraizer Wells II Snow",
+   "length_m": 5100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 175,
+   "location": "US",
+   "stage": "Hualapai Nation II Snow",
+   "length_m": 8600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 176,
+   "location": "CZ",
+   "stage": "Semetin 2009",
+   "length_m": 11735,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 177,
+   "location": "CZ",
+   "stage": "Semetin 2010",
+   "length_m": 11763,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 178,
+   "location": "GB",
+   "stage": "Northumbria",
+   "length_m": 9040,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 179,
+   "location": "GB",
+   "stage": "Northumbria Tarmac",
+   "length_m": 9040,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 180,
+   "location": "FR",
+   "stage": "Joux Plane II Gravel",
+   "length_m": 11383,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 181,
+   "location": "FR",
+   "stage": "Bisanne II Gravel",
+   "length_m": 5600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 182,
+   "location": "FI",
+   "stage": "Autiovaara II Gravel",
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 183,
+   "location": "FI",
+   "stage": "Sikakama II Gravel",
+   "length_m": 10200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 184,
+   "location": "FI",
+   "stage": "Autiovaara II Tarmac",
+   "length_m": 6100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 185,
+   "location": "FI",
+   "stage": "Sikakama II Tarmac",
+   "length_m": 10200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 186,
+   "location": "US",
+   "stage": "Fraizer Wells II Tarmac",
+   "length_m": 5100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 187,
+   "location": "US",
+   "stage": "Hualapai Nation II Tarmac",
+   "length_m": 8600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 188,
+   "location": "GB",
+   "stage": "Falstone II Tarmac",
+   "length_m": 6600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 189,
+   "location": "GB",
+   "stage": "Shepherds Shield II Tarmac",
+   "length_m": 4800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 190,
+   "location": "GB",
+   "stage": "Rally School Stage II Tarmac",
+   "length_m": 2200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 191,
+   "location": "AU",
+   "stage": "Greenhills II Tarmac",
+   "length_m": 6000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 192,
+   "location": "AU",
+   "stage": "Mineshaft II Tarmac",
+   "length_m": 8200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 193,
+   "location": "JP",
+   "stage": "Sipirkakim II Tarmac",
+   "length_m": 8700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 194,
+   "location": "JP",
+   "stage": "Pirka Menoko II Tarmac",
+   "length_m": 6700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 195,
+   "location": "GB",
+   "stage": "Falstone II Snow",
+   "length_m": 6600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 196,
+   "location": "GB",
+   "stage": "Shepherds Shield II Snow",
+   "length_m": 4800,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 197,
+   "location": "GB",
+   "stage": "Rally School Stage II Snow",
+   "length_m": 2200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 198,
+   "location": "JP",
+   "stage": "Sipirkakim II Snow",
+   "length_m": 8700,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 199,
+   "location": "JP",
+   "stage": "Pirka Menoko II Snow",
+   "length_m": 6700,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 200,
+   "location": "FR",
+   "stage": "Cote D'Arbroz Gravel",
+   "length_m": 4500,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 201,
+   "location": "FR",
+   "stage": "Joux Verte Gravel",
+   "length_m": 7900,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 202,
+   "location": "FR",
+   "stage": "Bisanne Gravel",
+   "length_m": 5600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 203,
+   "location": "FR",
+   "stage": "Joux Plane Gravel",
+   "length_m": 11237,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 204,
+   "location": "FR",
+   "stage": "Joux Verte II Gravel",
+   "length_m": 7800,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 205,
+   "location": "FR",
+   "stage": "Cote D'Arbroz II Gravel",
+   "length_m": 4508,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 206,
+   "location": "FI",
+   "stage": "Kaihuavaara Gravel",
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 207,
+   "location": "FI",
+   "stage": "Mustaselka Gravel",
+   "length_m": 7900,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 208,
+   "location": "FI",
+   "stage": "Sikakama Gravel",
+   "length_m": 10200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 209,
+   "location": "FI",
+   "stage": "Autiovaara Gravel",
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 210,
+   "location": "FI",
+   "stage": "Kaihuavaara II Gravel",
+   "length_m": 6100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 211,
+   "location": "FI",
+   "stage": "Mustaselka II Gravel",
+   "length_m": 7700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 212,
+   "location": "FI",
+   "stage": "Kaihuavaara Tarmac",
+   "length_m": 6100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 213,
+   "location": "FI",
+   "stage": "Mustaselka Tarmac",
+   "length_m": 7900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 214,
+   "location": "FI",
+   "stage": "Sikakama Tarmac",
+   "length_m": 10200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 215,
+   "location": "FI",
+   "stage": "Autiovaara Tarmac",
+   "length_m": 6100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 216,
+   "location": "FI",
+   "stage": "Kaihuavaara II Tarmac",
+   "length_m": 6100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 217,
+   "location": "FI",
+   "stage": "Mustaselka II Tarmac",
+   "length_m": 7700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 218,
+   "location": "US",
+   "stage": "Fraizer Wells Tarmac",
+   "length_m": 5000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 219,
+   "location": "US",
+   "stage": "Prospect Ridge Tarmac",
+   "length_m": 7800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 220,
+   "location": "US",
+   "stage": "Diamond Creek Tarmac",
+   "length_m": 7100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 221,
+   "location": "US",
+   "stage": "Hualapai Nation Tarmac",
+   "length_m": 8600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 222,
+   "location": "US",
+   "stage": "Prospect Ridge II Tarmac",
+   "length_m": 7900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 223,
+   "location": "US",
+   "stage": "Diamond Creek II Tarmac",
+   "length_m": 6800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 224,
+   "location": "GB",
+   "stage": "Harwood Forest Tarmac",
+   "length_m": 6100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 225,
+   "location": "GB",
+   "stage": "Falstone Tarmac",
+   "length_m": 6600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 226,
+   "location": "GB",
+   "stage": "Chirdonhead Tarmac",
+   "length_m": 7000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 227,
+   "location": "GB",
+   "stage": "Shepherds Shield Tarmac",
+   "length_m": 4800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 228,
+   "location": "GB",
+   "stage": "Harwood Forest II Tarmac",
+   "length_m": 5900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 229,
+   "location": "GB",
+   "stage": "Chirdonhead II Tarmac",
+   "length_m": 6900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 230,
+   "location": "GB",
+   "stage": "Rally School Stage Tarmac",
+   "length_m": 2200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 231,
+   "location": "AU",
+   "stage": "NewBobs Tarmac",
+   "length_m": 10100,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 232,
+   "location": "AU",
+   "stage": "Greenhills Tarmac",
+   "length_m": 6000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 233,
+   "location": "AU",
+   "stage": "Mineshaft Tarmac",
+   "length_m": 8200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 234,
+   "location": "AU",
+   "stage": "East-West Tarmac",
+   "length_m": 9500,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 235,
+   "location": "AU",
+   "stage": "NewBobs II Tarmac",
+   "length_m": 10000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 236,
+   "location": "AU",
+   "stage": "East-West II Tarmac",
+   "length_m": 9600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 237,
+   "location": "JP",
+   "stage": "Noiker Tarmac",
+   "length_m": 13800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 238,
+   "location": "JP",
+   "stage": "Sipirkakim Tarmac",
+   "length_m": 8700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 239,
+   "location": "JP",
+   "stage": "Pirka Menoko Tarmac",
+   "length_m": 6700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 240,
+   "location": "JP",
+   "stage": "Tanner Tarmac",
+   "length_m": 3900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 241,
+   "location": "JP",
+   "stage": "Noiker II Tarmac",
+   "length_m": 13700,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 242,
+   "location": "JP",
+   "stage": "Tanner II Tarmac",
+   "length_m": 4000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 243,
+   "location": "GB",
+   "stage": "Harwood Forest Snow",
+   "length_m": 6100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 244,
+   "location": "GB",
+   "stage": "Falstone Snow",
+   "length_m": 6600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 245,
+   "location": "GB",
+   "stage": "Chirdonhead Snow",
+   "length_m": 7000,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 246,
+   "location": "GB",
+   "stage": "Shepherds Shield Snow",
+   "length_m": 4800,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 247,
+   "location": "GB",
+   "stage": "Harwood Forest II Snow",
+   "length_m": 5900,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 248,
+   "location": "GB",
+   "stage": "Chirdonhead II Snow",
+   "length_m": 6900,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 249,
+   "location": "GB",
+   "stage": "Rally School Stage Snow",
+   "length_m": 2200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 250,
+   "location": "JP",
+   "stage": "Noiker Snow",
+   "length_m": 13800,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 251,
+   "location": "JP",
+   "stage": "Sipirkakim Snow",
+   "length_m": 8700,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 252,
+   "location": "JP",
+   "stage": "Pirka Menoko Snow",
+   "length_m": 6700,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 253,
+   "location": "JP",
+   "stage": "Tanner Snow",
+   "length_m": 3900,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 254,
+   "location": "JP",
+   "stage": "Noiker II Snow",
+   "length_m": 13700,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 255,
+   "location": "JP",
+   "stage": "Tanner II Snow",
+   "length_m": 4000,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 256,
+   "location": "AU",
+   "stage": "NewBobs Snow",
+   "length_m": 10100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 257,
+   "location": "AU",
+   "stage": "Greenhills Snow",
+   "length_m": 6000,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 258,
+   "location": "AU",
+   "stage": "Mineshaft Snow",
+   "length_m": 8200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 259,
+   "location": "AU",
+   "stage": "East-West Snow",
+   "length_m": 9500,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 260,
+   "location": "AU",
+   "stage": "NewBobs II Snow",
+   "length_m": 10000,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 261,
+   "location": "AU",
+   "stage": "East-West II Snow",
+   "length_m": 9600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 262,
+   "location": "FR",
+   "stage": "Cote D'Arbroz Snow",
+   "length_m": 4500,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 263,
+   "location": "FR",
+   "stage": "Joux Verte Snow",
+   "length_m": 7900,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 264,
+   "location": "FR",
+   "stage": "Bisanne Snow",
+   "length_m": 5600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 265,
+   "location": "FR",
+   "stage": "Joux Plane Snow",
+   "length_m": 11237,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 266,
+   "location": "FR",
+   "stage": "Joux Verte II Snow",
+   "length_m": 7800,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 267,
+   "location": "FR",
+   "stage": "Cote D'Arbroz II Snow",
+   "length_m": 4508,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 268,
+   "location": "US",
+   "stage": "Fraizer Wells Snow",
+   "length_m": 5000,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 269,
+   "location": "US",
+   "stage": "Prospect Ridge Snow",
+   "length_m": 7800,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 270,
+   "location": "US",
+   "stage": "Diamond Creek Snow",
+   "length_m": 7100,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 271,
+   "location": "US",
+   "stage": "Hualapai Nation Snow",
+   "length_m": 8600,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 272,
+   "location": "US",
+   "stage": "Prospect Ridge II Snow",
+   "length_m": 7900,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 273,
+   "location": "US",
+   "stage": "Diamond Creek II Snow",
+   "length_m": 6800,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 280,
+   "location": "CZ",
+   "stage": "Jirkovicky",
+   "length_m": 3508,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 281,
+   "location": "CZ",
+   "stage": "Jirkovicky II",
+   "length_m": 3566,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 282,
+   "location": "CZ",
+   "stage": "Sourkov",
+   "length_m": 6306,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 283,
+   "location": "CZ",
+   "stage": "Sourkov II",
+   "length_m": 6277,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 294,
+   "location": "CZ",
+   "stage": "Rozmital 96 I",
+   "length_m": 6880,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 295,
+   "location": "CZ",
+   "stage": "Rozmital 96 II",
+   "length_m": 6909,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 296,
+   "location": "CZ",
+   "stage": "Sumburk 2007",
+   "length_m": 12650,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 297,
+   "location": "CZ",
+   "stage": "Sosnova",
+   "length_m": 7207,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 298,
+   "location": "CZ",
+   "stage": "Sosnova 2010",
+   "length_m": 4207,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 299,
+   "location": "CZ",
+   "stage": "Kamenak",
+   "length_m": 7507,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 300,
+   "location": "CZ",
+   "stage": "Kamenak 2",
+   "length_m": 7420,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 301,
+   "location": "PL",
+   "stage": "Karowa 2009 Again",
+   "length_m": 1810,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 302,
+   "location": "PL",
+   "stage": "Wisla Shakedown",
+   "length_m": 2500,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 303,
+   "location": "FI",
+   "stage": "Hyppyjulma Gravel",
+   "length_m": 6183,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 304,
+   "location": "FI",
+   "stage": "Hyppyjulma Gravel II",
+   "length_m": 6140,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 305,
+   "location": "FI",
+   "stage": "Hyppyjulma Tarmac",
+   "length_m": 6183,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 306,
+   "location": "FI",
+   "stage": "Hyppyjulma Tarmac II",
+   "length_m": 6140,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 307,
+   "location": "US",
+   "stage": "Pikes Peak 2008",
+   "length_m": 19900,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 308,
+   "location": "UA",
+   "stage": "Livadija R",
+   "length_m": 5600,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 309,
+   "location": "JP",
+   "stage": "Monster HC",
+   "length_m": 2501,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 310,
+   "location": "FR",
+   "stage": "Maton I",
+   "length_m": 3553,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 311,
+   "location": "FR",
+   "stage": "Maton II",
+   "length_m": 3553,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 312,
+   "location": "GB",
+   "stage": "GB Sprint Extreme",
+   "length_m": 6866,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 313,
+   "location": "FR",
+   "stage": "Haguenau 2012",
+   "length_m": 5518,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 314,
+   "location": "FR",
+   "stage": "Vieux Moulin-Perrancey",
+   "length_m": 20595,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 315,
+   "location": "CH",
+   "stage": "Swiss III Tarmac",
+   "length_m": 8177,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 316,
+   "location": "CH",
+   "stage": "Swiss IV Gravel",
+   "length_m": 8177,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 317,
+   "location": "FR",
+   "stage": "Blanare",
+   "length_m": 7580,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 318,
+   "location": "FR",
+   "stage": "Lyon - Gerland",
+   "length_m": 826,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 319,
+   "location": "FR",
+   "stage": "Blanare II",
+   "length_m": 6630,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 320,
+   "location": "SK",
+   "stage": "Slovakia Ring 2014",
+   "length_m": 11150,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 321,
+   "location": "SK",
+   "stage": "Slovakia Ring 2014 II",
+   "length_m": 11119,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 322,
+   "location": "IT",
+   "stage": "Tavia",
+   "length_m": 3810,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 323,
+   "location": "IT",
+   "stage": "SS Berica",
+   "length_m": 14832,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 324,
+   "location": "AU",
+   "stage": "Junior Wheels",
+   "length_m": 5654,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 325,
+   "location": "UA",
+   "stage": "SS Ai-Petri",
+   "length_m": 17455,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 326,
+   "location": "UA",
+   "stage": "SS Ai-Petri Winter",
+   "length_m": 17455,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 327,
+   "location": "UA",
+   "stage": "SS Uchan-Su",
+   "length_m": 10912,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 328,
+   "location": "UA",
+   "stage": "SS Uchan-Su Winter",
+   "length_m": 10912,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 329,
+   "location": "PL",
+   "stage": "FSO Zeran - Warsaw",
+   "length_m": 7219,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 330,
+   "location": "AU",
+   "stage": "Junior Wheels-II",
+   "length_m": 5659,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 331,
+   "location": "US",
+   "stage": "Red Bull Hill Climb",
+   "length_m": 14069,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 332,
+   "location": "FI",
+   "stage": "Kuadonvaara",
+   "length_m": 5925,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 333,
+   "location": "FR",
+   "stage": "Maton I Snow",
+   "length_m": 3553,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 334,
+   "location": "FR",
+   "stage": "Maton II Snow",
+   "length_m": 3553,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 335,
+   "location": "FR",
+   "stage": "Foron Snow",
+   "length_m": 9200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 336,
+   "location": "FR",
+   "stage": "Foron II Snow",
+   "length_m": 9200,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 337,
+   "location": "IT",
+   "stage": "Torre Vecchia",
+   "length_m": 9848,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 338,
+   "location": "EE",
+   "stage": "Undva I",
+   "length_m": 9914,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 339,
+   "location": "FI",
+   "stage": "Kolmenjarvet gravel I",
+   "length_m": 6197,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 340,
+   "location": "FI",
+   "stage": "Kolmenjarvet gravel II",
+   "length_m": 6232,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 341,
+   "location": "FI",
+   "stage": "Kolmenjarvet tarmac I",
+   "length_m": 6197,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 342,
+   "location": "FI",
+   "stage": "Kolmenjarvet tarmac II",
+   "length_m": 6232,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 343,
+   "location": "EE",
+   "stage": "Undva II",
+   "length_m": 9914,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 344,
+   "location": "UA",
+   "stage": "Azov I",
+   "length_m": 19050,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 345,
+   "location": "UA",
+   "stage": "Azov II",
+   "length_m": 19226,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 346,
+   "location": "AR",
+   "stage": "Fernet Branca 2015",
+   "length_m": 6015,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 347,
+   "location": "PL",
+   "stage": "Kormoran I",
+   "length_m": 10262,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 348,
+   "location": "PL",
+   "stage": "Kormoran II",
+   "length_m": 11963,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 349,
+   "location": "PL",
+   "stage": "Kormoran shakedown",
+   "length_m": 5162,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 350,
+   "location": "IT",
+   "stage": "Shakedown Rally del Salento 2014",
+   "length_m": 3879,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 351,
+   "location": "NL",
+   "stage": "Gestel I",
+   "length_m": 7193,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 352,
+   "location": "IT",
+   "stage": "Passo Valle",
+   "length_m": 5790,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 353,
+   "location": "IT",
+   "stage": "Passo Valle Reverse",
+   "length_m": 5738,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 354,
+   "location": "PL",
+   "stage": "SSS Mikolajki Rally I",
+   "length_m": 2698,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 355,
+   "location": "PL",
+   "stage": "SSS Mikolajki Rally II",
+   "length_m": 2716,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 356,
+   "location": "PT",
+   "stage": "Travanca do Monte",
+   "length_m": 2179,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 357,
+   "location": "LT",
+   "stage": "Zaraso Salos - 5 Laps",
+   "length_m": 5174,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 358,
+   "location": "LT",
+   "stage": "Zaraso Salos - 2 Laps",
+   "length_m": 2066,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 359,
+   "location": "FI",
+   "stage": "Joukkovaara gravel",
+   "length_m": 10184,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 360,
+   "location": "FI",
+   "stage": "Joukkovaara gravel II",
+   "length_m": 10174,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 361,
+   "location": "FI",
+   "stage": "Joukkovaara tarmac",
+   "length_m": 10184,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 362,
+   "location": "FI",
+   "stage": "Joukkovaara tarmac II",
+   "length_m": 10174,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 363,
+   "location": "IT",
+   "stage": "La Rocca",
+   "length_m": 7446,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 364,
+   "location": "ES",
+   "stage": "Rallysprint Hondarribia 2011",
+   "length_m": 7617,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 365,
+   "location": "GB",
+   "stage": "Sherwood Forest I Summer",
+   "length_m": 13581,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 366,
+   "location": "GB",
+   "stage": "Sherwood Forest II Summer",
+   "length_m": 13570,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 367,
+   "location": "GB",
+   "stage": "Sherwood Forest I",
+   "length_m": 13581,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 368,
+   "location": "GB",
+   "stage": "Sherwood Forest II",
+   "length_m": 13570,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 369,
+   "location": "FR",
+   "stage": "Capo Di Feno v2",
+   "length_m": 4385,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 370,
+   "location": "FR",
+   "stage": "Capo Di Feno v2 R",
+   "length_m": 4439,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 371,
+   "location": "PT",
+   "stage": "Carvalho de Rei 2008",
+   "length_m": 8184,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 372,
+   "location": "PT",
+   "stage": "Carvalho de Rei 2008 reverse",
+   "length_m": 8185,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 373,
+   "location": "CZ",
+   "stage": "Halenkovice SD",
+   "length_m": 4404,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 374,
+   "location": "UA",
+   "stage": "Shurdin I",
+   "length_m": 21887,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 375,
+   "location": "UA",
+   "stage": "Shurdin II",
+   "length_m": 22009,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 376,
+   "location": "AR",
+   "stage": "Dolmen",
+   "length_m": 13400,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 377,
+   "location": "AU",
+   "stage": "SSS York I",
+   "length_m": 4343,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 378,
+   "location": "AU",
+   "stage": "SSS York II",
+   "length_m": 4355,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 379,
+   "location": "SK",
+   "stage": "Sturec",
+   "length_m": 8065,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 380,
+   "location": "SK",
+   "stage": "Sturec II",
+   "length_m": 8073,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 381,
+   "location": "PT",
+   "stage": "Lousada - WRC",
+   "length_m": 3418,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 382,
+   "location": "PT",
+   "stage": "Lousada - RX",
+   "length_m": 3686,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 383,
+   "location": "PT",
+   "stage": "Lousada - RG",
+   "length_m": 3729,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 384,
+   "location": "CZ",
+   "stage": "Svince",
+   "length_m": 4802,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 385,
+   "location": "CZ",
+   "stage": "Svince II",
+   "length_m": 4807,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 386,
+   "location": "SK",
+   "stage": "Sturec snow",
+   "length_m": 8065,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 387,
+   "location": "SK",
+   "stage": "Sturec snow II",
+   "length_m": 8073,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 388,
+   "location": "ES",
+   "stage": "Vicar",
+   "length_m": 4833,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 389,
+   "location": "AT",
+   "stage": "Mitterbach",
+   "length_m": 2952,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 390,
+   "location": "GB",
+   "stage": "Rally school mix",
+   "length_m": 5230,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 391,
+   "location": "GB",
+   "stage": "Rally school mix II",
+   "length_m": 5218,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 392,
+   "location": "GB",
+   "stage": "Rally school tarmac",
+   "length_m": 5230,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 393,
+   "location": "GB",
+   "stage": "Rally school tarmac II",
+   "length_m": 5218,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 394,
+   "location": "LT",
+   "stage": "Verkiai 2010",
+   "length_m": 5627,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 395,
+   "location": "LT",
+   "stage": "Verkiai 2010 reverse",
+   "length_m": 5879,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 396,
+   "location": "LT",
+   "stage": "Verkiai 2010 Super Special",
+   "length_m": 950,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 397,
+   "location": "SK",
+   "stage": "Uhorna",
+   "length_m": 11417,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 398,
+   "location": "SK",
+   "stage": "Uhorna II",
+   "length_m": 11300,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 399,
+   "location": "SE",
+   "stage": "Torsby shakedown",
+   "length_m": 4260,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 400,
+   "location": "CZ",
+   "stage": "Vinec-Skalsko",
+   "length_m": 17843,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 401,
+   "location": "CZ",
+   "stage": "Vinec-Skalsko NIGHT",
+   "length_m": 17843,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 402,
+   "location": "CZ",
+   "stage": "Zadverice",
+   "length_m": 14842,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 403,
+   "location": "CZ",
+   "stage": "Zadverice II",
+   "length_m": 14777,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 404,
+   "location": "SK",
+   "stage": "Uhorna snow",
+   "length_m": 11417,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 405,
+   "location": "SK",
+   "stage": "Uhorna snow II",
+   "length_m": 11300,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 406,
+   "location": "IT",
+   "stage": "Aragona",
+   "length_m": 6425,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 407,
+   "location": "IT",
+   "stage": "Muxarello",
+   "length_m": 15430,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 408,
+   "location": "HU",
+   "stage": "Ring Kulso 2011 pre-alpha V0.6",
+   "length_m": 7330,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 409,
+   "location": "HU",
+   "stage": "Ring Belso 2011 pre-alpha V0.6",
+   "length_m": 6344,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 410,
+   "location": "SE",
+   "stage": "Vargassence",
+   "length_m": 14936,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 411,
+   "location": "CZ",
+   "stage": "Komarov",
+   "length_m": 7390,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 412,
+   "location": "CZ",
+   "stage": "Komarov II",
+   "length_m": 7180,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 413,
+   "location": "CZ",
+   "stage": "Komarov Snow",
+   "length_m": 7390,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 414,
+   "location": "CZ",
+   "stage": "Komarov Snow II",
+   "length_m": 7180,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 415,
+   "location": "SE",
+   "stage": "Vargassence Mirror-Reverse",
+   "length_m": 14957,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 416,
+   "location": "CZ",
+   "stage": "Biskupice SSS",
+   "length_m": 2309,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 417,
+   "location": "MC",
+   "stage": "Lucéram - Col Saint-Roch",
+   "length_m": 5676,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 418,
+   "location": "IT",
+   "stage": "Pian del Colle",
+   "length_m": 8324,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 419,
+   "location": "IT",
+   "stage": "Pian del Colle Reversed",
+   "length_m": 8415,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 420,
+   "location": "IT",
+   "stage": "Pian del Colle Snow",
+   "length_m": 8324,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 421,
+   "location": "IT",
+   "stage": "Pian del Colle Snow Reversed",
+   "length_m": 8415,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 422,
+   "location": "SE",
+   "stage": "Torsby 2018",
+   "length_m": 9742,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 423,
+   "location": "SE",
+   "stage": "Torsby 2018 Sprint",
+   "length_m": 3498,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 424,
+   "location": "CZ",
+   "stage": "Biskupice 2004",
+   "length_m": 7524,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 425,
+   "location": "CZ",
+   "stage": "Biskupice 2004 II",
+   "length_m": 7881,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 426,
+   "location": "CZ",
+   "stage": "Helfstyn",
+   "length_m": 13937,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 427,
+   "location": "CZ",
+   "stage": "Zaton",
+   "length_m": 6660,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 428,
+   "location": "CZ",
+   "stage": "Zaton II",
+   "length_m": 6691,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 429,
+   "location": "ES",
+   "stage": "Era del Cardon",
+   "length_m": 9546,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 430,
+   "location": "SI",
+   "stage": "Drazgose 2014",
+   "length_m": 9508,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 431,
+   "location": "NZ",
+   "stage": "Inland Road 2022",
+   "length_m": 5600,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 432,
+   "location": "NZ",
+   "stage": "Inland Road Reversed 2022",
+   "length_m": 5700,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 433,
+   "location": "FI",
+   "stage": "Harju 2019",
+   "length_m": 2316,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 434,
+   "location": "FR",
+   "stage": "Alpes Rally",
+   "length_m": 10226,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 435,
+   "location": "CH",
+   "stage": "Rally Diepflingen 2022",
+   "length_m": 5266,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 436,
+   "location": "CZ",
+   "stage": "Barak",
+   "length_m": 5400,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 437,
+   "location": "CZ",
+   "stage": "Barak snow",
+   "length_m": 3828,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 438,
+   "location": "AT",
+   "stage": "Mitterbach Tarmac",
+   "length_m": 2953,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 439,
+   "location": "CZ",
+   "stage": "Olsava 2010",
+   "length_m": 1702,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 440,
+   "location": "CZ",
+   "stage": "Olsava long",
+   "length_m": 3096,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 441,
+   "location": "CZ",
+   "stage": "Banov",
+   "length_m": 3010,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 442,
+   "location": "CZ",
+   "stage": "Banov II",
+   "length_m": 3000,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 443,
+   "location": "CZ",
+   "stage": "Banov okruh",
+   "length_m": 12745,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 444,
+   "location": "CZ",
+   "stage": "Koprivnice SS1",
+   "length_m": 2166,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 445,
+   "location": "CZ",
+   "stage": "Koprivnice SS2",
+   "length_m": 4164,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 446,
+   "location": "CZ",
+   "stage": "Koprivnice SS3",
+   "length_m": 5308,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 447,
+   "location": "CZ",
+   "stage": "Koprivnice SS4",
+   "length_m": 5511,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 448,
+   "location": "CZ",
+   "stage": "Horazdovice - Komusin",
+   "length_m": 5059,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 449,
+   "location": "CZ",
+   "stage": "SSS Valasske Mezirici",
+   "length_m": 3573,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 450,
+   "location": "ES",
+   "stage": "Gabiria-Legazpi 2004",
+   "length_m": 6496,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 451,
+   "location": "ES",
+   "stage": "La Atalaya",
+   "length_m": 7488,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 452,
+   "location": "ES",
+   "stage": "La Atalaya II",
+   "length_m": 7544,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 453,
+   "location": "CH",
+   "stage": "Rally Diepflingen 2022 Reverse",
+   "length_m": 5250,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 454,
+   "location": "ES",
+   "stage": "Era del Cardon II",
+   "length_m": 9592,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 455,
+   "location": "IT",
+   "stage": "Murello",
+   "length_m": 7232,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 456,
+   "location": "ES",
+   "stage": "Legazpi-Gabiria 2004",
+   "length_m": 6509,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 457,
+   "location": "ES",
+   "stage": "El Fargue SS1",
+   "length_m": 6733,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 458,
+   "location": "PL",
+   "stage": "Rosciszow-Walim",
+   "length_m": 8467,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 459,
+   "location": "PL",
+   "stage": "Walim-Rosciszow",
+   "length_m": 8467,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 460,
+   "location": "IT",
+   "stage": "PS Valstagna",
+   "length_m": 12758,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 461,
+   "location": "ES",
+   "stage": "Sant Bartumeu - Valldoreix",
+   "length_m": 9394,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 462,
+   "location": "CZ",
+   "stage": "Odry",
+   "length_m": 7162,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 463,
+   "location": "CZ",
+   "stage": "Odry II",
+   "length_m": 7168,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 464,
+   "location": "CZ",
+   "stage": "Odry snow",
+   "length_m": 6270,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 465,
+   "location": "CZ",
+   "stage": "Odry snow II",
+   "length_m": 6153,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 466,
+   "location": "CZ",
+   "stage": "Odry snow Night",
+   "length_m": 6270,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 467,
+   "location": "CZ",
+   "stage": "Odry snow Night II",
+   "length_m": 6153,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 468,
+   "location": "IT",
+   "stage": "PS Valstagna Reverse",
+   "length_m": 12830,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 469,
+   "location": "BR",
+   "stage": "Estrada da Banana - Uphill",
+   "length_m": 4381,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.5,
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 470,
+   "location": "EE",
+   "stage": "Narva Kreenholmi Rahvasprint 22",
+   "length_m": 3325,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 473,
+   "location": "BR",
+   "stage": "Estrada da Banana - Downhill",
+   "length_m": 4402,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 0.5,
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 474,
+   "location": "ES",
+   "stage": "Valldoreix - Sant Bartumeu",
+   "length_m": 9358,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 476,
+   "location": "ES",
+   "stage": "La Mussara Shakedown I",
+   "length_m": 7299,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 477,
+   "location": "ES",
+   "stage": "La Mussara Shakedown II",
+   "length_m": 7360,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 478,
+   "location": "CZ",
+   "stage": "Zlin SS1",
+   "length_m": 9478,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 479,
+   "location": "PL",
+   "stage": "Ul. Rajdowa",
+   "length_m": 1617,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 480,
+   "location": "PL",
+   "stage": "Ul. Rajdowa R",
+   "length_m": 1590,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 481,
+   "location": "FR",
+   "stage": "SSS Alpes School Rally",
+   "length_m": 1831,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 482,
+   "location": "HU",
+   "stage": "RabocsiRing 2021 Rally Hungary",
+   "length_m": 2362,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 483,
+   "location": "HU",
+   "stage": "RabocsiRing RX",
+   "length_m": 3318,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 484,
+   "location": "ES",
+   "stage": "Vacarisses SS2",
+   "length_m": 6013,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 485,
+   "location": "PL",
+   "stage": "Woliborz - Jodlownik",
+   "length_m": 8232,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 486,
+   "location": "CZ",
+   "stage": "Neubuz - Slusovice",
+   "length_m": 1785,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 487,
+   "location": "FI",
+   "stage": "Vesikkola",
+   "length_m": 9653,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 488,
+   "location": "FI",
+   "stage": "Saalahti",
+   "length_m": 4749,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 489,
+   "location": "ES",
+   "stage": "Vacarisses SS1",
+   "length_m": 6063,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 500,
+   "location": "JP",
+   "stage": "Akagi",
+   "length_m": 3530,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 501,
+   "location": "FI",
+   "stage": "Myhinpaa 2023",
+   "length_m": 15594,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 502,
+   "location": "FI",
+   "stage": "Savopohja",
+   "length_m": 14351,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 503,
+   "location": "SK",
+   "stage": "Sunava Shakedown",
+   "length_m": 3280,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 504,
+   "location": "PL",
+   "stage": "Witoszow - Zloty Las",
+   "length_m": 5383,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 505,
+   "location": "PL",
+   "stage": "Zloty Las - Witoszow",
+   "length_m": 5537,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 506,
+   "location": "PL",
+   "stage": "Kaczyce",
+   "length_m": 3280,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 507,
+   "location": "PL",
+   "stage": "Jodlownik - Woliborz",
+   "length_m": 8225,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 508,
+   "location": "ES",
+   "stage": "Vilaplana 2007",
+   "length_m": 12985,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 509,
+   "location": "ES",
+   "stage": "Santa Lucia",
+   "length_m": 12978,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 510,
+   "location": "IT",
+   "stage": "PS Valstagna Historic Gravel",
+   "length_m": 6502,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 511,
+   "location": "PL",
+   "stage": "Kaczyce 2",
+   "length_m": 2530,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 512,
+   "location": "SM",
+   "stage": "The Legend",
+   "length_m": 4328,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 513,
+   "location": "LV",
+   "stage": "Bikernieki SSS",
+   "length_m": 11117,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 514,
+   "location": "ES",
+   "stage": "Santa Lucia II",
+   "length_m": 12857,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 515,
+   "location": "CN",
+   "stage": "Nujiang 72 Turns R",
+   "length_m": 15319,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 516,
+   "location": "CZ",
+   "stage": "Halenkovice 2018",
+   "length_m": 13749,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 517,
+   "location": "CN",
+   "stage": "Bayanbulak-Pegasus 2",
+   "length_m": 18070,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 518,
+   "location": "ES",
+   "stage": "Ponteareas 2008",
+   "length_m": 6208,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 519,
+   "location": "FR",
+   "stage": "Bois de Bie",
+   "length_m": 5240,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 520,
+   "location": "FI",
+   "stage": "Vesala Shakedown",
+   "length_m": 4426,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 521,
+   "location": "FI",
+   "stage": "Ahvenus I",
+   "length_m": 5236,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 522,
+   "location": "FI",
+   "stage": "Ahvenus II",
+   "length_m": 5366,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 523,
+   "location": "BE",
+   "stage": "Fintele",
+   "length_m": 4645,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 524,
+   "location": "FI",
+   "stage": "Hassi",
+   "length_m": 7777,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 525,
+   "location": "SE",
+   "stage": "Piren Tarmac",
+   "length_m": 4424,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 526,
+   "location": "SE",
+   "stage": "Piren Gravel",
+   "length_m": 4424,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 527,
+   "location": "MG",
+   "stage": "Antaramanana",
+   "length_m": 14398,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 528,
+   "location": "MG",
+   "stage": "Antaramanana II",
+   "length_m": 14541,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 529,
+   "location": "SE",
+   "stage": "Blyfoten",
+   "length_m": 4946,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 530,
+   "location": "MG",
+   "stage": "TMF A 2021",
+   "length_m": 1897,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 531,
+   "location": "FI",
+   "stage": "Aittajarvi",
+   "length_m": 22463,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 532,
+   "location": "GB",
+   "stage": "Wythop",
+   "length_m": 5268,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 533,
+   "location": "GB",
+   "stage": "Wythop II",
+   "length_m": 5274,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 534,
+   "location": "KE",
+   "stage": "Ubunapa Kabula",
+   "length_m": 6205,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 535,
+   "location": "KE",
+   "stage": "Ubunapa Kabula II",
+   "length_m": 6108,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 536,
+   "location": "SE",
+   "stage": "Hacke Pokalen",
+   "length_m": 5546,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 537,
+   "location": "FI",
+   "stage": "Vennivaara",
+   "length_m": 5668,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 538,
+   "location": "FI",
+   "stage": "Koirakivi",
+   "length_m": 4629,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 539,
+   "location": "EE",
+   "stage": "Laitse Rallypark",
+   "length_m": 2424,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 540,
+   "location": "SE",
+   "stage": "Granbacken",
+   "length_m": 9934,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 541,
+   "location": "GR",
+   "stage": "Limnis Plastiras",
+   "length_m": 7145,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 542,
+   "location": "MX",
+   "stage": "El Cubilete",
+   "length_m": 13654,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 543,
+   "location": "IT",
+   "stage": "Valvestino II",
+   "length_m": 5985,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 544,
+   "location": "FI",
+   "stage": "Oskola 2023",
+   "length_m": 13256,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 545,
+   "location": "FI",
+   "stage": "Toikkala",
+   "length_m": 9838,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 546,
+   "location": "IT",
+   "stage": "Monti di Ala",
+   "length_m": 10189,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 547,
+   "location": "FI",
+   "stage": "Hokkara Gravel",
+   "length_m": 4033,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 548,
+   "location": "FI",
+   "stage": "Hokkara Gravel Rever",
+   "length_m": 4231,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 549,
+   "location": "FI",
+   "stage": "Makkola",
+   "length_m": 7434,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 550,
+   "location": "FI",
+   "stage": "Sirkkamaki",
+   "length_m": 6426,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 551,
+   "location": "KE",
+   "stage": "Sleeping Warrior 2019",
+   "length_m": 27001,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 552,
+   "location": "FI",
+   "stage": "Karkaus",
+   "length_m": 4591,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 553,
+   "location": "BR",
+   "stage": "Passauna",
+   "length_m": 5542,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 554,
+   "location": "BR",
+   "stage": "Passauna II",
+   "length_m": 5606,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 555,
+   "location": "FR",
+   "stage": "Course de Cote de Cauterets",
+   "length_m": 1754,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 556,
+   "location": "FR",
+   "stage": "Course de Cote de Cauterets Slal",
+   "length_m": 1754,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 557,
+   "location": "SE",
+   "stage": "Erken",
+   "length_m": 7053,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 558,
+   "location": "SE",
+   "stage": "Erken II",
+   "length_m": 6969,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 559,
+   "location": "KE",
+   "stage": "Karagita Ruma",
+   "length_m": 4366,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 560,
+   "location": "CZ",
+   "stage": "Nechanice - Presin",
+   "length_m": 7782,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 561,
+   "location": "KE",
+   "stage": "Elmenteita",
+   "length_m": 3561,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 562,
+   "location": "ES",
+   "stage": "Aguimes-Santa Lucia 2025",
+   "length_m": 14884,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 563,
+   "location": "FI",
+   "stage": "Toivonvaara",
+   "length_m": 7669,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 564,
+   "location": "AR",
+   "stage": "El Condor",
+   "length_m": 9693,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 565,
+   "location": "ES",
+   "stage": "Legazpi-Gabiria Winter",
+   "length_m": 6503,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 566,
+   "location": "KE",
+   "stage": "Ulu Karagita",
+   "length_m": 8597,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 567,
+   "location": "PL",
+   "stage": "Kaczyce 3",
+   "length_m": 2963,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 568,
+   "location": "BR",
+   "stage": "Graciosa I",
+   "length_m": 13857,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 569,
+   "location": "BR",
+   "stage": "Graciosa II",
+   "length_m": 13712,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 570,
+   "location": "IT",
+   "stage": "Fosso delle Dogane",
+   "length_m": 3201,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 571,
+   "location": "ES",
+   "stage": "Cueva Santa",
+   "length_m": 9192,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 572,
+   "location": "KE",
+   "stage": "Kinamba Yala",
+   "length_m": 13664,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 573,
+   "location": "ES",
+   "stage": "Lebozan 2010",
+   "length_m": 13904,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 574,
+   "location": "CN",
+   "stage": "Longyou 2024 SSS - 1 Lap R",
+   "length_m": 1773,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 575,
+   "location": "CN",
+   "stage": "Longyou 2024 SSS - 1 Lap L",
+   "length_m": 1798,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 576,
+   "location": "CN",
+   "stage": "Longyou 2024 SSS - 2 Laps R",
+   "length_m": 3497,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 577,
+   "location": "CN",
+   "stage": "Longyou 2024 SSS - 2 Laps L",
+   "length_m": 3519,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 578,
+   "location": "FI",
+   "stage": "Mattila",
+   "length_m": 13001,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 579,
+   "location": "NZ",
+   "stage": "Kuri Bush 1",
+   "length_m": 7241,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 580,
+   "location": "FR",
+   "stage": "Helette",
+   "length_m": 8584,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 581,
+   "location": "SE",
+   "stage": "Dylanda",
+   "length_m": 6044,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 582,
+   "location": "SE",
+   "stage": "Gastabudstrofen",
+   "length_m": 4615,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 583,
+   "location": "ES",
+   "stage": "Cercados de Espino",
+   "length_m": 7657,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 584,
+   "location": "ES",
+   "stage": "Cierru Los Pinos",
+   "length_m": 4742,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 585,
+   "location": "ES",
+   "stage": "Cierru Los Pinos 2",
+   "length_m": 4804,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 586,
+   "location": "FI",
+   "stage": "Pirttijarvi",
+   "length_m": 6662,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 587,
+   "location": "ES",
+   "stage": "Les Guilleries",
+   "length_m": 18263,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 588,
+   "location": "NZ",
+   "stage": "Whaanga Coast 2025",
+   "length_m": 30049,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 589,
+   "location": "FI",
+   "stage": "Hakolahti sprint",
+   "length_m": 2708,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 590,
+   "location": "FI",
+   "stage": "Pirttikulma",
+   "length_m": 7017,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 591,
+   "location": "FR",
+   "stage": "Bois de Bie Reverse",
+   "length_m": 5201,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 592,
+   "location": "FR",
+   "stage": "Helette Reverse",
+   "length_m": 8684,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 593,
+   "location": "BE",
+   "stage": "Fintele Reverse",
+   "length_m": 4543,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 594,
+   "location": "US",
+   "stage": "Colorado Springs West Circuit A",
+   "length_m": 13231,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 595,
+   "location": "ES",
+   "stage": "La Serra d'Almos",
+   "length_m": 4058,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 597,
+   "location": "FI",
+   "stage": "Sarvana",
+   "length_m": 6496,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 598,
+   "location": "US",
+   "stage": "Colorado Springs West Hill Climb B",
+   "length_m": 12560,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 599,
+   "location": "US",
+   "stage": "Hurricane Peak Hillclimb Snow",
+   "length_m": 6264,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 600,
+   "location": "ES",
+   "stage": "Arteara Artedara",
+   "length_m": 13259,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 601,
+   "location": "ES",
+   "stage": "Collsesplanes",
+   "length_m": 18349,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 602,
+   "location": "FR",
+   "stage": "Lescheraines-Arith",
+   "length_m": 5200,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 603,
+   "location": "FR",
+   "stage": "Arith-Lescheraines",
+   "length_m": 5277,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 604,
+   "location": "NZ",
+   "stage": "Tahekeroa",
+   "length_m": 10812,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 605,
+   "location": "NZ",
+   "stage": "Kuri Bush 2",
+   "length_m": 8331,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 606,
+   "location": "FI",
+   "stage": "Sarvana II",
+   "length_m": 7224,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 607,
+   "location": "FI",
+   "stage": "Pengonpohja",
+   "length_m": 7904,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 608,
+   "location": "ES",
+   "stage": "Olocau Gatova",
+   "length_m": 8585,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 609,
+   "location": "ES",
+   "stage": "Brantega 2010",
+   "length_m": 10132,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 610,
+   "location": "ES",
+   "stage": "Brantega 2010 R",
+   "length_m": 10189,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 611,
+   "location": "FI",
+   "stage": "Ouninpohja 1986",
+   "length_m": 7400,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 612,
+   "location": "SE",
+   "stage": "Ramirent Sprinten 2014",
+   "length_m": 3470,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 614,
+   "location": "ES",
+   "stage": "Gabiria-Legazpi Winter",
+   "length_m": 6496,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 615,
+   "location": "FI",
+   "stage": "Kaihuavaara 2021",
+   "length_m": 19957,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 616,
+   "location": "SE",
+   "stage": "Norrlands Sprinten",
+   "length_m": 4309,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 617,
+   "location": "NZ",
+   "stage": "Komokoriki Hill Road 2021",
+   "length_m": 4935,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 618,
+   "location": "MG",
+   "stage": "Miadamanjaka",
+   "length_m": 11200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 619,
+   "location": "MG",
+   "stage": "Miadamanjaka II",
+   "length_m": 11182,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 620,
+   "location": "IT",
+   "stage": "Stoccareddo",
+   "length_m": 5680,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 621,
+   "location": "GB",
+   "stage": "Comb I",
+   "length_m": 9100,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 626,
+   "location": "FI",
+   "stage": "Vyskala SS4",
+   "length_m": 5924,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 629,
+   "location": "NZ",
+   "stage": "Ruapuke",
+   "length_m": 14200,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 630,
+   "location": "NZ",
+   "stage": "Whaanga Coast Sprint",
+   "length_m": 4400,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 631,
+   "location": "IT",
+   "stage": "Bignone Shakedown",
+   "length_m": 2914,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 634,
+   "location": "CZ",
+   "stage": "Vyskovec",
+   "length_m": 5941,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 635,
+   "location": "CZ",
+   "stage": "Vyskovec okruh",
+   "length_m": 9145,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 636,
+   "location": "NZ",
+   "stage": "Te Parae Road",
+   "length_m": 7009,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 640,
+   "location": "SE",
+   "stage": "Dylanda II",
+   "length_m": 5899,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 641,
+   "location": "PL",
+   "stage": "Dobka-Partecznik Sprint",
+   "length_m": 5800,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 902,
+   "location": "GB",
+   "stage": "Skidpad",
+   "length_m": 900,
+   "surface": "tarmac",
+   "confidence": "high"
+  },
+  {
+   "id": 903,
+   "location": "GB",
+   "stage": "Rally Yard",
+   "length_m": 1000,
+   "surface": "tarmac",
+   "confidence": "high"
+  },
+  {
+   "id": 904,
+   "location": "GB",
+   "stage": "Garage",
+   "length_m": 1000,
+   "surface": "gravel",
+   "confidence": "high"
+  },
+  {
+   "id": 905,
+   "location": "GB",
+   "stage": "Podium",
+   "length_m": 1000,
+   "surface": "gravel",
+   "confidence": "high"
+  },
+  {
+   "id": 906,
+   "location": "GB",
+   "stage": "Service Park",
+   "length_m": 1000,
+   "surface": "tarmac",
+   "confidence": "high"
+  },
+  {
+   "id": 1002,
+   "location": "HU",
+   "stage": "Bikol Tardos",
+   "length_m": 7303,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1003,
+   "location": "FI",
+   "stage": "Vyskälä SS1",
+   "length_m": 2059,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1004,
+   "location": "FI",
+   "stage": "Vyskälä SS2",
+   "length_m": 2101,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1005,
+   "location": "FI",
+   "stage": "Vyskälä SS3",
+   "length_m": 5850,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1006,
+   "location": "BE",
+   "stage": "Burgknop",
+   "length_m": 9694,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1007,
+   "location": "BE",
+   "stage": "Burgknop II",
+   "length_m": 9707,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1008,
+   "location": "CA",
+   "stage": "Le barrage des gorges",
+   "length_m": 9511,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1009,
+   "location": "ES",
+   "stage": "Arteara Artedara-",
+   "length_m": 13259,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1010,
+   "location": "ES",
+   "stage": "Cercados de Espino-",
+   "length_m": 7660,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1011,
+   "location": "ES",
+   "stage": "Olocau Gatova-",
+   "length_m": 8553,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1012,
+   "location": "FR",
+   "stage": "Course de Cote de Cauterets-",
+   "length_m": 1619,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1013,
+   "location": "GR",
+   "stage": "Limnis Plastiras-",
+   "length_m": 7144,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1014,
+   "location": "IT",
+   "stage": "Crastazza",
+   "length_m": 20734,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1015,
+   "location": "CZ",
+   "stage": "Nechanice - Presin-",
+   "length_m": 7793,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1016,
+   "location": "MC",
+   "stage": "Lantosque - Luceram",
+   "length_m": 7185,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1017,
+   "location": "MC",
+   "stage": "Lantosque - Luceram II",
+   "length_m": 7158,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1018,
+   "location": "MG",
+   "stage": "Antaramanana-",
+   "length_m": 14398,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1019,
+   "location": "MG",
+   "stage": "Antaramanana II-",
+   "length_m": 14523,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1020,
+   "location": "MX",
+   "stage": "El Cubilete-",
+   "length_m": 13662,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1021,
+   "location": "PT",
+   "stage": "Serra d'Agua",
+   "length_m": 10956,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1022,
+   "location": "RO",
+   "stage": "Sibiu Superspecial",
+   "length_m": 2132,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1023,
+   "location": "SE",
+   "stage": "Blyfoten-",
+   "length_m": 4945,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1024,
+   "location": "SE",
+   "stage": "Dead Head",
+   "length_m": 2550,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1025,
+   "location": "SE",
+   "stage": "Hacke Pokalen-",
+   "length_m": 5551,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1026,
+   "location": "US",
+   "stage": "Hurricane Peak Hillclimb Snow-",
+   "length_m": 6176,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 1.0,
+    "snow": 0.1
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1027,
+   "location": "SE",
+   "stage": "Sagen Sweden 2012",
+   "length_m": 13958,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1028,
+   "location": "FI",
+   "stage": "Ouninpohja",
+   "length_m": 34667,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1029,
+   "location": "FI",
+   "stage": "Ouninpohja II",
+   "length_m": 35020,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1030,
+   "location": "FI",
+   "stage": "Vyskälä SS4 Evening-",
+   "length_m": 5923,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1031,
+   "location": "FI",
+   "stage": "Vyskälä SS4 Noon-",
+   "length_m": 5923,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1032,
+   "location": "ES",
+   "stage": "Bareyo",
+   "length_m": 7711,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1033,
+   "location": "ES",
+   "stage": "Bareyo II",
+   "length_m": 7666,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1034,
+   "location": "ES",
+   "stage": "Bareyo Snow",
+   "length_m": 7711,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1035,
+   "location": "ES",
+   "stage": "Bareyo Snow II",
+   "length_m": 7666,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1036,
+   "location": "SE",
+   "stage": "Dylanda-",
+   "length_m": 6031,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1037,
+   "location": "SE",
+   "stage": "Dylanda II-",
+   "length_m": 5899,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1038,
+   "location": "SE",
+   "stage": "Erken-",
+   "length_m": 7052,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1039,
+   "location": "SE",
+   "stage": "Erken II-",
+   "length_m": 6968,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1040,
+   "location": "SE",
+   "stage": "Gästabudstrofen-",
+   "length_m": 4619,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1041,
+   "location": "AU",
+   "stage": "Kidney Health Snow",
+   "length_m": 5801,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1042,
+   "location": "MG",
+   "stage": "Miadamanjaka-",
+   "length_m": 11172,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1043,
+   "location": "MG",
+   "stage": "Miadamanjaka II-",
+   "length_m": 11188,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1044,
+   "location": "IT",
+   "stage": "Montecrestese",
+   "length_m": 10432,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1045,
+   "location": "MC",
+   "stage": "Sainte - Agnes",
+   "length_m": 5197,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1046,
+   "location": "SE",
+   "stage": "Skogby",
+   "length_m": 4924,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1047,
+   "location": "IT",
+   "stage": "Stoccareddo-",
+   "length_m": 5716,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1048,
+   "location": "IT",
+   "stage": "Stoccareddo II",
+   "length_m": 6325,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1049,
+   "location": "FI",
+   "stage": "Tikkala",
+   "length_m": 7079,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1050,
+   "location": "GB",
+   "stage": "UK 2",
+   "length_m": 7945,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1051,
+   "location": "NL",
+   "stage": "Valkenswaard Rallycross",
+   "length_m": 3936,
+   "surface": "mixed",
+   "surface_parts": {
+    "tarmac": 1.0,
+    "gravel": 0.4
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1052,
+   "location": "IT",
+   "stage": "Valvestino",
+   "length_m": 7501,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1053,
+   "location": "IT",
+   "stage": "Valvestino II-",
+   "length_m": 6005,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1054,
+   "location": "CY",
+   "stage": "Ypsonas Rallysprint",
+   "length_m": 2791,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1055,
+   "location": "FI",
+   "stage": "Hokkara Gravel-",
+   "length_m": 4032,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1056,
+   "location": "FI",
+   "stage": "Hokkara Gravel Rever-",
+   "length_m": 4230,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1057,
+   "location": "FI",
+   "stage": "Hokkara Snow",
+   "length_m": 4032,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1058,
+   "location": "FI",
+   "stage": "Hokkara Snow Rever",
+   "length_m": 4230,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1059,
+   "location": "FI",
+   "stage": "Myttäälä",
+   "length_m": 5046,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1060,
+   "location": "FI",
+   "stage": "Pirttijärvi-",
+   "length_m": 6674,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1061,
+   "location": "FI",
+   "stage": "Sarvana-",
+   "length_m": 6501,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1062,
+   "location": "FI",
+   "stage": "Pengonpohja-",
+   "length_m": 7905,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1063,
+   "location": "NZ",
+   "stage": "Inland Road Shakedown 2021",
+   "length_m": 4888,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1064,
+   "location": "NZ",
+   "stage": "Inland Road Shakedown 2021 R",
+   "length_m": 4947,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1065,
+   "location": "FI",
+   "stage": "Aittajärvi-",
+   "length_m": 22462,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1066,
+   "location": "FI",
+   "stage": "Savo",
+   "length_m": 8003,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1067,
+   "location": "FI",
+   "stage": "Korpiaho",
+   "length_m": 6757,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1068,
+   "location": "FI",
+   "stage": "Makkola-",
+   "length_m": 7433,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1069,
+   "location": "FI",
+   "stage": "Kaihuavaara 2021-",
+   "length_m": 19913,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1070,
+   "location": "FI",
+   "stage": "Karkaus-",
+   "length_m": 4594,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1071,
+   "location": "NZ",
+   "stage": "Kuri Bush 1-",
+   "length_m": 7245,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1072,
+   "location": "NZ",
+   "stage": "Komokoriki Hill Road 2021-",
+   "length_m": 4901,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1073,
+   "location": "NZ",
+   "stage": "Komokoriki Hill Road 2021 R",
+   "length_m": 4896,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1074,
+   "location": "NZ",
+   "stage": "Kuri Bush 2-",
+   "length_m": 8336,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1075,
+   "location": "FI",
+   "stage": "Kuohu",
+   "length_m": 8335,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1076,
+   "location": "EE",
+   "stage": "Laitse Rallypark-",
+   "length_m": 2423,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1077,
+   "location": "LB",
+   "stage": "Lebanon Rally SSS RPM",
+   "length_m": 2330,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1078,
+   "location": "KE",
+   "stage": "Ubunapa Kabula II-",
+   "length_m": 6114,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1079,
+   "location": "KE",
+   "stage": "Kinamba Yala-",
+   "length_m": 13662,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1080,
+   "location": "KE",
+   "stage": "Karagita Ruma-",
+   "length_m": 4380,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1081,
+   "location": "MG",
+   "stage": "TMF A 2021-",
+   "length_m": 1897,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1082,
+   "location": "FI",
+   "stage": "Kutemajärvi 1994",
+   "length_m": 13028,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1083,
+   "location": "SE",
+   "stage": "Norrlands Sprinten-",
+   "length_m": 4309,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1084,
+   "location": "FI",
+   "stage": "Mattila-",
+   "length_m": 13005,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1085,
+   "location": "SE",
+   "stage": "Piren Tarmac-",
+   "length_m": 4423,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1086,
+   "location": "SE",
+   "stage": "Ramirent Sprinten 2010-",
+   "length_m": 3445,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1087,
+   "location": "FI",
+   "stage": "Savulampi",
+   "length_m": 9567,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1088,
+   "location": "FI",
+   "stage": "Hassi-",
+   "length_m": 7776,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1089,
+   "location": "FI",
+   "stage": "Vennivaara-",
+   "length_m": 5719,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1090,
+   "location": "FI",
+   "stage": "Vesala Shakedown-",
+   "length_m": 4425,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1091,
+   "location": "ES",
+   "stage": "Cueva Santa II",
+   "length_m": 9058,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1092,
+   "location": "ES",
+   "stage": "Cueva Santa-",
+   "length_m": 9156,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1093,
+   "location": "US",
+   "stage": "Colorado Springs West Circuit A-",
+   "length_m": 13231,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1094,
+   "location": "US",
+   "stage": "Colorado Springs West Hill Climb",
+   "length_m": 12559,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1095,
+   "location": "IT",
+   "stage": "Monti di Ala-",
+   "length_m": 10189,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1096,
+   "location": "FI",
+   "stage": "Laajavuori",
+   "length_m": 4132,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1097,
+   "location": "FI",
+   "stage": "Ruuhimäki",
+   "length_m": 6867,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1098,
+   "location": "FI",
+   "stage": "Kuomiokoski",
+   "length_m": 2680,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1099,
+   "location": "FI",
+   "stage": "Pöykky",
+   "length_m": 4411,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1100,
+   "location": "FI",
+   "stage": "Myllylähde",
+   "length_m": 5918,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1101,
+   "location": "CY",
+   "stage": "Platres Hillclimb",
+   "length_m": 1749,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1102,
+   "location": "KE",
+   "stage": "Ubunapa Kabula-",
+   "length_m": 6208,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1103,
+   "location": "FI",
+   "stage": "Pirttikulma-",
+   "length_m": 7021,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1104,
+   "location": "SE",
+   "stage": "Gränbäcken-",
+   "length_m": 9934,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1105,
+   "location": "FI",
+   "stage": "Karankamäki",
+   "length_m": 4244,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1106,
+   "location": "NZ",
+   "stage": "Te Parae Road-",
+   "length_m": 7013,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1107,
+   "location": "NZ",
+   "stage": "Te Parae Road II",
+   "length_m": 7028,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1108,
+   "location": "FI",
+   "stage": "Koirakivi-",
+   "length_m": 4632,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1109,
+   "location": "FI",
+   "stage": "Pirttikulma Snow",
+   "length_m": 7474,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1110,
+   "location": "FI",
+   "stage": "Kaihuavaara 2022",
+   "length_m": 28025,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1111,
+   "location": "SE",
+   "stage": "Piren Gravel-",
+   "length_m": 4423,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1112,
+   "location": "KE",
+   "stage": "Elmenteita-",
+   "length_m": 3561,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1113,
+   "location": "KE",
+   "stage": "Ulu Karagita-",
+   "length_m": 8617,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1114,
+   "location": "KE",
+   "stage": "Sleeping Warrior 2019-",
+   "length_m": 27006,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1115,
+   "location": "BE",
+   "stage": "Fintele-",
+   "length_m": 4645,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1116,
+   "location": "FI",
+   "stage": "Hakolahti sprint-",
+   "length_m": 2716,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1117,
+   "location": "FI",
+   "stage": "Pengonpohja II",
+   "length_m": 8564,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1118,
+   "location": "FI",
+   "stage": "Sarvana II-",
+   "length_m": 7226,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1119,
+   "location": "ES",
+   "stage": "La Serra d'Almos-",
+   "length_m": 4062,
+   "surface": "tarmac",
+   "surface_parts": {
+    "tarmac": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1120,
+   "location": "FI",
+   "stage": "Palvaanjärvi Sprint",
+   "length_m": 3927,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1121,
+   "location": "FI",
+   "stage": "Ahvenus I-",
+   "length_m": 5235,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1122,
+   "location": "FI",
+   "stage": "Ahvenus II-",
+   "length_m": 5366,
+   "surface": "snow",
+   "surface_parts": {
+    "snow": 1.0
+   },
+   "confidence": "high"
+  },
+  {
+   "id": 1124,
+   "location": "FI",
+   "stage": "Ouninpohja 1986-",
+   "length_m": 7400,
+   "surface": "gravel",
+   "surface_parts": {
+    "gravel": 1.0
+   },
+   "confidence": "high"
+  }
+ ]
+}

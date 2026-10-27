@@ -12,6 +12,7 @@ import pytest
 
 from oversteer import rbr_install, stage_tables, telemetry_formats
 from oversteer.telemetry_formats import RBR_SIZE, decode_sample
+from oversteer.shift_learner import ShiftLearner
 from tests.test_drive_log import drive_runs
 
 _spec = importlib.util.spec_from_file_location(
@@ -185,6 +186,7 @@ def install(tmp_path, monkeypatch):
     monkeypatch.setattr(rbr_install, 'CAR_RECHECK', 0.0)
     rbr_install.forget()
     stage_tables.set_tables(None)
+    stage_tables._local.update(print=None, checked=0.0)
     yield root
     rbr_install.forget()
     stage_tables.set_tables(None)
@@ -220,17 +222,46 @@ def test_stage_tables_load_the_local_table_with_the_ids_as_keys(install):
     assert stage_tables.entry('rbr:71')['length_m'] == 2200
 
 
-def test_no_install_no_table(monkeypatch, tmp_path):
+def test_no_install_needs_no_setup(monkeypatch, tmp_path):
+    """The shipped table names the stages, the car is the shared one, and nothing is asked of the user."""
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     rbr_install.forget()
-    assert rbr_install.stage_table() is None and 'rbr' not in stage_tables.load()
-    assert rbr_install.car_in_slot() is None
+    assert rbr_install.stage_table() is None and rbr_install.car_in_slot() is None
+    entries = stage_tables.load()['rbr']
+    assert entries['rbr:71']['stage'] == 'Rally School Stage' and entries['rbr:71']['length_m'] == 2200
+    assert entries['rbr:309']['stage'] == 'Monster HC' and entries['rbr:517']['stage'] == 'Bayanbulak-Pegasus 2'
+    assert len(entries) > 600 and 'rbr:41' not in entries and 'rbr:81' not in entries
+    assert all(e.keys() <= {'id', 'location', 'stage', 'length_m', 'surface', 'surface_parts', 'confidence', 'key'} for e in entries.values())
+    assert stage_tables.surface_of(entries['rbr:71']) == ('gravel', None)
 
 
-def test_the_root_can_be_a_file_in_the_data_folder(install, tmp_path, monkeypatch):
-    monkeypatch.delenv(rbr_install.ENV)
-    os.makedirs(tmp_path / 'data' / 'oversteer' / 'rbr')
-    (tmp_path / 'data' / 'oversteer' / 'rbr' / 'root').write_text(str(install) + '\n')
+def test_an_install_is_found_without_any_setting(tmp_path, monkeypatch, install):
+    home = tmp_path / 'home'
+    for kind, path in (('bottles', '.local/share/bottles/bottles/RBR/drive_c/Games/Richard Burns Rally'),
+                       ('heroic', 'Games/Heroic/Prefixes/default/rbr/drive_c/Richard Burns Rally'),
+                       ('steam', '.local/share/Steam/steamapps/compatdata/123/pfx/drive_c/RBR')):
+        home.mkdir(exist_ok=True)
+        root = home / path
+        root.mkdir(parents=True)
+        (root / 'RichardBurnsRally.ini').write_text('[NGP]\n')
+        monkeypatch.setenv('HOME', str(home))
+        monkeypatch.delenv(rbr_install.ENV, raising=False)
+        monkeypatch.setattr(rbr_install, 'CANDIDATES', tuple('{}/{}'.format(p, f) for p in rbr_install._PREFIXES
+                                                              for f in rbr_install._FOLDERS))
+        rbr_install.forget()
+        assert rbr_install.find_root() == str(root), kind
+        import shutil
+        shutil.rmtree(home)
+
+
+def test_lutris_says_where_the_game_is(tmp_path, monkeypatch, install):
+    home = tmp_path / 'home'
+    (home / '.config' / 'lutris' / 'games').mkdir(parents=True)
+    (home / '.config' / 'lutris' / 'games' / 'rbr-1.yml').write_text(
+        'game:\n  exe: %s\n  prefix: /x\n' % (install / 'RichardBurnsRally_SSE.exe'))
+    (home / '.config' / 'lutris' / 'games' / 'other.yml').write_text('game:\n  exe: /games/other/other.exe\n')
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.delenv(rbr_install.ENV, raising=False)
     rbr_install.forget()
     assert rbr_install.find_root() == str(install)
 
@@ -333,11 +364,11 @@ def test_a_stage_is_one_run_finished_on_the_frozen_clock(tmp_path):
     learner.close()
 
 
-def test_the_stage_is_named_rbr_stage_id_without_an_install(tmp_path):
-    stage = Stage().countdown().drive(LENGTH).finish()
+def test_a_stage_no_table_has_is_named_rbr_stage_id(tmp_path):
+    stage = Stage(stage=83).countdown().drive(LENGTH).finish()
     learner, reader, runs = runs_of(tmp_path, stage)
-    row = learner.log.store.stage('rbr:71')
-    assert row['name'] == 'RBR stage 71' and row['game'] == 'rbr' and row['length'] == pytest.approx(LENGTH + 1.5, abs=1)
+    row = learner.log.store.stage('rbr:83')
+    assert row['name'] == 'RBR stage 83' and row['game'] == 'rbr' and row['length'] == pytest.approx(LENGTH + 1.5, abs=1)
     learner.close()
 
 
@@ -647,17 +678,30 @@ def test_the_table_is_read_again_when_the_install_changes(install, monkeypatch):
 
 def test_a_later_table_renames_a_stage_driven_without_it(install, tmp_path):
     install_stages = install / 'rsfdata' / 'cache' / 'stages_data.json'
-    install_stages.write_text(json.dumps(STAGES[1:]))                 # 71 missing
-    rbr_install.forget()
     stage_tables.set_tables(None)
-    stage = Stage().countdown().drive(LENGTH).finish()
+    stage = Stage(stage=83).countdown().drive(LENGTH).finish()       # neither the shipped table nor the install has 83
     learner, reader, runs = runs_of(tmp_path, stage)
-    assert learner.log.store.stage('rbr:71')['name'] == 'RBR stage 71'
-    install_stages.write_text(json.dumps(STAGES))
+    assert learner.log.store.stage('rbr:83')['name'] == 'RBR stage 83'
+    install_stages.write_text(json.dumps(STAGES + [dict(STAGES[0], id="83", stage_id="83", name="Custom Test Map")]))
     assert stage_tables.refresh_local(now=1e12) is True
     learner.log.store.seed_stages({'rbr': stage_tables.tables()['rbr']})
-    assert learner.log.store.stage('rbr:71')['name'] == 'Rally School Stage'
+    assert learner.log.store.stage('rbr:83')['name'] == 'Custom Test Map'
     learner.close()
+
+
+def test_the_data_repair_names_a_stored_fallback_the_shipped_table_knows(tmp_path):
+    """A database from before the table: "RBR stage 71" is Rally School Stage from the next start on."""
+    from oversteer.drive_log import DriveLog
+    from oversteer.telemetry_store import open_store
+    path = str(tmp_path / 'old.db')
+    store = open_store(path)
+    store.upsert_stage('rbr:71', 'rbr', 2263.0, 'RBR stage 71')
+    store.upsert_stage('rbr:83', 'rbr', 394.3, 'RBR stage 83')
+    store.commit()
+    store.db.close()
+    log = DriveLog(path, threaded=False)
+    assert log.store.stage('rbr:71')['name'] == 'Rally School Stage' and log.store.stage('rbr:83')['name'] == 'RBR stage 83'
+    log.close()
 
 
 def test_a_720_hz_stage_loses_no_distance_to_its_segments(tmp_path):
@@ -734,3 +778,36 @@ def test_a_capture_records_the_car_in_its_header_and_counts_the_last_packet_once
         w.write(t, addr, data)
     w.close()
     assert w.packets == len(kept) and w.packets + w.thinned == len(packets)
+
+
+def test_a_replay_names_the_car_the_header_recorded(install, tmp_path):
+    from oversteer import telemetry_capture as tc
+    packets = capture_packets('rbr-clock-start.ovcap.gz')
+    recorded = {'key': 'rbr/91', 'id': 91, 'name': 'Abarth Grande Punto S2000'}
+    keys = []
+    for car in (recorded, None):
+        learner = ShiftLearner(str(tmp_path / ('r%s.db' % bool(car))))
+        tc.replay(packets[:50], learner, recorded_car=car)
+        keys.append(learner.car.key)
+        learner.close()
+    assert keys == ['rbr/91', 'rbr/5']
+    assert rbr_install.recorded is None                                      # not left behind for the live listener
+
+
+def test_the_fallback_rename_touches_rbr_stages_only(tmp_path):
+    from oversteer.telemetry_store import open_store
+    store = open_store(str(tmp_path / 's.db'))
+    store.upsert_stage('dirt:rbr:71', 'dirt', 100.0, 'RBR stage 71')
+    store.upsert_stage('rbr:71', 'rbr', 100.0, 'RBR stage 71')
+    store.name_rbr_stage('dirt:rbr:71', {'stage': 'Wrong'})
+    store.name_rbr_stage('rbr:71', {'stage': 'Right'})
+    assert store.stage('dirt:rbr:71')['name'] == 'RBR stage 71' and store.stage('rbr:71')['name'] == 'Right'
+
+
+def test_refreshing_the_local_table_swaps_it_in_whole(install):
+    tables = stage_tables.tables()
+    before = tables['rbr']
+    (install / 'rsfdata' / 'cache' / 'stages_data.json').write_text(json.dumps(STAGES[:1]))
+    assert stage_tables.refresh_local(now=5e9) is True
+    after = stage_tables.tables()
+    assert 'rbr' in tables and tables['rbr'] is before and after is not tables      # nothing a reader held changed

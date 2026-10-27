@@ -699,14 +699,24 @@ class NullLeds:
         pass
 
 
-def replay(records, learner=None, start=1000.0, started=None, **options):
+def replay(records, learner=None, start=1000.0, started=None, recorded_car=None, **options):
     """Feed capture records through Telemetry.handle on the capture's own
     clock (from `start`, so no packet lands on the listener's "never"
     time 0), with a NullLeds; the learner, if given, learns as it would
     live, with its wall clock from `started` (the capture's epoch time,
     so the same capture writes the same database) and its session ended
-    at the end. Returns the Telemetry, idle at the end."""
+    at the end. `recorded_car`: the capture header's `rbr_car`, which names a Richard Burns Rally car the way it
+    was when recorded, not as today's Cars.ini has it. Returns the Telemetry, idle at the end."""
     from .telemetry import Telemetry, IDLE_TIMEOUT
+    from . import rbr_install
+    rbr_install.recorded = recorded_car if isinstance(recorded_car, dict) and recorded_car.get('key') else None
+    try:
+        return _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT)
+    finally:
+        rbr_install.recorded = None
+
+
+def _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT):
     telemetry = Telemetry(NullLeds(), learner=learner, **options)
     if learner is not None and started is not None:
         learner.clock = lambda now: started + (now - start)

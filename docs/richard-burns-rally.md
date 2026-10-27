@@ -123,10 +123,10 @@ folder (`…/drive_c/Richard Burns Rally/` in the Wine prefix), case-insensitive
 | `Physics/s_i2003/common.lsp` (slot 5; ztmz reads `rsfdata\Physics\…`) | the loaded car's physics in plain text: `RPMLimit`, `NumberOfGears`, `Gear<N>Upshift/Downshift`, `MaxSteeringLock`, `SteeringRackRatio`, `InverseMass`. Some packs may be encrypted | medium |
 | `RichardBurnsRally.ini [NGP]` | `udpTelemetry`, `udpTelemetryEndpoints` (or `udpTelemetryAddress`, `udpTelemetryPort`) | medium |
 
-The stage tables can be built from marth's install like WRCG's (`scripts/stage-tables.py`): RSF's json has no
-licence, so keep the generated `stages/rbr.json` local (personal use) unless RSF agrees to it being shipped.
-Under the Flatpak, Oversteer cannot read the prefix without `flatpak override --user
---filesystem=<prefix path>:ro io.github.berarma.Oversteer`.
+**Decision (marth, 2026-10-26): users set up nothing** (no environment variable, no file, no Flatpak override). The
+stage names are shipped as facts only (`data/telemetry/stages/rbr.json`: id, name, length, surface and shares, country),
+read once from marth's install by `research/rbr/stage_table.py`; a player's own install is an optional extra that
+Oversteer finds by itself (section 8).
 
 ## 4. What the coach gets ("decode everything")
 
@@ -283,9 +283,8 @@ capture** where section 2 says so; each such place carries a "verify on capture"
 | Plan axes | `plan_xyz('rbr')` | (x, z, y), z up, north's sign unchecked. |
 | Port preset | `PORT_PRESETS` in `oversteer/telemetry.py` | `(6776, "Richard Burns Rally (RSF / NGP)")`; Auto listens on it too. A launcher that also sends to `127.0.0.1:5310` (marth's does) needs nothing else. |
 | Run lifecycle | `oversteer/drive_log.py` (`RunTracker`: `_rbr_loaded`, `_rbr_finish`, the repeated-step return in `feed`) | start: car moving **and the stage clock above 0** (a car rolling or spinning before the clock starts is no run). Restart: steps back by more than 720 (or another `stage.index`) ends the run unfinished, and the clock going back does as before. Finish: the clock stopped (`RunClock.settle`) with the car moving and `distanceToEnd` ≤ 10 m; or the clock stopped for 3 s well into the stage whatever `distanceToEnd` says. `result_time` = the frozen `raceTime` (game clock, `run_clock = 'game'`). Pause / results page: a packet with the same `totalSteps` as the last is ignored altogether; silence is no run boundary (a position is sent). After a finish the guard blocks the 20 s roll-on and is released by the steps going back, the clock reset, a stage change or 10 s of silence. |
-| Stage names | `oversteer/rbr_install.py`, `stage_tables.load()` | stage key `rbr:<map id>`. The table is built **locally** from the install (`rsfdata/cache/stages_data.json`, `Maps/Tracks.ini` for ids it lacks), cached in `<data>/oversteer/rbr/stages.json` (a fingerprint of the source files decides when it is rebuilt) and merged into `stage_tables.tables()['rbr']` (name, country, length, surface and its shares). Never committed or shipped (RSF's json has no licence). Without an install: "RBR stage <id>", length = driveLineLocation + distanceToEnd at the start. BTB (`stage.index` 41) names no stage (the start-cell fingerprint takes over). |
-| Car names | `rbr_install.car_in_slot()` | `Cars/Cars.ini [Car05] RSFCarID` -> `rsfdata/cache/cars.json` name, key `rbr/<RSFCarID>`; `cars_data.json` gives the drivetrain and gear count. Cars.ini is checked every 2 s and read again only when it changed (RSF rewrites it at a stage load). With no RSFCarID or no install the key is `rbr/unknown`, name "RBR car": a shared key, so nothing is learnt under it (instead of the `rbr/slot5` the plan said, which would have mixed cars into one learnt shift point). |
-| Where the install is | `rbr_install.find_root()` | `$OVERSTEER_RBR_DIR`, else the first line of `<data>/oversteer/rbr/root`, else the usual Lutris / Bottles / Wine prefixes (`~/Games/*/drive_c/Richard Burns Rally` ...). Read-only. A settings-page "RBR folder" is not built. |
+| Stage names | `data/telemetry/stages/rbr.json`, `oversteer/rbr_install.py`, `stage_tables.load()` | stage key `rbr:<map id>`; the shipped table (built by `research/rbr/stage_table.py`) names every RSF stage; the install's own list, where one is found, is merged over it. Without either: "RBR stage <id>", length = driveLineLocation + distanceToEnd at the start. BTB (`stage.index` 41) names no stage (the start-cell fingerprint takes over). |
+| Car names | `rbr_install.car_in_slot()` | from a found install only: `Cars/Cars.ini [Car<slot>] RSFCarID` -> `cars.json` name, key `rbr/<RSFCarID>`, `cars_data.json` drivetrain and gear count; checked every 2 s, read again when it changed. Otherwise `rbr/unknown`, "RBR car": a shared key, nothing learnt under it (no packet fingerprint tells the cars apart, see "Names without any setup"). |
 | Coach | `coach.LAUNCH_OUT`, `ATTITUDE_OUT`, `coach_context.UNCHECKED_GAMES` | `rbr` is in all three: no launch, spin or stall coaching and no speed-drop reads until the speed and sign channels are checked. |
 | Tests | `tests/test_rbr.py` | the layout against `research/rbr/ngp_packet.py`, the doc's sample values, wheel order, units, a fake install (stage table, cache, cars, no write under the install), and synthetic packet sequences: finish, restart, pause (repeated steps and silence), retire, results page, no phantom runs. |
 
@@ -313,19 +312,29 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
 - Stage 81 is not in `rsfdata/cache/stages_data.json` nor `Maps/Tracks.ini` (a stock map): "RBR stage 81", length from
   the packet.
 
-### Under the Flatpak, and where the install is
+### Names without any setup
 
-The Flatpak cannot see a Wine prefix or a game folder outside its sandbox. Give it read-only access to the folder
-that holds `RichardBurnsRally.ini`, for example:
-
-    flatpak override --user --filesystem=/mnt/gaming/RBR/RBR:ro io.github.berarma.Oversteer
-
-and tell Oversteer where it is, by either `OVERSTEER_RBR_DIR=/mnt/gaming/RBR/RBR` in its environment or one line, the
-folder, in `<data>/oversteer/rbr/root` (`~/.var/app/io.github.berarma.Oversteer/data/oversteer/rbr/root` under the
-Flatpak). Installs in the usual Lutris, Bottles and Wine prefixes are found without either. Without the install a stage
-is "RBR stage <id>" and the car "RBR car" (`rbr/unknown`); when the table later has the stage, the stored fallback name
-(and only that exact form) is replaced, and the table is read again when the install's stage files change (checked at
-each run's start, at most every 30 s).
+- **Stages**: `data/telemetry/stages/rbr.json` (661 stages, read once from an RSF install on 2026-10-26; stage 41 /
+  Beyond the Box left out) names every stage RSF lists. An id it lacks (a custom stage added later) is "RBR stage <id>"
+  with the length from the packet. A stored fallback name (and only that exact form) is replaced once a table knows the
+  stage: `Store.seed_stages` does it for every table at each start, so a database from before the shipped table is
+  repaired on its next start.
+- **Cars**: the packets cannot name the car. `car.index` is the slot (5 or 6 on the captures), and nothing else in the
+  packet identifies it that a table could carry: the two cars captured (Fiesta WRC 2019, i20 Coupe WRC 2021) have the same
+  mass (1390 kg, measured 1361-1394 kg at rest, so +-15 kg of noise), balance (49%), idle (1214 rpm), redline (about 8530
+  rpm) and gear count (6); over RSF's 103 cars only half are unique even by published mass, balance and gears. So no car
+  table is shipped and the key is the shared `rbr/unknown` ("RBR car"): runs and PBs are kept, nothing is learnt per car.
+  Where Oversteer finds an install by itself, `Cars.ini [Car05/06] RSFCarID` gives the exact car (`rbr/<id>`, name,
+  drivetrain, gears).
+  The best further step, not built: identify the car from its gear ratios once shifted (the ratios between gears do not
+  depend on the tyre radius; the shift learner already learns them per gear), against ratios from the physics packs'
+  `common.lsp`. Only the 9 packs installed locally have them, not RSF's 103 cars.
+- **The optional install**: `rbr_install.find_root()` looks, with no setting, in the usual Lutris (including the game path
+  in Lutris' game files), Bottles, Heroic, Steam (Proton prefixes) and Wine places. When found it adds the exact car and
+  the install's own stage list over the shipped one (custom stages), cached in `<data>/oversteer/rbr/stages.json` and read
+  again when the install's stage files change (checked at each run's start, at most every 30 s). A sandbox that cannot see
+  the install (the Flatpak) just finds none and uses the shipped names. `OVERSTEER_RBR_DIR` points the finder at an
+  install for development; it is not documented to users and not a setting.
 
 ### Per-packet cost at 720 packets a second
 
@@ -342,8 +351,10 @@ recorder (`oversteer/telemetry_capture.py`, `THIN`: packet length -> maximum sav
 packet in every 12 steps and always the packets where a lifecycle field changes (steps going back, a new
 `stage.index`, the clock starting, stopping or jumping by over 0.5 s, `distanceToEnd` jumping by over 5 m) and the
 first and last of a file. The file format is unchanged; other formats are not thinned. The header line also gets `rbr_car` (`key`, `id`,
-`name` of the car RSF had in the packet's slot when the file was opened), since the packets do not carry the car; a replay
-still names the car from today's `Cars.ini` (the decoder does not read the header). A replay of a thinned capture
+`name` of the car RSF had in the packet's slot when the file was opened), since the packets do not carry the car; the
+replays (`telemetry_capture.replay(..., recorded_car=meta.get('rbr_car'))`, used by the data repair's retime and by
+`scripts/telemetry-replay.py`) name the car from it, so an old capture keeps the car it was driven with. A capture
+without the key (before this) is named from the install found today, or `rbr/unknown`. A replay of a thinned capture
 gives the same run starts, finishes, result times and restarts as the full-rate one (`tests/test_rbr.py`; the
 2026-10-26 run capture gave the same run both ways).
 
@@ -351,7 +362,7 @@ gives the same run starts, finishes, result times and restarts as the full-rate 
 
 | file | stage | what is in it |
 |---|---|---|
-| 190243 | 83 (not in the table: "RBR stage 83", 394 m), car slot 5 | two attempts of a short map; the clock starts as the car crosses the start line (the car rolls 5 s with the clock at 0 first), max clock 9.2 s, a restart (steps back to 1 after 17.7 s of silence), second attempt ends with the capture |
+| 190243 | 83 (not in the table: "RBR stage 83", 195 m), car slot 5 | two attempts of a short map; the clock starts as the car crosses the start line (the car rolls 5 s with the clock at 0 first), max clock 9.2 s, a restart (steps back to 1 after 17.7 s of silence), second attempt ends with the capture |
 | 190435 | 83 | the same, max clock 9.6 s, restart after 14.3 s |
 | 190639 | 517 Bayanbulak-Pegasus 2 (18 070 m), car slot 6 | a first leg to 1:01.3 ended by a restart at 83 km/h after 21 s of silence (pause menu); a second leg of 5:24 clock: a +35.003 s jump of the clock at driveline 2328 m with the car at rest, a 10.4 s silence (pause) at 2:26.9 while rolling, and the capture ends with the car at rest (a retire, no finish) |
 | 191420 | 517 | one leg to 3:54.6, the same +35.003 s jump at 2330 m, ends at rest (retire) |
