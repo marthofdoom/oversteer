@@ -1,0 +1,463 @@
+{
+ "game": "dirt",
+ "title": "DiRT Rally 2.0 car names",
+ "keys": "The car key the decoder makes (telemetry_formats._codemasters): dirt/<max rpm>-<idle rpm>-<gears>, the rpm rounded to 10. The game sends no car name, so a key lists every car with that engine and gearbox, in dr2_logger's order; two or more are shown as 'A / B' until the learnt drivetrain or gearing tells them apart. class is the section dr2_logger lists the car under.",
+ "notes": "Names, max rpm, idle rpm and gear count from dr2_logger (ErlerPhilipp/dr2_logger, source/dirt_rally/car_data_dr2.py, 5e5fcbe); built by research/dr2/car_table.py. No torque curves or gearing, so car_data.load() takes no cars from this file ('cars' is empty).",
+ "licenses": [
+  {
+   "source": "https://github.com/ErlerPhilipp/dr2_logger",
+   "text": "MIT License\n\nCopyright (c) 2019-2020 ErlerPhilipp\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n"
+  }
+ ],
+ "cars": [],
+ "names": {
+  "dirt/15270-1540-6": [
+   {
+    "name": "Speedcar Xtrem",
+    "class": "Crosskarts"
+   }
+  ],
+  "dirt/9500-1800-6": [
+   {
+    "name": "Volkswagen Polo S1600",
+    "class": "RX Super 1600S"
+   }
+  ],
+  "dirt/9250-1900-6": [
+   {
+    "name": "Renault Clio RS S1600",
+    "class": "RX Super 1600S"
+   }
+  ],
+  "dirt/9500-1900-6": [
+   {
+    "name": "Opel Corsa Super 1600",
+    "class": "RX Super 1600S"
+   }
+  ],
+  "dirt/8500-1600-5": [
+   {
+    "name": "Lancia Delta S4 RX",
+    "class": "RX Group B"
+   },
+   {
+    "name": "Lancia Delta S4",
+    "class": "Group B 4WD"
+   },
+   {
+    "name": "Peugeot 208 R2",
+    "class": "R2"
+   }
+  ],
+  "dirt/9000-1600-5": [
+   {
+    "name": "Ford RS200 Evolution",
+    "class": "RX Group B"
+   }
+  ],
+  "dirt/8000-2000-5": [
+   {
+    "name": "Peugeot 205 T16 Evo 2 RX",
+    "class": "RX Group B"
+   },
+   {
+    "name": "Peugeot 205 T16 Evo 2",
+    "class": "Group B 4WD"
+   }
+  ],
+  "dirt/9500-1100-5": [
+   {
+    "name": "MG Metro 6R4 RX",
+    "class": "RX Group B"
+   }
+  ],
+  "dirt/8000-1600-6": [
+   {
+    "name": "Ford Fiesta OMSE SuperCar Lites",
+    "class": "RX2"
+   }
+  ],
+  "dirt/8350-2000-6": [
+   {
+    "name": "Volkswagen Polo R Supercar",
+    "class": "RX Supercars"
+   },
+   {
+    "name": "Audi S1 EKS RX Quattro",
+    "class": "RX Supercars"
+   }
+  ],
+  "dirt/8000-1700-6": [
+   {
+    "name": "Peugeot 208 WRX",
+    "class": "RX Supercars"
+   },
+   {
+    "name": "Renault Clio R.S. RX",
+    "class": "RX Supercars 2019"
+   }
+  ],
+  "dirt/7800-1650-5": [
+   {
+    "name": "Renault Megane RS",
+    "class": "RX Supercars"
+   }
+  ],
+  "dirt/7750-1800-6": [
+   {
+    "name": "Ford Fiesta RX (MK8)",
+    "class": "RX Supercars"
+   }
+  ],
+  "dirt/7500-1650-6": [
+   {
+    "name": "Ford Fiesta RX (MK7)",
+    "class": "RX Supercars"
+   }
+  ],
+  "dirt/7400-1700-6": [
+   {
+    "name": "Subaru WRX STI RX",
+    "class": "RX Supercars"
+   },
+   {
+    "name": "Skoda Fabia Rally",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/8000-1700-5": [
+   {
+    "name": "Renault Megane R.S. RX",
+    "class": "RX Supercars 2019"
+   },
+   {
+    "name": "Fiat 131 Abarth Rally",
+    "class": "H2 RWD"
+   },
+   {
+    "name": "Subaru Impreza WRX STI NR4",
+    "class": "NR4/R4"
+   }
+  ],
+  "dirt/8000-1800-6": [
+   {
+    "name": "Ford Fiesta RXS Evo 5",
+    "class": "RX Supercars 2019"
+   },
+   {
+    "name": "Ford Fiesta RX (Stard)",
+    "class": "RX Supercars 2019"
+   }
+  ],
+  "dirt/7500-2500-6": [
+   {
+    "name": "Mini Cooper SX1",
+    "class": "RX Supercars 2019"
+   }
+  ],
+  "dirt/7500-1700-6": [
+   {
+    "name": "Seat Ibiza RX",
+    "class": "RX Supercars 2019"
+   },
+   {
+    "name": "Ford Focus RS Rally 2001",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/7000-800-4": [
+   {
+    "name": "Mini Cooper S",
+    "class": "H1 FWD"
+   }
+  ],
+  "dirt/6000-1000-4": [
+   {
+    "name": "Citroen DS 21",
+    "class": "H1 FWD"
+   }
+  ],
+  "dirt/6500-950-4": [
+   {
+    "name": "Lancia Fulvia HF",
+    "class": "H1 FWD"
+   }
+  ],
+  "dirt/7500-900-5": [
+   {
+    "name": "Volkswagen Golf GTI 16V",
+    "class": "H2 FWD"
+   }
+  ],
+  "dirt/7000-1200-5": [
+   {
+    "name": "Peugeot 205 GTI",
+    "class": "H2 FWD"
+   }
+  ],
+  "dirt/9500-1200-5": [
+   {
+    "name": "Ford Escort Mk II",
+    "class": "H2 RWD"
+   }
+  ],
+  "dirt/8000-1600-5": [
+   {
+    "name": "Renault Alpine A110 1600 S",
+    "class": "H2 RWD"
+   }
+  ],
+  "dirt/9000-1500-5": [
+   {
+    "name": "Opel Kadett C GT/E",
+    "class": "H2 RWD"
+   }
+  ],
+  "dirt/8900-1100-6": [
+   {
+    "name": "BMW E30 Evo Rally",
+    "class": "H3 RWD"
+   }
+  ],
+  "dirt/7500-1300-5": [
+   {
+    "name": "Opel Ascona 400",
+    "class": "H3 RWD"
+   }
+  ],
+  "dirt/8500-1000-5": [
+   {
+    "name": "Lancia Stratos",
+    "class": "H3 RWD"
+   }
+  ],
+  "dirt/8000-1450-5": [
+   {
+    "name": "Renault 5 Turbo",
+    "class": "H3 RWD"
+   }
+  ],
+  "dirt/7450-770-5": [
+   {
+    "name": "Datsun 240Z",
+    "class": "H3 RWD"
+   }
+  ],
+  "dirt/7500-1100-5": [
+   {
+    "name": "Ford Sierra Cosworth RS500",
+    "class": "H3 RWD"
+   }
+  ],
+  "dirt/11000-1900-6": [
+   {
+    "name": "Peugeot 306 Maxi",
+    "class": "F2 Kit Car"
+   }
+  ],
+  "dirt/9000-1300-6": [
+   {
+    "name": "Seat Ibiza Kit Car",
+    "class": "F2 Kit Car"
+   }
+  ],
+  "dirt/9000-1200-6": [
+   {
+    "name": "Volkswagen Golf Kitcar",
+    "class": "F2 Kit Car"
+   }
+  ],
+  "dirt/8500-1200-5": [
+   {
+    "name": "Lancia 037 Evo 2",
+    "class": "Group B RWD"
+   }
+  ],
+  "dirt/7800-1400-5": [
+   {
+    "name": "Opel Manta 400",
+    "class": "Group B RWD"
+   }
+  ],
+  "dirt/9250-1500-5": [
+   {
+    "name": "BMW M1 Procar Rally",
+    "class": "Group B RWD"
+   }
+  ],
+  "dirt/8000-1300-5": [
+   {
+    "name": "Porsche 911 SC RS",
+    "class": "Group B RWD"
+   }
+  ],
+  "dirt/9000-1300-5": [
+   {
+    "name": "Audi Sport quattro S1 E2",
+    "class": "Group B 4WD"
+   }
+  ],
+  "dirt/9000-1200-5": [
+   {
+    "name": "Ford RS200",
+    "class": "Group B 4WD"
+   }
+  ],
+  "dirt/9500-1050-5": [
+   {
+    "name": "MG Metro 6R4",
+    "class": "Group B 4WD"
+   }
+  ],
+  "dirt/7800-1500-5": [
+   {
+    "name": "Ford Fiesta R2",
+    "class": "R2"
+   }
+  ],
+  "dirt/8650-1700-5": [
+   {
+    "name": "Opel Adam R2",
+    "class": "R2"
+   }
+  ],
+  "dirt/7000-1400-6": [
+   {
+    "name": "Mitsubishi Lancer Evo VI",
+    "class": "Group A"
+   },
+   {
+    "name": "BMW M2 Competition",
+    "class": "Rally GT"
+   }
+  ],
+  "dirt/7000-1100-6": [
+   {
+    "name": "Subaru Impreza 1995",
+    "class": "Group A"
+   }
+  ],
+  "dirt/7500-1000-6": [
+   {
+    "name": "Lancia Delta HF Integrale",
+    "class": "Group A"
+   }
+  ],
+  "dirt/7000-1400-7": [
+   {
+    "name": "Ford Escort RS Cosworth",
+    "class": "Group A"
+   }
+  ],
+  "dirt/7560-1930-6": [
+   {
+    "name": "Subaru Legacy RS",
+    "class": "Group A"
+   }
+  ],
+  "dirt/7500-1700-5": [
+   {
+    "name": "Mitsubishi Lancer Evo X",
+    "class": "NR4/R4"
+   },
+   {
+    "name": "Peugeot 208 T16",
+    "class": "R5"
+   }
+  ],
+  "dirt/7400-1800-6": [
+   {
+    "name": "Citroen C4 Rally",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/7350-1790-5": [
+   {
+    "name": "Ford Focus RS Rally 2007",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/7500-2100-6": [
+   {
+    "name": "Subaru Impreza 2008",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/8000-1950-6": [
+   {
+    "name": "Subaru Impreza 2001",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/6500-1500-5": [
+   {
+    "name": "Peugeot 206 Rally",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/7800-1980-6": [
+   {
+    "name": "Subaru Impreza S4 Rally",
+    "class": "2000cc 4WD"
+   }
+  ],
+  "dirt/7400-1800-5": [
+   {
+    "name": "Ford Fiesta R5",
+    "class": "R5"
+   }
+  ],
+  "dirt/8000-2100-5": [
+   {
+    "name": "Mitsubishi Space Star R5",
+    "class": "R5"
+   }
+  ],
+  "dirt/7400-1700-5": [
+   {
+    "name": "Skoda Fabia R5",
+    "class": "R5"
+   },
+   {
+    "name": "Volkswagen Polo GTI R5",
+    "class": "R5"
+   }
+  ],
+  "dirt/7100-1780-5": [
+   {
+    "name": "Citroen C3 R5",
+    "class": "R5"
+   }
+  ],
+  "dirt/7400-1750-5": [
+   {
+    "name": "Ford Fiesta R5 MKII",
+    "class": "R5"
+   }
+  ],
+  "dirt/9000-1800-6": [
+   {
+    "name": "Porsche 911 RGT Rally Spec",
+    "class": "Rally GT"
+   }
+  ],
+  "dirt/7250-1700-6": [
+   {
+    "name": "Chevrolet Camaro GT4.R",
+    "class": "Rally GT"
+   }
+  ],
+  "dirt/7000-1000-6": [
+   {
+    "name": "Aston Martin V8 Vantage GT4",
+    "class": "Rally GT"
+   }
+  ],
+  "dirt/8250-1400-6": [
+   {
+    "name": "Ford Mustang GT4 Ford RS200",
+    "class": "Rally GT"
+   }
+  ]
+ }
+}

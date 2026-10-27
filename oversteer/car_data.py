@@ -21,6 +21,7 @@ import sys
 DATADIR = None                   # the installed data folder (share/oversteer), set by the application
 
 _cars = None
+_names = None
 
 
 def find_dir(datadir=None):
@@ -39,12 +40,15 @@ def find_dir(datadir=None):
     return None
 
 
-def load(directory=None):
+def load(directory=None, names=None):
     """{car key: entry} from every file in `directory` (found when None).
     A file that does not parse, or an entry without a usable torque curve
-    and gearing, is logged and skipped."""
+    and gearing, is logged and skipped. A file's `names` ({car key: [{name,
+    class}, ...]}, for games that send no car name: DiRT Rally 2.0) go
+    into the `names` dict passed in, as {car key: [name, ...]}."""
     directory = directory or find_dir()
     cars = {}
+    names = {} if names is None else names
     if not directory:
         return cars
     for name in sorted(os.listdir(directory)):
@@ -54,6 +58,8 @@ def load(directory=None):
             with open(os.path.join(directory, name), encoding='utf-8') as f:
                 table = json.load(f)
             game = table['game']
+            for key, candidates in (table.get('names') or {}).items():
+                names.setdefault(key, [c['name'] for c in candidates if c.get('name')])
             for entry in table['cars']:
                 curve = [(float(r), float(t)) for r, t in entry['torque_curve']]
                 sets = [s for s in entry.get('gear_sets') or [] if len(s.get('gears') or []) >= 2]
@@ -77,6 +83,22 @@ def cars():
     if _cars is None:
         _cars = load()
     return _cars
+
+
+def car_names():
+    """{car key: [name, ...]} of the games that send no car name, loaded once."""
+    global _names
+    if _names is None:
+        _names = {}
+        load(names=_names)
+    return _names
+
+
+def display_name(key):
+    """The shipped name of a car key with no name in the game's telemetry, or None. Several cars with one key
+    (the same engine and gearbox) read 'A / B'."""
+    found = car_names().get(key)
+    return ' / '.join(found) if found else None
 
 
 def set_cars(value):

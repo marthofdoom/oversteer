@@ -115,7 +115,6 @@ def test_stage_keys_match_within_tolerance(tmp_path):
     assert key == 'dirt:9843:100'
     store.upsert_stage(key, 'dirt', 9843.4)
     assert store.match_stage('dirt', 9844.2, 105.1) == key                  # the same stage over a boundary
-    assert store.match_stage('dirt', 9843.4, 160.0) != key                  # same length, another start
     assert store.match_stage('dirt', 9900.0, 105.0) != key
     cell = store.match_cell('forza-fh', (10, -4, 2), 5230.0)
     assert cell == 'cell:forza-fh:10:-4:2:5200'
@@ -287,7 +286,8 @@ def test_shipped_stages_are_seeded_and_matched_first(tmp_path, monkeypatch):
     monte = store.stage('dirt:6000:10')
     assert (monte['surface_prior'], monte['surface_prior_source']) == ('mixed:tarmac,snow', 'table')
     assert store.match_stage('dirt', 9843.4, 104.9) == 'dirt:9844:100'      # the table before the stored key
-    assert store.match_stage('dirt', 9843.4, 160.0) == 'dirt:9843:160'      # another start: not that stage
+    assert store.match_stage('dirt', 9843.4, 160.0) == 'dirt:9844:100'      # the sent length names it, whatever the start z
+    assert store.match_stage('dirt', 9800.0, 160.0) == 'dirt:9800:160'      # no table length near: a new key
 
 
 def test_a_run_to_the_finish_matches_a_published_length(tmp_path, monkeypatch):
@@ -509,3 +509,18 @@ def test_the_pb_among_the_game_clock_runs_keeps_its_trace(tmp_path):
                                       (240.0, 'clean', 10.0), (250.0, 'clean', 10.0)], clock=(2, 3, 4, 5))
     assert store.trace(ids[2]) is not None             # the PB on the game's clock, slower than the progress-timed run 1
     assert store.trace(ids[0]) is not None             # the PB it was when set
+
+
+def test_dirt_stage_is_named_by_its_sent_length_and_z_splits_equal_lengths(tmp_path, monkeypatch):
+    from oversteer import stage_tables
+    tables = _tables('dirt', {'location': 'Mexico', 'stage': 'El Rodeo', 'length_m': 2845.63, 'start_z': 206.2,
+                              'surface': 'tarmac'},
+                     {'location': 'A', 'stage': 'One', 'length_m': 5000.0, 'start_z': 100.0, 'surface': 'gravel'},
+                     {'location': 'B', 'stage': 'Two', 'length_m': 5000.0, 'start_z': -400.0, 'surface': 'gravel'},
+                     {'location': 'C', 'stage': 'Near', 'length_m': 5000.3, 'start_z': 150.0, 'surface': 'gravel'})
+    monkeypatch.setattr(stage_tables, '_tables', tables)
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    assert store.match_stage('dirt', 2845.63, 188.0) == 'dirt:2846:210'     # rolled 18 m from the line: still El Rodeo
+    assert store.match_stage('dirt', 5000.0, -380.0) == 'dirt:5000:-400'    # equal lengths: the nearest start z
+    assert store.match_stage('dirt', 5000.0, 90.0) == 'dirt:5000:100'
+    assert store.match_stage('dirt', 5000.3, -380.0) == 'dirt:5000:150'     # the nearer length wins over z

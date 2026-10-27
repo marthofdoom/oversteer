@@ -36,6 +36,8 @@ import logging
 import math
 import struct
 
+from . import car_data
+
 RPM_LIMIT = 30000.0                                  # anything above is not an engine speed
 FORZA_SIZES = (232, 311, 324, 331)
 FORZA_GAMES = {232: 'forza', 311: 'forza-fm', 324: 'forza-fh', 331: 'forza-fm'}
@@ -286,12 +288,16 @@ def plan_xyz(game, pos):
     minimap, the coach's) is drawn the same way. ACR's world is left-handed
     with y up: the plan is (x, -z), or the map comes out mirrored (on marth's
     v4 captures the heading rate of (x, -z) correlates +0.63 with the yaw
-    rate, left positive; (x, z) -0.63). WRC Generations has z up: (x, y).
+    rate, left positive; (x, z) -0.63). DiRT Rally 2.0 is left-handed with y up
+    as well: on marth's captures (research/dr2/axes.py, dirt_signs.py) the heading rate of
+    (x, z) correlates -0.86/-0.83 with the steering-side evidence (roll, lateral g, r
+    +0.95/+0.94) and (x, -z) the same size the right way round, so the plan is (x, -z)
+    (DiRT 4 shares the key; unverified there). WRC Generations has z up: (x, y).
     Other games: (x, z) with y up, as before (unchecked). None for no position."""
     if pos is None:
         return None
     x, y, z = pos
-    if game == 'acr':
+    if game in ('acr', 'dirt'):
         return (x, y, -z)
     if game == 'wrcg':
         return (x, z, y)
@@ -569,6 +575,8 @@ def _codemasters(data, n):
     key = '{}/{:.0f}-{:.0f}-{:.0f}'.format(game, top, round(idle, -1) if math.isfinite(idle) else 0,
                                            gears if math.isfinite(gears) else 0)
     name = '{:.0f} rpm, {:.0f} gears'.format(top, gears) if math.isfinite(gears) else None
+    if game == 'dirt':
+        name = car_data.display_name(key) or name           # dr2_logger's table (cars/dirt.json); WRCG has none
     sample = Sample(max(0.0, rpm), max_rpm, gear=gear,
                     speed=_finite(floats[7]), car=key, car_name=name,
                     throttle=_finite(floats[29]), clutch=_finite(floats[32]), brake=_finite(floats[31]),

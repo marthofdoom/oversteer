@@ -361,6 +361,7 @@ EVENT_FIELDS = ('kind', 'class', 'd0', 'd1', 't0', 't1', 'gear', 'value', 'detai
 
 STAGE_LENGTH_TOLERANCE = {'dirt': 2.0, 'wrcg': 2.0, 'acr': 10.0}     # m, a measured length on a rounding boundary
 STAGE_START_TOLERANCE = 15.0                                         # m of start z (DiRT)
+STAGE_SENT_TOLERANCE = 0.5                                           # m: DiRT sends its stage's length to the float
 STAGE_DISTANCE_TOLERANCE = 0.01      # of a published length: a run to the finish, or a length the game sent
 STAGE_START_NEAR = 50.0              # m between two starts of one stage (x and z)
 SENT_LENGTH_SLACK = 0.005            # m: a sent length this much nearer one stage than another is that stage
@@ -1323,14 +1324,26 @@ class Store(Reader):
 
     def match_stage(self, game, length, start_z=None):
         """The key of a stage that a measured (length, start z) is, within
-        tolerance: the shipped table's first, then one already stored;
+        tolerance: the shipped table's first (DiRT's by the sent length alone,
+        the start z only choosing among equal lengths), then one already stored;
         else a new rounded key: a value on a rounding boundary must not
         split one stage in two."""
         tolerance = STAGE_LENGTH_TOLERANCE.get(game, 5.0)
         best = None
-        for entry in stage_tables.tables().get(game, {}).values():
-            known_length, known_z = entry.get('length_m'), entry.get('start_z')
-            if known_length is None or known_z is None or abs(known_length - length) > tolerance:
+        entries = [e for e in stage_tables.tables().get(game, {}).values() if e.get('length_m') is not None]
+        if game == 'dirt':
+            # The length DiRT sends is the table's float: it names the stage whatever the start z (a run starts
+            # where the car rolled to, 18 m from the line). The start z only splits stages of one length.
+            near = sorted((abs(e['length_m'] - length), n) for n, e in enumerate(entries)
+                          if abs(e['length_m'] - length) <= STAGE_SENT_TOLERANCE)
+            if near:
+                tied = [entries[n] for miss, n in near if miss <= near[0][0] + 0.01]
+                if len(tied) > 1 and start_z is not None:
+                    tied.sort(key=lambda e: abs((e.get('start_z') or 0.0) - start_z))
+                return tied[0]['key']
+        for entry in entries:
+            known_length, known_z = entry['length_m'], entry.get('start_z')
+            if known_z is None or abs(known_length - length) > tolerance:
                 continue
             if start_z is not None and abs(known_z - start_z) > STAGE_START_TOLERANCE:
                 continue
