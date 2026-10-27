@@ -802,7 +802,7 @@ def _rbr_speed(velocity, packet_speed):
     return packet_speed / 3.6 if math.isfinite(packet_speed) else None
 
 
-def _rbr(data, n):
+def _rbr(data, n, recorded_car=None):
     """Richard Burns Rally (RallySimFans) through NGP's UDP telemetry. Wheels LF, RF, LB, RB are Sample's FL, FR,
     RL, RR. Units follow docs/richard-burns-rally.md: kelvin to C, Pa to kPa, angles in degrees to radians, gear
     0 reverse / 1 neutral / 2 first. Everything the doc marks verify is converted as it reads and waits for a
@@ -815,7 +815,7 @@ def _rbr(data, n):
     if not (math.isfinite(rpm) and -100.0 < rpm < RPM_LIMIT):
         return None
     wheels = [t[RBR_WHEEL0 + RBR_WHEEL_FIELDS * w: RBR_WHEEL0 + RBR_WHEEL_FIELDS * (w + 1)] for w in range(4)]
-    car = rbr_install.car_in_slot(slot) if 0 <= slot < 8 else None
+    car = recorded_car or (rbr_install.car_in_slot(slot) if 0 <= slot < 8 else None)
     sample = Sample(max(0.0, rpm), None, gear=gear - 1 if 0 <= gear <= 10 else None,
                     speed=_rbr_speed(t[22:25], speed_raw),
                     car=(car or {}).get('key') or rbr_install.UNKNOWN_CAR,
@@ -881,7 +881,7 @@ def _rbr(data, n):
     return sample
 
 
-def decode_sample(data):
+def decode_sample(data, rbr_car=None):
     """A Sample, or None if the packet isn't a telemetry format we know
     (or carries nonsense)."""
     n = len(data)
@@ -906,7 +906,7 @@ def decode_sample(data):
         return None
     if n == RBR_SIZE:
         # 664 is above every Codemasters length (CODEMASTERS_MAX) and no other format's
-        return _rbr(data, n)
+        return _rbr(data, n, rbr_car)
     if CODEMASTERS_MIN <= n <= CODEMASTERS_MAX and n % 4 == 0:
         return _codemasters(data, n)
     return None

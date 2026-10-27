@@ -708,12 +708,9 @@ def replay(records, learner=None, start=1000.0, started=None, recorded_car=None,
     at the end. `recorded_car`: the capture header's `rbr_car`, which names a Richard Burns Rally car the way it
     was when recorded, not as today's Cars.ini has it. Returns the Telemetry, idle at the end."""
     from .telemetry import Telemetry, IDLE_TIMEOUT
-    from . import rbr_install
-    rbr_install.recorded = recorded_car if isinstance(recorded_car, dict) and recorded_car.get('key') else None
-    try:
-        return _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT)
-    finally:
-        rbr_install.recorded = None
+    if isinstance(recorded_car, dict) and recorded_car.get('key'):
+        options['rbr_car'] = dict({'drivetrain': None, 'gears': None}, **recorded_car)
+    return _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT)
 
 
 def _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT):

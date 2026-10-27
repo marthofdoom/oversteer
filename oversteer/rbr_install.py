@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 
 from . import diagnostics
@@ -43,11 +44,15 @@ _PREFIXES = (
     '~/.local/share/lutris/runners/wine/*/drive_c',
 )
 CANDIDATES = tuple('{}/{}'.format(prefix, folder) for prefix in _PREFIXES for folder in _FOLDERS)
+STEAM_SHORTCUTS = ('~/.local/share/Steam/userdata/*/config/shortcuts.vdf', '~/.steam/steam/userdata/*/config/shortcuts.vdf',
+                   '~/.var/app/com.valvesoftware.Steam/data/Steam/userdata/*/config/shortcuts.vdf')
+SHORTCUTS_MAX = (20, 1 << 20)       # files read, and bytes of each: the search is bounded
+ASYNC = True                        # a search that is not asked for synchronously runs on a thread of its own (tests: False)
 LUTRIS_GAMES = ('~/.config/lutris/games', '~/.var/app/net.lutris.Lutris/config/lutris/games')
 
 _root = None
 _root_at = None
-recorded = None          # a replay: the car the capture's header recorded ({'key', 'id', 'name'}), over today's Cars.ini
+_searching = False
 
 
 def data_dir():
@@ -77,7 +82,8 @@ def _is_root(path):
 
 
 def find_root(refresh=False):
-    """The install folder, or None. Found once; a miss is looked for again after ROOT_RECHECK s."""
+    """The install folder, or None, searching here if it has not been (or `refresh`). The packet path uses
+    current_root() instead, which never searches on its thread."""
     global _root, _root_at
     now = time.monotonic()
     if not refresh and _root_at is not None and (_root is not None or now - _root_at < ROOT_RECHECK):
@@ -87,13 +93,34 @@ def find_root(refresh=False):
     candidates = [os.environ.get(ENV)]
     for pattern in CANDIDATES:
         candidates += sorted(glob.glob(os.path.expanduser(pattern)))
-    candidates += _lutris_roots()
+    candidates += _lutris_roots() + _steam_roots()
     for path in candidates:
         if _is_root(path):
             found = path
             break
     _root = found
     return _root
+
+
+def _steam_roots():
+    """The folders of Steam non-Steam shortcuts that point at Richard Burns Rally: shortcuts.vdf is binary, its strings
+    (Exe, StartDir, quoted) are NUL-ended; a path with the game's name in it is the exe, its folder the install."""
+    found, files = [], 0
+    for pattern in STEAM_SHORTCUTS:
+        for path in sorted(glob.glob(os.path.expanduser(pattern))):
+            if files >= SHORTCUTS_MAX[0]:
+                return found
+            files += 1
+            try:
+                with open(path, 'rb') as f:
+                    data = f.read(SHORTCUTS_MAX[1])
+            except OSError:
+                continue
+            for match in re.finditer(rb'[^\x00\x01\x02"]*richardburnsrally[^\x00"]*', data, re.I):
+                text = match.group(0).decode('utf-8', 'replace').strip()
+                if text.startswith('/'):
+                    found.append(os.path.dirname(text) if os.path.splitext(text)[1] else text)
+    return found
 
 
 def _lutris_roots():
@@ -113,10 +140,34 @@ def _lutris_roots():
     return found
 
 
+def current_root(retry=False):
+    """The install found so far, without searching on the caller's thread (the packet path asks): the search runs on
+    a thread of its own when none has run yet, or, with `retry` (a run starting), when the last one found nothing
+    ROOT_RECHECK s ago. Until it has finished the answer is None."""
+    global _searching
+    now = time.monotonic()
+    due = _root_at is None or (retry and _root is None and now - _root_at >= ROOT_RECHECK)
+    if due and not _searching:
+        if ASYNC:
+            _searching = True
+
+            def search():
+                global _searching
+                try:
+                    find_root(refresh=True)
+                finally:
+                    _searching = False
+            threading.Thread(target=search, name='rbr-install', daemon=True).start()
+        else:
+            find_root(refresh=True)
+    return _root
+
+
 def forget():
     """Look for the install again at the next call (tests; a changed setting)."""
-    global _root, _root_at, _cars
+    global _root, _root_at, _cars, _searching
     _root = _root_at = _cars = None
+    _searching = False
     _slot_cache.clear()
 
 
@@ -305,13 +356,11 @@ def car_in_slot(slot=SLOT, root=None):
     UNKNOWN_CAR where the slot has no RSFCarID), 'name', 'id', 'drivetrain', 'gears'} (the last two where
     cars_data.json has them). Cars.ini is looked at again at most every CAR_RECHECK s, and read again only when it
     changed: RSF writes it when a stage loads."""
-    if recorded is not None:
-        return dict({'drivetrain': None, 'gears': None}, **recorded)
     now = time.monotonic()
     cached = _slot_cache.get(slot)
     if cached is not None and now - cached[0] < CAR_RECHECK:
         return cached[2]
-    root = root or find_root()
+    root = root or current_root()
     path = resolve(root, 'Cars/Cars.ini') if root else None
     try:
         st = os.stat(path) if path else None

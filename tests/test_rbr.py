@@ -21,6 +21,7 @@ ngp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ngp)
 
 K = 273.15
+STEAM_SHORTCUTS, LUTRIS_GAMES = rbr_install.STEAM_SHORTCUTS, rbr_install.LUTRIS_GAMES      # (conftest empties them)
 
 
 def packet(**over):
@@ -261,6 +262,7 @@ def test_lutris_says_where_the_game_is(tmp_path, monkeypatch, install):
         'game:\n  exe: %s\n  prefix: /x\n' % (install / 'RichardBurnsRally_SSE.exe'))
     (home / '.config' / 'lutris' / 'games' / 'other.yml').write_text('game:\n  exe: /games/other/other.exe\n')
     monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setattr(rbr_install, 'LUTRIS_GAMES', LUTRIS_GAMES)
     monkeypatch.delenv(rbr_install.ENV, raising=False)
     rbr_install.forget()
     assert rbr_install.find_root() == str(install)
@@ -791,7 +793,6 @@ def test_a_replay_names_the_car_the_header_recorded(install, tmp_path):
         keys.append(learner.car.key)
         learner.close()
     assert keys == ['rbr/91', 'rbr/5']
-    assert rbr_install.recorded is None                                      # not left behind for the live listener
 
 
 def test_the_fallback_rename_touches_rbr_stages_only(tmp_path):
@@ -811,3 +812,66 @@ def test_refreshing_the_local_table_swaps_it_in_whole(install):
     assert stage_tables.refresh_local(now=5e9) is True
     after = stage_tables.tables()
     assert 'rbr' in tables and tables['rbr'] is before and after is not tables      # nothing a reader held changed
+
+
+def shortcuts_vdf(*entries):
+    """A Steam shortcuts.vdf as Steam writes it: nested NUL-ended keys, 0x01 string values, 0x02 ints, 0x08 closers."""
+    out = b'\x00shortcuts\x00'
+    for i, (name, exe, start) in enumerate(entries):
+        out += b'\x00%d\x00' % i
+        out += b'\x02appid\x00\x01\x02\x03\x04'
+        out += b'\x01AppName\x00' + name.encode() + b'\x00'
+        out += b'\x01Exe\x00"' + exe.encode() + b'"\x00'
+        out += b'\x01StartDir\x00"' + start.encode() + b'"\x00'
+        out += b'\x08'
+    return out + b'\x08\x08'
+
+
+def test_a_steam_shortcut_to_the_game_finds_it(tmp_path, monkeypatch, install):
+    home = tmp_path / 'home'
+    config = home / '.local' / 'share' / 'Steam' / 'userdata' / '1234' / 'config'
+    config.mkdir(parents=True)
+    (config / 'shortcuts.vdf').write_bytes(shortcuts_vdf(
+        ('Other', '/games/other/other.exe', '/games/other/'),
+        ('RBR', str(install / 'RichardBurnsRally_SSE.exe'), str(install) + '/')))
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setattr(rbr_install, 'STEAM_SHORTCUTS', STEAM_SHORTCUTS)
+    monkeypatch.delenv(rbr_install.ENV, raising=False)
+    rbr_install.forget()
+    assert rbr_install._steam_roots() == [str(install)]
+    assert rbr_install.find_root() == str(install)
+    # nothing about the game in it, or a file that is no vdf at all
+    (config / 'shortcuts.vdf').write_bytes(shortcuts_vdf(('Other', '/games/other/other.exe', '/games/other/')))
+    assert rbr_install._steam_roots() == []
+    (config / 'shortcuts.vdf').write_bytes(b'\xff' * 5000)
+    assert rbr_install._steam_roots() == []
+
+
+def test_the_packet_path_never_searches_and_a_miss_is_not_searched_again(monkeypatch):
+    import threading
+    calls = []
+    monkeypatch.setattr(rbr_install, 'ASYNC', True)
+    done = threading.Event()
+
+    def fake(refresh=False):
+        calls.append(threading.current_thread().name)
+        rbr_install._root_at = 1.0
+        done.set()
+    monkeypatch.setattr(rbr_install, 'find_root', fake)
+    monkeypatch.setattr(rbr_install, 'CAR_RECHECK', 0.0)
+    rbr_install.forget()
+    for _ in range(200):
+        assert rbr_install.car_in_slot() is None                       # no install, every packet
+    done.wait(2.0)
+    import time
+    time.sleep(0.05)
+    assert calls == ['rbr-install']                                    # once, on its own thread, not on ours
+    rbr_install._root_at = time.monotonic()
+    rbr_install.current_root()
+    rbr_install.current_root(retry=True)                               # a run starting, but only just searched
+    time.sleep(0.05)
+    assert len(calls) == 1
+    rbr_install._root_at = time.monotonic() - 3 * rbr_install.ROOT_RECHECK
+    rbr_install.current_root(retry=True)                               # a run starting, long after the last miss
+    time.sleep(0.2)
+    assert len(calls) == 2

@@ -263,7 +263,7 @@ class Telemetry:
     the lock."""
 
     def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None,
-                 launch=False, inputs=None, on_limiter=None, learner=None, use_learnt=False):
+                 launch=False, inputs=None, on_limiter=None, learner=None, use_learnt=False, rbr_car=None):
         """`port` is a UDP port, or AUTO.
         `shift` is the shift point as a fraction of the game's max RPM;
         `shift_rpm`, when given, is an absolute shift point instead. With
@@ -294,6 +294,7 @@ class Telemetry:
         self.on_limiter = on_limiter
         self.learner = learner
         self.use_learnt = use_learnt
+        self.rbr_car = rbr_car            # a replay: the Richard Burns Rally car the capture's header recorded (never set live)
         self.recorder = None              # a telemetry_capture.Recorder while "Record raw telemetry" is on
         self.live = None                  # the last Sample, for the GUI
         self.using_learnt = None          # the learnt shift point in use, or None
@@ -773,7 +774,7 @@ class Telemetry:
                     and now - self._released[1] < LOCK_SILENCE:
                 self._drop(port, data)                  # the last port may only be pausing
                 return
-        sample = decode_sample(data)
+        sample = decode_sample(data) if self.rbr_car is None else decode_sample(data, self.rbr_car)
         if sample is None:
             if len(data) not in self._unknown_sizes:
                 self._unknown_sizes.add(len(data))

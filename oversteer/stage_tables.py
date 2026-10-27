@@ -185,7 +185,7 @@ def refresh_local(now=None):
         return False
     _local['checked'] = now
     try:
-        root = rbr_install.find_root()
+        root = rbr_install.current_root(retry=True)         # (a search is a thread's, not ours)
         current = rbr_install.stage_fingerprint(root) if root else None
         if current == _local['print']:
             return False

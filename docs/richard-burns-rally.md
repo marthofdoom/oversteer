@@ -330,7 +330,7 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
   depend on the tyre radius; the shift learner already learns them per gear), against ratios from the physics packs'
   `common.lsp`. Only the 9 packs installed locally have them, not RSF's 103 cars.
 - **The optional install**: `rbr_install.find_root()` looks, with no setting, in the usual Lutris (including the game path
-  in Lutris' game files), Bottles, Heroic, Steam (Proton prefixes) and Wine places. When found it adds the exact car and
+  in Lutris' game files), Bottles, Heroic, Steam (Proton prefixes, and the exe/StartDir of non-Steam shortcuts in `userdata/*/config/shortcuts.vdf`, read-only, at most 20 files of 1 MB) and Wine places. The search runs once on a thread of its own and again, the same way, only when an RBR run starts and the last one found nothing (30 s apart at most); the packet path never searches. When found it adds the exact car and
   the install's own stage list over the shipped one (custom stages), cached in `<data>/oversteer/rbr/stages.json` and read
   again when the install's stage files change (checked at each run's start, at most every 30 s). A sandbox that cannot see
   the install (the Flatpak) just finds none and uses the shipped names. `OVERSTEER_RBR_DIR` points the finder at an

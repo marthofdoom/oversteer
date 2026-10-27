@@ -18,6 +18,9 @@ def _no_real_rbr_install(monkeypatch):
     about it point OVERSTEER_RBR_DIR at a folder of their own."""
     monkeypatch.delenv(rbr_install.ENV, raising=False)
     monkeypatch.setattr(rbr_install, 'CANDIDATES', ())
+    monkeypatch.setattr(rbr_install, 'STEAM_SHORTCUTS', ())
+    monkeypatch.setattr(rbr_install, 'LUTRIS_GAMES', ())
+    monkeypatch.setattr(rbr_install, 'ASYNC', False)          # (a search on a thread of its own is tested as such)
     rbr_install.forget()
     yield
     rbr_install.forget()
