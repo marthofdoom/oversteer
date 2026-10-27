@@ -3,26 +3,41 @@
 ## Unreleased
 
 ### Telemetry
-- **Richard Burns Rally (RallySimFans, NGP plugin) telemetry, first cut, built from the research in
-  `docs/richard-burns-rally.md` and checked against marth's captures (one real finish so far).** The 664-byte packet is decoded
-  (Auto and the port drop-down now also listen on 6776, the usual NGP port; a game that sends to 5310 works
-  as well): pedals, steering, gear, rpm, speed, position and attitude, velocities and accelerations,
-  per-wheel suspension, forces, tyre temperatures (surface, carcass, tread, 8 segments), pressures and wear,
-  brake temperatures and wear, engine temperatures. A run starts when the car moves, ends unfinished when the
-  stage is loaded again (the step counter goes back), and finishes when the stage clock stops at the line
-  (the result is the game's own time, penalties included). A pause or the results page starts no run.
-  Stages are named from a shipped table of RSF's stage list (id, name, length, surface, country; no setup of any kind),
-  and from the player's own install too where Oversteer finds one by itself (the usual Lutris, Bottles, Heroic, Steam
-  and Wine places), which also names the car exactly. The packets cannot name the car (the two cars captured are
-  identical in mass, balance, idle, redline and gears), so without an install the car is the shared "RBR car": runs and
-  PBs are kept, nothing is learnt per car. A stage no table has is "RBR stage <id>", renamed once a table knows it. The coach treats the speed and steering signals as unchecked
-  until a capture settles them.
-- RBR: the run tracker and the shift learner use 60 Hz rows and a steps-based clock, a run cannot start after a finish
-  whatever the pause, the finish at the line needs no speed, a stored "RBR stage <id>" is renamed once the install lists
-  the stage, and capture headers record the car (`rbr_car`).
-- **RBR captures are saved at 60 Hz** (the packets come at 720 a second; the live view and the coach use every
-  packet): the recorder keeps one packet in 12 and every packet where the run's lifecycle changes (steps going
-  back, the clock starting or stopping, a new stage, the first and last packet). The capture format is unchanged.
+- **Richard Burns Rally (RallySimFans, NGP plugin) telemetry.** The 664-byte packet is decoded: pedals, steering,
+  gear, rpm, speed, position and attitude, velocities and accelerations, per-wheel suspension, forces, tyre
+  temperatures (surface, carcass, tread, 8 segments), pressures and wear, brake temperatures and wear, engine
+  temperatures. Auto and the port drop-down listen on 6776, the usual NGP port (RSF's launcher sends there from its
+  Telemetry page); a game that sends to 5310 works as well. A run starts when the car moves and the stage clock runs,
+  ends unfinished when the stage is loaded again, and finishes when the stage clock stops at the line (the result is
+  the game's own time, penalties included). A pause or the results page starts no run. Stages are named from a shipped
+  table of RSF's stage list, with no setup. The steering sign and the other signs (sway, yaw rate, roll, pitch,
+  heading) were checked against the G29's axis and the positions on a real session; the coach still treats the
+  speed channel as unchecked, so there is no launch, spin or stall coaching and no speed-drop reading yet.
+- RBR finds the install by itself (Steam shortcuts, Lutris, Bottles, Heroic, Wine prefixes) when the app can see
+  it, and then names the car and any stage the table lacks exactly. Otherwise the car shows as "RBR car" and
+  nothing is learnt per car; runs and PBs are still kept. A stage no table has is "RBR stage <id>", renamed once a
+  table knows it. RBR captures are saved at 60 Hz (the packets come at 720 a second; the live view and the coach
+  use every packet) and record the car. Captures recorded before 0.16 do not become runs.
+- **DiRT Rally 2.0:** the stage plan is no longer mirrored, the stage is matched by the length the game sends, and
+  cars have their real names.
+
+### Coaching and timing
+- **Steering is shown as "% lock"** (the share of the car's own lock) on a square-root scale in the live, Run and
+  web strips, so the small angles rally driving lives in are readable and two runs compare.
+- **Counter-steer** is judged against the car's yaw a moment later, not at the same instant: 0.3 s in Assetto Corsa
+  Rally, 0.6 s in DiRT Rally, 0.4 s in Richard Burns Rally. Unwinding the wheel no longer counts as counter-steering.
+
+### Stored data
+- **One-off repair of the stored data on the first start of 0.16.** Oversteer backs up the database first
+  (`telemetry.db.pre-0.16-...bak`, kept), removes phantom DiRT runs, moves DiRT runs to their stage under the new
+  length match, gives DiRT cars their real names, and works every stored run over again in the background (the
+  coach and the pages fill in as it goes). PB runs keep their place meanwhile and are never deleted or pruned.
+- **`oversteer --retime-from-captures`** (Flatpak: `flatpak run io.github.berarma.Oversteer --retime-from-captures`)
+  re-times the stored runs from the captures with the current finish rules (a stored trace does not hold the finish
+  exactly); `--retime-dry-run` only says what would change, and on its own it is a dry run. It backs the database
+  up first and needs Oversteer closed. After updating: (1) start Oversteer once and let the repair finish;
+  (2) close it and run `--retime-dry-run`, then `--retime-from-captures`; (3) start Oversteer again, which works
+  the re-timed runs over.
 
 ## 0.15.5 — 2026-10-26
 

@@ -736,9 +736,11 @@ function drawStrips() {
       g.save(); g.globalAlpha = .35;
       for (const f of STEER_GRID) for (const s of [f, -f]) { g.beginPath(); g.moveTo(GUT, Y(s)); g.lineTo(GUT + W, Y(s)); g.stroke(); }
       g.restore();
-      g.fillStyle = css("--faint"); g.font = "8.5px " + css("--mono"); g.fillText("% lock", 4, top + 23); g.font = "9.5px " + css("--mono"); g.fillText("L", GUT + 3, top + 10); g.fillText("R", GUT + 3, bot - 3);
+      g.fillStyle = css("--faint"); g.font = "8.5px " + css("--mono"); g.fillText("% lock", 2, top + 23); g.font = "9.5px " + css("--mono"); g.fillText("L", GUT + 3, top + 10); g.fillText("R", GUT + 3, bot - 3);
+      g.save(); g.beginPath(); g.rect(GUT, top, W, bot - top); g.clip();   // the trace stays out of the gutter, clear of the "% lock" caption
       refLine((r, d) => Y(r.steer[d]), css("--ref"), 1, .8);
       line(g, series(LAST, (r, d) => Y(r.steer[d])), css("--steer"), 1.75);
+      g.restore();
     } else if (st.key === "gear") {
       const Y = (v) => bot - 4 - (Math.max(1, v) - 1) / Math.max(1, CAR.gears - 1) * (H - 8);
       const stepPts = (run) => { const p = []; let prev = null; for (let d = Math.floor(a); d <= Math.min(L, z); d += step) { const yy = Y(run.gear[d]); if (prev !== null && yy !== prev) p.push([X(d), prev]); p.push([X(d), yy]); prev = yy; } return p; };

@@ -367,7 +367,8 @@ def migrate(store):
                  potentials, envelopes, len(order))
     for run, stage, result, why in suspects:
         logging.warning("data repair: run %s on %s keeps its time %s (%s): run 'oversteer --retime-from-captures' "
-                        "with Oversteer closed to take it from the capture", run, stage,
+                        "(Flatpak: 'flatpak run io.github.berarma.Oversteer --retime-from-captures') with Oversteer closed "
+                        "to take it from the capture", run, stage,
                         'none' if result is None else '{:.3f} s'.format(result), why)
     return summary
 

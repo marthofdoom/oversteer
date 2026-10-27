@@ -971,11 +971,14 @@ def spread(sections, others):
 BRAKE_DELTA = 10.0               # m: a braking point further than this from the reference's is earlier or later (calibrate)
 SPEED_DELTA = 3.0 / 3.6          # m/s (3 km/h): a speed this far from the reference's is lower or higher (calibrate)
 THROTTLE_DELTA = 0.2             # s: the throttle this much later than the reference's (calibrate)
-STEER_LAG_S = {'acr': 0.3, 'dirt': 0.6}     # s the yaw follows the wheel, per game; the steer is read this long before the yaw.
+STEER_LAG_S = {'acr': 0.3, 'dirt': 0.6, 'rbr': 0.4}   # s the yaw follows the wheel, per game; the steer is read this long before the yaw.
                                              # ACR measured on marth's captures (steer_kinematics.py): best steer-to-curvature lag
                                              # 0.15-0.31 s (Fabia 0.27-0.31, i20N 0.15-0.28, 208 0.15-0.21); at 0 s the wheel
                                              # unwinding counts as counter-steer. DiRT's yaw is worked out from positions (a
-                                             # 3-point stencil, one row late): its best lag is 0.6-0.7 s once un-mirrored
+                                             # 3-point stencil, one row late): its best lag is 0.6-0.7 s once un-mirrored.
+                                             # RBR measured on marth's 2026-10-26 captures (research/issue-hunt/counter_lag.py,
+                                             # two runs, 52 corners): corners at >= 20 % counter-steer 7 at 0 s, 2 at 0.3 s,
+                                             # 0 at 0.4 s, 11 at 0.5 s and 43 at 1 s, the same minimum in each run
 STEER_LAG_DEFAULT = 0.3
 
 
