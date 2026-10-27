@@ -1,0 +1,379 @@
+"""Richard Burns Rally cars told apart by their gearing (oversteer/rbr_fingerprint.py): the comparison, the shipped
+table, candidate sets, the library of cars met before (its file), epochs and the provisional car, and the shift
+learner re-keying a session and run once the car is known. Packets are synthetic (tests/test_rbr.packet)."""
+import json
+import os
+import sqlite3
+
+import pytest
+
+from oversteer import car_data, rbr_fingerprint as fp
+from oversteer.shift_learner import ShiftLearner
+from oversteer.telemetry import Telemetry
+from oversteer.telemetry_formats import decode_sample
+from tests.test_rbr import packet
+from tests.test_telemetry import FakeLeds
+
+WRC = [3.0, 2.3846, 1.9286, 1.5789, 1.3182, 1.12]            # the Fiesta WRC 2019's and the i20 WRC 2021's gears
+OTHER = [3.3333, 2.2857, 1.6875, 1.3125, 1.0625]             # the Fabia Rally2's (gravel)
+SCALE = 4.375 * 60 / (2 * 3.14159265 * 0.315)                # rpm per m/s per unit of gear ratio (drop gear 35/8)
+TORQUE = [[1000, 260.0], [5500, 450.0], [8500, 290.0]]
+
+
+def entry(name, gears, limiter=8500, torque=TORQUE, screen=None):
+    return {'name': name, 'screen_name': screen or 'Car ' + name, 'game': 'rbr', 'limiter_rpm': limiter,
+            'torque_curve': [tuple(p) for p in torque], 'final_drive': 4.375, 'tyre_radius_m': {'gravel': [0.315] * 2},
+            'gear_sets': [{'id': 'gravel', 'gears': list(gears), 'primary': 1.0, 'default': True}]}
+
+
+@pytest.fixture
+def table():
+    """A shipped table of our own: set() it to {key: entry}."""
+    class Table:
+        def set(self, cars):
+            car_data.set_cars(dict(cars))
+    yield Table()
+    car_data.set_cars(None)
+
+
+class Drive:
+    """Packets of a car driving through some gears: its steps advance 12 a packet (60 a second)."""
+
+    def __init__(self, gears=WRC, scale=SCALE, slot=6, stage=81, steps=2000):
+        self.gears, self.scale, self.slot, self.stage, self.steps = gears, scale, slot, stage, steps
+        self.t = 100.0            # arrival time
+        self.d = 10.0
+        self.clock0 = None
+
+    def packet(self, gear, speed, rpm=None, clutch=0.0, wheels=None):
+        """(arrival time, packet)"""
+        self.steps += 12
+        self.t += 12 / 720.0
+        if self.clock0 is None:
+            self.clock0 = self.steps
+        self.d += speed * 12 / 720.0
+        rpm = rpm if rpm is not None else (self.gears[gear - 1] * self.scale * (wheels or speed) if gear >= 1 else 1000.0)
+        return self.t, packet(**{'totalSteps': self.steps, 'stage.index': self.stage, 'car.index': self.slot,
+                         'control.gear': gear + 1, 'control.clutch': clutch, 'control.throttle': 0.3,
+                         'car.speed': (wheels or speed) * 3.6, 'car.velocities.surge': speed, 'car.engine.rpm': rpm,
+                         'stage.raceTime': (self.steps - self.clock0) / 720.0, 'stage.driveLineLocation': self.d,
+                         'stage.distanceToEnd': 5000.0 - self.d, 'car.positionX': self.d})
+
+    def through(self, gears, seconds=1.0, rpm=5000.0):
+        """Packets: `seconds` in each of `gears` at `rpm` (with a moment after each change, which is not counted)."""
+        out = []
+        for gear in gears:
+            speed = rpm / (self.gears[gear - 1] * self.scale)
+            for _ in range(int(seconds * 60)):
+                out.append(self.packet(gear, speed))
+        return out
+
+    def load(self, stage=None, slot=None, gap=0.0):
+        """A stage loaded again (or another one, or another car slot) after `gap` s of silence."""
+        self.steps = 100
+        self.t += gap
+        self.clock0 = None
+        self.d = 10.0
+        if stage is not None:
+            self.stage = stage
+        if slot is not None:
+            self.slot = slot
+
+
+def identify(rec, drive, packets):
+    """Each packet through the recogniser; the last sample and every event."""
+    events, sample = [], None
+    for t, data in packets:
+        sample = decode_sample(data)
+        events += rec.identify(t, sample)
+    return sample, events
+
+
+# -- the comparison --
+
+def test_compare_scales_out_the_drop_gear_and_needs_three_gears():
+    ref = {g + 1: r for g, r in enumerate(WRC)}
+    est = {g: ref[g] * SCALE * 0.914 for g in (2, 3, 4)}           # a setup's drop gear option: every gear alike
+    assert fp.compare(ref, est)[0] == 'match'
+    assert fp.compare(ref, {g: est[g] for g in (2, 3)})[0] is None        # two gears: one step, wait
+    est[3] *= 1.015
+    assert fp.compare(ref, est)[0] is None                               # between the tolerance and a miss: wait
+    est[3] *= 1.02
+    assert fp.compare(ref, est)[0] == 'miss'
+    fabia = {g + 1: r for g, r in enumerate(OTHER)}
+    assert fp.compare(fabia, {g: ref[g] for g in (1, 2, 3)})[0] == 'miss'
+
+
+# -- the shipped table --
+
+def test_one_shipped_car_whose_gearing_fits_is_that_car_after_a_few_gears(table):
+    table.set({'rbr/11': entry('11', WRC, screen='Ford Fiesta WRC 2019'), 'rbr/106': entry('106', OTHER, 7500)})
+    rec, drive = fp.Recogniser(fp.Library()), Drive()
+    sample, _ = identify(rec, drive, drive.through([2, 3], 1.0))
+    assert sample.car == 'rbr/unknown' and sample.car_epoch == 1 and not sample.car_provisional
+    sample, events = identify(rec, drive, drive.through([4], 1.0))
+    assert sample.car == 'rbr/11' and sample.car_name == 'Ford Fiesta WRC 2019'
+    assert rec.fp.distance < 200.0
+    assert events == []                                                 # a car the table names needs no library entry
+
+
+def test_a_gearbox_the_wheels_spin_or_the_clutch_slips_in_is_read_from_the_wheels(table):
+    table.set({'rbr/11': entry('11', WRC)})
+    rec, drive = fp.Recogniser(fp.Library()), Drive()
+    packets = []
+    for gear in (2, 3, 4):
+        speed = 5000.0 / (WRC[gear - 1] * SCALE)
+        packets += [drive.packet(gear, speed * 0.9, wheels=speed) for _ in range(60)]          # sliding: the ground lags
+        packets += [drive.packet(gear, speed, rpm=9000.0, clutch=1.0) for _ in range(60)]     # clutch down: not counted
+    sample, _ = identify(rec, drive, packets)
+    assert sample.car == 'rbr/11'
+
+
+def test_cars_one_gearbox_fits_are_a_candidate_set_with_their_shared_data(table):
+    table.set({'rbr/11': entry('11', WRC, screen='Ford Fiesta WRC 2019'),
+               'rbr/104': entry('104', WRC, screen='Hyundai i20 Coupe WRC 2021')})
+    rec, drive = fp.Recogniser(fp.Library(writable=True)), Drive(slot=6)
+    sample, events = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11+104@6'
+    assert sample.car_name == 'Ford Fiesta WRC 2019 / Hyundai i20 Coupe WRC 2021 (car slot 6)'
+    assert car_data.entry('rbr/11+104@6')['limiter_rpm'] == 8500           # the lights' limiter, the best changes up
+    assert [e[0] for e in events] == ['save'] and events[0][1]['cars'][0]['kind'] == 'set'
+    other = fp.Recogniser(fp.Library())
+    sample, _ = identify(other, Drive(slot=5), Drive(slot=5).through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11+104@5'                                    # the other slot: another car
+
+
+def test_candidates_whose_data_differ_share_none(table):
+    table.set({'rbr/1': entry('1', WRC), 'rbr/2': entry('2', WRC, torque=[[1000, 200.0], [8500, 300.0]])})
+    assert car_data.entry('rbr/1+2@5') is None
+    table.set({'rbr/1': entry('1', WRC), 'rbr/2': entry('2', WRC, limiter=8000)})
+    assert car_data.entry('rbr/1+2@5') is None
+    assert car_data.entry('rbr/1+3@5') is None                              # one of them not in the table
+
+
+def test_a_car_revving_past_a_shipped_cars_limiter_is_not_it(table):
+    table.set({'rbr/11': entry('11', WRC, limiter=7000)})
+    rec, drive = fp.Recogniser(fp.Library()), Drive()
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4, 5], 1.0, rpm=8000.0))
+    assert sample.car == 'rbr/g1'
+
+
+# -- the library --
+
+def test_a_car_the_table_does_not_know_keeps_its_key_across_sessions(table, tmp_path):
+    table.set({'rbr/106': entry('106', OTHER, 7500)})
+    path = str(tmp_path / 'lib' / 'cars.json')
+    library = fp.Library(path, writable=True)
+    rec, drive = fp.Recogniser(library), Drive(slot=6)
+    sample, events = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/unknown'                                     # three gears: waits for a fourth to mint
+    sample, events = identify(rec, drive, drive.through([5], 1.0))
+    assert sample.car == 'rbr/g1' and sample.car_name == 'RBR car #1 (5 gears)'
+    assert library.write(events[-1][1]) and not os.path.exists(path + '.tmp')
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+    assert data['version'] == fp.VERSION and data['last'] == {'key': 'rbr/g1', 'slot': 6}
+    [car] = data['cars']
+    assert car['key'] == 'rbr/g1' and car['kind'] == 'local' and car['slot'] == 6 and car['n'] == 1
+    assert sorted(car['gears']) == ['2', '3', '4', '5'] and car['gears']['3'] == pytest.approx(WRC[2] * SCALE, rel=1e-3)
+
+    # The next session (the app started again): the same car, another drop gear option, gears 3 to 6, slot 6
+    rec = fp.Recogniser(fp.Library(path))
+    drive = Drive(slot=6, scale=SCALE * 0.914)
+    sample, _ = identify(rec, drive, drive.through([3], 0.2))
+    assert sample.car == 'rbr/g1' and sample.car_provisional                # the last car, carried over
+    sample, events = identify(rec, drive, drive.through([3, 4, 5, 6], 1.0))
+    assert sample.car == 'rbr/g1' and not sample.car_provisional
+    rec.close()
+    assert rec.library.entry('rbr/g1')['name'] == 'RBR car #1 (6 gears)' and rec.library.entry('rbr/g1')['epochs'] == 2
+    assert rec.library.entry('rbr/g1')['gears'][6] == pytest.approx(WRC[5] * SCALE, rel=1e-3)   # scaled to the first
+
+    # Another gearbox, and the same one in another slot: two more cars
+    for gears, slot, key in (([3.5, 2.6, 2.0, 1.6, 1.3], 6, 'rbr/g2'), (WRC, 5, 'rbr/g3')):
+        rec.library.last = None
+        drive = Drive(gears=gears, slot=slot)
+        sample, _ = identify(fp.Recogniser(rec.library), drive, drive.through([1, 2, 3, 4], 1.0))
+        assert sample.car == key
+
+
+def test_a_library_of_another_version_or_broken_is_not_used(tmp_path):
+    path = tmp_path / 'cars.json'
+    path.write_text(json.dumps({'version': 99, 'cars': [{'key': 'rbr/g1', 'slot': 5, 'gears': {'1': 1}}]}))
+    assert fp.Library(str(path)).load().cars == []
+    path.write_text('{not json')
+    assert fp.Library(str(path)).load().cars == []
+    path.write_text(json.dumps({'version': 1, 'cars': [{'key': 'rbr/g1'}, {'key': 'rbr/g2', 'slot': 5,
+                                                                             'gears': {'2': 300.0}}]}))
+    assert [e['key'] for e in fp.Library(str(path)).load().cars] == ['rbr/g2']
+
+
+def test_the_installs_car_is_recorded_so_its_slot_is_known_without_it(table, tmp_path):
+    table.set({})
+    library = fp.Library(str(tmp_path / 'cars.json'), writable=True)
+    rec, drive = fp.Recogniser(library), Drive(slot=5)
+    for t, data in drive.through([2, 3, 4], 1.0):
+        s = decode_sample(data)
+        s.car, s.car_name = 'rbr/11', 'Ford Fiesta WRC 2019'              # as the install's Cars.ini names it
+        rec.identify(t, s)
+        assert s.car == 'rbr/11'
+    entry = library.entry('rbr/11')
+    assert entry['kind'] == 'install' and entry['slot'] == 5 and len(entry['gears']) == 3
+    rec = fp.Recogniser(library)
+    drive = Drive(slot=5)
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11' and sample.car_name == 'Ford Fiesta WRC 2019'
+
+
+def test_a_car_of_ours_the_table_later_names_is_adopted(table, tmp_path):
+    table.set({})
+    library = fp.Library(str(tmp_path / 'cars.json'))
+    rec, drive = fp.Recogniser(library), Drive(slot=6)
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4, 5], 1.0))
+    assert sample.car == 'rbr/g1'
+    table.set({'rbr/104': entry('104', WRC, screen='Hyundai i20 Coupe WRC 2021')})
+    rec = fp.Recogniser(library)
+    drive = Drive(slot=6)
+    sample, events = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/104' and ('adopt', 'rbr/g1', 'rbr/104') in events
+
+
+# -- epochs and the provisional car --
+
+def test_a_restart_keeps_the_car_and_a_trip_to_the_menus_makes_it_provisional(table):
+    table.set({'rbr/11': entry('11', WRC), 'rbr/106': entry('106', OTHER, 7500)})
+    rec, drive = fp.Recogniser(fp.Library()), Drive(slot=6)
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11' and sample.car_epoch == 1
+    drive.load(gap=15.0)                                                   # a restart from the pause menu
+    sample, _ = identify(rec, drive, drive.through([1], 1.5))
+    assert sample.car == 'rbr/11' and sample.car_epoch == 1 and not sample.car_provisional
+    drive.load(gap=fp.MENU_GAP + 1)                                        # the menus: the car may have changed
+    sample, _ = identify(rec, drive, drive.through([1], 0.2))
+    assert sample.car == 'rbr/11' and sample.car_epoch == 2 and sample.car_provisional
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11' and not sample.car_provisional           # confirmed
+    drive.load(stage=90)                                                   # another stage, in another car
+    drive.gears = OTHER
+    sample, _ = identify(rec, drive, drive.through([1], 0.2))
+    assert sample.car == 'rbr/11' and sample.car_epoch == 3 and sample.car_provisional
+    sample, _ = identify(rec, drive, drive.through([1, 2, 3], 1.0))
+    assert sample.car == 'rbr/106' and sample.car_epoch == 3 and not sample.car_provisional    # corrected
+    drive.load(slot=2)                                                     # another slot: another car for certain
+    sample, _ = identify(rec, drive, drive.through([1], 0.2))
+    assert sample.car == 'rbr/unknown' and sample.car_epoch == 4 and not sample.car_provisional
+
+
+# -- the shift learner: re-keying, nothing learnt under a car not known --
+
+def learner_drive(tmp_path, name='t.db'):
+    learner = ShiftLearner(str(tmp_path / name))
+    learner.rbr_cars.library.writable = True                               # as the app
+    telemetry = Telemetry(FakeLeds(), learner=learner)
+    return learner, telemetry
+
+
+def feed(telemetry, drive, packets):
+    for t, data in packets:
+        telemetry.handle(t, data, ('127.0.0.1', 0))
+
+
+def runs_by_car(path):
+    db = sqlite3.connect(path)
+    try:
+        return db.execute('SELECT c.key, COUNT(DISTINCT s.id), COUNT(r.id) FROM sessions s JOIN cars c ON c.id = s.car '
+                          'LEFT JOIN runs r ON r.session = s.id GROUP BY c.key ORDER BY c.key').fetchall()
+    finally:
+        db.close()
+
+
+def test_the_run_started_unknown_is_rekeyed_to_the_car_and_learns_from_then_on(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3], 1.5))
+    assert learner.car.key == 'rbr/unknown' and learner.runs.run is not None and not learner.car.ratios
+    run = learner.runs.run
+    feed(telemetry, drive, drive.through([4, 5, 4], 1.5))
+    assert learner.car.key == 'rbr/11' and learner.runs.run == run         # the same run, under the car now
+    assert learner.runs._summary['car'] == 'rbr/11'
+    assert learner.car.ratios.get(4)                                       # learnt once the car is known
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/11', 1, 1)]       # the unknown car's row is gone
+
+
+def test_nothing_is_learnt_under_a_provisional_car_and_a_correction_moves_the_session(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC), 'rbr/106': entry('106', OTHER, 7500)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/11'
+    learnt = {g: len(v) for g, v in learner.car.ratios.items()}
+    drive.load(stage=90, gap=fp.MENU_GAP + 5)                               # the menus; another car (the Fabia)
+    drive.gears = OTHER
+    feed(telemetry, drive, drive.through([1], 1.0))
+    assert learner.car.key == 'rbr/11' and learner._provisional
+    assert {g: len(v) for g, v in learner.car.ratios.items()} == learnt     # the Fiesta's model untouched
+    feed(telemetry, drive, drive.through([2, 3, 2], 2.5))
+    assert learner.car.key == 'rbr/106' and not learner._provisional
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/106', 1, 1), ('rbr/11', 1, 1)]   # two sessions, one each
+
+
+def test_a_provisional_car_never_confirmed_leaves_its_session_to_the_shared_key(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/11'
+    drive.load(stage=90, gap=fp.MENU_GAP + 5)
+    feed(telemetry, drive, drive.through([1], 12.0))                       # 1st gear only: never confirmed
+    assert learner.car.key == 'rbr/11' and learner._provisional
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/11', 1, 1), ('rbr/unknown', 1, 1)]
+
+
+def test_an_adopted_car_brings_its_sessions_and_model_to_the_tables_key(table, tmp_path):
+    table.set({})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=6)
+    feed(telemetry, drive, drive.through([2, 3, 4, 5, 4], 2.5))
+    assert learner.car.key == 'rbr/g1'
+    learnt = sum(len(v) for v in learner.car.ratios.values())
+    learner.close()
+    table.set({'rbr/104': entry('104', WRC, screen='Hyundai i20 Coupe WRC 2021')})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=6, stage=90)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/104' and sum(len(v) for v in learner.car.ratios.values()) >= learnt
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/104', 2, 2)]
+    db = sqlite3.connect(str(tmp_path / 't.db'))
+    assert db.execute("SELECT name FROM cars WHERE key = 'rbr/104'").fetchone()[0] == 'Hyundai i20 Coupe WRC 2021'
+    db.close()
+
+
+def test_a_replay_reads_the_library_and_never_writes_it(table, tmp_path):
+    from oversteer import telemetry_capture as tc
+    table.set({})
+    drive = Drive(slot=6)
+    packets = [(t - 100.0, ('127.0.0.1', 0), p) for t, p in drive.through([2, 3, 4, 5], 1.5)]
+    learner = ShiftLearner(str(tmp_path / 'a.db'))
+    learner.rbr_cars.library.writable = True                               # as the app: the library is written
+    tc.replay(packets, learner)
+    assert learner.car.key == 'rbr/g1'
+    learner.close()
+    path = fp.library_path()
+    with open(path, encoding='utf-8') as f:
+        written = f.read()
+    for name in ('b.db', 'c.db'):
+        learner = ShiftLearner(str(tmp_path / name))                       # a replay: read-only
+        tc.replay(packets, learner)
+        assert learner.car.key == 'rbr/g1'                                 # the key the live session gave
+        learner.close()
+    with open(path, encoding='utf-8') as f:
+        assert f.read() == written
+    os.remove(path)
+    learner = ShiftLearner(str(tmp_path / 'd.db'))
+    tc.replay(packets, learner)
+    assert learner.car.key == 'rbr/g1' and not os.path.exists(path)        # minted in memory only
+    learner.close()

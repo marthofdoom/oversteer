@@ -82,6 +82,7 @@ class Gui:
         self.telemetry_status = lambda: None
         from .shift_learner import ShiftLearner
         self.shift_learner = ShiftLearner(threaded=True)
+        self.shift_learner.rbr_cars.library.writable = True     # the app keeps the RBR cars it meets (rbr_fingerprint)
         self.telemetry_car_selected = None      # a saved car picked in the Telemetry tab; None = the live one
         self.telemetry_car_live = None
         self.telemetry_tab_shown = 0            # counts the times the tab was opened: history is re-read then

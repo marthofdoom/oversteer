@@ -198,7 +198,12 @@ class Sample:
       helper_spring (0/1), damper_damage, brake_layer_temp (C), brake_wear,
       tyre_carcass_temp and tyre_tread_temp (C), tyre_seg_temp (C) and
       tyre_seg_wear (8 per wheel, around the tyre), tyre_contact (which of
-      the 8 segments touches the road), ang_accel (roll, pitch, yaw; rad/s^2)."""
+      the 8 segments touches the road), ang_accel (roll, pitch, yaw; rad/s^2),
+      car_slot (car.index, the Cars.ini slot 0..7), wheels_speed (car.speed
+      in m/s: the speed the wheels read, wheelspin included, which with the
+      rpm gives the gearing), and from rbr_fingerprint car_epoch (numbers the
+      stretches in which the car cannot have changed) and car_provisional
+      (the car is the last one's, not confirmed yet: nothing is learnt)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -214,7 +219,8 @@ class Sample:
                  'cylinders', 'laps_done', 'sector', 'split_times',
                  'steps', 'dist_to_end', 'drive_progress', 'radiator_temp', 'block_temp', 'pedal_pressure',
                  'susp_forces', 'helper_spring', 'damper_damage', 'brake_layer_temp', 'brake_wear',
-                 'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel')
+                 'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel',
+                 'car_slot', 'wheels_speed', 'car_epoch', 'car_provisional')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -242,6 +248,8 @@ class Sample:
         self.pedal_pressure = self.susp_forces = self.helper_spring = self.damper_damage = None
         self.brake_layer_temp = self.brake_wear = self.tyre_carcass_temp = self.tyre_tread_temp = None
         self.tyre_seg_temp = self.tyre_seg_wear = self.tyre_contact = self.ang_accel = None
+        self.car_slot = self.wheels_speed = self.car_epoch = None
+        self.car_provisional = False
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -826,6 +834,10 @@ def _rbr(data, n, recorded_car=None):
                     throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake), game='rbr')
     sample.drivetrain = (car or {}).get('drivetrain')
     sample.gears = (car or {}).get('gears')
+    sample.car_slot = slot
+    # car.speed reads the wheels (km/h; mph with the game set so, which scales every gear alike): rpm over it is the
+    # gearing within 0.3 % of the physics files on marth's captures, slides and wheelspin included
+    sample.wheels_speed = abs(speed_raw) / 3.6 if math.isfinite(speed_raw) else None
     sample.handbrake = _finite(handbrake)
     sample.steer = _finite(-steering)            # positive right as sent (it equals the G29's axis, high to the right): negated
     sample.steps = steps

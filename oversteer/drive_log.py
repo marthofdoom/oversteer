@@ -703,6 +703,23 @@ class RunTracker:
         learner.log.post(self._live_reference, self.run, session, sample.game, sample.track, sample.stage_length,
                          self._acr_start)
 
+    def rekey(self, car, gears=None):
+        """The run's car is known now (rbr_fingerprint: told from its gearing after the run began): the summary
+        names it, and the live delta's reference is looked up again for it once the session row is re-keyed
+        (ShiftLearner._write_rekey, posted before)."""
+        if self.run is None:
+            return
+        self._summary['car'] = car
+        if gears:
+            self._summary['gears'] = gears
+        summary = self._summary
+        self.learner.log.post(self._reload_reference, self.run, self._session, summary['game'], summary['track'],
+                              summary['stage_length'], self._acr_start)
+
+    def _reload_reference(self, number, session, game, track, stage_length, start_d):
+        self._live_loaded.discard(number)
+        self._live_reference(number, session, game, track, stage_length, start_d)
+
     def _clock(self, now, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
         stage clock stops at the line while the car rolls on."""
