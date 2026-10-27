@@ -345,18 +345,25 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
   the physics files on the captures, 0.1-0.3 % between gears; the ground-speed vector reads 4-9 % off). The steps
   between the gears (the drop gear and a setup's drop gear option scale every gear alike: 19:18 reads 0.914) are matched,
   once 3 gears have 30 samples each (half a second of driving in each), against: the gearing the install named in that
-  car slot before; the car table (one car fits: `rbr/<id>`; several: the candidate set in that slot, `rbr/11+104@6`,
-  "Ford Fiesta WRC 2019 / Hyundai i20 Coupe WRC 2021 (car slot 6)", with the table's data where all candidates' agree,
-  as the Fiesta's and i20's do: one gear list, drop gear, limiter, torque within 2 %); the cars met before in that slot
-  (`<data>/oversteer/rbr/cars.json`); else a car of its own, `rbr/g<n>`, "RBR car #n (6 gears)", from 4 gears. A car
-  is changed only in the menus: a stage loaded after 30 s of silence, another stage or another slot begins an epoch; the
-  car before carries on as provisional (lights yes, learning no) until its gearing confirms or corrects it, and the
-  session of an epoch is re-keyed when its car becomes known (`ShiftLearner.recognise`). On the captures (no install,
+  car slot before; the car table (one car fits and no RSF car the table lacks gearing for has its gear count and
+  drivetrain: `rbr/<id>`; one fit others could share: `rbr/106@5`, "Skoda Fabia RS Rally2 (by gearing, car slot 5)";
+  several: the candidate set in that slot, `rbr/11+104@6`, "Ford Fiesta WRC 2019 / Hyundai i20 Coupe WRC 2021 (car slot
+  6)"; a set has the table's data where all candidates' agree, as the Fiesta's and i20's do: one gear list, drop gear,
+  limiter, torque within 2 %); the cars met before in that slot (`<data>/oversteer/rbr/cars.json`); else a car of its
+  own, `rbr/g<n>`, "RBR car #n (6 gears)", from 4 gears, numbered past every number the library and the store have. A
+  set or car of ours is adopted (sessions, model, PBs moved) only on the install's word or a lone fit no other car could
+  share. A gear set neither fitting nor missing counts as a miss 1 km into an epoch. A car is changed only in the menus:
+  a stage loaded after 30 s of silence, another stage or another slot begins an epoch; the car before carries on as
+  provisional (lights yes, learning no) until its gearing confirms or corrects it, every session of the epoch is
+  re-keyed when its car becomes known (`ShiftLearner.recognise`), and back to `rbr/unknown` if it never is; a known
+  car's gearing is checked again after each stage load, and a miss (a quicker trip to the menus) begins an epoch. A PB
+  whose run moves keeps its trace (`pb_keep`). On the captures (no install,
   replayed in order): the Fiesta (slot 5) is `rbr/11+104@5` after 118 and 141 m (19:02, 19:04; 18:54 and 18:57 never
   leave 1st gear: unknown), the i20 (slot 6) `rbr/11+104@6` after 82, 45 and 50 m (19:06, 19:14, 19:18, the last on
-  the 0.914 drop gear); the same keys replayed against a read-only library. With the Fiesta alone in the table every
-  capture is `rbr/11` (the i20 too: a car the table lacks that shares a gearbox with one it has is taken for it); with
-  no table the i20 is `rbr/g1` in all three, the Fiesta's three gears are too few for a key of its own.
+  the 0.914 drop gear); the same keys replayed against a read-only library. With the Fiesta alone in the table the
+  slot 5 captures are `rbr/11@5` and the i20's `rbr/11@6` (23 RSF cars without gearing are 6-speed AWD: no lone fit is
+  taken for the car); with no table the i20 is `rbr/g1` in all three, the Fiesta's three gears are too few for a key
+  of its own.
 - **The car table** (`data/telemetry/cars/rbr.json`, built by `research/rbr/car_table.py`): a name for every RSF car id
   (`names`, key `rbr/<RSFCarID>`, 102 cars, with path, year, drivetrain and gear count; `car_data.display_name`, which the
   decoder uses when the install gave the key but no name), and for the cars whose NGP physics the install has held (today

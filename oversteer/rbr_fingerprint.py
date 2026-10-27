@@ -9,27 +9,37 @@ gearbox, read after 40-150 m of driving. With the gear count seen and the highes
 
 1. against what the install named before in this car slot (entries of kind 'install' in the library below);
 2. against the shipped table (data/telemetry/cars/rbr.json, car_data): one car whose gear set fits is that car,
-   `rbr/<RSF id>`. Several cars share a gearbox (the Fiesta WRC 2019 and the i20 WRC 2021: the same gear list, drop
-   gear and limiter), and no signal in the packet tells them apart: none is picked. The run is keyed to the candidate
-   set in that car slot, `rbr/11+104@6` (named 'Ford Fiesta WRC 2019 / Hyundai i20 Coupe WRC 2021'), learnt on its
-   own, with the shipped data where every candidate's agrees (car_data.entry);
+   `rbr/<RSF id>`, only where no RSF car the table has no gearing for could share its gearbox (impostors(): the same
+   gear count and drivetrain in the table's `names`). Several cars share a gearbox (the Fiesta WRC 2019 and the i20 WRC
+   2021: the same gear list, drop gear and limiter), and no signal in the packet tells them apart: none is picked. The
+   run is keyed to the candidate set in that car slot, `rbr/11+104@6` (named 'Ford Fiesta WRC 2019 / Hyundai i20
+   Coupe WRC 2021 (car slot 6)'), or to the one fit that others could share, `rbr/106@5` ('Skoda Fabia RS Rally2 (by
+   gearing, car slot 5)'), learnt on its own, with the shipped data where every candidate's agrees (car_data.entry);
 3. against the cars met before (the library): a car the table has no gearing for gets a key of its own, `rbr/g<n>`,
-   'RBR car #n (6 gears)', the same in every session, matched by tolerance (STEP_TOLERANCE), not by rounding.
+   'RBR car #n (6 gears)', the same in every session, matched by tolerance (STEP_TOLERANCE), not by rounding; its
+   number is past every one the library and the store have (a lost library never hands one out again).
+
+A set or a car of ours that the install, or a lone fit no other car could share, later names is adopted: its
+sessions, model and PBs move to that key (Store.merge_car), once. A gear set that neither fits nor misses counts as
+a miss DECIDED_M into an epoch, so the wait ends. Once a car is known its gearing is checked again every MATCH_EVERY
+s since the stage was last loaded: a miss is another car (a quick trip to the menus), a new epoch.
 
 The library, `<data>/oversteer/rbr/cars.json`, is {"version": 1, "cars": [entry, ...], "last": {"key", "slot"}}; an
 entry is {"key", "kind" ('local', 'set' or 'install'), "slot" (the packet's car.index, 0..7), "gears" ({gear: rpm per
 m/s}, as first measured; later gears are added scaled to them), "top" (highest gear seen), "rpm" (highest rpm seen),
 "name", "n" (local: the number), "first" and "last" (epoch seconds), "epochs" (stretches driven)}. Local and set
-entries are bound to their slot: two cars with one gearbox in two slots stay two cars. It is written whole (a
-temporary file, then a rename) on the drive-log thread, and only by the app: replays read it and never write it, so
-a capture replayed gives the key the live session gave.
+entries are bound to their slot: two cars with one gearbox in two slots stay two cars; "adopted" names the key an
+entry became. It is written whole (a temporary file of its own, synced, then renamed over it) on the drive-log thread,
+and only by the app: replays read it and never write it (nor adopt), so a capture replayed gives the key the live
+session gave. A file that cannot be used is moved aside (`.bad`), never overwritten.
 
 A car can change only in RSF's menus, which stop the packets: a stage loaded after MENU_GAP s of silence, another
 stage, or another car slot begins a new epoch (Sample.car_epoch). The car of the epoch before carries on into it as
 provisional (Sample.car_provisional: the lights use it, nothing is learnt under it) until the fingerprint confirms
 it or names another car; another slot is another car for certain, so it starts unknown. Until a car is known the key
 is rbr_install.UNKNOWN_CAR, shared, under which nothing is learnt (shift_learner.shared_car). The shift learner
-re-keys the epoch's session and run when the car becomes known (ShiftLearner.recognise).
+re-keys every session of the epoch, and its run, when the car becomes known (ShiftLearner.recognise), and an epoch
+that ends still provisional goes back to the shared key.
 """
 
 import json
@@ -37,6 +47,7 @@ import logging
 import math
 import os
 import statistics
+import tempfile
 import time
 
 from . import car_data, rbr_install
@@ -57,12 +68,15 @@ STEP_BACK = 720                  # steps the counter goes back by: a stage (re)l
 SETTLED = 0.25                   # s in a gear before its samples count (shift_learner.SETTLED)
 CLUTCH_OUT = 0.1
 MIN_SPEED = 5.0                  # m/s of the wheels
-MATCH_EVERY = 1.0                # s of the packets' clock between matches while the car is not known
+MATCH_EVERY = 1.0                # s of the packets' clock between matches (and checks, once the car is known)
+DECIDED_M = 1000.0               # m into an epoch (or GEAR_KEEP samples in every gear) after which a gear set that
+                                 # neither fits nor misses counts as a miss: the wait ends
 TORQUE_AGREE = 0.02              # a candidate set shares the shipped data where the torque curves agree this well
 
 LOCAL_PREFIX = 'rbr/g'
 
 _path = None                     # the library file (tests point it elsewhere); None: the user's data folder
+_names = None                    # {car key: {'gears', 'drivetrain'}} of every RSF car the table names (set_names)
 
 
 def library_path():
@@ -73,6 +87,42 @@ def set_library_path(path):
     """Use another library file (tests); None: the user's."""
     global _path
     _path = path
+
+
+def set_names(names):
+    """Use these {car key: {'gears', 'drivetrain'}} as the RSF cars that exist (tests); None: the table's `names`."""
+    global _names
+    _names = names
+
+
+def rsf_cars():
+    """{car key: {'gears', 'drivetrain'}} of every RSF car the shipped table names (its `names`, read once)."""
+    global _names
+    if _names is None:
+        names = {}
+        directory = car_data.find_dir()
+        try:
+            with open(os.path.join(directory, 'rbr.json'), encoding='utf-8') as f:
+                for key, rows in (json.load(f).get('names') or {}).items():
+                    row = rows[0] if rows else {}
+                    names[key] = {'gears': row.get('gears'), 'drivetrain': row.get('drivetrain')}
+        except (OSError, TypeError, ValueError, AttributeError) as e:
+            logging.warning("rbr cars: the table's names not read: %s", e)
+        _names = names
+    return _names
+
+
+def impostors(key):
+    """The RSF cars the table has no gearing for that could have the gearbox of the shipped car `key`: the same
+    forward gear count and drivetrain (or not known). One gearbox can serve many cars (the Fiesta's and the i20's are
+    one), so a lone fit names its car only where no such car exists."""
+    shipped = car_data.cars()
+    entry = shipped.get(key) or {}
+    gears = len(car_data.default_set(entry)['gears']) if entry.get('gear_sets') else None
+    drive = entry.get('drivetrain')
+    return sorted(k for k, v in rsf_cars().items() if k != key and k not in shipped
+                  and (v.get('gears') is None or gears is None or v['gears'] == gears)
+                  and (v.get('drivetrain') is None or drive is None or v['drivetrain'] == drive))
 
 
 def fingerprint_key(key):
@@ -155,12 +205,15 @@ def shipped_cars():
 
 
 def set_key(keys, slot):
-    """The key of the shipped cars `keys`, which one gearbox fits, in car slot `slot`: 'rbr/11+104@6'."""
+    """The key of the shipped cars `keys`, which one gearbox fits, in car slot `slot`: 'rbr/11+104@6'; 'rbr/106@5'
+    for one the table has the gearing of where other cars could share it (impostors)."""
     ids = sorted((k.split('/', 1)[1] for k in keys), key=lambda i: (len(i), i))
     return 'rbr/{}@{}'.format('+'.join(ids), slot)
 
 
 def set_name(keys, slot):
+    if len(keys) == 1:
+        return '{} (by gearing, car slot {})'.format(_shared_names(keys), slot)
     return '{} (car slot {})'.format(_shared_names(sorted(keys, key=lambda k: (len(k), k))), slot)
 
 
@@ -173,6 +226,7 @@ class Library:
         self.writable = writable
         self.cars = []
         self.last = None
+        self.broken = False      # the file was there and could not be used: moved aside before the first write
         self._loaded = False
 
     def load(self):
@@ -187,9 +241,11 @@ class Library:
             return self
         except (OSError, ValueError) as e:
             logging.warning("rbr cars: %s not read: %s", path, e)
+            self.broken = True
             return self
         if not isinstance(data, dict) or data.get('version') != VERSION:
             logging.warning("rbr cars: %s is of another version, not used", path)
+            self.broken = True
             return self
         for entry in data.get('cars') or []:
             try:
@@ -208,21 +264,43 @@ class Library:
                 'notes': "Richard Burns Rally cars Oversteer told apart by their gearing (oversteer/rbr_fingerprint.py)."}
 
     def write(self, data, path=None):
-        """Write a snapshot() whole: a temporary file, then a rename (drive-log thread). True when written."""
+        """Write a snapshot() whole (drive-log thread): a temporary file of its own in the same folder, synced, then
+        renamed over the file. A file that could not be used when read is moved aside first (`.bad`), never
+        overwritten. True when written."""
         path = path or self.path or library_path()
+        tmp = None
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp = path + '.tmp'
-            with open(tmp, 'w', encoding='utf-8') as f:
+            folder = os.path.dirname(path)
+            os.makedirs(folder, exist_ok=True)
+            if self.broken and os.path.exists(path):
+                aside = '{}.{}.bad'.format(path, time.strftime('%Y%m%d-%H%M%S'))
+                os.replace(path, aside)
+                logging.warning("rbr cars: %s could not be used; moved aside to %s", path, aside)
+            self.broken = False
+            fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + '.', suffix='.tmp', dir=folder)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=1)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, path)
             return True
         except OSError as e:
             logging.warning("rbr cars: %s not written: %s", path, e)
+            if tmp is not None:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
             return False
 
-    def next_number(self):
-        return max([e.get('n') or 0 for e in self.cars] + [0]) + 1
+    def next_number(self, taken=()):
+        """The number of a new local car: past every one the library has, and every `taken` key (the store's
+        rbr/g<n> cars, so a library lost or broken never hands a number out again)."""
+        numbers = [e.get('n') or 0 for e in self.cars]
+        for key in taken:
+            if key.startswith(LOCAL_PREFIX) and key[len(LOCAL_PREFIX):].isdigit():
+                numbers.append(int(key[len(LOCAL_PREFIX):]))
+        return max(numbers + [0]) + 1
 
     def entry(self, key, slot=None):
         """The entry of `key` (in car slot `slot`, where given), or None."""
@@ -232,11 +310,12 @@ class Library:
 class Recogniser:
     """Gives each Richard Burns Rally sample its car (see the module's docstring). Fed every decoded RBR packet on
     the listener thread, under the shift learner's lock. identify() returns what the learner has to do besides: a
-    list of ('adopt', old key, new key) (a car known under a key of ours that the table now names) and ('save',
-    snapshot) (the library changed)."""
+    list of ('adopt', old key, new key) (a car known under a key of ours that the install or the table alone now
+    names) and ('save', snapshot) (the library changed). `taken`: a callable giving the store's rbr/g<n> keys."""
 
-    def __init__(self, library=None):
+    def __init__(self, library=None, taken=None):
         self.library = library if library is not None else Library()
+        self.taken = taken
         self.epoch = 0
         self.key = None          # the epoch's car, None while unknown
         self.name = None
@@ -244,12 +323,14 @@ class Recogniser:
         self.exact = None        # the key the install (or a capture's header) named
         self.slot = None
         self.stage = None
-        self.fp = Fingerprint()
+        self.fp = Fingerprint()  # the epoch's gearing
+        self.check = Fingerprint()   # since the stage was last loaded: what the known car is checked against
         self._steps = None       # the last packet's
         self._fed = None         # the last sample's taken
         self._arrived = None     # arrival time of the last packet
         self._match_at = None
         self._recorded = None    # (key, epoch): its fingerprint went into the library
+        self._force = False      # the known car's gearing missed: the next packet begins an epoch, car unknown
 
     # -- per packet --
 
@@ -261,18 +342,22 @@ class Recogniser:
         slot = sample.car_slot
         loaded = self._steps is not None and steps < self._steps - STEP_BACK
         gap = now - self._arrived if self._arrived is not None else 0.0
-        boundary = (self._steps is None or slot != self.slot or exact != self.exact
+        forced, self._force = self._force, False
+        boundary = (forced or self._steps is None or slot != self.slot or exact != self.exact
                     or (sample.stage is not None and self.stage is not None and sample.stage != self.stage)
                     or (loaded and gap >= MENU_GAP))
         if boundary:
-            events += self._close_epoch()
-            if self._steps is None:
-                last = library.last or {}
-                carry = last['key'] if last.get('key') and last.get('slot') == slot else None   # the app's last car
+            if forced:
+                carry = None                             # (and what the epoch measured is two cars': not kept)
             else:
-                carry = self.key if slot == self.slot else None          # another slot is another car
+                events += self._close_epoch()
+                if self._steps is None:
+                    last = library.last or {}
+                    carry = last['key'] if last.get('key') and last.get('slot') == slot else None   # the app's last car
+                else:
+                    carry = self.key if slot == self.slot else None          # another slot is another car
             self.epoch += 1
-            self.fp = Fingerprint()
+            self.fp, self.check = Fingerprint(), Fingerprint()
             self._fed = self._match_at = None
             self.slot, self.exact = slot, exact
             if exact is not None:
@@ -283,6 +368,8 @@ class Recogniser:
             else:
                 self.key = self.name = None
                 self.provisional = False
+        elif loaded:
+            self.check = Fingerprint()                   # a restart: the car is checked again from here
         if sample.stage is not None:
             self.stage = sample.stage
         self._steps, self._arrived = steps, now
@@ -290,10 +377,14 @@ class Recogniser:
             self._fed = steps
             t = steps / STEPS_PER_S
             self.fp.feed(t, sample)
-            if (self.key is None or self.provisional or exact is not None) and (
-                    self.fp.grew or self._match_at is None or t < self._match_at or t - self._match_at >= MATCH_EVERY):
+            self.check.feed(t, sample)
+            due = self.fp.grew or self._match_at is None or t < self._match_at or t - self._match_at >= MATCH_EVERY
+            if due:
                 self._match_at = t
-                events += self._match(exact)
+                if self.key is None or self.provisional or exact is not None:
+                    events += self._match(exact)
+                else:
+                    self._check()
         if self.key is not None:
             sample.car, sample.car_name = self.key, self.name or sample.car_name
         sample.car_epoch, sample.car_provisional = self.epoch, self.provisional
@@ -305,19 +396,27 @@ class Recogniser:
         entry = self.library.entry(key)
         return (entry or {}).get('name') or car_data.display_name(key) or key
 
+    def _decided(self, fp):
+        """Enough driven that a gear set neither fitting nor missing will not come to fit: it counts as a miss."""
+        est = fp.estimates()
+        return fp.distance >= DECIDED_M or bool(est) and all(len(fp.ratios[g]) >= GEAR_KEEP for g in est)
+
     def _match(self, exact):
         est = self.fp.estimates()
         if len(est) < GEARS_MIN:
             return []
         if exact is not None:
             # The install named it: its gearing is recorded (once an epoch, and again at its end), so this slot's car
-            # is known without the install later
-            return self._record(exact, 'install', est, name=self.name) if self._recorded != (exact, self.epoch) else []
-        found = self.find(est, self.slot, self.fp.top, self.fp.rpm)
+            # is known without the install later; a car of ours with that gearing in this slot is this one
+            if self._recorded == (exact, self.epoch):
+                return []
+            events = self._adopt([e for e in self._ours(est, self.slot) if e['key'] != exact], exact)
+            return events + self._record(exact, 'install', est, name=self.name)
+        found = self.find(est, self.slot, self.fp.top, self.fp.rpm, self._decided(self.fp))
         if found is None:
             return []
         key, name, kind, adopt = found
-        events = [('adopt', old, key) for old in adopt]
+        events = self._adopt(adopt, key)
         before, was = self.key, self.provisional
         self.key, self.name, self.provisional = key, name, False
         if before == key and was:
@@ -327,11 +426,63 @@ class Recogniser:
             logging.info("rbr car: %s (%s) from its gearing after %.0f m, %.0f s: %s%s", key, name, self.fp.distance,
                          self.fp.seconds, ', '.join('%d: %.1f' % (g, v) for g, v in sorted(est.items())),
                          ' (was %s)' % before if before else '')
-        self.library.last = {'key': key, 'slot': self.slot}
-        return events + self._record(key, kind, est, name=name)
+        last = {'key': key, 'slot': self.slot}
+        changed = self.library.last != last
+        self.library.last = last
+        recorded = self._record(key, kind, est, name=name)
+        if changed and not recorded:
+            recorded = [('save', self.library.snapshot())]           # the last car, for the next start
+        return events + recorded
 
-    def find(self, est, slot, top, rpm):
-        """(key, name, kind, [library keys it adopts]) of the car `est` fits, or None to wait for more."""
+    def _adopt(self, entries, key):
+        """Mark our entries as the car `key` from now on: ('adopt', old, key) once each."""
+        events = []
+        for entry in entries:
+            if entry.get('adopted'):
+                continue
+            entry['adopted'] = key
+            events.append(('adopt', entry['key'], key))
+        return events
+
+    def _ours(self, est, slot):
+        """The library's local and candidate-set entries in `slot` that `est` fits, the closest first."""
+        found = []
+        for entry in self.library.cars:
+            if entry.get('kind') in ('local', 'set') and entry['slot'] == slot:
+                verdict, worst, _ = compare(entry['gears'], est)
+                if verdict == 'match':
+                    found.append((worst, entry))
+        return [e for _, e in sorted(found, key=lambda x: x[0])]
+
+    def _references(self, key):
+        """The gearings the car `key` is known by: its library entries', its shipped gear sets (each candidate's, for
+        a candidate set)."""
+        refs = [e['gears'] for e in self.library.cars if e['key'] == key or e.get('adopted') == key]
+        ids = key.split('/', 1)[1].split('@', 1)[0].split('+') if key.startswith('rbr/') else []
+        for i in ids:
+            entry = car_data.cars().get('rbr/' + i)
+            if entry is not None:
+                refs += [{n + 1: r for n, r in enumerate(s['gears'])} for s in entry['gear_sets']]
+        return refs
+
+    def _check(self):
+        """The car is known: since the stage was last loaded its gearing must still fit. A miss is another car
+        (changed in the menus quicker than MENU_GAP): a new epoch, car unknown."""
+        if self.exact is not None:
+            return
+        est = self.check.estimates()
+        if len(est) < GEARS_MIN:
+            return
+        refs = self._references(self.key)
+        verdicts = [compare(r, est)[0] for r in refs]
+        if verdicts and all(v == 'miss' for v in verdicts):
+            logging.info("rbr car: the gearing no longer fits %s (%s): another car", self.key,
+                         ', '.join('%d: %.1f' % (g, v) for g, v in sorted(est.items())))
+            self._force = True
+
+    def find(self, est, slot, top, rpm, decided=False):
+        """(key, name, kind, [library entries it adopts]) of the car `est` fits, or None to wait for more. With
+        `decided`, a gear set that neither fits nor misses counts as a miss."""
         library = self.library
         waiting = False
         for entry in library.cars:
@@ -346,31 +497,30 @@ class Recogniser:
             verdicts = [compare(s, est)[0] for s in sets if top <= len(s)]
             if 'match' in verdicts:
                 fits.append((key, name))
-            elif verdicts and all(v == 'miss' for v in verdicts):
-                continue
-            elif verdicts:
+            elif verdicts and not decided and not all(v == 'miss' for v in verdicts):
                 waiting = True
-        ours = []
-        for entry in library.cars:
-            if entry.get('kind') in ('local', 'set') and entry['slot'] == slot:
-                verdict, worst, n = compare(entry['gears'], est)
-                if verdict == 'match':
-                    ours.append((worst, entry))
-                elif verdict is None and len(est) < MINT_GEARS:
-                    waiting = True
-        ours.sort(key=lambda x: x[0])
-        if len(fits) == 1:
+        ours = self._ours(est, slot)
+        if not ours and not decided and len(est) < MINT_GEARS and any(
+                e.get('kind') in ('local', 'set') and e['slot'] == slot and compare(e['gears'], est)[0] is None
+                for e in library.cars):
+            waiting = True
+        if len(fits) == 1 and not impostors(fits[0][0]):
+            # The table's one car with that gearbox, and no car it lacks could have it: that car
             key, name = fits[0]
-            return key, name, 'shipped', [e['key'] for _, e in ours if e['key'] != key]
+            return key, name, 'shipped', [e for e in ours if e['key'] != key]
         if ours:
-            entry = ours[0][1]
+            entry = ours[0]
+            if entry.get('adopted'):
+                return entry['adopted'], car_data.display_name(entry['adopted']) or entry['adopted'], 'shipped', []
             return entry['key'], entry.get('name') or entry['key'], entry['kind'], []
-        if len(fits) > 1:
+        if fits:
+            # Cars one gearbox fits, or one fit that a car the table has no gearing for could share: a set, bound to
+            # the slot, with the data its members share (shared_entry)
             keys = [k for k, _ in fits]
             return set_key(keys, slot), set_name(keys, slot), 'set', []
         if waiting or len(est) < MINT_GEARS:
             return None
-        n = library.next_number()
+        n = library.next_number(self.taken() if self.taken is not None else ())
         return '{}{}'.format(LOCAL_PREFIX, n), 'RBR car #{} ({} gears)'.format(n, top), 'local', []
 
     def _record(self, key, kind, est, name=None):
@@ -420,11 +570,12 @@ class Recogniser:
 
 def shared_entry(key):
     """The shipped data of a candidate set key ('rbr/11+104@6') where every candidate's agrees (one limiter, one
-    default gearing, torque within TORQUE_AGREE at each point): the first candidate's entry; else None."""
+    default gearing, torque within TORQUE_AGREE at each point): the first candidate's entry; else None. A set of one
+    ('rbr/106@5') has its car's."""
     game, _, rest = key.partition('/')
     ids = rest.split('@', 1)[0].split('+')
     entries = [car_data.cars().get('{}/{}'.format(game, i)) for i in ids]
-    if len(entries) < 2 or any(e is None for e in entries):
+    if not entries or any(e is None for e in entries):
         return None
     first = entries[0]
     for other in entries[1:]:

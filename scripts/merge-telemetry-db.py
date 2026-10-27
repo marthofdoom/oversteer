@@ -38,8 +38,9 @@ Every table of the schema, and what the merge does with it:
     runs          inserted in start order unless a duplicate (below). A run with a trace is queued (reanalyse),
                   so the backfill works it over (its corners, events, metrics, class) as the app does after an
                   upgrade; a run with no trace keeps its class and its derived rows (nothing could make them again)
-    traces, laps, segments, labels, run_start, run_clock, run_stop, run_finish
-                  ported with their run (run_finish: the line a run was timed at, so the re-timing leaves it be).
+    traces, laps, segments, labels, run_start, run_clock, run_stop, run_finish, pb_keep
+                  ported with their run (run_finish: the line a run was timed at, so the re-timing leaves it be;
+                  pb_keep: a PB under a car its runs later left, whose trace is kept).
                   A duplicate's label is added to the kept copy where that copy has none
     shifts        ported with their run (the backfill rewrites flags, d and band); one with no run is ported with a
                   session that was inserted, and skipped where the session was matched (recorded in both)
@@ -88,12 +89,12 @@ from oversteer.drive_log import BACKFILL_KEEP, BACKFILL_KEEP_EVENTS, BACKFILL_KE
 DUP_SECONDS = 2.0
 
 PRIMARY = ('cars', 'tunes', 'stages', 'sessions', 'runs', 'traces', 'laps', 'segments', 'shifts', 'labels',
-           'captures', 'run_finish', 'run_start', 'run_clock', 'run_stop')
+           'captures', 'run_finish', 'run_start', 'run_clock', 'run_stop', 'pb_keep')
 PARTLY = ('metrics',)
 DERIVED = ('corners', 'events', 'envelopes', 'stage_potential')
 STATE = ('stage_lines', 'coach_state', 'calibration', 'store_meta', 'reanalyse')
 KNOWN = set(PRIMARY + PARTLY + DERIVED + STATE)
-RUN_TABLES = ('run_start', 'run_clock', 'run_stop', 'run_finish')      # one row per run, keyed by it
+RUN_TABLES = ('run_start', 'run_clock', 'run_stop', 'run_finish', 'pb_keep')     # one row per run, keyed by it
 PRIOR_RANK = {'user': 2}
 
 

@@ -32,7 +32,7 @@ VERSION = 3
 # The stored data's version (store_meta 'data_version'), apart from the schema's: it goes up when what older code
 # worked out from the runs is wrong enough to be repaired in place (data_repair.migrate, once, on the drive-log thread).
 # A file made by this code starts at it; a file from before has none (0).
-DATA_VERSION = 1
+DATA_VERSION = 2                 # 1: the 0.16 repair; 2: Richard Burns Rally's runs worked over again (0.17)
 
 SCHEMA = """
 CREATE TABLE cars (
@@ -288,6 +288,14 @@ REANALYSE_DDL = """
 CREATE TABLE IF NOT EXISTS reanalyse (
     run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
     rank INTEGER NOT NULL
+)"""
+
+# Runs whose trace prune_traces keeps whatever its own PB lookups say: each was a PB (now or when it was set) of the
+# car it was driven under before its runs moved to another car (Store.move_session, merge_car: a Richard Burns Rally
+# car told from its gearing later, rbr_fingerprint). PBs are never deleted by any data rule.
+PB_KEEP_DDL = """
+CREATE TABLE IF NOT EXISTS pb_keep (
+    run INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE
 )"""
 
 REBUILD_META = 'reanalyse_rebuild'       # store_meta: runs were queued; every potential is built again once it is empty
@@ -694,6 +702,7 @@ def open_store(path):
         db.execute(ddl)
     db.execute(STORE_META_DDL)
     db.execute(REANALYSE_DDL)
+    db.execute(PB_KEEP_DDL)
     if not has_cars:
         # a new file holds nothing an older build worked out: no repair is due
         db.execute("INSERT OR IGNORE INTO store_meta (key, value) VALUES ('data_version', ?)", (str(DATA_VERSION),))
@@ -778,6 +787,10 @@ class Reader:
         except sqlite3.OperationalError:
             return False
         return bool(rows) and rows[0][0] is None
+
+    def keys_like(self, prefix):
+        """The car keys of every profile that begin with `prefix` (rbr_fingerprint: the numbers taken)."""
+        return [r[0] for r in self._rows('SELECT DISTINCT key FROM cars WHERE key LIKE ?', (prefix + '%',))]
 
     def cars(self, profile):
         """[(key, name)] of the profile's cars, by name."""
@@ -1264,57 +1277,78 @@ class Store(Reader):
             self._do('DELETE FROM cars WHERE id = ?', (car,))
         return not learnt
 
-    def _drop_car_potentials(self, cars):
-        """Forget the stored potentials and envelopes of `cars` (ids): their runs moved, so they are built again from
-        the runs they have now (potentials_missing, potential.recompute)."""
+    def _drop_potentials_of(self, sessions, cars):
+        """Forget the stored potentials of `cars` (ids) on the stages the runs of `sessions` were driven on, and their
+        envelopes on those runs' surfaces: those runs moved, so they are built again from the runs each car has now
+        (potentials_missing, potential.recompute). Nothing else is touched."""
+        marks = ', '.join('?' * len(sessions))
+        stages = [r[0] for r in self._do('SELECT DISTINCT stage FROM runs WHERE stage IS NOT NULL AND session IN ({})'
+                                         .format(marks), tuple(sessions)).fetchall()]
+        surfaces = [r[0] for r in self._do('SELECT DISTINCT surface FROM runs WHERE surface IS NOT NULL AND session '
+                                           'IN ({})'.format(marks), tuple(sessions)).fetchall()]
         for car in cars:
-            for table in ('stage_potential', 'envelopes'):
-                try:
-                    self._do('DELETE FROM {} WHERE car = ?'.format(table), (car,))
-                except sqlite3.OperationalError:
-                    pass                                  # (a file without the potential tables yet)
+            try:
+                for stage in stages:
+                    self._do('DELETE FROM stage_potential WHERE car = ? AND stage = ?', (car, stage))
+                for surface in surfaces:
+                    self._do('DELETE FROM envelopes WHERE car = ? AND surface = ?', (car, surface))
+            except sqlite3.OperationalError:
+                pass                                      # (a file without the potential tables yet)
+
+    def protect_pbs(self, cars):
+        """Keep the trace of every PB the cars (ids) have, now and at the time it was set, whatever later moves of
+        runs between cars do to the PB lookups (PB_KEEP_DDL): called before runs change car. Returns the runs."""
+        runs = self.pb_runs(cars)
+        for run in runs:
+            self._do('INSERT OR IGNORE INTO pb_keep (run) VALUES (?)', (run,))
+        return runs
 
     def move_session(self, session, car):
         """The session (its runs, changes of gear and metrics with it) belongs to another car: a Richard Burns Rally
-        car told from its gearing only after the session began (rbr_fingerprint). Nothing is deleted."""
+        car told from its gearing only after the session began (rbr_fingerprint). Nothing is deleted; every PB of
+        either car keeps its trace (protect_pbs). Returns the car it belonged to, or None where nothing moved."""
         row = self._do('SELECT car FROM sessions WHERE id = ?', (session,)).fetchone()
         if row is None or row[0] == car:
-            return
+            return None
+        self.protect_pbs((row[0], car))
         self._do('UPDATE sessions SET car = ? WHERE id = ?', (car, session))
-        self._drop_car_potentials((row[0], car))
+        self._drop_potentials_of((session,), (row[0], car))
+        return row[0]
 
     def merge_car(self, profile, old_key, new_key, name=None):
         """Everything of the car `old_key` becomes `new_key`'s (a Richard Burns Rally car known by a key of ours that
-        the shipped table now names): its sessions with their runs, tunes and coaching state move, the richer of the
-        two models is kept, then the emptied row goes. With no row of `new_key` the row is renamed. Returns the
-        number of sessions moved. Runs, traces and PBs are moved, never deleted."""
+        the shipped table, or the install, names): its sessions with their runs, tunes and coaching state move, the
+        richer of the two models is kept, then the emptied row goes. With no row of `new_key` the row is renamed.
+        Returns the number of sessions moved. Runs, traces and PBs are moved, never deleted (protect_pbs)."""
         old = self._do('SELECT id, model, name, user_named FROM cars WHERE profile = ? AND key = ?',
                        (profile, old_key)).fetchone()
         if old is None:
             return 0
         new = self._do('SELECT id, model FROM cars WHERE profile = ? AND key = ?', (profile, new_key)).fetchone()
-        sessions = self._do('SELECT COUNT(*) FROM sessions WHERE car = ?', (old[0],)).fetchone()[0]
+        sessions = [r[0] for r in self._do('SELECT id FROM sessions WHERE car = ?', (old[0],)).fetchall()]
         game = new_key.split('/', 1)[0]
         if new is None:
+            # One car under a new name: the same id, the same runs, nothing worked out from them changes
             self._do('UPDATE cars SET key = ?, game = ?, name = CASE WHEN user_named THEN name ELSE ? END '
                      'WHERE id = ?', (new_key, game, name, old[0]))
-            self._drop_car_potentials((old[0],))
-            return sessions
+            return len(sessions)
 
         def samples(text):
             try:
                 return sum(len(v) for v in (json.loads(text).get('ratios') or {}).values())
             except (ValueError, AttributeError, TypeError):
                 return 0
+        self.protect_pbs((old[0], new[0]))
         if samples(old[1]) > samples(new[1]):
             self._do('UPDATE cars SET model = ? WHERE id = ?', (old[1], new[0]))
+        if sessions:
+            self._drop_potentials_of(sessions, (new[0],))
         self._do('UPDATE sessions SET car = ? WHERE car = ?', (new[0], old[0]))
         self._do('UPDATE tunes SET car = ? WHERE car = ?', (new[0], old[0]))
         self._do('UPDATE OR IGNORE coach_state SET car = ? WHERE car = ?', (new[0], old[0]))
-        self._drop_car_potentials((old[0], new[0]))
         self._do('DELETE FROM coach_state WHERE car = ?', (old[0],))
-        self._do('DELETE FROM cars WHERE id = ?', (old[0],))
-        return sessions
+        self._do('DELETE FROM cars WHERE id = ?', (old[0],))          # (its potentials and envelopes go with it)
+        return len(sessions)
 
     def rename_car(self, profile, key, name):
         self._do('UPDATE cars SET name = ?, user_named = 1, updated = ? WHERE profile = ? AND key = ?',
@@ -1626,6 +1660,43 @@ class Store(Reader):
                  (run, TRACE_VERSION, pack_trace(rows)))
         self.prune_traces(cap)
 
+    def pb_runs(self, cars=None):
+        """The runs that are or were a PB of their car (ids `cars`, or every car) on their stage: every PB, now and
+        at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the wetness or the time after
+        the first section): each finished run quicker than all the runs before it; and the PB as stage_pb_id ranks it
+        (once a car has a run on the game's own clock on a stage, only its clock runs; of two equal times the newer,
+        as stage_pb_id picks it). Both are worked out for the ranked classes, then again with the finished runs that
+        have no class yet (cleared by an older build, waiting for the backfill) counted too, and both kept: a
+        class-less run only adds protection, never hides a PB of the ranked ones."""
+        kept = set()
+        only = ''
+        args = ()
+        if cars is not None:
+            cars = tuple(c for c in cars if c is not None)
+            if not cars:
+                return kept
+            only = ' AND s.car IN ({})'.format(', '.join('?' * len(cars)))
+            args = cars
+        ranked = "r.run_class IN ('clean', 'learning', 'off')"
+        for classes in (ranked, '({} OR r.run_class IS NULL)'.format(ranked)):
+            records = {}
+            for run, stage, car, result in self._do(
+                    'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                    'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                    'AND ' + classes + only + ' ORDER BY r.started, r.id', args).fetchall():
+                if result < records.get((stage, car), float('inf')):
+                    records[(stage, car)] = result
+                    kept.add(run)
+            pbs = {}
+            for run, stage, car, result in self._do(
+                    'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                    'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                    'AND ' + classes + ' AND ' + self.ON_CLOCK + only + ' ORDER BY r.started, r.id', args).fetchall():
+                if result <= pbs.get((stage, car), (float('inf'),))[0]:
+                    pbs[(stage, car)] = (result, run)
+            kept.update(run for _, run in pbs.values())
+        return kept
+
     def prune_traces(self, cap=TRACES_CAP):
         """Drop the oldest traces beyond `cap` bytes in total; their runs,
         metrics and verdicts stay. The trace of each car's best finished run
@@ -1652,30 +1723,8 @@ class Store(Reader):
             if key not in best or result < best[key][0]:
                 best[key] = (result, run)
         kept = {run for _, run in best.values()}
-        # every PB, now and at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the
-        # wetness or the time after the first section): each finished run quicker than all the runs before it; and
-        # the PB as stage_pb_id ranks it (once a car has a run on the game's own clock on a stage, only its clock runs;
-        # of two equal times the newer, as stage_pb_id picks it). Both are worked out for the ranked classes, then
-        # again with the finished runs that have no class yet (cleared by an older build, waiting for the backfill)
-        # counted too, and both kept: a class-less run only adds protection, never hides a PB of the ranked ones
-        ranked = "r.run_class IN ('clean', 'learning', 'off')"
-        for classes in (ranked, '({} OR r.run_class IS NULL)'.format(ranked)):
-            records = {}
-            for run, stage, car, result in self._do(
-                    'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
-                    'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                    'AND ' + classes + ' ORDER BY r.started, r.id').fetchall():
-                if result < records.get((stage, car), float('inf')):
-                    records[(stage, car)] = result
-                    kept.add(run)
-            pbs = {}
-            for run, stage, car, result in self._do(
-                    'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
-                    'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                    'AND ' + classes + ' AND ' + self.ON_CLOCK + ' ORDER BY r.started, r.id').fetchall():
-                if result <= pbs.get((stage, car), (float('inf'),))[0]:
-                    pbs[(stage, car)] = (result, run)
-            kept.update(run for _, run in pbs.values())
+        kept |= self.pb_runs()
+        kept |= {r[0] for r in self._do('SELECT run FROM pb_keep').fetchall()}       # PBs under a car since moved
         dropped = 0
         for run, size in self._do('SELECT run, LENGTH(data) FROM traces ORDER BY run').fetchall():
             if total <= cap:

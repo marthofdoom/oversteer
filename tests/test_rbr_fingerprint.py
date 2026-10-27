@@ -28,12 +28,18 @@ def entry(name, gears, limiter=8500, torque=TORQUE, screen=None):
 
 @pytest.fixture
 def table():
-    """A shipped table of our own: set() it to {key: entry}."""
+    """A shipped table of our own: set() it to {key: entry}; the RSF cars that exist are those, plus `others`
+    ({key: (gears, drivetrain)}: cars the table has no gearing for)."""
     class Table:
-        def set(self, cars):
+        def set(self, cars, others=None):
             car_data.set_cars(dict(cars))
+            names = {k: {'gears': len(e['gear_sets'][0]['gears']), 'drivetrain': e.get('drivetrain')}
+                     for k, e in cars.items()}
+            names.update({k: {'gears': g, 'drivetrain': d} for k, (g, d) in (others or {}).items()})
+            fp.set_names(names)
     yield Table()
     car_data.set_cars(None)
+    fp.set_names(None)
 
 
 class Drive:
@@ -114,7 +120,8 @@ def test_one_shipped_car_whose_gearing_fits_is_that_car_after_a_few_gears(table)
     sample, events = identify(rec, drive, drive.through([4], 1.0))
     assert sample.car == 'rbr/11' and sample.car_name == 'Ford Fiesta WRC 2019'
     assert rec.fp.distance < 200.0
-    assert events == []                                                 # a car the table names needs no library entry
+    [(kind, saved)] = events                                            # a car the table names needs no entry...
+    assert kind == 'save' and saved['cars'] == [] and saved['last'] == {'key': 'rbr/11', 'slot': 6}   # ...but is the last
 
 
 def test_a_gearbox_the_wheels_spin_or_the_clutch_slips_in_is_read_from_the_wheels(table):
@@ -377,3 +384,206 @@ def test_a_replay_reads_the_library_and_never_writes_it(table, tmp_path):
     tc.replay(packets, learner)
     assert learner.car.key == 'rbr/g1' and not os.path.exists(path)        # minted in memory only
     learner.close()
+
+
+# -- the review's fixes (0.17) --
+
+def test_a_lone_fit_a_car_without_gearing_could_share_is_a_set_of_one_in_its_slot(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC, screen='Ford Fiesta WRC 2019')}, others={'rbr/50': (6, None)})
+    library = fp.Library(str(tmp_path / 'cars.json'), writable=True)
+    rec, drive = fp.Recogniser(library), Drive(slot=6)
+    sample, events = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11@6' and sample.car_name == 'Ford Fiesta WRC 2019 (by gearing, car slot 6)'
+    assert car_data.entry('rbr/11@6')['limiter_rpm'] == 8500 and library.entry('rbr/11@6')['kind'] == 'set'
+    assert not [e for e in events if e[0] == 'adopt']
+    table.set({'rbr/11': entry('11', WRC)}, others={'rbr/50': (5, None)})      # no car could share it: rbr/11...
+    rec = fp.Recogniser(library)
+    drive = Drive(slot=6)
+    sample, events = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11' and ('adopt', 'rbr/11@6', 'rbr/11') in events      # ...and the set is it now
+    rec = fp.Recogniser(library)
+    drive = Drive(slot=6)
+    sample, events = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11' and not [e for e in events if e[0] == 'adopt']      # adopted once
+
+
+def test_a_gear_set_neither_fitting_nor_missing_stops_the_wait_a_kilometre_in(table):
+    near = [r * (1.015 if i == 1 else 1.0) for i, r in enumerate(WRC)]           # one gear 1.5 % off
+    table.set({'rbr/11': entry('11', near)})
+    rec, drive = fp.Recogniser(fp.Library()), Drive()
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4, 5], 2.0))
+    assert sample.car == 'rbr/unknown' and rec.fp.distance < fp.DECIDED_M
+    sample, _ = identify(rec, drive, drive.through([5], 30.0))
+    assert rec.fp.distance >= fp.DECIDED_M and sample.car == 'rbr/g1'
+
+
+def test_a_known_car_whose_gearing_stops_fitting_after_a_quick_restart_is_another(table):
+    table.set({'rbr/11': entry('11', WRC), 'rbr/106': entry('106', OTHER, 7500)})
+    rec, drive = fp.Recogniser(fp.Library()), Drive(slot=6)
+    sample, _ = identify(rec, drive, drive.through([2, 3, 4], 1.0))
+    assert sample.car == 'rbr/11' and sample.car_epoch == 1
+    drive.load(gap=10.0)                                                   # a quick trip, the same stage, the Fabia
+    drive.gears = OTHER
+    sample, _ = identify(rec, drive, drive.through([1, 2, 3], 1.0))
+    sample, _ = identify(rec, drive, drive.through([1, 2, 3], 1.0))
+    assert sample.car == 'rbr/106' and sample.car_epoch == 2
+
+
+def test_a_new_local_car_never_takes_a_number_the_store_has(table, tmp_path):
+    table.set({})
+    path = tmp_path / 'cars.json'
+    path.write_text('{"version": 1, "cars": [')                            # broken
+    library = fp.Library(str(path), writable=True)
+    rec, drive = fp.Recogniser(library, taken=lambda: ['rbr/g7', 'rbr/gx', 'rbr/104']), Drive()
+    sample, events = identify(rec, drive, drive.through([2, 3, 4, 5], 1.0))
+    assert sample.car == 'rbr/g8'
+    assert library.write(events[-1][1])
+    [aside] = [p for p in os.listdir(tmp_path) if p.endswith('.bad')]
+    assert (tmp_path / aside).read_text() == '{"version": 1, "cars": ['    # never overwritten: moved aside
+    assert json.loads(path.read_text())['cars'][0]['key'] == 'rbr/g8'
+    assert sorted(os.listdir(tmp_path)) == sorted(['cars.json', aside])  # no temporary file left
+    assert library.write(library.snapshot()) and len([p for p in os.listdir(tmp_path) if p.endswith('.bad')]) == 1
+
+
+def test_the_learner_numbers_past_the_stores_cars(table, tmp_path):
+    table.set({})
+    learner, telemetry = learner_drive(tmp_path)
+    learner.log.store.car_id('other profile', 'rbr/g5', 'rbr')
+    learner.log.store.commit()
+    drive = Drive()
+    feed(telemetry, drive, drive.through([2, 3, 4, 5], 1.5))
+    assert learner.car.key == 'rbr/g6'
+    learner.close()
+
+
+def test_every_session_of_an_unconfirmed_epoch_goes_to_the_shared_key(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/11'
+    drive.load(stage=90, gap=fp.MENU_GAP + 5)                              # the menus: provisional
+    feed(telemetry, drive, drive.through([1], 12.0))
+    drive.t += 150.0                                                       # a long pause: the session ends, not the epoch
+    feed(telemetry, drive, drive.through([1], 12.0))
+    assert learner._provisional and len(learner._epoch_sessions) == 2
+    drive.load(stage=91, gap=fp.MENU_GAP + 5)                              # the menus again, never confirmed
+    feed(telemetry, drive, drive.through([1], 0.5))
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/11', 1, 1), ('rbr/unknown', 2, 2)]
+
+
+def test_a_rekey_the_drive_log_refuses_is_posted_with_the_next_packet(table, tmp_path):
+    table.set({'rbr/11': entry('11', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    post = learner.log.post
+    refused = []
+
+    def full(fn, *args):
+        if getattr(fn, '__name__', '') == '_write_rekey' and not refused:
+            refused.append(fn)
+            return False
+        return post(fn, *args)
+    learner.log.post = full
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert refused and learner.car.key == 'rbr/11' and not learner._rbr_posts
+    learner.close()
+    assert runs_by_car(str(tmp_path / 't.db')) == [('rbr/11', 1, 1)]
+
+
+def test_a_replay_adopts_nothing(table, tmp_path):
+    table.set({})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive(slot=6)
+    feed(telemetry, drive, drive.through([2, 3, 4, 5, 4], 2.5))
+    assert learner.car.key == 'rbr/g1'
+    learner.close()
+    table.set({'rbr/104': entry('104', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    learner.rbr_cars.library.writable = False                              # as a replay
+    drive = Drive(slot=6, stage=90)
+    feed(telemetry, drive, drive.through([2, 3, 4, 3], 2.5))
+    assert learner.car.key == 'rbr/104'
+    learner.close()
+    assert ('rbr/g1', 1, 1) in runs_by_car(str(tmp_path / 't.db'))        # g1 kept its own
+
+
+def test_another_game_ends_the_rbr_epoch(table, tmp_path):
+    from oversteer.telemetry_formats import Sample
+    table.set({'rbr/11': entry('11', WRC)})
+    learner, telemetry = learner_drive(tmp_path)
+    drive = Drive()
+    feed(telemetry, drive, drive.through([2], 0.5))
+    assert learner._rbr_epoch == 1
+    learner.feed(drive.t + 1, Sample(3000.0, 7000.0, gear=2, speed=10.0, car='forza/1', game='forza'), 7000.0, 0.3, 0.0)
+    assert learner._rbr_epoch is None and learner._epoch_sessions == [] and not learner._provisional
+    learner.close()
+
+
+def test_a_sets_shared_data_is_worked_out_once(table, monkeypatch):
+    table.set({'rbr/11': entry('11', WRC), 'rbr/104': entry('104', WRC)})
+    calls = []
+    real = fp.shared_entry
+    monkeypatch.setattr(fp, 'shared_entry', lambda key: calls.append(key) or real(key))
+    assert car_data.entry('rbr/11+104@6') is car_data.entry('rbr/11+104@6') is not None
+    assert calls == ['rbr/11+104@6']
+
+
+def test_a_reference_offered_again_for_the_run_is_taken_again():
+    from oversteer.live_buffer import LiveBuffer
+    live = LiveBuffer()
+    live.start_run(1, 0.0, 'rbr', 'rbr:81')
+    live.offer_reference(1, None, {'key': 'rbr:81', 'name': 'A', 'length': 1000.0}, 5)
+    live._adopt()
+    assert live._run['id'] == 5
+    live.offer_reference(1, None, {'key': 'rbr:81', 'name': 'A', 'length': 1000.0}, 6)
+    live._adopt()
+    assert live._run['id'] == 6
+
+
+def _store_with_runs(tmp_path):
+    """Two cars; car A's run on stage S at 100 s (its PB), car B's earlier run at 90 s; both with traces, and stored
+    potentials on two stages and envelopes on two surfaces for both."""
+    from oversteer.telemetry_store import open_store
+    store = open_store(str(tmp_path / 's.db'))
+    a = store.car_id('p', 'rbr/g1', 'rbr')
+    b = store.car_id('p', 'rbr/unknown', 'rbr')
+    sb = store.start_session('p', b, 'rbr', 1000.0)
+    sa = store.start_session('p', a, 'rbr', 2000.0)
+    runs = {}
+    for name, session, started, result in (('b1', sb, 1000.0, 90.0), ('a1', sa, 2000.0, 100.0)):
+        run = store.start_run(session, 1, started, 'rbr:1', 'rbr', 1000.0)
+        store.end_run(run, ended=started + result, finished=1, result_time=result, distance=1000.0)
+        store._do("UPDATE runs SET run_class = 'clean', surface = 'gravel' WHERE id = ?", (run,))
+        store._do('INSERT INTO traces (run, version, data) VALUES (?, 2, zeroblob(1000))', (run,))
+        runs[name] = run
+    for car in (a, b):
+        for stage in ('rbr:1', 'rbr:2'):
+            store._do("INSERT INTO stage_potential (stage, car, data_version, sections, profile) VALUES "
+                      "(?, ?, 'x', '[]', '{}')", (stage, car))
+        for surface in ('gravel', 'tarmac'):
+            store._do("INSERT INTO envelopes (car, surface, data_version, data) VALUES (?, ?, 'x', '{}')",
+                      (car, surface))
+    store.commit()
+    return store, a, b, sa, sb, runs
+
+
+def test_moving_a_session_keeps_every_pb_and_drops_only_its_stages_potentials(tmp_path):
+    store, a, b, sa, sb, runs = _store_with_runs(tmp_path)
+    assert store.move_session(sa, b) == a
+    assert {r[0] for r in store._do('SELECT run FROM pb_keep')} == {runs['a1'], runs['b1']}
+    left = set(store._do('SELECT stage, car FROM stage_potential').fetchall())
+    assert left == {('rbr:2', a), ('rbr:2', b)}                            # the moved run's stage only
+    assert set(store._do('SELECT car, surface FROM envelopes').fetchall()) == {(a, 'tarmac'), (b, 'tarmac')}
+    assert store.prune_traces(cap=1) == 0                                  # a1 is no PB of b's now, and still kept
+    assert {r[0] for r in store._do('SELECT run FROM traces')} == {runs['a1'], runs['b1']}
+
+
+def test_merging_a_car_keeps_every_pb(tmp_path):
+    store, a, b, sa, sb, runs = _store_with_runs(tmp_path)
+    assert store.merge_car('p', 'rbr/g1', 'rbr/unknown') == 1
+    assert store._do("SELECT COUNT(*) FROM cars WHERE key = 'rbr/g1'").fetchone()[0] == 0
+    assert store._do('SELECT COUNT(*) FROM runs').fetchone()[0] == 2
+    assert store.prune_traces(cap=1) == 0
+    assert {r[0] for r in store._do('SELECT run FROM traces')} == {runs['a1'], runs['b1']}

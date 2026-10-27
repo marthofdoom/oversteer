@@ -22,6 +22,7 @@ DATADIR = None                   # the installed data folder (share/oversteer), 
 
 _cars = None
 _names = None
+_shared = {}                     # candidate set key -> its shared entry or None (worked out once per load)
 
 
 def find_dir(datadir=None):
@@ -105,6 +106,7 @@ def set_cars(value):
     """Replace the loaded cars (tests; None loads them again)."""
     global _cars
     _cars = value
+    _shared.clear()
 
 
 def entry(key):
@@ -115,8 +117,10 @@ def entry(key):
         return None
     found = cars().get(key)
     if found is None and key.startswith('rbr/') and '@' in key:
-        from . import rbr_fingerprint
-        found = rbr_fingerprint.shared_entry(key)
+        if key not in _shared:                       # (asked per packet: the lights' limiter)
+            from . import rbr_fingerprint
+            _shared[key] = rbr_fingerprint.shared_entry(key)
+        found = _shared[key]
     return found
 
 

@@ -524,3 +524,54 @@ def test_a_dry_run_only_reads_and_works_while_the_app_has_the_file(tmp_path, mon
     assert not d.store.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'reanalyse'").fetchone()
     assert d.store.run(run)['result_time'] == 174.0 and glob.glob(str(tmp_path / '*.bak')) == []
     d.store.close()
+
+
+# -- data version 2 (0.17): Richard Burns Rally --
+
+def test_a_file_at_data_version_1_has_its_rbr_runs_worked_over_and_nothing_else(tmp_path):
+    d = Dirt(tmp_path, game='rbr', key='rbr/unknown', name='RBR car')
+    pb = d.run('rbr:81', 2500.0, 1, 150.0, 2500.0, (0, 0), (500, 500), 'clean')
+    slower = d.run('rbr:81', 2500.0, 1, 160.0, 2500.0, (0, 0), (500, 500), 'off')
+    untraced = d.run('rbr:83', 2000.0, 1, 120.0, 2000.0, (0, 0), (500, 500), 'clean', trace=False)
+    other = Dirt.__new__(Dirt)
+    other.store, other.game, other.n, other.t = d.store, 'dirt', 10, 5000.0
+    other.car = d.store.car_id('p', 'dirt/9000-1300-6', 'dirt', '9000 rpm, 6 gears')
+    other.session = d.store.start_session('p', other.car, 'dirt', 5000.0)
+    dirt_run = other.run(EL_RODEO, EL_RODEO_LENGTH, 1, 175.0, 2860.0, (0, 0), (500, 500), 'clean')
+    store = d.store
+    for stage, car in (('rbr:81', d.car), (EL_RODEO, other.car)):
+        store._do("INSERT INTO stage_potential (stage, car, data_version, sections, profile) VALUES (?, ?, 'x', '[]', "
+                  "'{}')", (stage, car))
+    for car, game in ((d.car, 'rbr'), (other.car, 'dirt')):
+        store._do("INSERT INTO envelopes (car, surface, game, data_version, data) VALUES (?, 'gravel', ?, 'x', '{}')",
+                  (car, game))
+    store._do("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('data_version', '1')")
+    store.commit()
+    traces = {r[0] for r in store._do('SELECT run FROM traces')}
+    runs = store._do('SELECT id, run_class, result_time FROM runs ORDER BY id').fetchall()
+
+    summary = data_repair.migrate(store)
+    assert store.data_version() == DATA_VERSION == 2
+    assert summary['rbr'] == dict(summary['rbr'], potentials_dropped=1, envelopes_dropped=1, rbr_runs_queued=2)
+    assert 'phantoms_deleted' not in summary                         # the 0.16 repair is not run again
+    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.17-v1-v2-*.bak'))) == 1
+    assert store._do('SELECT stage FROM stage_potential').fetchall() == [(EL_RODEO,)]
+    assert store._do('SELECT game FROM envelopes').fetchall() == [('dirt',)]
+    assert {r[0] for r in store._do('SELECT run FROM reanalyse')} == {pb, slower}   # with a trace: the RBR ones
+    assert store._do('SELECT id, run_class, result_time FROM runs ORDER BY id').fetchall() == runs   # classes kept
+    assert {r[0] for r in store._do('SELECT run FROM traces')} == traces
+    assert store.prune_traces(cap=1) == 0                            # nothing pruned while the queue holds runs
+    assert untraced and dirt_run
+    assert data_repair.migrate(store) is None
+    store.close()
+
+
+def test_a_file_from_before_016_gets_both_repairs_in_one(tmp_path):
+    d = Dirt(tmp_path, game='rbr', key='rbr/unknown', name='RBR car')
+    d.run('rbr:81', 2500.0, 1, 150.0, 2500.0, (0, 0), (500, 500), 'clean')
+    _old(d.store)
+    summary = data_repair.migrate(d.store)
+    assert summary['queued'] == 1 and summary['rbr']['rbr_runs_queued'] == 1
+    assert d.store.data_version() == DATA_VERSION
+    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.16-v0-v2-*.bak'))) == 1
+    d.store.close()
