@@ -1683,6 +1683,11 @@ CORNER_YAW = 0.15                # rad/s, smoothed over CORNER_SMOOTH
 CORNER_SMOOTH = 0.5              # s
 CORNER_TIME = 1.0                # s above CORNER_YAW...
 CORNER_HEADING = 30.0            # ...or this many degrees of heading: a corner (calibrate)
+STEER_LAG_S = 0.3                # s the yaw follows the wheel: the steer is compared with the yaw this much later. Measured on
+                                 # marth's ACR captures (steer_kinematics.py): best steer-to-curvature lag 0.15-0.31 s (Fabia
+                                 # 0.27-0.31, i20N 0.15-0.28, 208 0.15-0.21); at 0 s the wheel unwinding counts as counter-steer
+                                 # (corners at 20 % or more: 302 at 0 s, 214 at 0.2 s, 161 at 0.3 s). One constant for every game
+                                 # (DiRT not re-measured)
 CORNER_SIDE = 2.0                # s either side of the apex for entry and exit speeds
 RADIUS_SPEED = 5.0               # m/s: slower than this the speed over the yaw rate (a crash row, a stop) is no radius
 RADIUS_YAW = 0.1                 # rad/s: slower turning than this has no radius worth the name
@@ -1754,7 +1759,9 @@ def _corner(trace, yaw, i, j, sign):
             k -= 1
         return speed[k]
     gears = [row[T['gear']] for row in trace[i:j + 1] if not math.isnan(row[T['gear']]) and row[T['gear']] >= 1]
-    steer = [(row[T['steer']], yaw[i + k]) for k, row in enumerate(trace[i:j + 1]) if not math.isnan(row[T['steer']])]
+    lag = int(round(STEER_LAG_S / TRACE_EVERY))
+    steer = [(row[T['steer']], yaw[min(len(yaw) - 1, i + k + lag)]) for k, row in enumerate(trace[i:j + 1])
+             if not math.isnan(row[T['steer']])]
     against = [s for s, y in steer if abs(s) > 0.02]
     handbrake = [row[T['handbrake']] for row in trace[i:j + 1] if not math.isnan(row[T['handbrake']])]
     spin = [row[T['slip_drive']] for row in trace if t[apex] <= row[T['t']] <= t[apex] + CORNER_SIDE
@@ -1770,7 +1777,7 @@ def _corner(trace, yaw, i, j, sign):
         'entry_speed': at(-CORNER_SIDE), 'min_speed': speed[apex], 'exit_speed': at(CORNER_SIDE),
         'gear_min': int(min(gears)) if gears else None,
         'heading_change': math.degrees(heading), 'duration': duration,
-        # Steering against the turn (steer and yaw rate both positive left)
+        # Steering against the turn (steer and yaw rate both positive left; the yaw STEER_LAG_S after the steer)
         'counter_steer': (sum(1 for s, y in steer if abs(s) > 0.02 and s * y < 0) / len(against)) if against else None,
         'handbrake': int(max(handbrake) > 0.5) if handbrake else None,
         'exit_spin': max(spin) if spin else None,

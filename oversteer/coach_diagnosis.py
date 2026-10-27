@@ -19,6 +19,7 @@ import math
 import numpy as np
 
 from . import coach_context as cc
+from . import drive_log
 from . import potential
 from .telemetry_formats import plan_xy
 
@@ -146,7 +147,13 @@ def _grip(run, i, env):
 
 
 def _counter(run, i0, i1):
+    """Share of the corner's steering that is against the yaw, the yaw taken drive_log.STEER_LAG_S after the steer (the
+    car follows the wheel; at the same instant the wheel unwinding reads as counter-steer)."""
     s, y = run.STEER[i0:i1 + 1], run.YAW[i0:i1 + 1]
+    t, yaw = run.T, run.YAW
+    known = np.isfinite(t) & np.isfinite(yaw)
+    if known.sum() > 1 and np.all(np.isfinite(t[i0:i1 + 1])):
+        y = np.interp(t[i0:i1 + 1] + drive_log.STEER_LAG_S, t[known], yaw[known])
     ok = np.isfinite(s) & np.isfinite(y) & (np.abs(s) > 0.02)
     if ok.sum() < 3:
         return None

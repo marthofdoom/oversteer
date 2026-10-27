@@ -158,6 +158,17 @@ def dash(cr, w, h, d, flash=False):
 
 SPEED, THROTTLE, BRAKE, STEER, RPM, GEAR = '#4cc3ff', '#2fd27a', '#ff4d4d', '#b58cff', '#ffb020', '#e8edf2'
 REF, SLOWER, FASTER, NEUTRAL, GRID, BG = '#8c96a3', '#ff5a4e', '#2fd27a', '#3a424d', '#1a2028', '#0a0c0f'
+def steer_scale(v):
+    """Where a steering value (fraction of the car's own lock, signed) sits on a strip, -1..1: sign(v) * sqrt(|v|),
+    clamped at full lock. Rally steering is mostly 5-30 % of lock (median 9 %, p99 60-90 %), so a linear +-100 % strip
+    shows a flat line; the square root opens the small angles and keeps 100 % at the edge, with no per-run range, so
+    the live strip, the Run view and the web page read alike and two runs compare. The web page has the same function."""
+    return math.copysign(math.sqrt(min(1.0, abs(v))), v)
+
+
+STEER_GRID = (0.1, 0.25, 0.5, 1.0)       # fractions of lock the strips draw a line at (both sides of centre)
+
+
 STRIPS = (('delta', 'Δ s', 56), ('v', 'km/h', 84), ('pedals', 'PEDAL', 56), ('steer', 'STEER', 44),
           ('gear', 'GEAR', 40), ('rpm', 'RPM', 56))
 LANE, LANE2, GAP, GUT = 16, 12, 6, 34
@@ -304,8 +315,12 @@ def strips(cr, w, h, data, view, cursor, scale=1.0):
             _line(cr, pts(this['brake'], Y), BRAKE, 1.75)
         elif key == 'steer':
             def Y(v, top=top, hh=hh):
-                return top + hh / 2.0 - max(-1.0, min(1.0, v)) * (hh / 2.0 - 3)
+                return top + hh / 2.0 - steer_scale(v) * (hh / 2.0 - 3)
             _rect(cr, GUT, Y(0), width, 1, GRID)
+            for f in STEER_GRID[:-1]:
+                _rect(cr, GUT, Y(f), width, 1, GRID, 0.35)
+                _rect(cr, GUT, Y(-f), width, 1, GRID, 0.35)
+            text(cr, '% lock', 4, top + 23, 8.5, FAINT)
             text(cr, 'L', 24, top + 10, 9.5, FAINT)
             text(cr, 'R', 24, bot - 3, 9.5, FAINT)
             if cmp_:
@@ -652,12 +667,12 @@ def live_rolling(cr, w, h, rows, now):
         filled(y, sh, 'hb', LV_HB)
         y += sh
     y += 8
-    label(y, 'STEERING', 'L ▲ · R ▼')
+    label(y, 'STEERING % lock', 'L ▲ · R ▼')
     y += 16
     sh = LV_STRIPS_H[1]
-    grid(y, sh, (0.5,))
+    grid(y, sh, (0.5,) + tuple(0.5 + sgn * steer_scale(f) / 2.0 for f in STEER_GRID[:-1] for sgn in (1, -1)))
     pts = _live_series(rows, now, lambda r: None if r.get('steer') is None
-                       else y + sh / 2.0 - max(-1.0, min(1.0, r['steer'])) * (sh / 2.0 - 2), x_of)
+                       else y + sh / 2.0 - steer_scale(r['steer']) * (sh / 2.0 - 2), x_of)
     _live_path(cr, pts, LV_STEER, 1.75)
 
 

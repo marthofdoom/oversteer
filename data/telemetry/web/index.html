@@ -546,7 +546,7 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
           <div class="panel-h"><span class="lbl">Pedals · last 12 s</span><span class="lbl"><span class="c-thr">THR</span> · <span class="c-brk">BRK</span><span id="clutch-key" hidden> · <span class="c-clutch">CLT</span></span></span></div>
           <canvas id="c-pedals" height="64"></canvas>
           <div id="hb-box" hidden><div class="panel-h strip-h"><span class="lbl">Handbrake</span></div><canvas id="c-hb" height="24"></canvas></div>
-          <div class="panel-h strip-h"><span class="lbl">Steering</span><span class="lbl">L ▲ · R ▼</span></div>
+          <div class="panel-h strip-h"><span class="lbl">Steering % lock</span><span class="lbl">L ▲ · R ▼</span></div>
           <canvas id="c-steer" height="44"></canvas>
         </div>
         <div class="duo">
@@ -1467,8 +1467,13 @@ function liveDrawPedals() {
   $("hb-box").hidden = !hb;
   if (hb) liveStrip($("c-hb"), 24, [{colour: "--hb", fill: true, fn: (r, h) => pos(r.hb)(h)}], (h) => [h - 0.5]);
 }
+// Steering is a fraction of the car's own lock, mostly 5-30 % in rally (median 9 %), so the strips use sign * sqrt(|s|) with
+// lines at 10/25/50 % of lock (full lock at the edge): the same scale as oversteer/telemetry_plot.py steer_scale.
+const STEER_GRID = [.1, .25, .5];
+const steerScale = (v) => Math.sign(v) * Math.sqrt(Math.min(1, Math.abs(v)));
 function liveDrawSteer() {
-  liveStrip($("c-steer"), 44, [{colour: "--steer", fn: (r, h) => r.steer == null ? null : h / 2 - Math.max(-1, Math.min(1, r.steer)) * (h / 2 - 2)}], (h) => [h / 2]);
+  liveStrip($("c-steer"), 44, [{colour: "--steer", fn: (r, h) => r.steer == null ? null : h / 2 - steerScale(r.steer) * (h / 2 - 2)}],
+    (h) => [h / 2].concat(...STEER_GRID.map((f) => [h / 2 - steerScale(f) * (h / 2 - 2), h / 2 + steerScale(f) * (h / 2 - 2)])));
 }
 function liveDrawGG() {
   const cv = $("c-gg"), c = lvSized(cv, Math.min(cv.clientWidth || 150, cv.clientWidth > 300 ? 240 : 170));
@@ -1914,9 +1919,12 @@ function rvDrawStrips() {
       if (D.cmp) { rvLine(g, pts(D.cmp.throttle, Y), C.ref, 1, .8); rvLine(g, pts(D.cmp.brake, Y), C.ref, 1, .8); }
       rvLine(g, pts(D.this.throttle, Y), C.thr, 1.75); rvLine(g, pts(D.this.brake, Y), C.brk, 1.75);
     } else if (key === "steer") {
-      const Y = (v) => top + H / 2 - Math.max(-1, Math.min(1, v)) * (H / 2 - 3);
+      const Y = (v) => top + H / 2 - steerScale(v) * (H / 2 - 3);
       g.strokeStyle = C.grid; g.beginPath(); g.moveTo(RV_GUT, Y(0)); g.lineTo(RV_GUT + W, Y(0)); g.stroke();
-      g.fillStyle = C.faint; g.fillText("L", 24, top + 10); g.fillText("R", 24, bot - 3);
+      g.save(); g.globalAlpha = .35;
+      for (const f of STEER_GRID) for (const s of [f, -f]) { g.beginPath(); g.moveTo(RV_GUT, Y(s)); g.lineTo(RV_GUT + W, Y(s)); g.stroke(); }
+      g.restore();
+      g.fillStyle = C.faint; g.fillText("% lock", 4, top + 23); g.fillText("L", 24, top + 10); g.fillText("R", 24, bot - 3);
       if (D.cmp) rvLine(g, pts(D.cmp.steer, Y), C.ref, 1, .8);
       rvLine(g, pts(D.this.steer, Y), C.steer, 1.75);
     } else if (key === "gear") {
@@ -1981,7 +1989,7 @@ function rvReadout() {
   grid.appendChild(cell("brk", "--brk", "brake", (v) => Math.round(v * 100)));
   grid.appendChild(cell("gear", "--gear", "gear", (v) => v < 1 ? (v === 0 ? "N" : "R") : v));
   grid.appendChild(cell("rpm", "--rpm", "rpm", (v) => (v / 1000).toFixed(1) + "k"));
-  grid.appendChild(cell("steer", "--steer", "steer", (v) => Math.round(v * 100)));
+  grid.appendChild(cell("steer % lock", "--steer", "steer", (v) => Math.round(v * 100)));
   const adv = $("ro-advice");
   clear(adv);
   const list = RV.adv[k] || [];

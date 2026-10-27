@@ -292,7 +292,7 @@ body.ap .demo { display: none; }
         <div class="panel">
           <div class="panel-h"><span class="lbl">Pedals · last 12 s</span><span class="lbl"><span style="color:var(--thr)">THR</span> · <span style="color:var(--brk)">BRK</span></span></div>
           <canvas id="c-pedals" height="64"></canvas>
-          <div class="panel-h" style="margin:8px 0 4px"><span class="lbl">Steering</span><span class="lbl">L ▲ · R ▼</span></div>
+          <div class="panel-h" style="margin:8px 0 4px"><span class="lbl">Steering % lock</span><span class="lbl">L ▲ · R ▼</span></div>
           <canvas id="c-steer" height="44"></canvas>
         </div>
         <div class="duo">
@@ -454,6 +454,10 @@ function splitColour(k, run, ref) {
 // ======================================================================
 // Canvas helpers
 // ======================================================================
+// Steering is a fraction of the car's own lock, mostly 5-30 % in rally (median 9 %): sign * sqrt(|s|), lines at 10/25/50 % of lock
+// (full lock at the edge), as oversteer/telemetry_plot.py steer_scale and the live page.
+const STEER_GRID = [.1, .25, .5];
+const steerScale = (v) => Math.sign(v) * Math.sqrt(Math.min(1, Math.abs(v)));
 function sized(cv, h) {
   const dpr = Math.min(3, window.devicePixelRatio || 1), w = cv.clientWidth || cv.parentNode.clientWidth;
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
@@ -574,8 +578,10 @@ function drawRolling() {
       line(g, pts, css(col), 1.75);
     } }
   { const {g, w, h} = sized($("c-steer"), 44);
-    g.strokeStyle = css("--grid"); g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
-    line(g, hist.map((s) => [xOf(w, s.t), h / 2 - s.steer * (h / 2 - 2)]), css("--steer"), 1.75); }
+    g.strokeStyle = css("--grid"); g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2);
+    for (const f of STEER_GRID) for (const s of [f, -f]) { g.moveTo(0, h / 2 - steerScale(s) * (h / 2 - 2)); g.lineTo(w, h / 2 - steerScale(s) * (h / 2 - 2)); }
+    g.stroke();
+    line(g, hist.map((s) => [xOf(w, s.t), h / 2 - steerScale(s.steer) * (h / 2 - 2)]), css("--steer"), 1.75); }
 }
 
 function drawGG(cv, s, all) {
@@ -725,9 +731,12 @@ function drawStrips() {
       line(g, series(LAST, (r, d) => Y(r.thr[d])), css("--thr"), 1.75);
       line(g, series(LAST, (r, d) => Y(r.brk[d])), css("--brk"), 1.75);
     } else if (st.key === "steer") {
-      const Y = (v) => top + H / 2 - v * (H / 2 - 3);
+      const Y = (v) => top + H / 2 - steerScale(v) * (H / 2 - 3);
       g.strokeStyle = css("--grid"); g.beginPath(); g.moveTo(GUT, Y(0)); g.lineTo(GUT + W, Y(0)); g.stroke();
-      g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono"); g.fillText("L", 24, top + 10); g.fillText("R", 24, bot - 3);
+      g.save(); g.globalAlpha = .35;
+      for (const f of STEER_GRID) for (const s of [f, -f]) { g.beginPath(); g.moveTo(GUT, Y(s)); g.lineTo(GUT + W, Y(s)); g.stroke(); }
+      g.restore();
+      g.fillStyle = css("--faint"); g.font = "9.5px " + css("--mono"); g.fillText("% lock", 4, top + 23); g.fillText("L", 24, top + 10); g.fillText("R", 24, bot - 3);
       refLine((r, d) => Y(r.steer[d]), css("--ref"), 1, .8);
       line(g, series(LAST, (r, d) => Y(r.steer[d])), css("--steer"), 1.75);
     } else if (st.key === "gear") {
@@ -765,7 +774,7 @@ function readout() {
     cell("brk", "--brk", Math.round(LAST.brk[d] * 100), Math.round(R.brk[d] * 100)) +
     cell("gear", "--gear", gearText(LAST.gear[d]), gearText(R.gear[d])) +
     cell("rpm", "--rpm", (LAST.rpm[d] / 1000).toFixed(1) + "k", (R.rpm[d] / 1000).toFixed(1) + "k") +
-    cell("steer", "--steer", Math.round(LAST.steer[d] * 100), Math.round(R.steer[d] * 100));
+    cell("steer % lock", "--steer", Math.round(LAST.steer[d] * 100), Math.round(R.steer[d] * 100));
 }
 function zoomTo(k) {
   zoomSec = k;
