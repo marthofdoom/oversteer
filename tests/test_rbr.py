@@ -68,13 +68,13 @@ def test_the_docs_sample_packet():
     assert s.engine_temp == pytest.approx(362.0 - K) and s.radiator_temp == s.block_temp == s.engine_temp
     assert s.tyre_pressure == (220.0,) * 4
     assert s.tyre_temp == pytest.approx((343.0 - K,) * 4) and s.tyre_carcass_temp == s.tyre_tread_temp == s.tyre_temp
-    assert s.susp == pytest.approx((0.195,) * 4) and s.tyre_load == (2540.0,) * 4
+    assert s.susp == pytest.approx((-0.195,) * 4) and s.tyre_load == (2540.0,) * 4
     assert s.pos == (pytest.approx(7.5), pytest.approx(45.1), pytest.approx(4.1))
     assert s.attitude[0] == pytest.approx(math.radians(91.5))
     assert s.lap_distance == pytest.approx(1.475) and s.stage_length == pytest.approx(2263.175)
     assert s.dist_to_end == pytest.approx(2261.7)
     assert s.game_time == pytest.approx(1839 / 720.0)
-    assert s.speed == 0.0 and s.accel == (0.0, 0.0, 0.0) and s.accel_kind == 'kinematic'
+    assert s.speed == 0.0 and s.accel == pytest.approx((0.0, 0.0, 0.0)) and s.accel_kind == 'kinematic'
     assert len(s.tyre_seg_temp[0]) == 8 and len(s.tyre_seg_wear[3]) == 8 and s.tyre_wear == (0.0,) * 4
 
 
@@ -99,7 +99,7 @@ def test_every_wheel_channel_lands_on_its_wheel():
             over[p + 'wheel.tire.segment%d.temperature' % seg] = K + 60 + i * 10 + seg
             over[p + 'wheel.tire.segment%d.wear' % seg] = 0.1 * seg + i
     s = decode_sample(packet(**over))
-    assert s.susp == pytest.approx((0.1, 1.1, 2.1, 3.1)) and s.susp_vel == pytest.approx((0.2, 1.2, 2.2, 3.2))
+    assert s.susp == pytest.approx((-0.1, -1.1, -2.1, -3.1)) and s.susp_vel == pytest.approx((-0.2, -1.2, -2.2, -3.2))
     assert s.tyre_pressure == pytest.approx((200.0, 201.0, 202.0, 203.0))
     assert s.tyre_temp == pytest.approx((50.0, 51.0, 52.0, 53.0))
     assert s.brake_temp == pytest.approx((400.0, 401.0, 402.0, 403.0)) and s.brake_wear == pytest.approx((0.3, 1.3, 2.3, 3.3))
@@ -119,13 +119,15 @@ def test_the_body_channels():
             'control.brake': 0.2, 'control.handbrake': 1.0, 'control.clutch': 0.3,
             'control.footbrakePressure': 11.0, 'control.handbrakePressure': 12.0}
     s = decode_sample(packet(**over))
-    assert s.vel == (20.0, 1.0, 0.5) and s.accel == (2.0, 3.0, 4.0)
-    assert s.ang_vel == pytest.approx(tuple(math.radians(a) for a in (10.0, 20.0, 30.0)))
+    assert s.vel == (20.0, -1.0, 0.5)                                # sway is positive to the right: y is to the left
+    assert s.accel == pytest.approx((2.0 * telemetry_formats.G, -3.0 * telemetry_formats.G, 4.0 * telemetry_formats.G))   # g
+    assert s.ang_vel == pytest.approx(tuple(math.radians(a) for a in (10.0, -20.0, 30.0)))   # pitch nose down positive
     assert s.yaw_rate == pytest.approx(math.radians(30.0))
     assert s.attitude == pytest.approx((math.radians(90.0), math.radians(-6.0), math.radians(5.0)))
     assert (s.throttle, s.brake, s.handbrake, s.clutch) == pytest.approx((0.7, 0.2, 1.0, 0.3))
     assert s.pedal_pressure == (11.0, 12.0) and s.steer == pytest.approx(-0.5)
     assert s.speed == pytest.approx(math.sqrt(400 + 1 + 0.25))
+
 
 
 def test_the_speed_is_the_velocity_not_the_wheels():
@@ -519,3 +521,83 @@ def test_the_thinned_capture_of_a_stage_gives_the_same_run(tmp_path):
     assert [f for f, _, _ in full] == [1, 0, 1] == [f for f, _, _ in thin]
     for (_, a, da), (_, b, db) in zip(full, thin):
         assert (a is None) == (b is None) and (a is None or abs(a - b) < 1e-3) and da == db
+
+
+# -- marth's full session of 2026-10-26 (pedals right; stages 83, 517, 309), cut down --
+
+def mss(x):
+    return '%d:%04.1f' % (x // 60, x % 60)
+
+
+def test_a_real_finish_is_the_frozen_clock(tmp_path):
+    """Monster HC (309, 2501 m): the clock stops at 2:25.6 with distanceToEnd at -0.02 m (driveLineLocation 2503.5,
+    the .dls finish at 2503.52), the car rolling on at 118 km/h."""
+    packets = capture_packets('rbr-finish.ovcap.gz')
+    samples = [decode_sample(d) for _, _, d in packets]
+    stopped = [s for a, s in zip(samples, samples[1:]) if s.stage_time == a.stage_time and s.stage_time > 100 and s.speed > 20]
+    assert len(stopped) > 100 and abs(stopped[0].dist_to_end) < 1.0       # (it goes on falling on the roll-on)
+    result = stopped[0].stage_time
+    assert mss(result) == '2:25.6'
+    assert samples[-1].dist_to_end < -50.0 and samples[-1].lap_distance > 2550.0        # the roll-on keeps a distance
+    learner, reader, session = drive_runs(tmp_path, [(t, s, 0.8) for (t, _, _), s in zip(packets, samples)])
+    [run] = session['runs']
+    assert run['finished'] == 1 and run['stage'] == 'rbr:309'
+    assert run['result_time'] == pytest.approx(result, abs=1e-3)
+    learner.close()
+
+
+def test_a_pause_then_a_restart_at_speed_ends_the_run_as_a_restart(tmp_path):
+    packets = capture_packets('rbr-pause-restart.ovcap.gz')
+    samples = [decode_sample(d) for _, _, d in packets]
+    assert any(b.steps < a.steps - 10000 for a, b in zip(samples, samples[1:]))          # the steps go back
+    learner, reader, session = drive_runs(tmp_path, [(t, s, 0.8) for (t, _, _), s in zip(packets, samples)])
+    [run] = session['runs']
+    assert run['finished'] == 0 and run['stage'] == 'rbr:517' and 150 < run['distance'] < 400
+    learner.close()
+
+
+def _corr(a, b):
+    import numpy as np
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def test_the_signs_on_a_real_stage():
+    """Corner side from the positions (the plan's east and north, a left turn counter-clockwise) against the
+    packet: the wheel's right is the packet's positive steering, the yaw rate and the lateral acceleration are
+    positive to the left once converted, and the plan (x, z, y) is not mirrored."""
+    import numpy as np
+    samples = [decode_sample(d) for _, _, d in capture_packets('rbr-finish.ovcap.gz')][:-40]            # (the fixture is at 60 Hz)
+    pos = np.array([telemetry_formats.plan_xy('rbr', s.pos) for s in samples])
+    k = np.ones(5) / 5
+    dx, dy = np.gradient(np.convolve(pos[:, 0], k, 'same')), np.gradient(np.convolve(pos[:, 1], k, 'same'))
+    heading = np.unwrap(np.arctan2(dy, dx))
+    rate = np.gradient(heading) * 60.0
+    speed = np.array([s.speed for s in samples])
+    keep = (speed > 12.0) & (np.abs(rate) < 3.0)
+    keep[:5] = keep[-5:] = False
+    yaw_rate = np.array([s.yaw_rate for s in samples])
+    lateral = np.array([s.accel[1] for s in samples])
+    steer = np.array([s.steer for s in samples])
+    roll = np.array([s.attitude[2] for s in samples])
+    assert keep.sum() > 500
+    assert _corr(rate[keep], yaw_rate[keep]) > 0.7
+    assert _corr(rate[keep] * speed[keep], lateral[keep]) > 0.9                  # positive to the left
+    assert np.polyfit(rate[keep] * speed[keep], lateral[keep], 1)[0] == pytest.approx(1.0, abs=0.25)   # m/s2, from g
+    assert _corr(rate[keep], steer[keep]) > 0.4                                  # steer positive left (the wheel leads the yaw)
+    assert _corr(rate[keep], roll[keep]) > 0.3                                   # a left turn rolls the body to the right
+    assert _corr(rate[keep], np.array([s.vel[1] for s in samples])[keep]) < -0.4     # and slides it outwards, to the right
+
+
+def test_the_pedals_and_the_suspension_of_a_real_stage():
+    import numpy as np
+    samples = [decode_sample(d) for _, _, d in capture_packets('rbr-finish.ovcap.gz')]
+    brake = np.array([s.brake for s in samples])
+    accel = np.array([s.accel[0] for s in samples])
+    assert 0.0 <= brake.min() and brake.max() <= 1.0 and brake.max() > 0.5
+    assert accel[brake > 0.6].mean() < -3.0 < 0.0 < accel[np.array([s.throttle for s in samples]) > 0.8].mean()
+    assert all(0.0 <= s.throttle <= 1.0 and 0.0 <= s.clutch <= 1.0 for s in samples)
+    susp = np.array([s.susp[0] for s in samples])
+    assert -0.45 < susp.min() and susp.max() < -0.1                                # extension, negated: compression positive
+    load = np.array([s.tyre_load[0] for s in samples])
+    assert _corr(susp, load) > 0.5                                                 # more compression, more load
+    assert all(s.gear >= -1 for s in samples)

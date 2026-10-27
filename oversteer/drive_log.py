@@ -223,7 +223,7 @@ FINISH_CLOCK_BEFORE = 400.0      # m before the table's line (the last pace note
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
 # Richard Burns Rally (NGP's packet: docs/richard-burns-rally.md; the numbers wait for the first capture)
 RBR_STEP_BACK = 720              # steps (a second at NGP's 1/720 s) the step counter goes back by: the stage was loaded again
-RBR_END_NEAR = 30.0              # m: distanceToEnd under this, the clock stopped and the car moving: the finish
+RBR_END_NEAR = 10.0              # m: distanceToEnd under this, the clock stopped and the car moving: the finish (-0.02 m at the one real finish)
 RBR_STOPPED = 3.0                # s: the clock stopped this long with the car moving is the finish whatever distanceToEnd says
 # The game keeps sending after the finish (the results screen, the car rolling
 # out or parked). A finish the game told ends the run at once (the guard keeps
@@ -874,15 +874,19 @@ class RunTracker:
 
     def _rbr_finish(self, now, sample, speed):
         """Richard Burns Rally: the stage clock stops at the finish key while the car drives on for 20 s. The
-        finish is that clock standing still with the car moving, past FINISH_AFTER, and distanceToEnd near 0 (or,
-        distanceToEnd being unproven, the clock stopped for RBR_STOPPED); the result is the frozen raceTime, the
-        game's own time with its penalties. A pause repeats the step counter and never gets here. Verify on capture."""
+        finish is that clock standing still with the car moving and distanceToEnd near 0 (-0.02 m at the one real
+        finish, marth's 2026-10-26 capture), or the clock stopped for RBR_STOPPED well into the stage; the result
+        is the frozen raceTime, the game's own time with its penalties. A pause repeats the step counter and never
+        gets here."""
         clock = self._clock_run
         if sample.stage_time is None or clock.offset is None or not clock.proven or speed <= MOVING \
-                or self._clock_moved_d is None or self._clock_moved_d < FINISH_AFTER:
+                or self._clock_moved_d is None:
             return
         near = sample.dist_to_end is not None and sample.dist_to_end <= RBR_END_NEAR
-        if (near and clock.still >= clock.settle) or clock.still >= max(RBR_STOPPED, clock.stopped_after):
+        # (the line is near: a run that began late in the stage is the finish all the same; without it the clock
+        # must have run for a while, which a test map of 394 m does within 500 m)
+        far = self._clock_moved_d >= min(FINISH_AFTER, 0.5 * (self._summary['stage_length'] or FINISH_AFTER))
+        if (near and clock.still >= clock.settle) or (far and clock.still >= max(RBR_STOPPED, clock.stopped_after)):
             self._finish_at(now, self._clock_moved_d, sample.stage_time + clock.result_offset, 'game')
 
     def _line_finish(self, now, sample, d, speed):

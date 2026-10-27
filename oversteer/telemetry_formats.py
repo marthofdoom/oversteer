@@ -824,7 +824,7 @@ def _rbr(data, n):
     sample.drivetrain = (car or {}).get('drivetrain')
     sample.gears = (car or {}).get('gears')
     sample.handbrake = _finite(handbrake)
-    sample.steer = _finite(-steering)            # verify on capture: assumed positive right as sent
+    sample.steer = _finite(-steering)            # positive right as sent (it equals the G29's axis, high to the right): negated
     sample.steps = steps
     sample.game_time = steps / RBR_STEPS_PER_S   # (verify the rate) freezes in a pause, goes back on a stage load
     sample.stage = 'rbr:{}'.format(stage_index) if stage_index >= 0 and stage_index != RBR_BTB else None
@@ -832,23 +832,33 @@ def _rbr(data, n):
     sample.drive_progress = _finite(progress)    # verify on capture: unit unknown
     # driveLineLocation: metres along the stage's driveline is the hypothesis (1.5 at the start of the sample's
     # 2.2 km stage, with distanceToEnd 2261.7 beside it); then their sum is the stage's length. Verify on capture
-    if math.isfinite(drive_line) and math.isfinite(to_end) and drive_line >= 0.0 and to_end >= 0.0 \
-            and 100.0 < drive_line + to_end < 200000.0:
+    # (confirmed on marth's captures: 2503.5 m at the clock stop of a stage whose .dls finish is 2503.52; distanceToEnd
+    # goes negative past the line, on the roll-on)
+    if math.isfinite(drive_line) and math.isfinite(to_end) and drive_line >= 0.0 and 100.0 < drive_line + to_end < 200000.0:
         sample.lap_distance = drive_line
         sample.stage_length = drive_line + to_end
     sample.dist_to_end = _finite(to_end)
     sample.pos = _vector(t[16:19])               # world metres, z up expected (verify handedness)
-    sample.attitude = _vector(math.radians(a) for a in (t[21], t[20], t[19]))     # yaw, pitch, roll (sent degrees)
-    sample.vel = _vector(t[22:25])               # surge, sway, heave (m/s); sway positive left is what readers imply
-    sample.ang_vel = _vector(math.radians(a) for a in t[25:28])                   # roll, pitch, yaw rates (deg/s; signs: verify)
+    # yaw, pitch, roll as sent, in radians: the yaw is a compass angle (it grows turning right), pitch nose up, roll right side down
+    sample.attitude = _vector(math.radians(a) for a in (t[21], t[20], t[19]))
+    # Signs and units from marth's captures of 2026-10-26 (corner side from the positions against the wheel, the
+    # packet's sway and rates against them): sway is positive to the RIGHT (m/s and g), the yaw rate positive to the
+    # left, roll positive with the right side down, pitch positive nose UP (braking lowers it); angular rates and
+    # accelerations are deg/s and deg/s^2; the accelerations are in g (acc.sway = v x heading rate / 9.81, braking
+    # -0.8, heave 0 at rest). Heave: not checked (z up expected)
+    sample.vel = _vector((t[22], -t[23], t[24]))   # surge, sway, heave (m/s), y to the left
+    sample.ang_vel = _vector((math.radians(t[25]), -math.radians(t[26]), math.radians(t[27])))   # roll, pitch (nose down), yaw
     sample.yaw_rate = _finite(math.radians(t[27]))
-    sample.accel = _vector(t[28:31])             # m/s^2 (verify; mika-n calls sway "G"): kinematic, 0 at rest
+    sample.accel = _vector((t[28] * G, -t[29] * G, t[30] * G))      # m/s^2, y to the left: kinematic, 0 at rest
     sample.accel_kind = 'kinematic'
-    sample.ang_accel = _vector(math.radians(a) for a in t[31:34])                 # deg/s^2 assumed (verify)
+    sample.ang_accel = _vector((math.radians(t[31]), -math.radians(t[32]), math.radians(t[33])))
     sample.radiator_temp, sample.engine_temp, sample.block_temp = _celsius(t[35]), _celsius(t[36]), _celsius(t[37])
-    sample.pedal_pressure = _vector((foot_pressure, hand_pressure))
-    sample.susp = _vector(w[0] for w in wheels)  # springDeflection, m: 0.195 at rest, so zero and sign: verify on capture
-    sample.susp_vel = _vector(w[7] for w in wheels)                                # damper pistonVelocity, m/s (sign: verify)
+    sample.pedal_pressure = _vector((foot_pressure, hand_pressure))      # Pa (6.4e6 at full brake)
+    # springDeflection is the extension, not the compression (0.12 to 0.41 m on a stage; it falls under braking and
+    # on the loaded side of a corner, and the spring force falls with it, r -0.99), pistonVelocity its rate (r 0.97):
+    # compression positive is their negative. The zero is the game's (full droop is not known)
+    sample.susp = _vector(-w[0] for w in wheels)
+    sample.susp_vel = _vector(-w[7] for w in wheels)                               # m/s
     forces = tuple(_vector(w[1:5]) for w in wheels)                                # rollbar, spring, damper, strut (N)
     sample.susp_forces = forces if None not in forces else None
     sample.tyre_load = _vector(-w[4] for w in wheels)                              # at rest strut = -(spring + rollbar + damper): verify

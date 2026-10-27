@@ -4,7 +4,7 @@
 
 ### Telemetry
 - **Richard Burns Rally (RallySimFans, NGP plugin) telemetry, first cut, built from the research in
-  `docs/richard-burns-rally.md` and checked against two short captures (a full stage is still to come).** The 664-byte packet is decoded
+  `docs/richard-burns-rally.md` and checked against marth's captures (one real finish so far).** The 664-byte packet is decoded
   (Auto and the port drop-down now also listen on 6776, the usual NGP port; a game that sends to 5310 works
   as well): pedals, steering, gear, rpm, speed, position and attitude, velocities and accelerations,
   per-wheel suspension, forces, tyre temperatures (surface, carcass, tread, 8 segments), pressures and wear,
