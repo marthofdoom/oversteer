@@ -1590,28 +1590,29 @@ class Store(Reader):
                 best[key] = (result, run)
         kept = {run for _, run in best.values()}
         # every PB, now and at the time it was set (PBs are never deleted: coach_context.PB_CLASSES, whatever the
-        # wetness or the time after the first section): each finished run quicker than all the runs before it. A
-        # finished run with no class yet (cleared by an older build, waiting for the backfill) counts here and below
-        records = {}
-        for run, stage, car, result in self._do(
-                'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
-                'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                "AND (r.run_class IN ('clean', 'learning', 'off') OR r.run_class IS NULL) "
-                "ORDER BY r.started, r.id").fetchall():
-            if result < records.get((stage, car), float('inf')):
-                records[(stage, car)] = result
-                kept.add(run)
+        # wetness or the time after the first section): each finished run quicker than all the runs before it; and
         # the PB as stage_pb_id ranks it (once a car has a run on the game's own clock on a stage, only its clock runs;
-        # of two equal times the newer, as stage_pb_id picks it)
-        pbs = {}
-        for run, stage, car, result in self._do(
-                'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
-                'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
-                "AND (r.run_class IN ('clean', 'learning', 'off') OR r.run_class IS NULL) AND " + self.ON_CLOCK +
-                ' ORDER BY r.started, r.id').fetchall():
-            if result <= pbs.get((stage, car), (float('inf'),))[0]:
-                pbs[(stage, car)] = (result, run)
-        kept.update(run for _, run in pbs.values())
+        # of two equal times the newer, as stage_pb_id picks it). Both are worked out for the ranked classes, then
+        # again with the finished runs that have no class yet (cleared by an older build, waiting for the backfill)
+        # counted too, and both kept: a class-less run only adds protection, never hides a PB of the ranked ones
+        ranked = "r.run_class IN ('clean', 'learning', 'off')"
+        for classes in (ranked, '({} OR r.run_class IS NULL)'.format(ranked)):
+            records = {}
+            for run, stage, car, result in self._do(
+                    'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                    'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                    'AND ' + classes + ' ORDER BY r.started, r.id').fetchall():
+                if result < records.get((stage, car), float('inf')):
+                    records[(stage, car)] = result
+                    kept.add(run)
+            pbs = {}
+            for run, stage, car, result in self._do(
+                    'SELECT r.id, r.stage, s.car, r.result_time FROM runs r JOIN sessions s ON r.session = s.id '
+                    'WHERE r.finished = 1 AND r.result_time IS NOT NULL AND r.stage IS NOT NULL '
+                    'AND ' + classes + ' AND ' + self.ON_CLOCK + ' ORDER BY r.started, r.id').fetchall():
+                if result <= pbs.get((stage, car), (float('inf'),))[0]:
+                    pbs[(stage, car)] = (result, run)
+            kept.update(run for _, run in pbs.values())
         dropped = 0
         for run, size in self._do('SELECT run, LENGTH(data) FROM traces ORDER BY run').fetchall():
             if total <= cap:

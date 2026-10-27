@@ -423,6 +423,20 @@ def test_a_pb_whose_class_an_older_build_cleared_keeps_its_trace_past_the_cap(tm
     store.close()
 
 
+def test_a_class_less_run_with_a_bogus_quick_time_does_not_hide_the_real_pb(tmp_path):
+    # an older build's run, its class cleared, quicker than anything since (a bad time); then the ranked runs
+    store, ids, size = _acr_runs(tmp_path, [(150.0, None), (210.0, 'clean'), (220.0, 'clean'), (200.0, 'off'),
+                                            (230.0, 'clean')])
+    car = store.run(ids[1])['car']
+    assert coach_context.stage_pb_id(store, 'acr:x:y', car) == ids[3]
+    assert store.prune_traces(cap=size * 2) > 0
+    assert store.trace(ids[3]) is not None                         # the PB, slower than the class-less run
+    assert store.trace(ids[1]) is not None                         # the PB history of the ranked runs
+    assert store.trace(ids[0]) is not None                         # and the class-less one, still protected
+    assert store.trace(ids[2]) is None and store.trace(ids[4]) is None
+    store.close()
+
+
 def test_the_old_requeue_paths_keep_the_class_while_the_run_waits(tmp_path):
     store, ids, size = _acr_runs(tmp_path, [(210.0, 'clean'), (200.0, 'off')])
     store.queue_stage_runs('acr:x:y')
