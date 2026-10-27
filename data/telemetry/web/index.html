@@ -653,9 +653,9 @@ const $ = (id) => document.getElementById(id);
 const METHODS = {"h-pattern": "H-pattern", "sequential": "Sequential", "paddles": "Paddles"};
 const GAMES = {"forza-fh": "Forza Horizon", "forza-fm": "Forza Motorsport", "forza": "Forza", "dirt": "DiRT",
   "wrcg": "WRC Generations", "eawrc": "EA SPORTS WRC", "acpmf": "Assetto Corsa", "ac": "Assetto Corsa", "acc": "Assetto Corsa Competizione", "acr": "Assetto Corsa Rally",
-  "beamng": "BeamNG.drive", "lfs": "Live for Speed"};
+  "beamng": "BeamNG.drive", "lfs": "Live for Speed", "rbr": "Richard Burns Rally"};
 const SHORT = {"forza-fh": "FH", "forza-fm": "FM", "dirt": "DiRT", "wrcg": "WRC", "eawrc": "EA WRC", "acpmf": "AC", "ac": "AC", "acc": "ACC",
-  "acr": "ACR", "beamng": "BeamNG", "lfs": "LFS"};
+  "acr": "ACR", "beamng": "BeamNG", "lfs": "LFS", "rbr": "RBR"};
 const LIGHTS = 15, MINUS = "−", STALE_MS = 2000, GONE_MS = 30000;
 let carId = null, sessionSeen = null, carFollowsLive = true, cars = [], liveGear = null, stageName = null;
 
@@ -1924,9 +1924,11 @@ function rvDrawStrips() {
       g.save(); g.globalAlpha = .35;
       for (const f of STEER_GRID) for (const s of [f, -f]) { g.beginPath(); g.moveTo(RV_GUT, Y(s)); g.lineTo(RV_GUT + W, Y(s)); g.stroke(); }
       g.restore();
-      g.fillStyle = C.faint; g.font = "8.5px " + C.mono; g.fillText("% lock", 4, top + 23); g.font = "9.5px " + C.mono; g.fillText("L", RV_GUT + 3, top + 10); g.fillText("R", RV_GUT + 3, bot - 3);
+      g.fillStyle = C.faint; g.font = "8.5px " + C.mono; g.fillText("% lock", 2, top + 23); g.font = "9.5px " + C.mono; g.fillText("L", RV_GUT + 3, top + 10); g.fillText("R", RV_GUT + 3, bot - 3);
+      g.save(); g.beginPath(); g.rect(RV_GUT, top, W, bot - top); g.clip();   // the trace stays out of the gutter, clear of the "% lock" caption
       if (D.cmp) rvLine(g, pts(D.cmp.steer, Y), C.ref, 1, .8);
       rvLine(g, pts(D.this.steer, Y), C.steer, 1.75);
+      g.restore();
     } else if (key === "gear") {
       let gmax = 5;
       for (const v of D.this.gear) if (v != null) gmax = Math.max(gmax, v);

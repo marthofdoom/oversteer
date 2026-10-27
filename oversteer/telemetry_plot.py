@@ -158,6 +158,8 @@ def dash(cr, w, h, d, flash=False):
 
 SPEED, THROTTLE, BRAKE, STEER, RPM, GEAR = '#4cc3ff', '#2fd27a', '#ff4d4d', '#b58cff', '#ffb020', '#e8edf2'
 REF, SLOWER, FASTER, NEUTRAL, GRID, BG = '#8c96a3', '#ff5a4e', '#2fd27a', '#3a424d', '#1a2028', '#0a0c0f'
+
+
 def steer_scale(v):
     """Where a steering value (fraction of the car's own lock, signed) sits on a strip, -1..1: sign(v) * sqrt(|v|),
     clamped at full lock. Rally steering is mostly 5-30 % of lock (median 9 %, p99 60-90 %), so a linear +-100 % strip
@@ -320,12 +322,16 @@ def strips(cr, w, h, data, view, cursor, scale=1.0):
             for f in STEER_GRID[:-1]:
                 _rect(cr, GUT, Y(f), width, 1, GRID, 0.35)
                 _rect(cr, GUT, Y(-f), width, 1, GRID, 0.35)
-            text(cr, '% lock', 4, top + 23, 8.5, FAINT)
+            text(cr, '% lock', 2, top + 23, 8.5, FAINT)
             text(cr, 'L', GUT + 3, top + 10, 9.5, FAINT)               # in the plot, clear of the STEER title
             text(cr, 'R', GUT + 3, bot - 3, 9.5, FAINT)
+            cr.save()
+            cr.rectangle(GUT, top, width, bot - top)       # the trace stays out of the gutter, clear of the '% lock' caption
+            cr.clip()
             if cmp_:
                 _line(cr, pts(cmp_['steer'], Y), REF, 1, 0.8)
             _line(cr, pts(this['steer'], Y), STEER, 1.75)
+            cr.restore()
         elif key == 'gear':
             gmax = max([5] + [g for g in this['gear'] if g is not None])
 

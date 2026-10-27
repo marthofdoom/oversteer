@@ -105,6 +105,8 @@ class Application:
         if args.diagnostics_bundle:
             exit(self.write_diagnostics_bundle(args.diagnostics_bundle))
 
+        if args.retime_dry_run:
+            args.retime_from_captures = True            # a dry run alone means a dry-run re-timing
         if args.retime_from_captures:
             from . import data_repair
             exit(data_repair.run_retime(os.path.join(diagnostics.data_home(), 'oversteer', 'telemetry.db'),
