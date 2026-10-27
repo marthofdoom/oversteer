@@ -47,6 +47,17 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.16.0" date="2026-10-26">
+      <description>
+        <ul>
+          <li>Richard Burns Rally telemetry (RallySimFans, NGP plugin) with no setup: stages, cars and runs.</li>
+          <li>DiRT Rally 2.0: the stage plan is no longer mirrored, and cars have their real names.</li>
+          <li>Steering is shown as % lock, and counter-steer is judged against the car's yaw a moment later.</li>
+          <li>A one-off repair of the stored data on the first start, with a backup made first.</li>
+          <li>New --retime-from-captures option re-times stored runs from the captures (--retime-dry-run previews).</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.15.5" date="2026-10-26">
       <description>
         <ul>

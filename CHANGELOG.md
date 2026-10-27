@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 — 2026-10-26
 
 ### Telemetry
 - **Richard Burns Rally (RallySimFans, NGP plugin) telemetry.** The 664-byte packet is decoded: pedals, steering,
