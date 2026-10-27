@@ -47,6 +47,15 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.15.5" date="2026-10-26">
+      <description>
+        <ul>
+          <li>The telemetry UDP port is a drop-down with the games' ports, and Auto (the default) listens on 5310, 20777 and 4444 at once.</li>
+          <li>Runs end at the finish line, your PB is the fastest finished run, and coaching covers only the stage you just drove.</li>
+          <li>A rotating log file, a diagnostics bundle (Settings, Diagnostics) and wheel inputs in raw telemetry captures.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.15.4" date="2026-10-18">
       <description>
         <p>The web page pairing code now shows when changes from the web page are allowed.</p>

@@ -385,11 +385,11 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
 .swrow { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 48px; }
 .swrow .txt { min-width: 0; }
 .swrow .name { font-weight: 600; font-size: 14.5px; }
-.sw { flex: none; width: 52px; height: 30px; border-radius: 15px; background: var(--neutral); position: relative; transition: background .15s; }
-.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--text); transition: transform .15s; }
-.sw[aria-checked="true"] { background: var(--accent); }
-.sw[aria-checked="true"]::after { transform: translateX(22px); }
-.sw:disabled { opacity: .4; cursor: default; }
+.toggle { flex: none; width: 52px; height: 30px; border-radius: 15px; background: var(--neutral); position: relative; transition: background .15s; }
+.toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+.toggle[aria-checked="true"] { background: var(--accent); }
+.toggle[aria-checked="true"]::after { transform: translateX(22px); }
+.toggle:disabled { opacity: .4; cursor: default; }
 .seg.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 6px 0 0; }
 .seg button:disabled { opacity: .45; cursor: default; }
 .seg.n3 button { height: 40px; font-size: 12.5px; letter-spacing: .02em; padding: 0 4px; }
@@ -2447,7 +2447,7 @@ function mkSwitch(name, hint, send) {
   const root = el("div", null, "row"), line = el("div", null, "swrow"), txt = el("div", null, "txt");
   txt.appendChild(el("div", name, "name"));
   if (hint) txt.appendChild(el("div", hint, "hint"));
-  const btn = el("button", null, "sw");
+  const btn = el("button", null, "toggle");
   btn.type = "button";
   btn.setAttribute("role", "switch");
   btn.setAttribute("aria-label", name);
