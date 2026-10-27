@@ -58,3 +58,12 @@ def test_a_gearing_off_the_game_data_is_told_from_wheelspin():
     assert abs(car_data.unexplained_miss(gear_set, third, 0.04) - 0.06) < 1e-9
     assert car_data.unexplained_miss(gear_set, {1: fits[1], 3: fits[3]}, 0.04) is None     # no two adjacent
     assert abs(car_data.unexplained_miss(gear_set, {4: fits[4] * 1.05, 5: fits[5]}, 0.04) - 0.05) < 1e-9
+
+
+def test_a_stored_generic_dirt_name_gives_way_to_the_table_unless_the_user_named_it():
+    from oversteer.shift_learner import ShiftLearner
+    car = type('C', (), {'name': 'x'})()
+    key = 'dirt/9000-1300-6'
+    assert ShiftLearner._stored_name({'name': '9000 rpm, 6 gears', 'user_named': False}, key, car) == 'Seat Ibiza Kit Car'
+    assert ShiftLearner._stored_name({'name': '9000 rpm, 6 gears', 'user_named': True}, key, car) == '9000 rpm, 6 gears'
+    assert ShiftLearner._stored_name({'name': 'My Ibiza', 'user_named': False}, key, car) == 'My Ibiza'

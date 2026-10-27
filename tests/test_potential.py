@@ -437,6 +437,23 @@ def test_the_curvature_reads_a_hairpins_radius_not_the_smoothing_windows(radius)
     assert k[np.nanargmax(np.abs(k))] > 0                                      # the arc bends north: a left turn
 
 
+def test_positions_give_the_road_in_any_game_and_an_unknown_road_gets_no_potential():
+    """DiRT sends no yaw: its positions are the road (plan x, -z). A run with neither positions nor yaw has no road,
+    and its stage gets no potential rather than one long straight."""
+    arr, total = _path_arr(30.0)
+    grid = np.arange(0.0, total, potential.DS)
+    k = potential.curvature(arr, grid, 'dirt')
+    assert 1 / np.nanmax(np.abs(k)) == pytest.approx(30.0, rel=0.12) and k[np.nanargmax(np.abs(k))] > 0
+    blind = {name: np.array(value) for name, value in arr.items()}
+    blind['x'][:] = 0.0
+    blind['z'][:] = 0.0
+    blind['yaw_rate'][:] = NAN
+    assert np.isnan(potential.curvature(blind, grid, 'dirt')).all()
+    runs = [{'id': 1, 'class': 'clean', 'finished': True, 'arr': blind, 'mine': True, 'bad': []}]
+    cols = [potential.envelope_rows(blind)] * 3
+    assert potential.stage(runs, None, 'gravel', 'dirt', cols, 3) is None
+
+
 def test_the_car_mass_scales_with_the_car():
     from oversteer import car_data
     i20 = car_data.entry('acr/Hyundai i20N Rally2')

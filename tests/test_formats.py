@@ -75,6 +75,13 @@ def test_codemasters_rad_s():
     assert sample.game == 'dirt'
 
 
+def test_codemasters_dirt_cars_are_named_from_the_shipped_table():
+    """dr2_logger's table (cars/dirt.json): one car by its name, cars sharing an engine and gearbox as 'A / B'."""
+    assert decode_sample(codemasters(6000, 9000, idle=1300)).car_name == 'Seat Ibiza Kit Car'
+    sample = decode_sample(codemasters(6000, 7400, idle=1700, gears=5))
+    assert sample.car == 'dirt/7400-1700-5' and sample.car_name == 'Skoda Fabia R5 / Volkswagen Polo GTI R5'
+
+
 def test_codemasters_true_rpm_and_rpm_over_10():
     """WRC Generations' unit is unverified: a round max in rpm, or in rpm / 10, is taken as it is."""
     sample = decode_sample(codemasters(6000, 7000, unit=1.0, size=280))

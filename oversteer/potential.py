@@ -45,7 +45,13 @@ from .telemetry_store import TRACE_CHANNELS
 CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 G = cc.G
 
-ALGO = 6                         # bumps when the numbers a stored potential holds would change
+ROAD_UNKNOWN_MAX = 0.2           # a stage whose road is unknown over more of its length than this gets no potential
+# Games whose plan axes (telemetry_formats.plan_xyz) are checked, so their positions give the road: ACR and DiRT
+# against the lateral g (DiRT: corner sides 98 % in agreement on marth's captures); WRC Generations sends no yaw, so
+# positions are its only road, and the replay supports (x, y) for it, weakly but with the right sign. The other games
+# keep the yaw-based road (their plan axes are unchecked).
+PLAN_VERIFIED = {'acr', 'dirt', 'wrcg'}
+ALGO = 7                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
 BIN_MIN = 10                     # rows a speed bin needs (the research had 40 at 60 Hz)
@@ -200,7 +206,7 @@ def has_positions(arr):
 def curvature(arr, grid, plan=None):
     """The path's curvature k (1/m, positive left) on the grid: from the positions where `plan` (the game's name,
     for its plan view: telemetry_formats.plan_xy; True: ACR) and the run has
-    them, else yaw rate over speed. NaN where the run was slower than V_MIN or not there."""
+    them (any game that sends positions), else yaw rate over speed. NaN where the run was slower than V_MIN or not there."""
     speed = resample(arr, 'speed', grid)
     if plan and has_positions(arr):
         x, y = plan_xy('acr' if plan is True else plan, (resample(arr, 'x', grid), resample(arr, 'y', grid),
@@ -222,12 +228,15 @@ def curvature(arr, grid, plan=None):
     return k
 
 
-def road(ks):
-    """The course's curvature: the median over the runs' (NaN where none was there: straight)."""
+def _median_k(ks):
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        med = np.nanmedian(np.asarray(ks), axis=0)
-    return _smooth(np.nan_to_num(med), 3)
+        return np.nanmedian(np.asarray(ks), axis=0)
+
+
+def road(ks):
+    """The course's curvature: the median over the runs' (NaN where none was there: straight)."""
+    return _smooth(np.nan_to_num(_median_k(ks)), 3)
 
 
 # -- the grip --
@@ -720,6 +729,8 @@ def stage(runs, data, surface, plan, env_rows, env_runs, sob=None, road_m=None, 
         return None
     grid = np.arange(0.0, length, DS)
     ks = [curvature(r['arr'], grid, plan) for r in runs]
+    if np.isnan(_median_k(ks)).mean() > ROAD_UNKNOWN_MAX:
+        return None                      # no road to speak of (no positions, no yaw): not one long straight
     k = road(ks)
     env = envelope([np.concatenate(c) for c in zip(*env_rows)], P_GRIP)
     if env is None:
@@ -876,9 +887,10 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
         runs.append({'id': r['id'], 'class': r['run_class'], 'finished': r['finished'] == 1, 'arr': a,
                      'mine': r['car'] == car_id, 'bad': _bad_ranges(store, r['id']) if r['car'] == car_id else []})
     env_cols = [envelope_rows(a) for a in (arr_of(r) for r in env_rows) if a is not None]
-    plan = 'acr' if acr else None
+    plan = game if game in PLAN_VERIFIED else ('acr' if acr else None)
     pot = stage(runs, data, surface, plan, env_cols, len(env_cols), sob, road, tail)
     if pot is None:
+        store.delete_potential(stage_key, car_id)        # a refusal leaves no older, wrong one standing
         return None
     built = now if now is not None else time.time()
     envelopes = pot.pop('envelopes')
