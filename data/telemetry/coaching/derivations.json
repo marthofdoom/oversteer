@@ -930,6 +930,120 @@
    "unit": "s",
    "description": "The first two splits' times, None until set (DiRT Rally 2.0, fields 49 and 50).",
    "rate": "packet"
+  },
+  "steps": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "NGP physics step counter (Richard Burns Rally): goes back when a stage is loaded, repeats in a pause.",
+   "rate": "packet"
+  },
+  "dist_to_end": {
+   "kind": "sample",
+   "unit": "m",
+   "description": "Distance to the end of the stage (Richard Burns Rally distanceToEnd); near 0 at the finish line: verify on capture.",
+   "rate": "packet"
+  },
+  "drive_progress": {
+   "kind": "sample",
+   "unit": "unknown",
+   "description": "stage.progress as Richard Burns Rally sends it; the unit is not known: verify on capture.",
+   "rate": "packet"
+  },
+  "radiator_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Radiator coolant temperature (Richard Burns Rally).",
+   "rate": "packet"
+  },
+  "block_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Engine temperature (Richard Burns Rally), beside the coolant temperature in engine_temp.",
+   "rate": "packet"
+  },
+  "pedal_pressure": {
+   "kind": "sample",
+   "unit": "unknown",
+   "description": "Foot brake and handbrake pressure (Richard Burns Rally); the unit is not known.",
+   "convention": "foot brake, handbrake",
+   "rate": "packet"
+  },
+  "susp_forces": {
+   "kind": "sample",
+   "unit": "N",
+   "description": "Rollbar, spring, damper and strut force per wheel (Richard Burns Rally).",
+   "convention": "per wheel ordered FL, FR, RL, RR, each (rollbar, spring, damper, strut)",
+   "rate": "packet"
+  },
+  "helper_spring": {
+   "kind": "sample",
+   "unit": "0/1",
+   "description": "Whether the helper spring is active (Richard Burns Rally).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "damper_damage": {
+   "kind": "sample",
+   "unit": "unknown",
+   "description": "Damper damage (Richard Burns Rally); 0 is none, the scale is not known.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "brake_layer_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Brake disc layer temperature (Richard Burns Rally).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "brake_wear": {
+   "kind": "sample",
+   "unit": "unknown",
+   "description": "Brake disc wear (Richard Burns Rally); the scale is not known.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_carcass_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Tyre carcass temperature (Richard Burns Rally).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_tread_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Tyre tread temperature (Richard Burns Rally).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_seg_temp": {
+   "kind": "sample",
+   "unit": "C",
+   "description": "Temperature of each of the 8 segments around the tyre (Richard Burns Rally).",
+   "convention": "per wheel ordered FL, FR, RL, RR, each 8 values",
+   "rate": "packet"
+  },
+  "tyre_seg_wear": {
+   "kind": "sample",
+   "unit": "unknown",
+   "description": "Wear of each of the 8 segments around the tyre (Richard Burns Rally); the scale is not known.",
+   "convention": "per wheel ordered FL, FR, RL, RR, each 8 values",
+   "rate": "packet"
+  },
+  "tyre_contact": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "Which of the 8 tyre segments touches the road (Richard Burns Rally).",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "ang_accel": {
+   "kind": "sample",
+   "unit": "rad/s^2",
+   "description": "Angular acceleration in the car frame: roll, pitch, yaw (Richard Burns Rally, degrees/s^2 assumed: verify on capture).",
+   "convention": "x forward, y left, z up",
+   "rate": "packet"
   }
  },
  "rig": {

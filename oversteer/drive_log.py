@@ -221,6 +221,11 @@ CLOCK_SETTLE = 0.25              # s of the run's own time the game's clock stan
 FINISH_CLOCK_PAST = 100.0        # m past the table's finish line the game's clock may still stop at its own
 FINISH_CLOCK_BEFORE = 400.0      # m before the table's line (the last pace note, the stop control) the game's clock may have stopped
 FINISH_AFTER = 500.0             # m: a clock standing still sooner is not the finish
+# Richard Burns Rally (NGP's packet: docs/richard-burns-rally.md; the numbers wait for the first capture)
+RBR_STEP_BACK = 720              # steps (a second at NGP's 1/720 s) the step counter goes back by: the stage was loaded again
+RBR_END_NEAR = 10.0              # m: distanceToEnd under this, the clock stopped and the car moving: the finish (-0.02 m at the one real finish)
+RBR_ROW_STEPS = 12              # the segment rows of RBR (720 packets a second) are one in this many steps: 60 Hz, as the others'
+RBR_STOPPED = 3.0                # s: the clock stopped this long with the car moving is the finish whatever distanceToEnd says
 # The game keeps sending after the finish (the results screen, the car rolling
 # out or parked). A finish the game told ends the run at once (the guard keeps
 # the roll-out from starting one); where progress said finished before the
@@ -383,6 +388,8 @@ class RunTracker:
         self.run_batch = {}              # run number -> the drive log's batch its row was written in
         self._live_loaded = set()        # run numbers whose live reference was looked up; drive-log thread only
         self._n_in_session = {}          # session number -> runs started in it
+        self._last_steps = None          # Richard Burns Rally: NGP's step counter at the last packet, and its stage
+        self._last_stage_key = None
         self._reset()
         self._waiting()
 
@@ -414,6 +421,8 @@ class RunTracker:
 
     def feed(self, now, sample, throttle, session, profile):
         """One packet of the session numbered `session`."""
+        if sample.game == 'rbr' and sample.steps is not None and sample.steps == self._last_steps:
+            return                                   # the same physics step again: RBR is paused or on its results page
         if self.run is not None:
             reason = self._boundary(now, sample, session)
             if reason is not None:
@@ -455,6 +464,10 @@ class RunTracker:
                     self._rolling = now
                 self._remember(now, sample)
                 return
+            if sample.game == 'rbr' and not (sample.stage_time and self._last_stage_time is not None
+                                             and sample.stage_time > self._last_stage_time):
+                self._remember(now, sample)
+                return                               # RBR's clock is not running (not started: a car rolling before the line; or frozen after a finish): no run
             self._start(now, sample, session, profile)
         self._track(now, sample, throttle, dt, speed)
         self._remember(now, sample)
@@ -513,6 +526,11 @@ class RunTracker:
         guard = self._guard
         if session != guard['session'] or sample.packet == 'start':
             return True
+        if sample.game == 'rbr':
+            # a pause or the results page can be as long as it likes: only the stage being loaded again, or another
+            # one, is something new
+            return self._rbr_loaded(sample) or (guard.get('stage') is not None and sample.stage is not None
+                                                and sample.stage != guard['stage'])
         if self._last_t is not None and now - self._last_t > NO_POSITION_GAP:
             return True
         if sample.track and guard['track'] and sample.track != guard['track']:
@@ -521,6 +539,8 @@ class RunTracker:
                 and sample.lap_distance < guard['ld'] - DISTANCE_BACK:
             return True
         if sample.stage_time is not None and guard['st'] is not None and sample.stage_time < guard['st'] - RESTART_DROP:
+            return True
+        if self._rbr_loaded(sample):
             return True
         if sample.pos is not None and self._last_pos is not None:
             jump = math.sqrt(sum((a - b) ** 2 for a, b in zip(sample.pos, self._last_pos)))
@@ -538,6 +558,8 @@ class RunTracker:
             self._last_lap_distance = sample.lap_distance
         if sample.track:
             self._last_track = sample.track
+        if sample.steps is not None:
+            self._last_steps, self._last_stage_key = sample.steps, sample.stage
         self._last_speed = sample.speed
 
     def _boundary(self, now, sample, session):
@@ -546,6 +568,9 @@ class RunTracker:
             return 'session'
         if sample.packet == 'start':
             return 'restart'
+        if self._rbr_loaded(sample) or (sample.game == 'rbr' and sample.stage != self._last_stage_key
+                                        and self._last_stage_key is not None and sample.stage is not None):
+            return 'restart'                         # Richard Burns Rally: the stage was loaded again, or another one
         pos, last = sample.pos, self._last_pos
         gap = now - self._last_t if self._last_t is not None else 0.0
         if pos is not None and last is not None:
@@ -582,6 +607,12 @@ class RunTracker:
                 return 'restart'                     # the clock went back without a lap done
         return None
 
+    def _rbr_loaded(self, sample):
+        """Richard Burns Rally's step counter went back by a second's worth: a stage was (re)loaded (a restart
+        from the pause menu, the next stage after a retire)."""
+        return sample.game == 'rbr' and sample.steps is not None and self._last_steps is not None \
+            and sample.steps < self._last_steps - RBR_STEP_BACK
+
     def _acr_lap(self, sample, stage_time):
         """ACR's clock back to 0 as a looped stage's car crosses the line at speed, the distance along the spline
         running on: a lap of the same run. A restart puts the car back at rest, or far back along the road."""
@@ -614,6 +645,7 @@ class RunTracker:
         self._line_clock = None                      # (d, the game's clock) where the run crossed the table's finish line
         self._seg_d0, self._seg_t0 = 0.0, self._clock_run.t
         self._rows = []
+        self._rows_step = None
         self._trace = []
         self._trace_at = None
         self._susp_sq = 0.0
@@ -655,6 +687,9 @@ class RunTracker:
         self._from_line = True
         self._start_d = sample.lap_distance
         self._acr_start = sample.lap_distance if self._summary['standing'] > 0.5 else None
+        if sample.game == 'rbr' and stage_tables.refresh_local():
+            # the install's files changed since the table was read (RSF updated its list): names the stages again
+            learner.log.post(learner.log.store.seed_stages, {'rbr': stage_tables.tables().get('rbr', {})})
         logging.info("run %s start: game %s, stage %s, track %s, car %s, session %s, standing %.1f s, launch %.1f s",
                      self.run, sample.game, sample.stage, sample.track, sample.car, session,
                      self._summary['standing'], self._summary['launch'])
@@ -671,8 +706,8 @@ class RunTracker:
     def _clock(self, now, sample, d, dt, speed):
         """The finish of a stage in a game that sends no progress: the
         stage clock stops at the line while the car rolls on."""
-        if self._finish_d is not None or sample.stage_time is None or sample.game in ('acr', 'dirt'):
-            return                                   # (ACR's is told with the table's line: _line_finish, _clock_finish; DiRT's by its own finish packet)
+        if self._finish_d is not None or sample.stage_time is None or sample.game in ('acr', 'dirt', 'rbr'):
+            return                                   # (ACR's is told with the table's line: _line_finish, _clock_finish; DiRT's by its own finish packet; RBR's by _rbr_finish)
         if sample.stage_time != self._last_stage_time or self._clock_d is None:
             self._clock_d, self._clock_still = d, 0.0
         elif speed > START_MOVING and sample.stage_time > 0:
@@ -714,7 +749,8 @@ class RunTracker:
             return
         # DiRT Rally repeats its last packet while paused: only the clock of
         # the game moves, the stage clock and the car do not
-        frozen = (sample.stage_time is not None and sample.stage_time == self._last_stage_time and speed < 0.1)
+        frozen = (sample.stage_time is not None and sample.stage_time == self._last_stage_time and speed < 0.1
+                  and sample.game != 'rbr')      # (RBR repeats its clock on most packets: its pauses are repeated steps or silence)
         if not self._paused and not frozen:
             self._clock_run.tick(sample.stage_time, dt)
             self._duration += dt
@@ -779,6 +815,8 @@ class RunTracker:
             self._result_time, self._finish_d = sample.stage_time, d
             self.learner.live_run.finish(self.run, now, self._result_time, d)
         self._clock(now, sample, d, dt, speed)
+        if sample.game == 'rbr' and self._finished is None:
+            self._rbr_finish(now, sample, speed)
         if self._finish_line is None and sample.game == 'acr' and sample.track and self._finished is None:
             stage = stage_tables.acr_stage(sample.track, self._acr_start, sample.stage_length)
             # The flying finish where known, else the last pace note (the stop control, past it)
@@ -821,17 +859,18 @@ class RunTracker:
         slip = slip[0] if slip is not None and slip[1] == 'raw' else None
         susp, susp_vel = sample.susp, sample.susp_vel
         slip_angle = sample.slip_angle
-        self._rows.append((
-            now, speed, a_long, a_lat, sample.yaw_rate, throttle, sample.gear, slip,
-            susp[0] if susp else None, susp[1] if susp else None,
-            susp_vel[0] if susp_vel else None, susp_vel[1] if susp_vel else None,
-            (abs(slip_angle[0]) + abs(slip_angle[1])) / 2 if slip_angle else None,
-            max(sample.puddle) if sample.puddle is not None else None,
-            sum(sample.surface_rumble) / 4 if sample.surface_rumble is not None else None,
-            sample.steer))
-        if susp_vel is not None:
-            self._susp_sq += (susp_vel[0] ** 2 + susp_vel[1] ** 2) / 2
-            self._susp_n += 1
+        if self._row_due(sample):
+            self._rows.append((
+                now, speed, a_long, a_lat, sample.yaw_rate, throttle, sample.gear, slip,
+                susp[0] if susp else None, susp[1] if susp else None,
+                susp_vel[0] if susp_vel else None, susp_vel[1] if susp_vel else None,
+                (abs(slip_angle[0]) + abs(slip_angle[1])) / 2 if slip_angle else None,
+                max(sample.puddle) if sample.puddle is not None else None,
+                sum(sample.surface_rumble) / 4 if sample.surface_rumble is not None else None,
+                sample.steer))
+            if susp_vel is not None:
+                self._susp_sq += (susp_vel[0] ** 2 + susp_vel[1] ** 2) / 2
+                self._susp_n += 1
         if self._trace_at is None or now - self._trace_at >= TRACE_EVERY - 0.005:     # 60 Hz packets: 6 per row
             self._trace_at = now
             pos = sample.pos or (None, None, None)
@@ -845,6 +884,33 @@ class RunTracker:
             self.learner.live_run.push(self.run, now, row)
         if d - self._seg_d0 >= SEGMENT or len(self._rows) >= SEGMENT_ROWS:
             self._close_segment(d)
+
+    def _row_due(self, sample):
+        """Whether this packet is a segment row. RBR sends 720 packets a second: a row is one in RBR_ROW_STEPS steps
+        (a minute of rows at 60 Hz is what SEGMENT_ROWS and the features are made for); the rest still count for the
+        clock, the distance, the finish and the lifecycle."""
+        if sample.game != 'rbr' or sample.steps is None:
+            return True
+        if self._rows_step is None or sample.steps < self._rows_step or sample.steps - self._rows_step >= RBR_ROW_STEPS:
+            self._rows_step = sample.steps
+            return True
+        return False
+
+    def _rbr_finish(self, now, sample, speed):
+        """Richard Burns Rally: the stage clock stops at the finish key while the car drives on for 20 s. The
+        finish is that clock standing still with the car moving and distanceToEnd near 0 (-0.02 m at the one real
+        finish, marth's 2026-10-26 capture), or the clock stopped for RBR_STOPPED well into the stage; the result
+        is the frozen raceTime, the game's own time with its penalties. A pause repeats the step counter and never
+        gets here."""
+        clock = self._clock_run
+        if sample.stage_time is None or clock.offset is None or not clock.proven or self._clock_moved_d is None:
+            return
+        near = sample.dist_to_end is not None and sample.dist_to_end <= RBR_END_NEAR
+        # (the line is near: a run that began late in the stage is the finish all the same; without it the clock
+        # must have run for a while, which a test map of 394 m does within 500 m)
+        far = self._clock_moved_d >= min(FINISH_AFTER, 0.5 * (self._summary['stage_length'] or FINISH_AFTER))
+        if (near and clock.still >= clock.settle) or (far and speed > MOVING and clock.still >= max(RBR_STOPPED, clock.stopped_after)):
+            self._finish_at(now, self._clock_moved_d, sample.stage_time + clock.result_offset, 'game')
 
     def _line_finish(self, now, sample, d, speed):
         """ACR: the run is at or past the table's finish line (the flying
@@ -942,7 +1008,7 @@ class RunTracker:
         guard = None
         if reason == 'finish' or finished == 1:
             guard = {'session': self._session, 'track': self._last_track, 'ld': self._last_lap_distance,
-                     'st': self._last_stage_time}
+                     'st': self._last_stage_time, 'stage': self._summary.get('stage')}
         self._reset()
         self._waiting()
         self._guard = guard
@@ -970,6 +1036,11 @@ class RunTracker:
         if stage is None and game in ('dirt', 'wrcg') and stage_length and start_pos is not None:
             # DiRT names no stage: its length and where it starts do
             stage = store.match_stage(game, stage_length, start_pos[2])
+        if game == 'rbr' and stage and stage_tables.entry(stage) is not None:
+            store.name_rbr_stage(stage, stage_tables.entry(stage))      # a fallback name from before the table had it
+        if game == 'rbr' and stage and stage_tables.entry(stage) is None:
+            # No RSF install to name it from: "RBR stage <map id>", its length from the packet (distanceToEnd at the start)
+            store.upsert_stage(stage, game, stage_length, name='RBR stage {}'.format(stage.split(':', 1)[1]))
         self.run_rows[number] = store.start_run(row[0], n, started, stage, game, stage_length, start_pos)
         if spline is not None and game == 'acr':             # only ACR's lap_distance is a place on the road
             store.set_run_start(self.run_rows[number], spline)
@@ -1038,7 +1109,7 @@ class RunTracker:
         game = summary['game']
         location = None
         # (ACR names its stage by its track: the road driven is no evidence, and its sent length is the spline's)
-        if stage is None and game != 'acr' and game in stage_tables.tables() \
+        if stage is None and game not in ('acr', 'rbr') and game in stage_tables.tables() \
                 and (summary['finished'] == 1 or not summary['progress']):
             # A game that names no stage and sends no length (WRC
             # Generations): the distance to the finish, against the

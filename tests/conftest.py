@@ -1,6 +1,6 @@
 import pytest
 
-from oversteer import stage_tables
+from oversteer import rbr_install, stage_tables
 
 
 @pytest.fixture(autouse=True)
@@ -10,6 +10,20 @@ def _no_learnt_finishes():
     stage_tables.set_learnt({})
     yield
     stage_tables.set_learnt({})
+
+
+@pytest.fixture(autouse=True)
+def _no_real_rbr_install(monkeypatch):
+    """No test reads (or builds a cache from) a Richard Burns Rally install of the machine it runs on; the ones
+    about it point OVERSTEER_RBR_DIR at a folder of their own."""
+    monkeypatch.delenv(rbr_install.ENV, raising=False)
+    monkeypatch.setattr(rbr_install, 'CANDIDATES', ())
+    monkeypatch.setattr(rbr_install, 'STEAM_SHORTCUTS', ())
+    monkeypatch.setattr(rbr_install, 'LUTRIS_GAMES', ())
+    monkeypatch.setattr(rbr_install, 'ASYNC', False)          # (a search on a thread of its own is tested as such)
+    rbr_install.forget()
+    yield
+    rbr_install.forget()
 
 
 @pytest.fixture

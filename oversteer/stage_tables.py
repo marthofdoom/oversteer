@@ -27,8 +27,16 @@ WRC Generations' come from the game's files (scripts/stage-tables.py):
 `descent_m`, `kind`, `rally`, `surface_source` and `name_source`.
 
 Each entry gets a stage key: DiRT's is the key a measured run would get
-(`dirt:<length>:<start z>`), so a run matches it by tolerance; the others
-are `<game>:<location>:<stage>` in lower-case words.
+(`dirt:<length>:<start z>`), so a run matches it by tolerance; Richard Burns
+Rally's is `rbr:<map id>` (the id the game sends); the others are
+`<game>:<location>:<stage>` in lower-case words.
+
+Richard Burns Rally's table (rbr.json: id, name, length, surface, country)
+was read once from an RSF install (research/rbr/stage_table.py). Where
+Oversteer also finds an install on its own (rbr_install: the usual Lutris,
+Bottles, Steam and Wine places, no setting), it reads that install's stage
+list too, cached in the user's data folder, and load() lets it add its custom
+stages and correct the shipped entries.
 """
 
 import json
@@ -76,6 +84,8 @@ def bridge_track(name):
 
 
 def stage_key(game, entry):
+    if game == 'rbr' and entry.get('id') is not None:
+        return 'rbr:{}'.format(int(entry['id']))
     if game == 'dirt' and entry.get('length_m') and entry.get('start_z') is not None:
         return 'dirt:{:.0f}:{:.0f}'.format(round(entry['length_m']), round(entry['start_z'], -1))
     return '{}:{}:{}'.format(game, _slug(entry['location']), _slug(entry['stage']))
@@ -103,31 +113,94 @@ def surface_of(entry):
     return None, None
 
 
+def _add_table(tables, table, name, replace=False):
+    """The stages of one table file's contents into `tables` ({game: {key: entry}}). `replace`: an entry already
+    there is replaced (the local install over the shipped table), else the first is kept."""
+    game = table['game']
+    entries = tables.setdefault(game, {})
+    for entry in table['stages']:
+        entry = dict(entry)
+        entry['key'] = key = stage_key(game, entry)
+        if key in entries and not replace:
+            logging.warning("stage tables: %s: %s twice, the first kept", name, key)
+            continue
+        entries[key] = entry
+
+
 def load(directory=None):
     """{game: {key: entry}} from every table in `directory` (found when
-    None). A table that does not parse is logged and skipped."""
+    None; then the local Richard Burns Rally table is added). A table that
+    does not parse is logged and skipped."""
+    local = directory is None
     directory = directory or find_dir()
     tables = {}
-    if not directory:
-        return tables
-    for name in sorted(os.listdir(directory)):
-        if not name.endswith('.json'):
-            continue
+    if local:
+        _local['print'] = None
+    if directory:
+        for name in sorted(os.listdir(directory)):
+            if not name.endswith('.json'):
+                continue
+            try:
+                with open(os.path.join(directory, name), encoding='utf-8') as f:
+                    _add_table(tables, json.load(f), name)
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                logging.warning("stage tables: %s not loaded: %s", name, e)
+    if local:
         try:
-            with open(os.path.join(directory, name), encoding='utf-8') as f:
-                table = json.load(f)
-            game = table['game']
-            entries = tables.setdefault(game, {})
-            for entry in table['stages']:
-                entry = dict(entry)
-                entry['key'] = key = stage_key(game, entry)
-                if key in entries:
-                    logging.warning("stage tables: %s: %s twice, the first kept", name, key)
-                    continue
-                entries[key] = entry
-        except (OSError, ValueError, KeyError, TypeError) as e:
-            logging.warning("stage tables: %s not loaded: %s", name, e)
+            from . import rbr_install
+            table = rbr_install.stage_table()
+            if table:
+                _add_table(tables, table, 'rbr (local)', replace=True)
+                _local['print'] = table.get('fingerprint')
+        except Exception:                # whatever RSF's files hold, the app starts
+            logging.exception("stage tables: the local Richard Burns Rally table not loaded")
     return tables
+
+
+def load_shipped(game):
+    """{key: entry} of one game's shipped table alone."""
+    directory = find_dir()
+    path = os.path.join(directory, game + '.json') if directory else None
+    tables = {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            _add_table(tables, json.load(f), game + '.json')
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        logging.warning("stage tables: %s not loaded: %s", game, e)
+    return tables.get(game, {})
+
+
+_local = {'print': None, 'checked': 0.0}     # the fingerprint of the install files the loaded RBR table came from
+LOCAL_RECHECK = 30.0                         # s between looks at them
+
+
+def refresh_local(now=None):
+    """Read the local Richard Burns Rally table again if the install's files changed since it was loaded (looked
+    at most every LOCAL_RECHECK s: two stats). True if the loaded tables changed."""
+    global _tables
+    import time
+    from . import rbr_install
+    now = time.monotonic() if now is None else now
+    if _tables is None or now - _local['checked'] < LOCAL_RECHECK:
+        return False
+    _local['checked'] = now
+    try:
+        root = rbr_install.current_root(retry=True)         # (a search is a thread's, not ours)
+        current = rbr_install.stage_fingerprint(root) if root else None
+        if current == _local['print']:
+            return False
+        table = rbr_install.stage_table(root) if root else None
+    except Exception:
+        logging.exception("stage tables: the local Richard Burns Rally table not read again")
+        return False
+    # Built apart and swapped in whole: a reader (a start-up seed_stages iterating the games) never sees the table
+    # missing or a dict changing size under it
+    fresh = {'rbr': load_shipped('rbr')}
+    if table:
+        _add_table(fresh, table, 'rbr (local)', replace=True)
+    _tables = dict(_tables, rbr=fresh['rbr'])
+    _local['print'] = table.get('fingerprint') if table else None
+    return True
 
 
 def tables():

@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Telemetry
+- **Richard Burns Rally (RallySimFans, NGP plugin) telemetry, first cut, built from the research in
+  `docs/richard-burns-rally.md` and checked against marth's captures (one real finish so far).** The 664-byte packet is decoded
+  (Auto and the port drop-down now also listen on 6776, the usual NGP port; a game that sends to 5310 works
+  as well): pedals, steering, gear, rpm, speed, position and attitude, velocities and accelerations,
+  per-wheel suspension, forces, tyre temperatures (surface, carcass, tread, 8 segments), pressures and wear,
+  brake temperatures and wear, engine temperatures. A run starts when the car moves, ends unfinished when the
+  stage is loaded again (the step counter goes back), and finishes when the stage clock stops at the line
+  (the result is the game's own time, penalties included). A pause or the results page starts no run.
+  Stages are named from a shipped table of RSF's stage list (id, name, length, surface, country; no setup of any kind),
+  and from the player's own install too where Oversteer finds one by itself (the usual Lutris, Bottles, Heroic, Steam
+  and Wine places), which also names the car exactly. The packets cannot name the car (the two cars captured are
+  identical in mass, balance, idle, redline and gears), so without an install the car is the shared "RBR car": runs and
+  PBs are kept, nothing is learnt per car. A stage no table has is "RBR stage <id>", renamed once a table knows it. The coach treats the speed and steering signals as unchecked
+  until a capture settles them.
+- RBR: the run tracker and the shift learner use 60 Hz rows and a steps-based clock, a run cannot start after a finish
+  whatever the pause, the finish at the line needs no speed, a stored "RBR stage <id>" is renamed once the install lists
+  the stage, and capture headers record the car (`rbr_car`).
+- **RBR captures are saved at 60 Hz** (the packets come at 720 a second; the live view and the coach use every
+  packet): the recorder keeps one packet in 12 and every packet where the run's lifecycle changes (steps going
+  back, the clock starting or stopping, a new stage, the first and last packet). The capture format is unchanged.
+
 ## 0.15.5 — 2026-10-26
 
 ### Telemetry

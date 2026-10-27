@@ -1326,7 +1326,18 @@ class Store(Reader):
                 _, prior = stage_tables.surface_of(entry)
                 self.upsert_stage(key, game, entry.get('length_m'), entry.get('stage'), entry.get('location'),
                                   prior, 'table' if prior else None)
+                if game == 'rbr':
+                    self.name_rbr_stage(key, entry)
         return True
+
+    def name_rbr_stage(self, key, entry):
+        """A Richard Burns Rally stage stored under the fallback name "RBR stage <id>" (it was driven before the
+        install's list had it) takes the table's name, location and length; any other stored name stays."""
+        if entry.get('stage'):
+            self._do('UPDATE stages SET name = ?, location = COALESCE(?, location), length = COALESCE(?, length) '
+                     'WHERE key = ? AND game = \'rbr\' AND name = ?',
+                     (entry['stage'], entry.get('location'), entry.get('length_m'), key,
+                      'RBR stage {}'.format(key.split(':', 1)[1])))
 
     def _starts(self, key, limit=10):
         """Where the last runs of a stage started ([x, y, z] each)."""

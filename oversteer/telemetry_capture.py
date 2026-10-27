@@ -57,6 +57,30 @@ CAPTURE_GAP = 60.0          # seconds without telemetry that close a capture fil
 RECORD_QUEUE = 4096         # packets waiting for the writer (about 30 s at 120 a second)
 DEFAULT_CAP = 1 << 30       # bytes kept in the folder; the oldest unlabelled captures go first
 
+# A format that sends faster than a capture needs is thinned when saved (the listener still gets every packet):
+# packet length -> (max saved packets a second, the packet's own steps a second, struct of its head:
+# steps, stage id, ?, clock, ?, distance to the end). Richard Burns Rally's NGP packet (664 bytes) comes at 720 a
+# second, in bursts that share one arrival time, so its own step counter is the clock. The packets where
+# something changes are always kept (CaptureWriter._keep); the file format is unchanged.
+THIN = {664: (60.0, 720.0, struct.Struct('<Iiffff'))}
+THIN_CLOCK_JUMP = 0.5       # s the stage clock may jump between two packets before both are kept (a penalty, a restart)
+THIN_DISTANCE_JUMP = 5.0    # m the distance to the end may jump
+THIN_FROZEN = 0.1           # s of the packets' own clock the stage clock must stand still to count as stopped (it steps in threes)
+
+
+def rbr_meta(first):
+    """Header keys for a file whose first packet is Richard Burns Rally's (664 bytes): the car RSF has put in the
+    slot the packet names, `rbr_car` (key, id, name). The car is not in the packets, and a replay later reads
+    today's Cars.ini: the header keeps the one that was driven. None for any other packet."""
+    if first is None or len(first) != 664:
+        return None
+    try:
+        from . import rbr_install
+        car = rbr_install.car_in_slot(struct.unpack_from('<i', first, 56)[0])
+    except Exception:
+        return None
+    return {'rbr_car': {k: car[k] for k in ('key', 'id', 'name')}} if car else None
+
 
 def _ipv4(address):
     try:
@@ -70,28 +94,66 @@ class CaptureWriter:
     seconds (the listener's monotonic one); times are stored from the first
     packet on."""
 
-    def __init__(self, path, port=None, note='', version=None, started=None):
+    def __init__(self, path, port=None, note='', version=None, started=None, extra=None):
         self.path = path
         self._file = gzip.open(path, 'wb')
         self._file.write(MAGIC)
         meta = {'started': time.time() if started is None else started, 'port': port, 'oversteer': version,
                 'note': note}
+        meta.update(extra or {})                     # more keys of the header line: a reader takes the ones it knows
         self._file.write(json.dumps(meta).encode() + b'\n')
         # Readable at once: labelling a session reads when a capture still
         # being written started
         self._file.flush()
         self._first = None
         self.packets = 0
+        self.thinned = 0                  # packets not saved (THIN)
+        self._seen = None                 # the last packet's (steps, stage, clock, distance to the end, frozen)
+        self._moved = None                # steps at which the stage clock last changed
+        self._kept = None                 # steps of the last packet saved
+        self._held = None                 # the last packet not saved: written on close, the session's last stays
 
     def write(self, now, addr, data):
+        if len(data) in THIN and not self._keep(now, addr, data):
+            return
+        self._put(now, addr, data)
+
+    def _put(self, now, addr, data):
         if self._first is None:
             self._first = now
         self._file.write(RECORD.pack(now - self._first, _ipv4(addr[0]), len(data)))
         self._file.write(data)
         self.packets += 1
 
+    def _keep(self, now, addr, data):
+        """Whether a packet of a THIN format is saved: one in every 1/rate of its own steps, and every one where
+        a lifecycle field changes: the steps going back, the stage, the clock starting or stopping (0 against
+        above, standing still against running, a jump), the distance to the end jumping; the first packet."""
+        rate, steps_per_s, head = THIN[len(data)]
+        steps, stage, _p, clock, _d, to_end = head.unpack_from(data)
+        prev = self._seen
+        if prev is None or clock != prev[2] or steps < prev[0]:
+            self._moved = steps
+        frozen = clock > 0 and steps - self._moved >= THIN_FROZEN * steps_per_s
+        keep = prev is None or self._kept is None or steps < self._kept or steps - self._kept >= steps_per_s / rate
+        if prev is not None and not keep:
+            keep = (steps < prev[0] or stage != prev[1] or (clock == 0) != (prev[2] == 0) or frozen != prev[4]
+                    or abs(clock - prev[2]) > THIN_CLOCK_JUMP or abs(to_end - prev[3]) > THIN_DISTANCE_JUMP)
+        self._seen = (steps, stage, clock, to_end, frozen)
+        if keep:
+            self._held = None
+            self._kept = steps
+            return True
+        self._held = (now, addr, data)
+        self.thinned += 1
+        return False
+
     def close(self):
         if self._file is not None:
+            if self._held is not None:
+                self._put(*self._held)
+                self._held = None
+                self.thinned -= 1                    # (saved after all)
             self._file.close()
             self._file = None
 
@@ -495,7 +557,7 @@ class Recorder:
             if self._writer is None and port in self._side:
                 self._promote(port, now)          # that port's file goes on as the main one
             if self._writer is None:
-                self._open(port)
+                self._open(port, data)
             first = self._writer.packets == 0
             self._writer.write(now, addr, data)
             if first:
@@ -512,7 +574,7 @@ class Recorder:
             self._close_side(port)
             side = None
         if side is None:
-            writer, path, started = self._new_file(port)
+            writer, path, started = self._new_file(port, data)
             side = self._side[port] = [writer, path, now, started]
         side[0].write(now, addr, data)
         side[2] = now
@@ -549,7 +611,8 @@ class Recorder:
     def _open_paths(self):
         return [p for p in [self.path] + [side[1] for side in self._side.values()] if p]
 
-    def _new_file(self, port):
+    def _new_file(self, port, first=None):
+        extra = rbr_meta(first)
         os.makedirs(self.folder, exist_ok=True)
         started = self.clock()
         base = time.strftime('%Y%m%d-%H%M%S', time.localtime(started))
@@ -559,12 +622,12 @@ class Recorder:
             path = os.path.join(self.folder, '{}-{}{}'.format(base, n, SUFFIX))
         # Room for the new file before it grows: the cap holds while recording
         prune(self.folder, self.cap, keep=self._open_paths())
-        writer = CaptureWriter(path, port=port, version=self.version, started=started)
+        writer = CaptureWriter(path, port=port, version=self.version, started=started, extra=extra)
         logging.info("telemetry capture: recording UDP %s to %s", port, os.path.basename(path))
         return writer, path, started
 
-    def _open(self, port=None):
-        self._writer, self.path, self._started = self._new_file(port)
+    def _open(self, port=None, first=None):
+        self._writer, self.path, self._started = self._new_file(port, first)
         self._file_port = port
 
     def _start_wheel(self, origin):
@@ -636,14 +699,21 @@ class NullLeds:
         pass
 
 
-def replay(records, learner=None, start=1000.0, started=None, **options):
+def replay(records, learner=None, start=1000.0, started=None, recorded_car=None, **options):
     """Feed capture records through Telemetry.handle on the capture's own
     clock (from `start`, so no packet lands on the listener's "never"
     time 0), with a NullLeds; the learner, if given, learns as it would
     live, with its wall clock from `started` (the capture's epoch time,
     so the same capture writes the same database) and its session ended
-    at the end. Returns the Telemetry, idle at the end."""
+    at the end. `recorded_car`: the capture header's `rbr_car`, which names a Richard Burns Rally car the way it
+    was when recorded, not as today's Cars.ini has it. Returns the Telemetry, idle at the end."""
     from .telemetry import Telemetry, IDLE_TIMEOUT
+    if isinstance(recorded_car, dict) and recorded_car.get('key'):
+        options['rbr_car'] = dict({'drivetrain': None, 'gears': None}, **recorded_car)
+    return _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT)
+
+
+def _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT):
     telemetry = Telemetry(NullLeds(), learner=learner, **options)
     if learner is not None and started is not None:
         learner.clock = lambda now: started + (now - start)

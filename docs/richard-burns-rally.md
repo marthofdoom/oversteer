@@ -2,6 +2,10 @@
 
 Research of 2026-10-26 against master (v0.15.4). **No RBR capture exists yet**: marth is installing the
 RallySimFans (RSF) build under Wine. Everything marked **verify** waits for the first capture (section 7).
+
+**Status (branch `rbr-telemetry`, Phase 1 built without a capture): section 8 lists what is built and what
+waits for the capture.** Marth's install (RSF, `[NGP] udpTelemetry=1`, `udpTelemetryEndpoints=127.0.0.1:5310`)
+already sends to 5310, which Oversteer's Auto port listens on; 6776 is a preset as well.
 Scripts in `research/rbr/` (read-only, no game files touched):
 
 | script | what it does |
@@ -51,7 +55,7 @@ rear left, rear right). Four blocks: `totalSteps`, `Stage` (20 bytes), `Control`
 | 60 | f32 | car.speed | **km/h or mph, following the game's unit setting**; Race-Element's comment says m/s | medium (mika-n, pmfrlyn, SliProSuperPro `speedKph`; Race-Element disagrees) |
 | 64–72 | f32 ×3 | positionX, Y, Z | world m; sample (7.5, 45.1, 4.1); **z up** expected (RBR's driveline is z-up), handedness **verify** | medium |
 | 76–84 | f32 ×3 | roll, pitch, yaw | **degrees** (sample yaw 91.5); SpaceMonkey and Race-Element convert deg → rad | medium |
-| 88–108 | f32 ×6 | velocities: surge, sway, heave, roll, pitch, yaw | car frame, m/s and deg/s (SpaceMonkey); **sway positive left** is what three readers' sign flips imply | medium (units), low (signs) |
+| 88–108 | f32 ×6 | velocities: surge, sway, heave, roll, pitch, yaw | car frame, m/s and deg/s (SpaceMonkey); **sway positive RIGHT, rates deg/s, signs below (section 8)** | high (marth's captures) |
 | 112–132 | f32 ×6 | accelerations: surge, sway, heave, roll, pitch, yaw | m/s² (simapi divides by 9.81; mika-n calls sway "G"): **verify**. All 0 at rest in the sample: kinematic, not accelerometer (heave would be +9.8) | medium |
 | 136 | f32 | engine.rpm | rpm (~1000 at idle in the sample) | high |
 | 140–148 | f32 ×3 | radiatorCoolant, engineCoolant, engine temperature | **kelvin** (sample 362 K = 89 °C) | high (groybe, pmfrlyn, sample) |
@@ -119,10 +123,10 @@ folder (`…/drive_c/Richard Burns Rally/` in the Wine prefix), case-insensitive
 | `Physics/s_i2003/common.lsp` (slot 5; ztmz reads `rsfdata\Physics\…`) | the loaded car's physics in plain text: `RPMLimit`, `NumberOfGears`, `Gear<N>Upshift/Downshift`, `MaxSteeringLock`, `SteeringRackRatio`, `InverseMass`. Some packs may be encrypted | medium |
 | `RichardBurnsRally.ini [NGP]` | `udpTelemetry`, `udpTelemetryEndpoints` (or `udpTelemetryAddress`, `udpTelemetryPort`) | medium |
 
-The stage tables can be built from marth's install like WRCG's (`scripts/stage-tables.py`): RSF's json has no
-licence, so keep the generated `stages/rbr.json` local (personal use) unless RSF agrees to it being shipped.
-Under the Flatpak, Oversteer cannot read the prefix without `flatpak override --user
---filesystem=<prefix path>:ro io.github.berarma.Oversteer`.
+**Decision (marth, 2026-10-26): users set up nothing** (no environment variable, no file, no Flatpak override). The
+stage names are shipped as facts only (`data/telemetry/stages/rbr.json`: id, name, length, surface and shares, country),
+read once from marth's install by `research/rbr/stage_table.py`; a player's own install is an optional extra that
+Oversteer finds by itself (section 8).
 
 ## 4. What the coach gets ("decode everything")
 
@@ -164,7 +168,7 @@ weeks of driving, could spell them).
 
 ### Phase 0: first capture (marth, section 7). Gate for all below.
 
-### Phase 1: decoder and run lifecycle (sonnet-coder; Opus review; tier C)
+### Phase 1: decoder and run lifecycle (sonnet-coder; Opus review; tier C) - BUILT, see section 8
 
 **P1.1 `_rbr` in `oversteer/telemetry_formats.py`** (`decode_sample`: `n == 664` before the Codemasters range;
 `game = 'rbr'`; docstring entry). Mapping (the **verify** items get fixed from the capture first):
@@ -263,6 +267,149 @@ misses something the coach needs.
    `--markers 71`, and on the capture: `research/rbr/ngp_packet.py --capture <file>.ovcap.gz`. Captures are in
    `~/.var/app/io.github.berarma.Oversteer/data/oversteer/captures/`. If nothing arrives: check the prefix is
    64-bit and that `NgpTelemetryDaemon.exe` runs (`ps` shows it under wine), then the address list.
+
+## 8. Phase 1 as built (no capture yet)
+
+Branch `rbr-telemetry`. Every number below that is not marked otherwise is taken from this doc and **verify on
+capture** where section 2 says so; each such place carries a "verify on capture" comment in the code.
+
+### Built
+
+| item | where | notes |
+|---|---|---|
+| Decoder `_rbr` | `oversteer/telemetry_formats.py` | `n == 664` before the Codemasters range, after the `OVST` magic check; `game = 'rbr'`. Whole packet decoded, per wheel FL, FR, RL, RR (= LF, RF, LB, RB). K to C, Pa to kPa, degrees to radians, gear − 1. |
+| New Sample slots | same | `steps`, `dist_to_end`, `drive_progress`, `radiator_temp`, `block_temp`, `pedal_pressure`, `susp_forces`, `helper_spring`, `damper_damage`, `brake_layer_temp`, `brake_wear`, `tyre_carcass_temp`, `tyre_tread_temp`, `tyre_seg_temp`, `tyre_seg_wear`, `tyre_contact`, `ang_accel`. Not stored in the drive log yet (it keeps what it keeps for every game); they are there for the engineer pages (P2.4). |
+| Speed | same | the length of the car-frame velocity vector (m/s); `car.speed` (km/h, see "Confirmed") only where the vector is not finite. |
+| Plan axes | `plan_xyz('rbr')` | (x, z, y), z up, north's sign unchecked. |
+| Port preset | `PORT_PRESETS` in `oversteer/telemetry.py` | `(6776, "Richard Burns Rally (RSF / NGP)")`; Auto listens on it too. A launcher that also sends to `127.0.0.1:5310` (marth's does) needs nothing else. |
+| Run lifecycle | `oversteer/drive_log.py` (`RunTracker`: `_rbr_loaded`, `_rbr_finish`, the repeated-step return in `feed`) | start: car moving **and the stage clock above 0** (a car rolling or spinning before the clock starts is no run). Restart: steps back by more than 720 (or another `stage.index`) ends the run unfinished, and the clock going back does as before. Finish: the clock stopped (`RunClock.settle`) with the car moving and `distanceToEnd` ≤ 10 m; or the clock stopped for 3 s well into the stage whatever `distanceToEnd` says. `result_time` = the frozen `raceTime` (game clock, `run_clock = 'game'`). Pause / results page: a packet with the same `totalSteps` as the last is ignored altogether; silence is no run boundary (a position is sent). After a finish the guard blocks the 20 s roll-on and is released by the steps going back, the clock reset, a stage change or 10 s of silence. |
+| Stage names | `data/telemetry/stages/rbr.json`, `oversteer/rbr_install.py`, `stage_tables.load()` | stage key `rbr:<map id>`; the shipped table (built by `research/rbr/stage_table.py`) names every RSF stage; the install's own list, where one is found, is merged over it. Without either: "RBR stage <id>", length = driveLineLocation + distanceToEnd at the start. BTB (`stage.index` 41) names no stage (the start-cell fingerprint takes over). |
+| Car names | `rbr_install.car_in_slot()` | from a found install only: `Cars/Cars.ini [Car<slot>] RSFCarID` -> `cars.json` name, key `rbr/<RSFCarID>`, `cars_data.json` drivetrain and gear count; checked every 2 s, read again when it changed. Otherwise `rbr/unknown`, "RBR car": a shared key, nothing learnt under it (no packet fingerprint tells the cars apart, see "Names without any setup"). |
+| Coach | `coach.LAUNCH_OUT`, `ATTITUDE_OUT`, `coach_context.UNCHECKED_GAMES` | `rbr` is in all three: no launch, spin or stall coaching and no speed-drop reads until the speed and sign channels are checked. |
+| Tests | `tests/test_rbr.py` | the layout against `research/rbr/ngp_packet.py`, the doc's sample values, wheel order, units, a fake install (stage table, cache, cars, no write under the install), and synthetic packet sequences: finish, restart, pause (repeated steps and silence), retire, results page, no phantom runs. |
+
+Note on `research/rbr/ngp_packet.py`: it holds the layout but **no sample packet** (the doc's "sample" is
+pmfrlyn/RBRTools' `tests/test_telemetry.py`, which is not in this repo); the test builds a packet with the doc's
+sample values on top of that layout. `research/rbr/rsf_install.py` stops on marth's `Maps/Tracks.ini` (line 201,
+a stray `***`); `rbr_install.read_ini` skips such lines.
+
+### Confirmed by marth's first captures (2026-10-26, stage 81, pedals inverted in them: pedal values not used)
+
+- 720 packets a second, `totalSteps` +1 per packet (so 720 steps/s is the packet rate too); arrival timestamps come
+  in bursts of about 3 that share one time (about 236 distinct times a second), so the steps are the packet clock.
+- `driveLineLocation` is metres along the stage and `driveLineLocation + distanceToEnd` is its length (394.31 m
+  on stage 81, constant), so `stage_length` and `lap_distance` are right. `stage.progress` is still unknown (3.38 at
+  89 m, 6.16 at 182 m; not linear).
+- `car.speed` is km/h (3.5 to 3.7 times the velocity vector's length at speed) but reads the wheels: 62 km/h with
+  the car held and the wheels spinning, where the vector says 5 m/s. The speed is the vector.
+- Kelvin, Pa and the gear mapping (1 = neutral, 2 = first) are as the doc says. `strutForce` is minus the spring
+  force (-3238 against +3232 N at a front corner at rest), so `tyre_load = -strutForce` holds at rest.
+- The clock starts when it starts, not at the go: on this map the car rolled for 8 s with the clock at 0 and the
+  driveline position moving, and the clock started at 0.004 s as it crossed `driveLineLocation` 92.9 m. The
+  tracker starts a run at the clock, not at the first movement.
+- A pause menu stops the packets (21 s of silence on the capture) and a restart sets `totalSteps` to 1 with
+  `raceTime` 0 and the car back at the start: the run ends as a restart.
+- Stage 81 is not in `rsfdata/cache/stages_data.json` nor `Maps/Tracks.ini` (a stock map): "RBR stage 81", length from
+  the packet.
+
+### Names without any setup
+
+- **Stages**: `data/telemetry/stages/rbr.json` (661 stages, read once from an RSF install on 2026-10-26; stage 41 /
+  Beyond the Box left out) names every stage RSF lists. An id it lacks (a custom stage added later) is "RBR stage <id>"
+  with the length from the packet. A stored fallback name (and only that exact form) is replaced once a table knows the
+  stage: `Store.seed_stages` does it for every table at each start, so a database from before the shipped table is
+  repaired on its next start.
+- **Cars**: the packets cannot name the car. `car.index` is the slot (5 or 6 on the captures), and nothing else in the
+  packet identifies it that a table could carry: the two cars captured (Fiesta WRC 2019, i20 Coupe WRC 2021) have the same
+  mass (1390 kg, measured 1361-1394 kg at rest, so +-15 kg of noise), balance (49%), idle (1214 rpm), redline (about 8530
+  rpm) and gear count (6); over RSF's 103 cars only half are unique even by published mass, balance and gears. So no car
+  table is shipped and the key is the shared `rbr/unknown` ("RBR car"): runs and PBs are kept, nothing is learnt per car.
+  Where Oversteer finds an install by itself, `Cars.ini [Car05/06] RSFCarID` gives the exact car (`rbr/<id>`, name,
+  drivetrain, gears).
+  The best further step, not built: identify the car from its gear ratios once shifted (the ratios between gears do not
+  depend on the tyre radius; the shift learner already learns them per gear), against ratios from the physics packs'
+  `common.lsp`. Only the 9 packs installed locally have them, not RSF's 103 cars.
+- **The optional install**: `rbr_install.find_root()` looks, with no setting, in the usual Lutris (including the game path
+  in Lutris' game files), Bottles, Heroic, Steam (Proton prefixes, and the exe/StartDir of non-Steam shortcuts in `userdata/*/config/shortcuts.vdf`, read-only, at most 20 files of 1 MB) and Wine places. The search runs once on a thread of its own and again, the same way, only when an RBR run starts and the last one found nothing (30 s apart at most); the packet path never searches. When found it adds the exact car and
+  the install's own stage list over the shipped one (custom stages), cached in `<data>/oversteer/rbr/stages.json` and read
+  again when the install's stage files change (checked at each run's start, at most every 30 s). A sandbox that cannot see
+  the install (the Flatpak) just finds none and uses the shipped names. `OVERSTEER_RBR_DIR` points the finder at an
+  install for development; it is not documented to users and not a setting.
+
+### Per-packet cost at 720 packets a second
+
+The tracker and the shift learner use a smooth clock made from `totalSteps` (the arrival times come in bursts) and keep
+one packet in 12 steps (60 Hz) as segment rows and for the shift learner's windows; the lights, the live view, the finish
+and the lifecycle see every packet. The clock repeating on most packets is no stop (RBR is exempt from the "frozen clock"
+rule: its pauses are repeated steps or silence). A run starts only while the clock is moving, and after a finish only the
+stage loading again (steps back) or another stage releases the guard, however long the pause.
+
+### Capture size
+
+The listener, the learner and the coach get every packet (720 a second). **RBR captures are saved at 60 Hz**: the
+recorder (`oversteer/telemetry_capture.py`, `THIN`: packet length -> maximum saved rate, here 664 -> 60) keeps one
+packet in every 12 steps and always the packets where a lifecycle field changes (steps going back, a new
+`stage.index`, the clock starting, stopping or jumping by over 0.5 s, `distanceToEnd` jumping by over 5 m) and the
+first and last of a file. The file format is unchanged; other formats are not thinned. The header line also gets `rbr_car` (`key`, `id`,
+`name` of the car RSF had in the packet's slot when the file was opened), since the packets do not carry the car; the
+replays (`telemetry_capture.replay(..., recorded_car=meta.get('rbr_car'))`, used by the data repair's retime and by
+`scripts/telemetry-replay.py`) name the car from it, so an old capture keeps the car it was driven with. A capture
+without the key (before this) is named from the install found today, or `rbr/unknown`. A replay of a thinned capture
+gives the same run starts, finishes, result times and restarts as the full-rate one (`tests/test_rbr.py`; the
+2026-10-26 run capture gave the same run both ways).
+
+### Confirmed by marth's session of 2026-10-26 (five files, pedals right)
+
+| file | stage | what is in it |
+|---|---|---|
+| 190243 | 83 (not in the table: "RBR stage 83", 195 m), car slot 5 | two attempts of a short map; the clock starts as the car crosses the start line (the car rolls 5 s with the clock at 0 first), max clock 9.2 s, a restart (steps back to 1 after 17.7 s of silence), second attempt ends with the capture |
+| 190435 | 83 | the same, max clock 9.6 s, restart after 14.3 s |
+| 190639 | 517 Bayanbulak-Pegasus 2 (18 070 m), car slot 6 | a first leg to 1:01.3 ended by a restart at 83 km/h after 21 s of silence (pause menu); a second leg of 5:24 clock: a +35.003 s jump of the clock at driveline 2328 m with the car at rest, a 10.4 s silence (pause) at 2:26.9 while rolling, and the capture ends with the car at rest (a retire, no finish) |
+| 191420 | 517 | one leg to 3:54.6, the same +35.003 s jump at 2330 m, ends at rest (retire) |
+| 191852 | 309 Monster HC (2501 m), slot 6 | **the one finish**: the clock stops at 2:25.6 (145.636 s) with `distanceToEnd` -0.02 m and `driveLineLocation` 2503.5 (the `.dls` finish is 2503.52), the car at 118 km/h rolling on (braking to 74 km/h); the capture ends 2.7 s later, so the 20 s roll-on and the results page are not on any capture |
+
+- The run finishes 0.25 s after the clock stops (`RunClock.settle`), at the first stopped packet's clock: `result_time`
+  2:25.6 against the clock stop 2:25.6 on the full-rate and the 60 Hz files alike. `distanceToEnd` is negative past the
+  line, so the rule is `distanceToEnd <= 10 m` (was 30), and it no longer needs 500 m of run (a run restarted late in the
+  stage finishes too; the 3 s fallback still does).
+- `driveLineLocation` is the `.dls` distance domain (finish 2503.5 m on 309; splits 633.5 and 1850.9 m): **splits are
+  not sent, but the sector times can be read as the clock at those distances (P2.1), no extra data needed.**
+  Nothing in the packets marks a split. The +35.003 s clock jump (twice, at 2328 and 2330 m on 517, at rest, not near its
+  splits at 2500 and 15500 m) is unexplained: a penalty the game adds, which stays in the clock and the result.
+- Signs, from the positions' heading rate (the plan (x, z, y) as east, north: not mirrored) against the packet and
+  the G29 axis (steering equals the wheel, high to the right; 95% of strong corners agree): `control.steering` positive
+  right, so `steer` is its negative; sway velocity and acceleration are positive to the **right** (the doc guessed left),
+  so the car-frame y is their negative; the yaw rate is positive to the left; roll positive with the right side down
+  (a left turn rolls it +); pitch positive nose up (so the ISO pitch rate is its negative); `car.yaw` is a compass angle
+  (it grows turning right); the angular rates are deg/s and the angular accelerations deg/s2; the **accelerations are in
+  g** (`acc.sway` = v x heading rate / 9.81, braking -0.8, driving +0.5, 0 at rest) and converted to m/s2.
+- `springDeflection` is the extension, not the compression: 0.12 to 0.41 m, smaller under braking and on the loaded
+  side of a corner, spring force -0.99 against it, `pistonVelocity` its rate (0.97). `susp` and `susp_vel` are their
+  negatives; the zero is not known. `tyre_load = -strutForce` (0 to 42 kN at the extremes).
+- Pedals are 0..1 at rest 0 / 0 / 0 with the clutch 1.0 only when pressed (1 while standing at the start, 1 for a
+  shift, 0 driving), foot and hand brake pressures in Pa (up to 6.4e6, brake pressure tracks the pedal at r 1.0), gears
+  1..7 (neutral to 6th), rpm 1220 idle to 8550 and a few negative values (clamped). The car slot is 5 or 6: it is the
+  slot of `Cars.ini` that RSF used, read from the packet.
+- Not checked: heave (velocity does not follow the position's z), the vertical axis (z is up by its range), `progress`.
+
+### Pending, verify on capture
+
+- `car.speed` as km/h or mph by the game's setting (the captures were set to km/h).
+- `stage.progress` (only stored as `drive_progress`).
+- Heave, the suspension's zero, the wear and damage scales (brake wear 0.10 and tyre segment wear 0.015 after a
+  long stage; damper damage 0).
+- What a replay sends (a replay must not create runs; nothing is done about it yet), and the 20 s roll-on and the results
+  page after a finish (the one finish capture ends 2.7 s after the line). A retire is the packets stopping with the car at rest.
+- The outside-assistance penalties and jump starts add to the clock while it runs: the result is the frozen clock,
+  so they are in it; the trace's `t` jumps with them.
+- Stage ids against the install (e.g. 71 = Rally School Stage), the real `Cars.ini` after a stage load (marth's has
+  no `RSFCarID` in `[Car05]` yet: RSF writes it at launch).
+
+### Not built (P2 and later)
+
+Real sectors from the `.dls` lines, the `.trk` driveline for maps and potential, slip without wheel speeds,
+the engineer page for the new channels, `common.lsp` limiter / shift points, the "RBR folder" setting, README
+and screenshots, and the NGP TSV import.
 
 ## Sources
 
