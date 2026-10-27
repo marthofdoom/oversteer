@@ -136,9 +136,10 @@ def load_reference(store, stage, car, exclude=None):
     entry = stage_tables.entry(stage)
     placed = stage_tables.sector_bounds(entry)
     origin = store.run_start(ref['id'])
+    usable, _ = coach_context.sector_go(stage, rows, origin)      # (RBR: a reference with no recorded start that began mid-stage)
     if origin is None:
         origin = stage_tables.run_origin(entry)
-    if placed is not None:
+    if placed is not None and usable:
         # from where the reference began (its trace's distance 0), as coach._sectors places a run's lines
         start = sector_start = placed['start_m'] if origin is None else origin
         sectors = tuple(('S{}'.format(i + 1), a - start, b - start) for i, (a, b) in enumerate(placed['bounds']))
