@@ -1188,6 +1188,15 @@ class ShiftLearner:
             if key is not None:
                 self._load_locked(key, name, game)
 
+    @staticmethod
+    def _stored_name(row, key, car):
+        """The stored name of a car, but the shipped table's where the stored one is only the decoder's generic
+        'N rpm, N gears' and nobody named the car (DiRT: cars/dirt.json)."""
+        name = row['name']
+        if name and not row.get('user_named') and re.match(r'^\d+ rpm, \d+ gears$', name):
+            name = car_data.display_name(key) or name
+        return name or car.name
+
     def _load_locked(self, key, name, game=None):
         car = self._models.get(key)
         reader = self._reader() if car is None else None
@@ -1201,7 +1210,7 @@ class ShiftLearner:
                 try:
                     car = CarModel.from_dict(row['model'])
                     car.key = key                            # adopted from a key of before
-                    car.name = row['name'] or car.name
+                    car.name = self._stored_name(row, key, car)
                 except (ValueError, KeyError, TypeError, AttributeError) as e:
                     logging.warning("shift learner: can't read %s: %s", key, e)
         if car is None:
@@ -1415,7 +1424,7 @@ class ShiftLearner:
             car = CarModel.from_dict(dict(row['model'], key=key))
         except (ValueError, KeyError, TypeError, AttributeError):
             return None
-        car.name = row['name'] or car.name
+        car.name = self._stored_name(row, key, car)
         data = self._snapshot_of(car, bands=self._bands_of(car), surface=car.last_surface)
         self._loaded = (stamp, data)
         return data

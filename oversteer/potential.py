@@ -46,6 +46,11 @@ CH = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 G = cc.G
 
 ROAD_UNKNOWN_MAX = 0.2           # a stage whose road is unknown over more of its length than this gets no potential
+# Games whose plan axes (telemetry_formats.plan_xyz) are checked, so their positions give the road: ACR and DiRT
+# against the lateral g (DiRT: corner sides 98 % in agreement on marth's captures); WRC Generations sends no yaw, so
+# positions are its only road, and the replay supports (x, y) for it, weakly but with the right sign. The other games
+# keep the yaw-based road (their plan axes are unchecked).
+PLAN_VERIFIED = {'acr', 'dirt', 'wrcg'}
 ALGO = 7                         # bumps when the numbers a stored potential holds would change
 DS = 2.0                         # m between the grid's points
 VBIN = 2.5                       # m/s per speed bin of the envelope
@@ -882,9 +887,10 @@ def recompute(store, stage_key, car_id, force=False, now=None, sob=None):
         runs.append({'id': r['id'], 'class': r['run_class'], 'finished': r['finished'] == 1, 'arr': a,
                      'mine': r['car'] == car_id, 'bad': _bad_ranges(store, r['id']) if r['car'] == car_id else []})
     env_cols = [envelope_rows(a) for a in (arr_of(r) for r in env_rows) if a is not None]
-    plan = game or ('acr' if acr else None)       # the positions give the road wherever the game sends them
+    plan = game if game in PLAN_VERIFIED else ('acr' if acr else None)
     pot = stage(runs, data, surface, plan, env_cols, len(env_cols), sob, road, tail)
     if pot is None:
+        store.delete_potential(stage_key, car_id)        # a refusal leaves no older, wrong one standing
         return None
     built = now if now is not None else time.time()
     envelopes = pot.pop('envelopes')

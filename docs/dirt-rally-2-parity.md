@@ -140,6 +140,10 @@ rounded as `_codemasters` does; per key a list of candidate names with class and
 candidate: that name; several: "A / B" until P3.4 resolves it. `user_named` stays untouched. Keep the existing car
 keys (no re-key: models and PB rows hang on them).
 
+*Built (P1.5):* `data/telemetry/cars/dirt.json` (made by `research/dr2/car_table.py`). DiRT Rally and DiRT 4 share
+`game = 'dirt'`, so a car of either that shares a key with a DR2 car gets the DR2 name. 11 keys are ambiguous (two or
+more DR2 cars share the engine and gearbox) and read "A / B" until P3.4.
+
 **P1.6 Repair the rows already written (A — Opus)**: a one-off, versioned store migration for `game = 'dirt'`:
 delete the post-finish `restart` runs (unfinished, start progress past the end, < 150 m; never a PB, rule
 "PBs never deleted" holds), re-key El Rodeo's runs to the table key, recompute `result_time` from the captures
