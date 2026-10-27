@@ -1419,8 +1419,7 @@ class GtkUi:
               "SimHub, which needs 20777, wants one port picked here instead of Auto. Turn on the game's UDP telemetry and point it at this "
               "computer at its usual port (Forza: Settings > HUD and gameplay > Data Out; BeamNG: OutGauge; "
               "Live for Speed: OutGauge Port in cfg.txt; DiRT Rally 2.0: hardware_settings_config.xml, "
-              "extradata 3). Only one app can listen on a UDP port: a port another tool holds is skipped and "
-              "shown. Forza has no fixed port: set Data Out to the Oversteer default and keep "
+              "extradata 3). Forza has no fixed port: set Data Out to the Oversteer default and keep "
               "away from 5200 to 5300, which the game uses itself. Pick one port to listen there alone, or "
               "type any port from 1024 to 65535."), (self.rev_leds_port,)))
         row, self.telemetry_learn = self._switch_row(
