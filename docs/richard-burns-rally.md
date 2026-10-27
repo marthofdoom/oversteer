@@ -322,13 +322,56 @@ a stray `***`); `rbr_install.read_ini` skips such lines.
 - **Cars**: the packets cannot name the car. `car.index` is the slot (5 or 6 on the captures), and nothing else in the
   packet identifies it that a table could carry: the two cars captured (Fiesta WRC 2019, i20 Coupe WRC 2021) have the same
   mass (1390 kg, measured 1361-1394 kg at rest, so +-15 kg of noise), balance (49%), idle (1214 rpm), redline (about 8530
-  rpm) and gear count (6); over RSF's 103 cars only half are unique even by published mass, balance and gears. So no car
-  table is shipped and the key is the shared `rbr/unknown` ("RBR car"): runs and PBs are kept, nothing is learnt per car.
+  rpm) and gear count (6); over RSF's 103 cars only half are unique even by published mass, balance and gears. So without
+  the install the key is the shared `rbr/unknown` ("RBR car"): runs and PBs are kept, nothing is learnt per car.
   Where Oversteer finds an install by itself, `Cars.ini [Car05/06] RSFCarID` gives the exact car (`rbr/<id>`, name,
   drivetrain, gears).
   The best further step, not built: identify the car from its gear ratios once shifted (the ratios between gears do not
   depend on the tyre radius; the shift learner already learns them per gear), against ratios from the physics packs'
   `common.lsp`. Only the 9 packs installed locally have them, not RSF's 103 cars.
+- **The car table** (`data/telemetry/cars/rbr.json`, built by `research/rbr/car_table.py`): a name for every RSF car id
+  (`names`, key `rbr/<RSFCarID>`, 102 cars, with path, year, drivetrain and gear count; `car_data.display_name`, which the
+  decoder uses when the install gave the key but no name), and for the cars whose NGP physics the install has held (today
+  the Fiesta WRC 2019 = 11, i20 Coupe WRC 2021 = 104, Skoda Fabia RS Rally2 = 106, Toyota GR Yaris Rally2 = 107) a
+  `car_data` entry like ACR's: the limiter, the torque curve, the gear sets and final drive. With the install visible the
+  key is `rbr/<id>`, so the rev lights use the shipped limiter (RBR sends no max rpm) and the shift learner the shipped
+  gearing and torque (exact best upshifts from the first drive). Rebuild after loading more cars in RSF:
+  `python3 research/rbr/car_table.py /path/to/RBR` (writes the file; a car an earlier run read keeps its entry).
+  What it reads: `rsfdata/cars/<path>/` or `<path>.zip` (RSF's download of each car), and a slot folder of
+  `rsfdata/Physics/` only where a file named after the RSF car marks it (`s_i2003` = Fiesta, `t_coroll` = i20; `c_xsara`,
+  `h_accent`, `mg_zr`, `m_lancer`, `p_206`, `s_i2000` carry no marker and are stock RBR cars, not shipped). From
+  `common.lsp`: `Tq_NN_RPM_NGP` with `Tq_NN_NGP` (normalised 0..1) times the peak torque of `cars_data.json` (450 Nm on the
+  Fiesta, the curve peaks at its listed 5500 rpm), `RPMLimit`, `GearNUpshift` (the AI's gearbox), `InverseMass`,
+  `EffWheelRadius`; from `r_<surface>.lsp` the `GearListNN` Gear/Pinion teeth; from `setups/d_<surface>.lsp` the default
+  setup's `GearId2..` (GearId0 reverse, 1 neutral, 2.. first gear), `FinalDriveId` and `DropGearId`. A gear set per default
+  setup where they differ (the Fabia's tarmac set is shorter), gravel the default.
+  **Verified against the captures of 2026-10-26.** The captures carry no `rbr_car`; the packet's slot tells the car:
+  slot 5 = Cars.ini [Car05] = Fiesta WRC 2019 (captures 18:54, 18:57, 19:02, 19:04; gears 1-3 only), slot 6 = [Car06] = i20
+  Coupe WRC 2021 (19:06, 19:14, 19:18; all six gears). The two cars share one gear list and drop gear (the i20's FinalDriveId
+  pair is 60 / 60, the Fiesta's 62 / 63), so the table below, from the packet's wheel speed (`car.speed` / 3.6, clutch up, the
+  mode over 100 000 packets; the ground-speed vector is not usable: wheelspin and slides move it by 4-9 %), is the i20's in
+  every gear and the Fiesta's in gears 1-3 (398 / 316 / 256 on slot 5 as on slot 6), which is what tells that the Fiesta's
+  62 / 63 does not multiply in. The i20's physics are in `rsfdata/Physics/t_coroll` (marked) and
+  `rsfdata/cars/Hyundai_i20_Coupe_WRC_2021_ngp7`; the Fiesta's in `s_i2003` and its cars folder. Gears 4-6 of the Fiesta
+  itself are not measured (it is the same list).
+
+  | gear | rpm per m/s measured | shipped (ratio x drop 4.375 x 60 / 2 pi r, r 0.315) | diff |
+  |---|---|---|---|
+  | 1 | 398 | 397.9 | +0.03 % |
+  | 2 | 316 | 316.3 | -0.08 % |
+  | 3 | 256 | 255.8 | +0.08 % |
+  | 4 | 209 | 209.4 | -0.19 % |
+  | 5 | 175 | 174.8 | +0.10 % |
+  | 6 | 149 | 148.5 | +0.31 % |
+
+  The limiter: RPMLimit 8500, the highest rpm seen 8518-8544 on the Fiesta (slot 5) and 8526-8552 on the i20 (the game overshoots by up to 0.6 %). Surprises:
+  the **drop gear multiplies in and its pair is stored the other way** (`Pinion 35, Gear 8` is 35 / 8 = 4.375, not 8 / 35),
+  whereas `FinalDriveId` (62 / 63 on the Fiesta, 60 / 60 on the i20) does **not** (with it every gear reads 1.6 % off, without
+  it within 0.3 %): it is kept as `transfer_ratio` and left out of the overall ratio. The capture of 19:18 (slot 6) reads 0.912
+  of these in every gear = drop gear option 12 (32 / 8 = 4.0, 0.914): RSF's own setup differs from the default, so the
+  overall ratio differs with the setup (the steps between gears, which the best upshift needs, do not; the learner's
+  `gearing_aside` and `match_set` take it from the learnt steps). Wheel speed under the ground-speed vector the decoder uses
+  for `speed` is what reads the driveline; the vector reads 5-9 % off in the low gears from wheelspin.
 - **The optional install**: `rbr_install.find_root()` looks, with no setting, in the usual Lutris (including the game path
   in Lutris' game files), Bottles, Heroic, Steam (Proton prefixes, and the exe/StartDir of non-Steam shortcuts in `userdata/*/config/shortcuts.vdf`, read-only, at most 20 files of 1 MB) and Wine places. The search runs once on a thread of its own and again, the same way, only when an RBR run starts and the last one found nothing (30 s apart at most); the packet path never searches. When found it adds the exact car and
   the install's own stage list over the shipped one (custom stages), cached in `<data>/oversteer/rbr/stages.json` and read

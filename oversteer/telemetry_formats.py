@@ -816,10 +816,11 @@ def _rbr(data, n, recorded_car=None):
         return None
     wheels = [t[RBR_WHEEL0 + RBR_WHEEL_FIELDS * w: RBR_WHEEL0 + RBR_WHEEL_FIELDS * (w + 1)] for w in range(4)]
     car = recorded_car or (rbr_install.car_in_slot(slot) if 0 <= slot < 8 else None)
+    key = (car or {}).get('key') or rbr_install.UNKNOWN_CAR
     sample = Sample(max(0.0, rpm), None, gear=gear - 1 if 0 <= gear <= 10 else None,
                     speed=_rbr_speed(t[22:25], speed_raw),
-                    car=(car or {}).get('key') or rbr_install.UNKNOWN_CAR,
-                    car_name=(car or {}).get('name') or 'RBR car',
+                    car=key,
+                    car_name=(car or {}).get('name') or car_data.display_name(key) or 'RBR car',    # cars/rbr.json names every RSF id
                     throttle=_finite(throttle), clutch=_finite(clutch), brake=_finite(brake), game='rbr')
     sample.drivetrain = (car or {}).get('drivetrain')
     sample.gears = (car or {}).get('gears')

@@ -1,0 +1,1357 @@
+{
+ "game": "rbr",
+ "title": "Richard Burns Rally (RallySimFans) car names, engines and gearing",
+ "keys": "name is the RSFCarID as a string: the car key is rbr/<RSFCarID>, the one Oversteer makes from the install's Cars/Cars.ini [Car05] (rbr_install.car_in_slot). screen_name is RSF's name of the car. `names` lists every car RSF's car list (rsfdata/cache/cars.json) has, with the facts cars_data.json holds (path, year, drivetrain, gear count); `cars` only those whose NGP physics have been on the install.",
+ "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-10-26; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm the Fiesta was seen to reach is 0.5 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the Fiesta WRC 2019 against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
+ "cars": [
+  {
+   "name": "11",
+   "screen_name": "Ford Fiesta WRC 2019",
+   "drivetrain": "awd",
+   "mass_kg": 1390.8,
+   "limiter_rpm": 8500,
+   "torque_curve": [
+    [
+     0,
+     222.3
+    ],
+    [
+     1000,
+     266.8
+    ],
+    [
+     2700,
+     409.5
+    ],
+    [
+     3000,
+     422.5
+    ],
+    [
+     4000,
+     436.1
+    ],
+    [
+     4500,
+     442.8
+    ],
+    [
+     5250,
+     444.6
+    ],
+    [
+     5500,
+     450.0
+    ],
+    [
+     5750,
+     444.6
+    ],
+    [
+     6000,
+     444.6
+    ],
+    [
+     6750,
+     392.4
+    ],
+    [
+     7500,
+     342.0
+    ],
+    [
+     8000,
+     314.5
+    ],
+    [
+     8500,
+     290.2
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+tarmac+snow",
+     "gears": [
+      3.0,
+      2.3846,
+      1.9286,
+      1.5789,
+      1.3182,
+      1.12
+     ],
+     "primary": 1.0,
+     "reverse": 3.5833,
+     "default": true
+    }
+   ],
+   "final_drive": 4.375,
+   "transfer_ratio": 0.9841,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "turbo": false,
+   "auto_upshift_rpm": [
+    7300,
+    7240,
+    7170,
+    7050,
+    6970
+   ],
+   "sources": [
+    "rsfdata/cars/Ford_Fiesta_WRC_2019_ngp6: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 3 / 2019-09-02",
+    "rsfdata/cache/cars_data.json: peak torque 450 Nm at 5500 rpm"
+   ]
+  },
+  {
+   "name": "104",
+   "screen_name": "Hyundai i20 Coupe WRC 2021",
+   "drivetrain": "awd",
+   "mass_kg": 1390.8,
+   "limiter_rpm": 8500,
+   "torque_curve": [
+    [
+     0,
+     222.3
+    ],
+    [
+     1000,
+     266.8
+    ],
+    [
+     2700,
+     409.5
+    ],
+    [
+     3000,
+     422.5
+    ],
+    [
+     4000,
+     436.1
+    ],
+    [
+     4500,
+     442.8
+    ],
+    [
+     5250,
+     444.6
+    ],
+    [
+     5500,
+     450.0
+    ],
+    [
+     5750,
+     444.6
+    ],
+    [
+     6000,
+     443.7
+    ],
+    [
+     6500,
+     410.4
+    ],
+    [
+     6750,
+     392.4
+    ],
+    [
+     7500,
+     342.0
+    ],
+    [
+     8000,
+     314.5
+    ],
+    [
+     8500,
+     290.2
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+tarmac+snow",
+     "gears": [
+      3.0,
+      2.3846,
+      1.9286,
+      1.5789,
+      1.3182,
+      1.12
+     ],
+     "primary": 1.0,
+     "reverse": 3.5833,
+     "default": true
+    }
+   ],
+   "final_drive": 4.375,
+   "transfer_ratio": 1.0,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "turbo": false,
+   "auto_upshift_rpm": [
+    7330,
+    7240,
+    7180,
+    7070,
+    6980
+   ],
+   "sources": [
+    "rsfdata/cars/Hyundai_i20_Coupe_WRC_2021_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2023-04-01",
+    "rsfdata/cache/cars_data.json: peak torque 450 Nm at 5500 rpm"
+   ]
+  },
+  {
+   "name": "106",
+   "screen_name": "Skoda Fabia RS Rally2",
+   "drivetrain": "awd",
+   "mass_kg": 1430.6,
+   "limiter_rpm": 7500,
+   "torque_curve": [
+    [
+     0,
+     215.0
+    ],
+    [
+     1000,
+     258.0
+    ],
+    [
+     2000,
+     344.0
+    ],
+    [
+     2700,
+     387.0
+    ],
+    [
+     3500,
+     423.6
+    ],
+    [
+     4000,
+     430.0
+    ],
+    [
+     4500,
+     425.7
+    ],
+    [
+     5000,
+     408.9
+    ],
+    [
+     6000,
+     339.7
+    ],
+    [
+     6750,
+     298.8
+    ],
+    [
+     7500,
+     259.3
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+snow",
+     "gears": [
+      3.3333,
+      2.2857,
+      1.6875,
+      1.3125,
+      1.0625
+     ],
+     "primary": 1.0,
+     "reverse": 2.9167,
+     "default": true
+    },
+    {
+     "id": "tarmac",
+     "gears": [
+      3.5833,
+      2.5385,
+      1.8667,
+      1.4118,
+      1.1364
+     ],
+     "primary": 1.0,
+     "reverse": 2.9167,
+     "default": false
+    }
+   ],
+   "final_drive": 4.2308,
+   "transfer_ratio": 1.0,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "turbo": false,
+   "auto_upshift_rpm": [
+    7000,
+    6650,
+    6380,
+    6150
+   ],
+   "sources": [
+    "rsfdata/cars/Skoda_Fabia_RS_Rally2_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 2 / 2024-12-09",
+    "rsfdata/cache/cars_data.json: peak torque 430 Nm at 4000 rpm"
+   ]
+  },
+  {
+   "name": "107",
+   "screen_name": "Toyota GR Yaris Rally2",
+   "drivetrain": "awd",
+   "mass_kg": 1430.6,
+   "limiter_rpm": 7500,
+   "torque_curve": [
+    [
+     0,
+     215.0
+    ],
+    [
+     1000,
+     258.0
+    ],
+    [
+     2000,
+     326.8
+    ],
+    [
+     2700,
+     367.6
+    ],
+    [
+     3500,
+     410.6
+    ],
+    [
+     4000,
+     430.0
+    ],
+    [
+     4500,
+     425.7
+    ],
+    [
+     5000,
+     408.9
+    ],
+    [
+     6000,
+     339.7
+    ],
+    [
+     6750,
+     298.8
+    ],
+    [
+     7500,
+     259.3
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+tarmac+snow",
+     "gears": [
+      2.9167,
+      2.2143,
+      1.7333,
+      1.3684,
+      1.1053
+     ],
+     "primary": 1.0,
+     "reverse": 3.0667,
+     "default": true
+    }
+   ],
+   "final_drive": 4.3333,
+   "transfer_ratio": 1.0,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "turbo": false,
+   "auto_upshift_rpm": [
+    6510,
+    6340,
+    6290,
+    6160
+   ],
+   "sources": [
+    "rsfdata/cars/Toyota_GR_Yaris_Rally2_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2025-02-03",
+    "rsfdata/cache/cars_data.json: peak torque 430 Nm at 4000 rpm"
+   ]
+  }
+ ],
+ "names": {
+  "rbr/91": [
+   {
+    "name": "Abarth Grande Punto S2000",
+    "path": "Abarth_Grande_Punto_S2000_ngp6",
+    "year": "2011",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/83": [
+   {
+    "name": "Alpine A110 Rally RGT",
+    "path": "Alpine_A110_Rally_RGT_ngp6",
+    "year": "2020",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/62": [
+   {
+    "name": "Aston Martin Vantage RGT",
+    "path": "Aston_Martin_Vantage_RGT_ngp6",
+    "year": "2016",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/72": [
+   {
+    "name": "Audi 200 quattro GrpA",
+    "path": "Audi_200_quattro_GrpA_ngp6",
+    "year": "1988",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/66": [
+   {
+    "name": "Audi quattro A1 GrpB",
+    "path": "Audi_quattro_A1_GrpB_ngp6",
+    "year": "1983",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/67": [
+   {
+    "name": "Audi quattro A2 GrpB",
+    "path": "Audi_quattro_A2_GrpB_ngp6",
+    "year": "1984",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/18": [
+   {
+    "name": "Audi quattro Grp4",
+    "path": "Audi_quattro_Grp4_ngp6",
+    "year": "1981",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/68": [
+   {
+    "name": "Audi Sport quattro GrpB",
+    "path": "Audi_Sport_quattro_GrpB_ngp6",
+    "year": "1985",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/99": [
+   {
+    "name": "BMW M1 GrpB",
+    "path": "BMW_M1_GrpB_ngp6",
+    "year": "1984",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/87": [
+   {
+    "name": "BMW M3 E30 GrpA",
+    "path": "BMW_M3_E30_GrpA_ngp6",
+    "year": "1990",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/89": [
+   {
+    "name": "BMW M3 E36 GrpA",
+    "path": "BMW_M3_E36_GrpA_ngp6",
+    "year": "1995",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/54": [
+   {
+    "name": "Citroen C2 GT S1600",
+    "path": "Citroen_C2_GT_S1600_ngp6",
+    "year": "2004",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/27": [
+   {
+    "name": "Citroen C2 R2 Max",
+    "path": "Citroen_C2_R2_Max_ngp6",
+    "year": "2011",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/69": [
+   {
+    "name": "Citroen C3 R5",
+    "path": "Citroen_C3_R5_ngp6",
+    "year": "2018",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/14": [
+   {
+    "name": "Citroen C3 WRC 2017",
+    "path": "Citroen_C3_WRC_2017_ngp6",
+    "year": "2017",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/12": [
+   {
+    "name": "Citroen C4 WRC 2008",
+    "path": "Citroen_C4_WRC_2008_ngp6",
+    "year": "2008",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/25": [
+   {
+    "name": "Citroen DS3 R1",
+    "path": "Citroen_DS3_R1_ngp6",
+    "year": "2012",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/32": [
+   {
+    "name": "Citroen DS3 R3-MAX",
+    "path": "Citroen_DS3_R3-MAX_ngp6",
+    "year": "2014",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/51": [
+   {
+    "name": "Citroen DS3 R5",
+    "path": "Citroen_DS3_R5_ngp6",
+    "year": "2014",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/8": [
+   {
+    "name": "Citroen DS3 WRC",
+    "path": "Citroen_DS3_WRC_ngp6",
+    "year": "2014",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/94": [
+   {
+    "name": "Citroen Xsara Kit Car",
+    "path": "Citroen_Xsara_Kit_Car_ngp6",
+    "year": "1998",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/13": [
+   {
+    "name": "Citroen Xsara WRC 2006",
+    "path": "Citroen_Xsara_WRC_2006_ngp6",
+    "year": "2006",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/40": [
+   {
+    "name": "Fiat 124 Abarth Rally RGT",
+    "path": "Fiat_124_Abarth_Rally_RGT_b_ngp6",
+    "year": "2019",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/17": [
+   {
+    "name": "Fiat 126 Grp2",
+    "path": "Fiat_126_Grp2_ngp6",
+    "year": "1977",
+    "drivetrain": "rwd",
+    "gears": 4
+   }
+  ],
+  "rbr/100": [
+   {
+    "name": "Fiat 131 Abarth Grp4",
+    "path": "Fiat_131_Abarth_Grp4_ngp6",
+    "year": "1978",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/97": [
+   {
+    "name": "Fiat Abarth 500 R3T",
+    "path": "Fiat_Abarth_500_R3T_ngp6",
+    "year": "2010",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/78": [
+   {
+    "name": "Ford Escort Mk II RS Grp4",
+    "path": "Ford_Escort_Mk_II_RS_Grp4_ngp6",
+    "year": "1978",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/43": [
+   {
+    "name": "Ford Escort Mk V RS Cosworth Grp",
+    "path": "Ford_Escort_Mk_V_RS_Cosworth_GrpA_ngp6",
+    "year": "1993",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/92": [
+   {
+    "name": "Ford Fiesta Mk VI S2000",
+    "path": "Ford_Fiesta_Mk_VI_S2000_ngp6",
+    "year": "2010",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/71": [
+   {
+    "name": "Ford Fiesta Mk VIII R2",
+    "path": "Ford_Fiesta_Mk_VIII_R2_ngp6",
+    "year": "2019",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/28": [
+   {
+    "name": "Ford Fiesta R2",
+    "path": "Ford_Fiesta_R2_ngp6",
+    "year": "2015",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/37": [
+   {
+    "name": "Ford Fiesta R5",
+    "path": "Ford_Fiesta_R5_ngp6",
+    "year": "2014",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/81": [
+   {
+    "name": "Ford Fiesta Rally2",
+    "path": "Ford_Fiesta_Rally2_ngp7",
+    "year": "2023",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/88": [
+   {
+    "name": "Ford Fiesta Rally3",
+    "path": "Ford_Fiesta_Rally3_ngp6",
+    "year": "2021",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/109": [
+   {
+    "name": "Ford Fiesta rally3 evo",
+    "path": "Ford_Fiesta_Rally3_Evo_ngp7",
+    "year": "2023",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/80": [
+   {
+    "name": "Ford Fiesta Rally4",
+    "path": "Ford_Fiesta_Rally4_ngp6",
+    "year": "2021",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/9": [
+   {
+    "name": "Ford Fiesta RS WRC 2014",
+    "path": "Ford_Fiesta_RS_WRC_2014_ngp6",
+    "year": "2014",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/11": [
+   {
+    "name": "Ford Fiesta WRC 2019",
+    "path": "Ford_Fiesta_WRC_2019_ngp6",
+    "year": "2019",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/55": [
+   {
+    "name": "Ford Focus Mk II RS WRC 2006",
+    "path": "Ford_Focus_Mk_II_RS_WRC_2006_ngp6",
+    "year": "2006",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/33": [
+   {
+    "name": "Honda Civic Type R(FN2) R3",
+    "path": "Honda_Civic_Type_R_FN2_R3_ngp6",
+    "year": "2009",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/15": [
+   {
+    "name": "Hyundai i20 Coupe WRC 2017",
+    "path": "Hyundai_i20_Coupe_WRC_2017_ngp6",
+    "year": "2017",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/76": [
+   {
+    "name": "Hyundai i20 Coupe WRC 2020",
+    "path": "Hyundai_i20_Coupe_WRC_2020_ngp6",
+    "year": "2020",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/104": [
+   {
+    "name": "Hyundai i20 Coupe WRC 2021",
+    "path": "Hyundai_i20_Coupe_WRC_2021_ngp7",
+    "year": "2021",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/102": [
+   {
+    "name": "Hyundai i20 N Rally2",
+    "path": "Hyundai_i20_N_Rally2_ngp7",
+    "year": "2023",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/38": [
+   {
+    "name": "Hyundai i20 R5",
+    "path": "Hyundai_i20_R5_ngp6",
+    "year": "2016",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/60": [
+   {
+    "name": "Lada Kalina RC2 GrpA",
+    "path": "Lada_Kalina_RC2_GrpA_ngp6",
+    "year": "2015",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/41": [
+   {
+    "name": "Lada VFTS GrpB",
+    "path": "Lada_VFTS_GrpB_ngp6",
+    "year": "1986",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/73": [
+   {
+    "name": "Lancia Delta HF 4WD GrpA",
+    "path": "Lancia_Delta_HF_4WD_GrpA_ngp6",
+    "year": "1988",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/84": [
+   {
+    "name": "Lancia Stratos HF Grp4",
+    "path": "Lancia_Stratos_HF_Grp4_ngp6",
+    "year": "1976",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/64": [
+   {
+    "name": "Lotus Exige S RGT",
+    "path": "Lotus_Exige_S_RGT_ngp6",
+    "year": "2007",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/74": [
+   {
+    "name": "Mazda 323 BF 4WD Turbo GrpA",
+    "path": "Mazda_323_BF_4WD_Turbo_GrpA_ngp6",
+    "year": "1988",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/101": [
+   {
+    "name": "Mini JCW WRC",
+    "path": "Mini_JCW_WRC_ngp6",
+    "year": "2013",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/49": [
+   {
+    "name": "Mitsubishi Lancer Evo II GrpA",
+    "path": "Mitsubishi_Lancer_Evo_II_GrpA_ngp6",
+    "year": "1994",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/24": [
+   {
+    "name": "Mitsubishi Lancer Evo IX N4",
+    "path": "Mitsubishi_Lancer_Evo_IX_N4_ngp6",
+    "year": "2011",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/48": [
+   {
+    "name": "Mitsubishi Lancer Evo IX R4",
+    "path": "Mitsubishi_Lancer_Evo_IX_R4_ngp6",
+    "year": "2011",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/56": [
+   {
+    "name": "Mitsubishi Lancer Evo X R4",
+    "path": "Mitsubishi_Lancer_Evo_X_R4_V1.2_ngp6",
+    "year": "2011",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/29": [
+   {
+    "name": "Opel ADAM R2",
+    "path": "Opel_ADAM_R2_ngp6",
+    "year": "2013",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/19": [
+   {
+    "name": "Opel Ascona 400 Grp4",
+    "path": "Opel_Ascona_400_Grp4_ngp6",
+    "year": "1982",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/65": [
+   {
+    "name": "Opel Manta 400 GrpB",
+    "path": "Opel_Manta_400_GrpB_ngp6",
+    "year": "1984",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/86": [
+   {
+    "name": "Peugeot 106 Rallye S20 GrpA",
+    "path": "Peugeot_106_Rallye_S20_GrpA_ngp6",
+    "year": "1997",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/70": [
+   {
+    "name": "Peugeot 205 T16 GrpB",
+    "path": "Peugeot_205_T16_GrpB_ngp6",
+    "year": "1985",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/90": [
+   {
+    "name": "Peugeot 207 S2000 Evolution Plus",
+    "path": "Peugeot_207_S2000_Evolution_Plus_ngp6",
+    "year": "2012",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/30": [
+   {
+    "name": "Peugeot 208 R2",
+    "path": "Peugeot_208_R2_ngp6",
+    "year": "2012",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/85": [
+   {
+    "name": "Peugeot 208 Rally4",
+    "path": "Peugeot_208_Rally4_ngp6",
+    "year": "2021",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/103": [
+   {
+    "name": "Peugeot 208 T16 R5",
+    "path": "Peugeot_208_T16_R5_ngp7",
+    "year": "2015",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/95": [
+   {
+    "name": "Peugeot 306 Maxi Kit Car",
+    "path": "Peugeot_306_Maxi_Kit_Car_ngp6",
+    "year": "1998",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/63": [
+   {
+    "name": "Porsche 911 GT3 RS (2007) RGT",
+    "path": "Porsche_911_GT3_RS_2007_RGT_ngp6",
+    "year": "2009",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/50": [
+   {
+    "name": "Porsche 911 GT3 RS (2010) RGT",
+    "path": "Porsche_911_GT3_RS_2010_RGT_ngp7",
+    "year": "2015",
+    "drivetrain": "rwd",
+    "gears": 6
+   }
+  ],
+  "rbr/52": [
+   {
+    "name": "Porsche 911 SC 3.0 Grp4",
+    "path": "Porsche_911_SC_3.0_Grp4_ngp6",
+    "year": "1981",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/23": [
+   {
+    "name": "Porsche 911 SC RS GrpB",
+    "path": "Porsche_911_SC_RS_GrpB_ngp6",
+    "year": "1985",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/44": [
+   {
+    "name": "Renault 5 GT Turbo GrpA",
+    "path": "Renault_5_GT_Turbo_GrpA_ngp6",
+    "year": "1985",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/21": [
+   {
+    "name": "Renault Clio 16S Williams GrpA",
+    "path": "Renault_Clio_16S_Williams_GrpA_ngp6",
+    "year": "1993",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/34": [
+   {
+    "name": "Renault Clio III R3",
+    "path": "Renault_Clio_III_R3_ngp6",
+    "year": "2007",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/35": [
+   {
+    "name": "Renault Clio IV R3T",
+    "path": "Renault_Clio_IV_R3T_ngp6",
+    "year": "2014",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/108": [
+   {
+    "name": "Renault Clio Rally3",
+    "path": "Renault_Clio_Rally3_ngp7",
+    "year": "2023",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/93": [
+   {
+    "name": "Renault Clio Rally4",
+    "path": "Renault_Clio_Rally4_ngp6",
+    "year": "2021",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/96": [
+   {
+    "name": "Renault Clio Rally5",
+    "path": "Renault_Clio_Rally5_ngp6",
+    "year": "2021",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/26": [
+   {
+    "name": "Renault Twingo R1",
+    "path": "Renault_Twingo_R1_ngp6",
+    "year": "2011",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/31": [
+   {
+    "name": "Renault Twingo R2 Evo",
+    "path": "Renault_Twingo_R2_Evo_ngp6",
+    "year": "2012",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/79": [
+   {
+    "name": "Seat Leon Cupra R GrpN",
+    "path": "Seat_Leon_Cupra_R_GrpN_ngp6",
+    "year": "2004",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/61": [
+   {
+    "name": "Skoda 130 LR GrpB",
+    "path": "Skoda_130_LR_GrpB_ngp6",
+    "year": "1986",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/58": [
+   {
+    "name": "Skoda 130 RS Grp2",
+    "path": "Skoda_130_RS_Grp2_ngp6",
+    "year": "1979",
+    "drivetrain": "rwd",
+    "gears": 4
+   }
+  ],
+  "rbr/39": [
+   {
+    "name": "Skoda Fabia R5",
+    "path": "Skoda_Fabia_R5_b_ngp6",
+    "year": "2015",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/42": [
+   {
+    "name": "Skoda Fabia R5 evo",
+    "path": "Skoda_Fabia_R5_evo_ngp6",
+    "year": "2019",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/106": [
+   {
+    "name": "Skoda Fabia RS Rally2",
+    "path": "Skoda_Fabia_RS_Rally2_ngp7",
+    "year": "2024",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/98": [
+   {
+    "name": "Skoda Fabia S2000 Evo 2",
+    "path": "Skoda_Fabia_S2000_Evo_2_ngp6",
+    "year": "2014",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/82": [
+   {
+    "name": "Skoda Fabia WRC 2006",
+    "path": "Skoda_Fabia_WRC_2006_ngp6",
+    "year": "2006",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/59": [
+   {
+    "name": "Skoda Favorit 136 L GrpA",
+    "path": "Skoda_Favorit_136_L_GrpA_ngp6",
+    "year": "1993",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/22": [
+   {
+    "name": "Subaru Impreza GC8 555 GrpA",
+    "path": "Subaru_Impreza_GC8_555_GrpA_ngp6",
+    "year": "1993",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/57": [
+   {
+    "name": "Subaru Impreza GDA WRC2003 (S9)",
+    "path": "Subaru_Impreza_GDA_WRC2003_S9_2006_ngp6",
+    "year": "2006",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/47": [
+   {
+    "name": "Subaru Impreza N14 N4",
+    "path": "Subaru_Impreza_N14_N4_ngp6",
+    "year": "2010",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/36": [
+   {
+    "name": "Subaru Impreza N15 R4",
+    "path": "Subaru_Impreza_N15_R4_ngp6",
+    "year": "2012",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/53": [
+   {
+    "name": "Toyota Celica 2000GT(ST185) GrpA",
+    "path": "Toyota_Celica_2000GT-FOUR_RC_ST185_GrpA_ngp6",
+    "year": "1993",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/77": [
+   {
+    "name": "Toyota Celica TCT (TA64) GrpB",
+    "path": "Toyota_Celica_TCT_TA64_GrpB_ngp6",
+    "year": "1985",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/107": [
+   {
+    "name": "Toyota GR Yaris Rally2",
+    "path": "Toyota_GR_Yaris_Rally2_ngp7",
+    "year": "2024",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/16": [
+   {
+    "name": "Toyota Yaris WRC 2018",
+    "path": "Toyota_Yaris_WRC_2018_ngp6",
+    "year": "2018",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/20": [
+   {
+    "name": "Trabant P 800 RS GrpA",
+    "path": "Trabant_P_800_RS_GrpA_ngp6",
+    "year": "1985",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ],
+  "rbr/105": [
+   {
+    "name": "Volvo 240 Turbo GrpA",
+    "path": "Volvo_240_Turbo_GrpA_ngp7",
+    "year": "1983",
+    "drivetrain": "rwd",
+    "gears": 5
+   }
+  ],
+  "rbr/75": [
+   {
+    "name": "VW Golf II GTI 16V GrpA",
+    "path": "VW_Golf_II_GTI_16V_GrpA_ngp6",
+    "year": "1988",
+    "drivetrain": "fwd",
+    "gears": 6
+   }
+  ],
+  "rbr/45": [
+   {
+    "name": "VW Polo GTI R5",
+    "path": "VW_Polo_GTI_R5_ngp6",
+    "year": "2018",
+    "drivetrain": "awd",
+    "gears": 5
+   }
+  ],
+  "rbr/10": [
+   {
+    "name": "VW Polo R WRC 2016",
+    "path": "VW_Polo_R_WRC_2016_ngp6",
+    "year": "2016",
+    "drivetrain": "awd",
+    "gears": 6
+   }
+  ],
+  "rbr/46": [
+   {
+    "name": "Wartburg 353 W 460 GrpA",
+    "path": "Wartburg_353_W_460_GrpA_ngp6",
+    "year": "1985",
+    "drivetrain": "fwd",
+    "gears": 5
+   }
+  ]
+ }
+}
