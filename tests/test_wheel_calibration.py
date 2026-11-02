@@ -495,6 +495,7 @@ class _Ui:
 class _Wheel:
     usb_id = '046d:c24f'
     name = 'G29'
+    dev_path = '/sys/fake-hid'
 
     def __init__(self, supported=True):
         self.supported = supported
@@ -526,6 +527,7 @@ def _gui(tmp_path, wheel, confirm=True):
     gui.calibration_thread = None
     gui.test = None
     gui.grab_input = False
+    gui._wheel_retry = None
     return gui
 
 
@@ -920,3 +922,86 @@ def test_the_owner_hook_is_released(monkeypatch):
     with pytest.raises(Aborted):
         Calibration(SimWheel()).run()
     assert calls == ['acquire', ('release', 'token')]
+
+
+# --- wheel_owner: one owner of the wheel's replace-mode attributes at a time ---
+
+def test_a_wheel_held_exclusively_elsewhere_is_left_alone():
+    from oversteer import wheel_owner
+    sim = SimWheel()
+    assert wheel_owner.acquire(sim.wheel_id, 'wheel-test', exclusive=True)
+    try:
+        with pytest.raises(Aborted) as e:
+            Calibration(sim).run()
+        assert e.value.reason == 'busy' and 'wheel-test' in str(e.value)
+        assert sim.writes == [] and sim.attempts == []
+    finally:
+        wheel_owner.release(sim.wheel_id, 'wheel-test')
+
+
+def test_countersteer_lets_go_and_the_run_holds_the_wheel(monkeypatch):
+    """A shared owner (the FFB engine) is asked to let go; it puts the game's force back and releases; only
+    then does the run look at ext_force (the engine's last value is stale by then) and start."""
+    from oversteer import wheel_owner
+    sim = SimWheel()
+    sim.attrs['ext_force'] = '2500'                              # what the engine last wrote
+    order = []
+
+    def let_go():
+        order.append(('inhibit', sim.attrs['ext_force']))
+        sim.write('game_ffb_level', '100')
+        wheel_owner.release(sim.wheel_id, 'countersteer-ffb')
+    assert wheel_owner.acquire(sim.wheel_id, 'countersteer-ffb', on_inhibit=let_go)
+    holders = []
+
+    def progress(fraction, text):
+        holders.append(wheel_owner.current(sim.wheel_id))
+        cal.cancel()
+    cal = Calibration(sim, progress)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'cancelled'
+    assert order == [('inhibit', '2500')]
+    assert holders and all(h == ('calibration', True) for h in holders)
+    first_clear = next(i for i, (_t, n, v) in enumerate(sim.writes) if n == 'ext_force')
+    assert [n for _t, n, _v in sim.writes[:first_clear]] == ['game_ffb_level']     # only the engine's own
+    assert wheel_owner.current(sim.wheel_id) is None                               # released after the restore
+    assert_put_back(sim)
+
+
+def test_the_wheel_is_released_after_every_ending(monkeypatch):
+    from oversteer import wheel_owner
+    sim = SimWheel()
+    sim.unplug(5.0)
+    with pytest.raises(Aborted):
+        Calibration(sim).run()
+    assert wheel_owner.current(sim.wheel_id) is None
+
+
+def test_nothing_is_written_while_the_wheel_is_held(tmp_path, g29_like, monkeypatch):
+    from oversteer import wheel_owner
+    from oversteer import gui as gui_module
+    timers = []
+    monkeypatch.setattr(gui_module.GLib, 'timeout_add', lambda ms, fn: timers.append(fn) or 7)
+    wheel = _Wheel()
+    gui = _gui(tmp_path, wheel)
+    wcal.save_store(str(tmp_path / wcal.STORE_NAME), {'046d:c24f': _entry(g29_like[2])})
+    path = str(tmp_path / wcal.PENDING_NAME)
+    assert wheel_owner.acquire(wheel.dev_path, 'countersteer-ffb', on_inhibit=lambda: None)
+    try:
+        sim = SimWheel()
+        wcal.write_pending(path, wcal.instance_key(wheel), {'range': 900})
+        assert wcal.recover_pending(path, wcal.instance_key(wheel), sim, wheel=wheel.dev_path) is False
+        assert sim.writes == [] and os.path.exists(path)
+        gui.apply_wheel_correction()
+        gui.recover_wheel()
+        assert wheel.attrs == {}
+        assert len(timers) == 1                                  # one retry timer, not one per call
+        assert timers[0]() is True                               # still held: keeps waiting
+        assert wheel.attrs == {}
+    finally:
+        wheel_owner.release(wheel.dev_path, 'countersteer-ffb')
+    monkeypatch.setattr(wcal, 'DeviceIO', lambda device: SimWheel())
+    assert timers[0]() is False                                  # free: written now
+    assert wheel.attrs['ffb_lut'] != 'identity'
+    assert not os.path.exists(path)

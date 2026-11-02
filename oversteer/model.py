@@ -66,6 +66,7 @@ class Model:
         'start_app_manually': None,
         'profile_note': None,
         'apply_on_plug': None,
+        'countersteer_ffb': None,
     }
 
     types = {
@@ -103,6 +104,7 @@ class Model:
         'start_app_manually': 'boolean',
         'profile_note': 'string',
         'apply_on_plug': 'boolean',
+        'countersteer_ffb': 'boolean',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -191,6 +193,8 @@ class Model:
             'start_app_manually': False,
             'profile_note': '',
             'apply_on_plug': False,
+            # Countersteer FFB, a feel preference kept per profile; None where the driver has no replace mode
+            'countersteer_ffb': False if self.device.get_ext_force_support() else None,
         }
 
     def pedal_bit(self, name):
@@ -342,6 +346,9 @@ class Model:
             data['profile_note'] = ''
         if data['apply_on_plug'] is None:
             data['apply_on_plug'] = False
+        # A profile from before Countersteer FFB: off (kept None where the driver has no replace mode)
+        if data['countersteer_ffb'] is None:
+            data['countersteer_ffb'] = None if self.data.get('countersteer_ffb') is None else False
 
         self.data = data
         self.save_reference_values()
@@ -594,6 +601,14 @@ class Model:
     def get_ffb_leds(self):
         return self.data['ffb_leds']
 
+    def set_countersteer_ffb(self, value):
+        value = bool(value)
+        if self.set_if_changed('countersteer_ffb', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_ffb()
+
+    def get_countersteer_ffb(self):
+        return bool(self.data['countersteer_ffb'])
+
     def set_rev_leds(self, value):
         value = bool(value)
         if self.set_if_changed('rev_leds', value) and self.ui is not None:
@@ -835,6 +850,7 @@ class Model:
         self.ui.set_start_app_manually(data['start_app_manually'])
         self.ui.set_profile_note(data['profile_note'])
         self.ui.set_apply_on_plug(data['apply_on_plug'])
+        self.ui.set_countersteer_ffb(data['countersteer_ffb'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()

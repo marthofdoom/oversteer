@@ -42,6 +42,7 @@ class SimWheel:
         self.tick = tick
         self.tick_s = tick
         self.report = report
+        self.wheel_id = 'sim-wheel-{}'.format(id(self))     # its wheel_owner key
         self.attrs = {'game_ffb_level': '100', 'ext_force': '0', 'ext_force_cap': '80', 'ffb_lut': 'identity',
                       'ffb_deadband': '0', 'ffb_dither': '0', 'ffb_soft_clip': '0'}
         self.t = 100.0

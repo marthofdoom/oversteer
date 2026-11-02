@@ -34,6 +34,7 @@ from collections import deque
 from locale import gettext as _
 
 from . import wheel_calib as wc
+from . import wheel_owner
 
 # The driver attributes the calibration and the correction need (new-lg4ff with replace mode and shaping)
 ATTRS = ('ext_force', 'ext_force_cap', 'game_ffb_level', 'ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip')
@@ -136,9 +137,8 @@ class Calibration:
         gc_was = gc.isenabled()
         owner = None
         try:
-            # TODO(wheel_owner): acquire the wheel exclusively here (oversteer/wheel_owner.py, branch
-            # ffb-engine), before _check_free: its stale-ext_force clearing may only run once no other owner in
-            # this process (the FFB engine) holds the wheel. Raise Aborted('busy') if it can't be had.
+            # The wheel exclusively first (wheel_owner): Countersteer FFB lets go (and puts the game's force back
+            # itself) or the run is refused before any write; only then may _check_free clear a stale ext_force
             owner = self._acquire_owner()
             self._check_free()              # before anything is changed: nothing to put back if it isn't
             # no collector pauses in the middle of a pulse
@@ -174,15 +174,26 @@ class Calibration:
         finally:
             if gc_was:
                 gc.enable()
-            self._release_owner(owner)      # TODO(wheel_owner): release the exclusive hold
+            self._release_owner(owner)      # after the restore (the inner finally)
             _running.discard(self)
 
-    def _acquire_owner(self):
-        """The interlock hook (see run): None until wheel_owner.py is wired in."""
-        return None
+    OWNER = 'calibration'
 
-    def _release_owner(self, owner):
-        pass
+    def _acquire_owner(self):
+        """Hold the wheel exclusively (wheel_owner). Returns the wheel held, None for an IO without one;
+        raises Aborted('busy') naming the holder if it can't be had."""
+        wheel = getattr(self.io, 'wheel_id', None)
+        if wheel is None:
+            return None
+        if not wheel_owner.acquire(wheel, self.OWNER, exclusive=True):
+            held = wheel_owner.current(wheel)
+            raise Aborted('busy', _("The wheel is in use by {}: try again in a moment.").format(
+                held[0] if held else _("another part of Oversteer")))
+        return wheel
+
+    def _release_owner(self, wheel):
+        if wheel is not None:
+            wheel_owner.release(wheel, self.OWNER)
 
     # --- set up and put back ---
 
@@ -832,11 +843,14 @@ def take_pending(path, key):
     return data['saved']
 
 
-def recover_pending(path, key, io):
+def recover_pending(path, key, io, wheel=None):
     """At start or when the wheel comes back (before any profile is applied to it, so a later choice of the
     user's always wins): undo a run that never got to put the wheel back. The record is used once: if that
     attempt fails, only its safe part (ext_force 0, game_ffb_level 100) is tried again later. True if there
-    was one and it is undone."""
+    was one and it is undone. Nothing is written while anyone holds the wheel (wheel_owner): the caller tries
+    again once it is free."""
+    if wheel is not None and wheel_owner.current(wheel) is not None:
+        return False
     saved = take_pending(path, key)
     if saved is None:
         return False
@@ -871,6 +885,7 @@ class DeviceIO:
 
     def __init__(self, device):
         self.device = device
+        self.wheel_id = device.dev_path         # the wheel_owner key
         self.tick_s = device.get_ffb_tick_ms() / 1000.0
         self._force_fd = None
         self._input = None

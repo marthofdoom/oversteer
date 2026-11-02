@@ -72,6 +72,8 @@ class Gui:
         self.test = None
         self.calibration = None             # the wheel calibration running now (wheel_calibration.Calibration)
         self.calibration_thread = None
+        self._wheel_retry = None            # a GLib timer waiting for the wheel to be free (wheel_owner)
+        self._test_wheel = None     # the wheel the test holds with wheel_owner
         self.linear_chart = None
         self.performance_chart = None
         self.combined_chart = None
@@ -79,6 +81,10 @@ class Gui:
         self.equipment = []
         self.telemetry = None
         self.telemetry_generation = 0
+        # Countersteer FFB: its own thread, fed by the listener, writing the wheel's ext_force (ffb_engine)
+        from .ffb_engine import FfbEngine
+        self.ffb_engine = FfbEngine()
+        self.ffb_engine.start()
         # Pedals as pressed fractions for the rev lights' launch mode; the
         # input thread writes, the telemetry thread reads (plain floats).
         # shift_press: (monotonic time, 'gear'/'sequential'/'paddle') of the
@@ -537,6 +543,9 @@ class Gui:
             self.telemetry.stop()
             self.telemetry = None
         self.device = self.device_manager.get_device(device_id)
+        ready = self.device is not None and self.device.is_ready()
+        # The old wheel's game force is restored by the engine before it takes the new one
+        self.ffb_engine.set_device(self.device.dev_path if ready else None)
         self.ffb_pending = {}
         self.ui.safe_call(self.ui.reset_ffb_meter)
 
@@ -593,6 +602,29 @@ class Gui:
         self.update_pedals()
         self.apply_wheel_correction()
         self.refresh_wheel_correction()
+        self.apply_countersteer_ffb()
+
+    def apply_countersteer_ffb(self):
+        """The "Countersteer FFB" switch to the engine; the listener started
+        or stopped where only the switch needs it."""
+        from .telemetry import NoLeds
+        wanted = self._countersteer_wanted()
+        self.ffb_engine.set_enabled(wanted)
+        telemetry = self.telemetry
+        if wanted and telemetry is None:
+            self.apply_rev_leds()
+        elif not wanted and telemetry is not None and isinstance(telemetry.leds, NoLeds) \
+                and not self.telemetry_learn and not self._forward_targets:
+            self.apply_rev_leds()           # it ran for the switch alone
+
+    def _countersteer_wanted(self):
+        return self.device is not None and self.model.get_device() is self.device \
+            and self.model.get_countersteer_ffb()
+
+    def countersteer_view(self):
+        """(light, text) for the FFB tab's Countersteer FFB row."""
+        from .ffb_engine import status_text
+        return status_text(self.ffb_engine.status, listening=self.telemetry is not None)
 
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory
@@ -644,7 +676,7 @@ class Gui:
                 self.ui.set_rev_leds_status(_("no LEDs"))
                 leds = None
         if leds is None:
-            if not self.telemetry_learn and not self._forward_targets:
+            if not self.telemetry_learn and not self._forward_targets and not self._countersteer_wanted():
                 if self.device is None or not self.model.get_rev_leds():
                     self.ui.set_rev_leds_status('')
                 self.refresh_capture_status()
@@ -702,6 +734,7 @@ class Gui:
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry.recorder = self.telemetry_recorder
+        self.telemetry.ffb = self.ffb_engine
         if self.telemetry_recorder is not None and not self.telemetry.auto:
             self.telemetry_recorder.port = self.telemetry.port   # Auto: each packet brings its port
         self.telemetry_status = show
@@ -908,12 +941,14 @@ class Gui:
 
     def on_quit(self):
         self._forward_stop.set()
+        self.ffb_engine.stop()              # the game's force feedback back before anything else
         self.cancel_calibration(wait=1.5)       # its finally puts the wheel back (force 0, game force on)
         if self.test is not None:
             try:
                 self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
             except Exception:
                 logging.exception("restoring the wheel at quit")
+            self._release_test_wheel()
         if self.telemetry_web is not None:
             self.telemetry_web.stop()
             self.telemetry_web = None
@@ -1439,6 +1474,12 @@ class Gui:
             self.ui.info_dialog(_("Force feedback is switched off for this device."))
             return
 
+        from . import wheel_owner
+        path = getattr(self.device, 'dev_path', None)
+        if not wheel_owner.hold_for_demo(path, wheel_owner.DEMO_SECONDS):
+            self.ui.info_dialog(_(wheel_owner.demo_refusal(path) or "The wheel is in use"))
+            return
+
         def failed(error):
             self.ui.safe_call(self.ui.info_dialog, _("Could not play the effect."), str(error))
         if not self.device.play_demo(kind, on_error=failed):
@@ -1500,6 +1541,7 @@ class Gui:
         self.model.flush_ui()
         self.update_pedals()
         self.update_learner_directory()
+        self.ffb_engine.set_enabled(self._countersteer_wanted())
         self.apply_rev_leds()
         self._remember_profile(profile_name)
 
@@ -2203,12 +2245,36 @@ class Gui:
     def _wheel_pending(self):
         return os.path.join(self.config_path, wcal.PENDING_NAME)
 
+    def _wheel_held(self):
+        """Who holds the selected wheel (wheel_owner), or None."""
+        from . import wheel_owner
+        path = getattr(self.device, 'dev_path', None)
+        return wheel_owner.current(path) if path else None
+
+    def _defer_wheel_writes(self):
+        """The wheel is held (Countersteer FFB playing, the test): its correction and any crash record wait,
+        since changing the shaping or the game's level under a playing force would make it jump."""
+        if getattr(self, '_wheel_retry', None) is None:
+            self._wheel_retry = GLib.timeout_add(1000, self._retry_wheel_writes)
+
+    def _retry_wheel_writes(self):
+        if self._wheel_held() is not None or self.calibration is not None:
+            return True
+        self._wheel_retry = None
+        self.recover_wheel()
+        self.apply_wheel_correction()
+        return False
+
     def recover_wheel(self):
         """A calibration that never put the wheel back (the process was killed): do it now."""
         if self.calibration is not None or not self._wheel_supported():
             return
+        if self._wheel_held() is not None:
+            self._defer_wheel_writes()
+            return
         try:
-            wcal.recover_pending(self._wheel_pending(), wcal.instance_key(self.device), wcal.DeviceIO(self.device))
+            wcal.recover_pending(self._wheel_pending(), wcal.instance_key(self.device), wcal.DeviceIO(self.device),
+                                 wheel=self.device.dev_path)
         except Exception as e:
             logging.warning("wheel calibration crash record: %s", e)
 
@@ -2230,6 +2296,9 @@ class Gui:
             return
         entry = self._wheel_entry()
         if entry is not None:
+            if self._wheel_held() is not None:
+                self._defer_wheel_writes()
+                return
             try:
                 wcal.apply_correction(self.device.write_attr, entry)
             except Exception as e:
@@ -2350,9 +2419,26 @@ class Gui:
         if wait and thread is not None:
             thread.join(wait)
 
+    TEST_OWNER = 'wheel-test'
+
     def start_test(self):
-        if self.calibration is not None:
+        # (a running calibration holds the wheel exclusively too: the test is refused below)
+        # The test needs the wheel's own forces: Countersteer FFB lets go first (wheel_owner)
+        from . import wheel_owner
+        path = self.device.dev_path if self.device is not None else None
+        if path is not None and not wheel_owner.acquire(path, self.TEST_OWNER, exclusive=True):
+            held = wheel_owner.current(path)
+            self.ui.info_dialog(_("The wheel is in use by {}: try again in a moment.").format(
+                held[0] if held else _("another part of Oversteer")))
             return
+        self._test_wheel = path
+        try:
+            self._start_test()
+        except Exception:
+            self._release_test_wheel()
+            raise
+
+    def _start_test(self):
         def test_callback(name = 'end', message = ''):
             if name == 'end':
                 self.ui.safe_call(self.end_test)
@@ -2365,8 +2451,15 @@ class Gui:
         self.test_run = 0
         self.ui.switch_test_panel(self.test_run)
 
+    def _release_test_wheel(self):
+        from . import wheel_owner
+        path, self._test_wheel = getattr(self, '_test_wheel', None), None
+        if path is not None:
+            wheel_owner.release(path, self.TEST_OWNER)
+
     def abort_test(self, message = ''):
         """A test that could not run or finish: say why and go back to the idle Test tab."""
+        self._release_test_wheel()
         self.test = None
         self.test_run = None
         self.ui.error_dialog(_('The wheel test could not be completed.'), message)
@@ -2383,6 +2476,7 @@ class Gui:
                     self.device.get_max_range())
             self.linear_chart.set_minimum_level(self.minimum_level)
         elif self.test_run == 2:
+            self._release_test_wheel()          # the last run is over, whatever it found
             self.performance_chart = PerformanceChart(self.test.get_input_values(), self.test.get_output_values(),
                     self.device.get_max_range())
             if self.performance_chart.get_latency() is None:
@@ -2404,6 +2498,7 @@ class Gui:
         self.test_run -= 1
         if self.test_run == -1:
             self.test_run = None
+            self._release_test_wheel()          # backed out of the test
         self.ui.switch_test_panel(self.test_run)
         if self.test_run is None and self.combined_chart is not None:
             self.show_test_results()

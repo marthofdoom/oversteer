@@ -65,6 +65,7 @@ class GtkUi:
         self._build_telemetry_page()
         self._build_wheel_launch_options()
         self._build_ffb_meter()
+        self._build_countersteer_ffb()
         self._build_wheel_calibration()
 
     def reset_view(self):
@@ -1163,6 +1164,78 @@ class GtkUi:
         dialog, self.calibration_dialog = getattr(self, 'calibration_dialog', None), None
         if dialog is not None:
             dialog.destroy()
+
+    COUNTERSTEER_MS = 250       # the light and its reason, while the row is on screen
+    LIGHT_COLOURS = {'green': (0.2, 0.75, 0.3), 'amber': (0.95, 0.65, 0.1), 'grey': (0.55, 0.55, 0.55)}
+    # Translated where shown
+    COUNTERSTEER_TOOLTIP = ("Countersteer plays its own steering force, from the tyre forces in the game's "
+                              "telemetry, in place of the game's force feedback, where it can do better: the light "
+                              "is green when the game sends what that needs, fast enough (measured live). Amber: "
+                              "a force model is possible but not built yet; grey: the game keeps its own force. "
+                              "It only takes over while the light is green and gives the game its force back at "
+                              "once otherwise. Saved with the profile.")
+    COUNTERSTEER_NO_DRIVER = ("Needs the new-lg4ff driver with replace mode (ext_force): update the driver")
+
+    def _build_countersteer_ffb(self):
+        """The "Countersteer FFB" row under the Force feedback switch: a
+        status light, the reason under the title, the switch."""
+        anchor = self._row_of(self.ffb_enabled)
+        if anchor is None or anchor.get_parent() is None:
+            return
+        self.countersteer_light = Gtk.DrawingArea()
+        self.countersteer_light.set_size_request(14, 14)
+        self.countersteer_light.connect('draw', self._draw_countersteer_light)
+        self.countersteer_light.connect('map', self._start_countersteer_poll)
+        self._countersteer_shown = ('off', '')
+        self.countersteer_status = self._status_label()
+        row, self.countersteer_switch = self._switch_row(
+            _("Countersteer FFB"), _(self.COUNTERSTEER_TOOLTIP),
+            lambda state: self.controller.model.set_countersteer_ffb(state),
+            status=self.countersteer_status, extra=(self.countersteer_light,))
+        self.countersteer_switch.set_sensitive(False)
+        anchor.get_parent().insert(row, anchor.get_index() + 1)
+        row.show_all()
+        self._countersteer_polling = False
+
+    def set_countersteer_ffb(self, value):
+        """The switch: None where the driver has no replace mode (insensitive, the tooltip says why)."""
+        if not hasattr(self, 'countersteer_switch'):
+            return
+        switch = self.countersteer_switch
+        switch.set_sensitive(value is not None)
+        switch.set_tooltip_text(_(self.COUNTERSTEER_NO_DRIVER) if value is None else None)
+        if value is not None and switch.get_active() != bool(value):
+            switch.set_active(bool(value))
+
+    def _start_countersteer_poll(self, *args):
+        if not self._countersteer_polling:
+            self._countersteer_polling = True
+            self._poll_countersteer()
+            GLib.timeout_add(self.COUNTERSTEER_MS, self._poll_countersteer)
+
+    def _poll_countersteer(self):
+        if not self.countersteer_light.get_mapped():
+            self._countersteer_polling = False
+            return False
+        shown = self.controller.countersteer_view()
+        if shown != self._countersteer_shown:
+            self._countersteer_shown = shown
+            self.countersteer_status.set_text(shown[1])
+            self.countersteer_light.queue_draw()
+        return True
+
+    def _draw_countersteer_light(self, area, cr):
+        size = min(area.get_allocated_width(), area.get_allocated_height())
+        colour = self.LIGHT_COLOURS.get(self._countersteer_shown[0])
+        cr.arc(size / 2, size / 2, size / 2 - 1, 0, 2 * math.pi)
+        if colour is None:          # off: an empty ring
+            fg = area.get_style_context().get_color(Gtk.StateFlags.NORMAL)
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.35)
+            cr.set_line_width(1.5)
+            cr.stroke()
+        else:
+            cr.set_source_rgb(*colour)
+            cr.fill()
 
     def reset_ffb_meter(self):
         if hasattr(self, 'ffb_meter'):
