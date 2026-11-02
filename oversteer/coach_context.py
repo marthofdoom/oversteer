@@ -439,10 +439,10 @@ PB_CLASSES = ('clean', 'learning', 'off')   # the classes of finished run that c
 
 def stage_pb_id(reader, stage, car_id):
     """The id of the PB: the quickest finished run of the car on the stage among those that rank (PB_CLASSES: clean,
-    learning or with offs; a partial run is not a finish), or None."""
-    ranked = reader.stage_runs(stage, car=car_id, limit=60, ranked=True)
-    finished = [r for r in ranked if r['finished'] == 1 and r['result_time'] and r['run_class'] in PB_CLASSES]
-    return min(finished, key=lambda r: r['result_time'])['id'] if finished else None
+    learning or with offs; a partial run is not a finish), over all of its runs there, or None
+    (Reader.stage_pb_builds, which the PB on a game build is ranked by too)."""
+    pb = reader.stage_pb_builds(stage, car_id)['pb']
+    return pb['run'] if pb else None
 
 
 def reference_run(candidates, result_time=None, wet=None):

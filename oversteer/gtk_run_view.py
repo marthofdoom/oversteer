@@ -35,6 +35,17 @@ def advice_markup(tips, empty):
     return '\n\n'.join(out)
 
 
+def _build_pb(head, ref):
+    """The PB on the game build the run was driven on, where the all-time PB was set on another: 'PB 2:21.6 · on this
+    build 2:23.0', the first half left out where the comparison shown is that PB; '' otherwise."""
+    bp = head.get('build_pb')
+    if not bp:
+        return ''
+    if ref and ref.get('role') == 'pb' and ref.get('time') == bp['pb']:
+        return _("on this build {}").format(clock(bp['time']))
+    return _("PB {} · on this build {}").format(clock(bp['pb']), clock(bp['time']))
+
+
 class RunView(Gtk.Box):
     """The widget. `set_source(reader, profile, car_id)` says where the runs are (reader: a callable giving a
     read-only Reader, or None); the view reads when it is shown and the car or the runs changed."""
@@ -326,7 +337,8 @@ class RunView(Gtk.Box):
                 plot.SLOWER if round(delta, 1) > 0 else plot.FASTER, signed(delta))))
         self._sub.set_text(' · '.join(x for x in (
             _("Run {}").format(head['n']), head['run_class'] or '', _date(head['started']),
-            _("vs {} {}").format(ref['label'], clock(ref['time'])) if ref else _("No run to compare with yet")) if x))
+            _("vs {} {}").format(ref['label'], clock(ref['time'])) if ref else _("No run to compare with yet"),
+            _build_pb(head, ref)) if x))
         self._legend.set_markup('<span foreground="{}">—</span> {}   <span foreground="{}">—</span> {}'.format(
             plot.SPEED, _("Run {}").format(head['n']), plot.REF,
             GLib.markup_escape_text((ref['label'] + (' · ' + _(run_analysis.ROLE_NAMES[ref['role']]) if ref['role'] in run_analysis.ROLE_NAMES else '')) if ref
