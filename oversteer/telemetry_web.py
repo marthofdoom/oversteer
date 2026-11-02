@@ -317,10 +317,10 @@ class TelemetryWeb(http.server.ThreadingHTTPServer):
                 text = f.read()
             self._page = text.encode('utf-8')
             scripts, styles = _hashes(text, 'script'), _hashes(text, 'style')
-            # media-src blob:: the keep-awake video, recorded in the page
-            # from a canvas (no file is fetched for it)
+            # media-src data:: the keep-awake video, embedded in the page
+            # (NoSleep.js's blank clips; no file is fetched for it)
             self._csp = ("default-src 'self'; script-src {}; style-src {}; img-src 'self' data:; "
-                         "media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'").format(
+                         "media-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'").format(
                              ' '.join(scripts) or "'none'", ' '.join(styles) or "'none'")
         hostname = socket.gethostname().lower()
         self.names = {'localhost', hostname, hostname + '.local', hostname.split('.')[0],

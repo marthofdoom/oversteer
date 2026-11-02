@@ -12,7 +12,7 @@ from . import steam_options
 from .telemetry import AUTO, DEFAULT_PORT, PORT_PRESETS, PORT_MIN, PORT_MAX, parse_port
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
 from . import telemetry_plot
-from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, splits_row, shift_summary, shift_table
+from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, sob_gain, splits_row, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
 
@@ -1835,8 +1835,9 @@ class GtkUi:
             self._show_splits_row()
             return
         self._splits_tones = (found['tones'], [tone for _n, _t, _d, tone in found['sectors']], found['bounds'])
-        summary = '<b>{}</b>   PB <tt><b>{}</b></tt>   {} <tt><b>{}</b></tt>'.format(
-            GLib.markup_escape_text(found['stage']), clock(found['pb']), _("SoB"), clock(found['sob']))
+        summary = '<b>{}</b>   {} <tt><b>{}</b></tt>   {} <tt><b>{}</b>{}</tt>'.format(
+            GLib.markup_escape_text(found['stage']), _("Best"), clock(found['pb']), _("SoB"), clock(found['sob']),
+            sob_gain(found.get('gain')))
         if found['last'] is not None and found['delta'] is not None:
             # PB for the quickest finished run, clean or with offs (coach.splits new_pb)
             tone = 'gold' if found['new_pb'] else 'ahead-gain' if round(found['delta'], 1) <= 0 else 'behind-lose'

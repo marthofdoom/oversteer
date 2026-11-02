@@ -217,6 +217,10 @@ def test_the_splits_summary_and_rows():
     assert rows[3][3:] == ('−1.0', 'good') and rows[3][0].endswith('(finish)')
 
 
+def test_sob_gain_is_the_signed_gain_after_the_sob():
+    assert view.sob_gain(3.23) == ' (\u22123.2)' and view.sob_gain(None) == '' and view.sob_gain(0.0) == ' (\u00b10.0)'
+
+
 def test_the_splits_row_tones_rows_and_sectors():
     assert view.splits_row(None) is None
     found = {'name': 'Afon Bidno - Severn', 'best': 197.74, 'possible': 194.51, 'gain': 3.23, 'last': 198.8, 'runs': 3,
