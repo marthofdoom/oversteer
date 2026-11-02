@@ -33,6 +33,7 @@ asked for, and full scale stays full scale.
 import numpy as np
 
 FULL = 32767                 # full-scale force (driver units)
+DEADBAND_FADE = 512          # the driver scales the deadband lift by m/512 for LUT outputs m below this
 LUT_POINTS = 33              # ffb_lut values: input i * 32767 / 32
 # Command levels (full-scale units) the pulses are played at; the torque curve is solved at these
 KNOTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25, 0.30, 0.33, 0.36, 0.40, 0.50,
@@ -49,6 +50,7 @@ BLOCKS = 12                  # groups of stretches the uncertainty is judged ove
 CHUNK = 250                  # samples (ms) in a stretch
 LATENCIES_S = tuple(i / 1000 for i in range(0, 101, 5))   # latency candidates (a proxy hop adds to the driver's),
                                                           # refined to 1 ms around the best
+DRIVER_SLEW_S = 0.012          # newer drivers take 12 ms for a full-scale change of ext_force; the fit tries with and without
 DEADBAND_FLOOR = 0.02        # below 2 % of the full-scale torque the motor counts as giving nothing
 MIN_R2 = 0.75                # a fit explaining less of the measured acceleration than this is not trusted (clean runs:
                              # 0.90 to 0.999 over nine simulated wheels and the field G29; with a random hand on
@@ -168,6 +170,18 @@ def command_at(cmd_t, cmd, t):
     return out
 
 
+def slew_limited(w, rate, h=GRID_S):
+    """The command after a driver slew: the same series, but changing by at most `rate` (full scale per
+    second) per sample."""
+    step = rate * h
+    out = np.empty(len(w))
+    cur = 0.0
+    for i, v in enumerate(w.tolist()):
+        cur = v if abs(v - cur) <= step else cur + step if v > cur else cur - step
+        out[i] = cur
+    return out
+
+
 def hats(u, knots):
     """Piecewise-linear basis over the knots, one column per knot after the first (tau(0) = 0)."""
     k = np.asarray(knots)
@@ -253,8 +267,17 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     if not scales:
         raise FitError("the wheel hardly moved during the run")
 
+    raw_cmd = command_at(cmd_t, cmd, grid)
+    slewed_cmd = slew_limited(raw_cmd, 1.0 / DRIVER_SLEW_S)
+
+    def delayed(series, lat):
+        k = int(round(lat / h))
+        return np.concatenate([np.zeros(k), series[:n - k]]) if k else series
+
+    slew = [True]                                    # whether the driver is taken to slew ext_force
+
     def design(lat):
-        w = command_at(cmd_t, cmd, grid - lat)
+        w = delayed(slewed_cmd if slew[0] else raw_cmd, lat)
         basis = hats(np.abs(w), knots) * np.sign(w)[:, None]
         xs = []
         for sc in scales:
@@ -280,6 +303,14 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     lat = best_of(latencies)
     lat = best_of([max(0.0, lat + d / 1000) for d in range(-4, 5)])
     ss, p, x = solve(lat)
+    slew[0] = False                                  # a driver without the slew: the latency is longer by about half of it
+    lat_plain = best_of([max(0.0, lat + d / 1000) for d in range(0, 9, 2)])
+    lat_plain = best_of([max(0.0, lat_plain + d / 1000) for d in range(-1, 2)])
+    ss_plain, p_plain, x_plain = solve(lat_plain)
+    if ss_plain < ss:
+        ss, p, x, lat = ss_plain, p_plain, x_plain, lat_plain
+    else:
+        slew[0] = True
     # One pass without the outliers (a stray report, a moment the model doesn't cover), then refit
     res = accel - x @ p
     mad = np.median(np.abs(res - np.median(res))) * 1.4826 + 1e-9
@@ -435,7 +466,10 @@ def shaped(x, lut, deadband):
     y = lut[i] + (lut[i + 1] - lut[i]) * (pos - i)
     if x <= 0:
         return 0.0
-    return deadband + (FULL - deadband) * y / FULL
+    out = deadband + (FULL - deadband) * y / FULL
+    if y < DEADBAND_FADE:
+        out *= y / DEADBAND_FADE                       # the driver fades the lift in over the LUT's first 512
+    return out
 
 
 def recommend_dither(lut, deadband, low=0.3, ratio=DITHER_RATIO):

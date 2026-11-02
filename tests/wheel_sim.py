@@ -22,7 +22,9 @@ class SimWheel:
                  dead_zone=0.06, curve=3.0, latency=0.012, encoder_deg=360 / 4096, ext_sign=-1,
                  max_range=900, range=540, gain=110, autocenter=30, start_deg=0.0, game_spring=0.002,
                  stop_deg=450.0, dt=0.0005, tick=0.002, report=0.001, read_delay=0.0, read_batch=0.0,
-                 rim_zone=None):
+                 rim_zone=None, slew_s=0.0):
+        self.slew_s = slew_s                # the driver's slew on ext_force: seconds for a full-scale change (0: none)
+        self._ext_now = 0.0
         self.J = inertia                    # full scale per deg/s^2
         self.coulomb = coulomb              # full scale
         self.static = static
@@ -125,6 +127,10 @@ class SimWheel:
         age = self.t - self.last_force_write
         if age > 0.030:
             ext *= max(0.0, 1 - (age - 0.030) / 0.100)
+        if self.slew_s > 0:
+            ext_step = self.tick / self.slew_s
+            self._ext_now += max(-ext_step, min(ext_step, ext - self._ext_now))
+            ext = self._ext_now
         ext *= self.gain / 100.0
         cap = int(self.attrs['ext_force_cap']) / 100.0
         ext = max(-cap, min(cap, ext))

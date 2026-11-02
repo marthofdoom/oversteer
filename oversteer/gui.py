@@ -2333,7 +2333,8 @@ class Gui:
         """A calibration that never put the wheel back (the process was killed): do it now."""
         if self.calibration is not None or not self._wheel_supported():
             return
-        if self._wheel_held() is not None:
+        held = self._wheel_held()
+        if held is not None and held[1]:
             self._defer_wheel_writes()
             return
         try:
@@ -2341,6 +2342,8 @@ class Gui:
                                  wheel=self.device.dev_path)
         except Exception as e:
             logging.warning("wheel calibration crash record: %s", e)
+        if held is not None and os.path.exists(self._wheel_pending()):    # shared: cap, gain, range are back, the rest waits
+            self._defer_wheel_writes()
 
     def _wheel_supported(self):
         try:

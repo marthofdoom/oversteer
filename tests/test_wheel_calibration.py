@@ -1287,19 +1287,20 @@ def test_writes_while_the_wheel_is_held(tmp_path, g29_like, monkeypatch):
     finally:
         wheel_owner.release(wheel.dev_path, 'wheel-test')
 
-    # shared (Countersteer FFB): nothing either, the correction and the crash record wait
+    # shared (Countersteer FFB): the correction and the forces wait; a killed run's cap, gain and range go back now
     assert wheel_owner.acquire(wheel.dev_path, 'countersteer-ffb', on_inhibit=lambda: None)
     try:
         gui.apply_wheel_correction()
         assert wheel.attrs == {}
         gui.recover_wheel()
-        assert not recovered and os.path.exists(path)
+        assert len(recovered) == 1 and os.path.exists(path)      # the partial restore; the record stays for the rest
+        assert wcal.take_pending(path, key) == {}
         assert timers[0]() is True
     finally:
         wheel_owner.release(wheel.dev_path, 'countersteer-ffb')
     wheel.attrs = {}
     assert timers[0]() is False                                  # free: both written now
-    assert recovered and wheel.attrs['ffb_lut'] != 'identity'
+    assert len(recovered) == 2 and wheel.attrs['ffb_lut'] != 'identity'
     assert not os.path.exists(path)
 
 
@@ -1621,3 +1622,156 @@ def test_the_lut_slope_cap_gives_up_linearity_for_a_gentler_curve():
     assert all(0 < b - a <= wc.LUT_SEGMENT_SLOPE * wc.FULL / n + 1 for a, b in zip(capped, capped[1:]))
     ident = [round(i * wc.FULL / n) for i in range(wc.LUT_POINTS)]
     assert wc.cap_slope(ident) == ident
+
+
+# --- a hand on the rim after the push, and what is put back afterwards ---
+
+def _stop_dead(sim):
+    """A hand that stops the rim at once and holds it."""
+    sim.coulomb = sim.static = 2.0
+
+
+def test_a_hand_stopping_the_rim_in_the_run_up_stops_the_run(monkeypatch):
+    sim = SimWheel()
+    real = Calibration._kick
+    calls = []
+
+    def kick(self, d):
+        accel = real(self, d)
+        calls.append(sim.t)
+        if len(calls) == 12:                                     # a pulse's push, well into the force response
+            _stop_dead(sim)
+        return accel
+
+    monkeypatch.setattr(Calibration, '_kick', kick)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'grabbed'
+    assert sim.t - calls[11] < 1.0                               # (it used to hold the push until TOTAL_S)
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_a_push_that_turns_nothing_stops_the_run_whatever_the_loop(monkeypatch):
+    sim = SimWheel(coulomb=2.0, static=2.0)
+    seen = []
+
+    def measure(self):
+        seen.append(sim.t)
+        while True:
+            self._tick(0.4)
+
+    monkeypatch.setattr(Calibration, '_measure', measure)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'grabbed'
+    assert sim.t - seen[0] < 1.2
+    assert sim.last('ext_force') == '0'
+
+
+def test_centring_after_a_near_lock_gives_up_after_a_second_and_a_half(monkeypatch):
+    sim = SimWheel(coulomb=2.0, static=2.0, start_deg=100.0)
+    seen = []
+
+    def measure(self):
+        self.sign_known, self.sign = True, -1.0
+        self.recovering = True
+        seen.append(sim.t)
+        self._move_to(0.0, tol=10.0, timeout=8.0, fatal=True)
+
+    monkeypatch.setattr(Calibration, '_measure', measure)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'grabbed'
+    assert sim.t - seen[0] < 2.5
+    assert sim.last('ext_force') == '0'
+
+
+def _abort_with_wheel_at(sim, monkeypatch, breakaway=0.12):
+    def measure(self):
+        self.sign_known, self.sign = True, -1.0
+        self.breakaway_max = breakaway
+        raise Aborted('cancelled', 'x')
+    monkeypatch.setattr(Calibration, '_measure', measure)
+    ranges = []
+    real = sim.set_range
+    sim.set_range = lambda v: (ranges.append((v, sim.theta)), real(v))
+    cal = Calibration(sim)
+    with pytest.raises(Aborted):
+        cal.run()
+    return ranges
+
+
+def test_the_users_smaller_range_is_never_put_back_with_the_wheel_outside_it(monkeypatch):
+    sim = SimWheel(range=360, start_deg=200.0)                   # the lock of 360 degrees is at 180
+    ranges = _abort_with_wheel_at(sim, monkeypatch)
+    assert ranges[-1][0] == 360 and abs(ranges[-1][1]) <= 180 - Calibration.LOCK_MARGIN_DEG
+    assert sim.range == 360
+
+
+def test_a_wheel_that_cannot_be_centred_gets_a_wider_range_instead(monkeypatch):
+    sim = SimWheel(range=360, start_deg=200.0, coulomb=2.0, static=2.0)
+    ranges = _abort_with_wheel_at(sim, monkeypatch)
+    v, theta = ranges[-1]
+    assert v > 360 and v / 2 >= abs(theta) + Calibration.LOCK_MARGIN_DEG - 1
+
+
+def test_a_killed_runs_cap_gain_and_range_go_back_under_countersteer_ffb(tmp_path):
+    from oversteer import wheel_owner
+    path = str(tmp_path / 'pending.json')
+    saved = {'ext_force_cap': '80', 'ffb_lut': 'identity', 'gain': 110, 'range': 540, 'autocenter': 30,
+             'ffb_output_cap': '70'}
+    wcal.write_pending(path, 'k', saved)
+    sim = SimWheel()
+    assert wheel_owner.acquire('w', 'countersteer-ffb', on_inhibit=lambda: None)
+    try:
+        assert wcal.recover_pending(path, 'k', sim, wheel='w') is False
+        written = {n for _t, n, _v in sim.writes}
+        assert written == {'ext_force_cap', 'ffb_output_cap', 'gain', 'range', 'autocenter'}
+        assert sim.attrs['ffb_output_cap'] == '70' and sim.gain == 110 and sim.range == 540
+        assert wcal.take_pending(path, 'k') == {'ffb_lut': 'identity'}
+    finally:
+        wheel_owner.release('w', 'countersteer-ffb')
+    assert wheel_owner.acquire('w', 'wheel-test', exclusive=True)
+    try:
+        sim.writes.clear()
+        assert wcal.recover_pending(path, 'k', sim, wheel='w') is False and sim.writes == []
+    finally:
+        wheel_owner.release('w', 'wheel-test')
+    assert wcal.recover_pending(path, 'k', sim, wheel='w') is True
+    assert sim.last('ext_force') == '0' and sim.attrs['game_ffb_level'] == '100'
+
+
+def test_the_output_cap_is_set_to_100_for_the_run_and_put_back():
+    sim = SimWheel(inertia=1 / 15000, latency=0.025)
+    sim.attrs['ffb_output_cap'] = '60'
+    cal = Calibration(sim)
+    result = cal.run()
+    assert result['lut']
+    first_force = next(i for i, (_t, n, v) in enumerate(sim.writes) if n == 'ext_force' and v != '0')
+    assert {n: v for _t, n, v in sim.writes[:first_force]}['ffb_output_cap'] == '100'
+    assert_put_back(sim, attrs={'ffb_output_cap': '60'})
+
+
+def test_the_drivers_12_ms_slew_does_not_bias_the_latency_or_the_strength():
+    sim = SimWheel(slew_s=0.012)
+    cal = Calibration(sim)
+    result = cal.run()
+    assert abs(result['fit_latency_ms'] - sim.latency * 1000) <= 4
+    assert abs(result['a_fs'] * sim.J - 1) < 0.15
+    assert linearity_error(sim, result) < 0.04
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_the_deadband_lift_fades_in_over_the_luts_first_512_like_the_drivers():
+    ident = [round(i * wc.FULL / 32) for i in range(33)]
+    d = 3000
+    outs = [wc.shaped(x, ident, d) for x in range(0, 6000, 50)]
+    assert outs[0] == 0.0 and all(b >= a for a, b in zip(outs, outs[1:]))
+    # m = 256 of the LUT's output: half the lift's usual size, and continuous at 512
+    assert wc.shaped(256, ident, d) == pytest.approx((d + (wc.FULL - d) * 256 / wc.FULL) * 0.5)
+    assert wc.shaped(512, ident, d) == pytest.approx(d + (wc.FULL - d) * 512 / wc.FULL)

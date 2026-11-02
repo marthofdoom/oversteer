@@ -41,6 +41,13 @@ from . import wheel_owner
 # The driver attributes the calibration and the correction need (new-lg4ff with replace mode and shaping)
 ATTRS = ('ext_force', 'ext_force_cap', 'game_ffb_level', 'ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip')
 SHAPING = ('ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip')
+# Newer drivers cap the output after the shaping (ffb_output_cap, 0-100): saved and set to 100 for a run when
+# it is there, put back after. (ffb_thermal_limit is left on: a run's duty, mean force^2 about 0.04 over any
+# 90 s, is far below it.)
+OPTIONAL_ATTRS = ('ffb_output_cap',)
+# What a crash record puts back first even while Countersteer FFB plays (the engine needs the cap, gain and range
+# back; the forces and the correction wait until the wheel is free)
+PARTIAL_RESTORE = ('ext_force_cap', 'ffb_output_cap', 'gain', 'range', 'autocenter')
 
 
 class Aborted(Exception):
@@ -86,6 +93,10 @@ class Calibration:
     KICK = 0.35                 # the push, unless twice the breakaway is more
     KICK_START_S = 0.200        # a push that moves nothing in this long: held
     KICK_MAX_S = 0.500
+    RUNUP_MAX_S = 0.8           # the run-up after the push reaches its speed in this long, or the wheel is held
+    PUSH_STALL_S = 0.5          # a push of the breakaway force and more that turns nothing for this long stops the run...
+    RECOVER_STALL_S = 1.5       # ...in this long while centring after a near-lock (nothing else watches it)
+    RESTORE_CENTRE_S = 2.0      # centring before the user's smaller range is put back: at most this long
     MOVE_MAX = 0.35             # largest force while moving between positions
     MOVE_SPEEDS = (1.0, 0.55, 1.25, 0.8)     # shares of V_MOVE the moves take turns at
     MOVE_BOOST_RATE = 0.5       # full scale per second the push grows by while the wheel is slower than asked...
@@ -148,6 +159,8 @@ class Calibration:
         self._next = 0.0
         self._last_tick = None
         self._last_w = 0.0
+        self._ramping = False           # a slow breakaway ramp: a push that turns nothing is its purpose
+        self._push_since = None         # since when a push has turned nothing
         self.t0 = 0.0
         self.period = 0.002
         self.log = []                   # (time, event) for the report and the tests
@@ -321,6 +334,11 @@ class Calibration:
         for name in ATTRS:
             if name != 'ext_force':
                 self.saved[name] = io.read(name)
+        for name in OPTIONAL_ATTRS:
+            try:
+                self.saved[name] = io.read(name)
+            except (OSError, KeyError, ValueError):
+                pass                        # an older driver
         self.saved['gain'] = io.get_gain()
         self.saved['autocenter'] = io.get_autocenter()
         self.saved['range'] = io.get_range()
@@ -336,6 +354,8 @@ class Calibration:
         io.write('ffb_deadband', '0')
         io.write('ffb_dither', '0')
         io.write('ffb_soft_clip', '0')
+        if self.saved.get('ffb_output_cap') is not None:
+            io.write('ffb_output_cap', '100')
         max_range = io.max_range()
         io.set_range(max_range)
         actual = io.get_range()
@@ -361,6 +381,13 @@ class Calibration:
             asked = io.release() or {}      # first: a request made from now on goes straight to the wheel
         except Exception as e:
             logging.debug("calibration release: %s", e)
+        asked = dict(asked)
+        wanted = asked.get('range', self.saved.get('range'))
+        if wanted is not None:
+            try:
+                asked['range'] = self._range_the_wheel_fits(wanted)
+            except Exception as e:
+                logging.debug("calibration range check: %s", e)
         failed = restore_saved(io, self.saved, asked)
         try:
             io.close()
@@ -368,6 +395,43 @@ class Calibration:
             logging.debug("calibration close: %s", e)
         if self.pending_path and not failed:
             clear_pending(self.pending_path, self.pending_key)
+
+    def _range_the_wheel_fits(self, wanted):
+        """The range to put back: the user's, unless the wheel stands past that range's lock (the firmware would
+        snap it to the new end). Then it is turned towards the centre, gently and for a few seconds at most, and
+        if it still stands outside the range is widened to hold it: never narrowed with the wheel outside."""
+        wanted = int(wanted)
+        if not self.sign_known or wanted >= self.lock * 2:
+            return wanted
+        limit = wanted / 2.0 - self.LOCK_MARGIN_DEG
+        try:
+            self._read()
+        except Aborted:
+            pass
+        if abs(self.theta) > limit:
+            self._centre_gently(limit)
+        if abs(self.theta) <= limit:
+            return wanted
+        need = int(math.ceil(2 * (abs(self.theta) + self.LOCK_MARGIN_DEG)))
+        logging.warning("calibration: the wheel stands at %.0f degrees, past the lock of the range %d to put back; "
+                        "the range is %d for now", self.theta, wanted, min(need, int(self.lock * 2)))
+        return min(max(wanted, need), int(self.lock * 2))
+
+    def _centre_gently(self, limit):
+        """Towards the centre with the breakaway force (and not above MOVE_MAX), coasting when fast, until inside
+        `limit` (10 degrees to spare) or RESTORE_CENTRE_S. Ends with force 0."""
+        w = min(self.MOVE_MAX, 1.3 * self.breakaway_max + 0.05)
+        end = self.io.now() + self.RESTORE_CENTRE_S
+        try:
+            while self.io.now() < end and abs(self.theta) > limit - 10.0:
+                toward = -_sign(self.theta)
+                push = 0.0 if self.omega * toward > 150.0 else toward * w
+                self.io.force(self._raw(push))
+                self.io.sleep_until(self.io.now() + self.period)
+                self._read()
+        except (OSError, Aborted):
+            pass
+        self._zero()
 
     # --- one tick ---
 
@@ -433,7 +497,20 @@ class Calibration:
         self.io.sleep_until(self._next)
         events = self._read()
         self._check()
+        self._guard_push(w, now)
         return events
+
+    def _guard_push(self, w, now):
+        """A push of about the breakaway force or more that turns nothing for PUSH_STALL_S (RECOVER_STALL_S while
+        centring, which no other check watches) is a hand on the rim, not a wheel: the run stops."""
+        thr = min(1.5 * self.breakaway_max + 0.05, 0.9 * self.MOVE_MAX)
+        if self._ramping or abs(w) < thr or abs(self.omega) >= self.STILL_DEG_S:
+            self._push_since = None
+            return
+        if self._push_since is None:
+            self._push_since = now
+        elif now - self._push_since > (self.RECOVER_STALL_S if self.recovering else self.PUSH_STALL_S):
+            raise self._grabbed(_("it did not turn when pushed"))
 
     def _read(self):
         try:
@@ -728,6 +805,14 @@ class Calibration:
         the wheel moves. Returns (degrees moved, force then)."""
         start = self._now()
         theta0 = self.theta
+        self._ramping = True
+        try:
+            return self._ramp_loop(direction, start, theta0)
+        finally:
+            self._ramping = False
+            self._push_since = None
+
+    def _ramp_loop(self, direction, start, theta0):
         while True:
             w = self.RAMP_RATE * (self._now() - start)
             if w > self.SWEEP_MAX:
@@ -868,11 +953,17 @@ class Calibration:
             # where the wheel would stop if braked now (KICK's acceleration is a floor for the brake)
             return _sign(self.omega) * self.theta + abs(self.omega) * lead + p * p / (2 * self.a_kick) > end
 
+        t_run = self._now()
         while True:                                          # run up
             self._tick(d * self.kick)
             p = peak()
             if d * p >= v_run or too_far(p):
                 break
+            run = self._now() - t_run
+            if d * self.omega < 0.7 * self.V_KICK:
+                raise self._grabbed(_("it stopped during the run-up"))
+            if run > self.RUNUP_MAX_S:
+                raise self._grabbed(_("it did not reach the run-up speed"))
         t_pulse = self._now()
         # Above SWEEP_MAX the 150 ms pulse limit; at sweep levels up to 400 ms, which is where the slow end of
         # the coast (friction against damping) and the small forces' data come from
@@ -1025,7 +1116,7 @@ class Calibration:
                 self.first_pass_done = True
 
 
-def restore_saved(io, saved, asked=None):
+def restore_saved(io, saved, asked=None, only=None):
     """Put a wheel back after a run: ext_force 0 and game_ffb_level 100 first and last, the shaping and cap as
     they were, and the range, gain and centring spring as asked for meanwhile (`asked`) or as they were. Each
     write on its own, so one failing does not skip the rest. Returns True if any failed."""
@@ -1039,17 +1130,19 @@ def restore_saved(io, saved, asked=None):
             failed.append(e)
             logging.debug("calibration restore %s%s: %s", getattr(fn, '__name__', fn), args, e)
 
-    attempt(io.force, 0)
-    attempt(io.write, 'game_ffb_level', '100')
-    for name in SHAPING + ('ext_force_cap',):
-        if saved.get(name) is not None:
+    if only is None:
+        attempt(io.force, 0)
+        attempt(io.write, 'game_ffb_level', '100')
+    for name in SHAPING + ('ext_force_cap',) + OPTIONAL_ATTRS:
+        if saved.get(name) is not None and (only is None or name in only):
             attempt(io.write, name, saved[name])
     for key, setter in (('gain', io.set_gain), ('range', io.set_range), ('autocenter', io.set_autocenter)):
         value = asked.get(key, saved.get(key))
-        if value is not None:
+        if value is not None and (only is None or key in only):
             attempt(setter, value)
-    attempt(io.force, 0)
-    attempt(io.write, 'game_ffb_level', '100')
+    if only is None:
+        attempt(io.force, 0)
+        attempt(io.write, 'game_ffb_level', '100')
     return bool(failed)
 
 
@@ -1135,10 +1228,21 @@ def recover_pending(path, key, io, wheel=None):
     attempt fails, only its safe part (ext_force 0, game_ffb_level 100) is tried again later. True if there
     was one and it is undone. Nothing is written while anyone holds the wheel (wheel_owner): the caller tries
     again once it is free."""
-    if wheel is not None and wheel_owner.current(wheel) is not None:
-        return False
+    holder = wheel_owner.current(wheel) if wheel is not None else None
+    if holder is not None and holder[1]:
+        return False                            # an exclusive holder (a test, a demo): its forces stay as they are
     saved = take_pending(path, key)
     if saved is None:
+        return False
+    if holder is not None:
+        # Countersteer FFB plays: its force and the correction wait, but the cap, gain, range and centring a
+        # killed run left at full are put back now (the engine's forces are scaled by them)
+        part = {k: v for k, v in saved.items() if k in PARTIAL_RESTORE}
+        if part:
+            logging.warning("wheel calibration: an earlier run did not finish; putting back the wheel's cap, gain "
+                            "and range now, the rest when it is free")
+            restore_saved(io, part, only=PARTIAL_RESTORE)
+            write_pending(path, key, {k: v for k, v in saved.items() if k not in PARTIAL_RESTORE})
         return False
     logging.warning("wheel calibration: an earlier run did not finish; putting the wheel back")
     if not restore_saved(io, saved):
