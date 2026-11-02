@@ -221,8 +221,8 @@ class Sample:
       tyre_slip_angle, contact_normal (per wheel a world-frame (x, y, z)),
       vibrations (kerb, slip, g, abs), abs_active and tc_active (bools).
     - For force feedback, BeamNG through the Countersteer mod ('beamng-ffb'; None elsewhere): rack_force (N, the
-      sum of the steering hydros' beam stress times their input factor: the game's own rack force; sign
-      unverified), tyre_load (N), tyre_slip, tyre_side_slip (the game's units) and tyre_slip_energy per wheel
+      sum of the steering hydros' beam stress times their input factor: the game's own rack force;
+      positive = it pushes steering_input positive, hydros.lua:324-327, to confirm on a capture), tyre_load (N), tyre_slip, tyre_side_slip (the game's units) and tyre_slip_energy per wheel
       FL, FR, RL, RR, and packet_id (the packet's sequence number); the packet's steering input is left unread until its sign is confirmed."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',

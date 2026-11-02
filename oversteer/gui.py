@@ -1100,13 +1100,26 @@ class Gui:
     def install_beamng_mod(self):
         """The Telemetry tab's "Install the Countersteer mod for BeamNG": into every BeamNG user folder found; where
         none can be reached (a sandbox, a game not started yet) the zip can be saved to put there by hand."""
-        report = beamng_mod.install()
+        ui = self.ui
+        ui.set_beamng_install_busy(True)
+
+        def work():
+            try:
+                report = beamng_mod.install()
+            except Exception:
+                logging.exception("beamng mod install")
+                report = {'results': [], 'version': None, 'error': _("The install failed; the log has the details.")}
+            GLib.idle_add(self._beamng_install_done, report)
+        threading.Thread(target=work, name='beamng-install', daemon=True).start()
+
+    def _beamng_install_done(self, report):
+        self.ui.set_beamng_install_busy(False)
         text = beamng_mod.summary(report)
         if report['error']:
             logging.info("beamng mod: %s", text)
             if report['version'] is None:
                 self.ui.error_dialog(_("Can't install the BeamNG mod"), text)
-                return
+                return False
             self.ui.info_dialog(_("The BeamNG mod was not installed"), text)
             path = self.ui.file_chooser(_('Save the BeamNG mod'), 'save', beamng_mod.ZIP_NAME)
             if path:
@@ -1115,10 +1128,11 @@ class Gui:
                         f.write(beamng_mod.build_zip(beamng_mod.find_source()))
                 except OSError as e:
                     self.ui.error_dialog(_("Can't write the mod"), str(e))
-            return
+            return False
         logging.info("beamng mod: %s", text.replace('\n', '; '))
         failed = any(r[2] == beamng_mod.FAILED for r in report['results'])
         (self.ui.error_dialog if failed else self.ui.info_dialog)(_("Countersteer mod for BeamNG"), text)
+        return False
 
     def capture_folder(self):
         from xdg.BaseDirectory import save_data_path

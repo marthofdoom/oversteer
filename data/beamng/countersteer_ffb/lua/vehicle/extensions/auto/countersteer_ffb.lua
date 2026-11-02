@@ -1,14 +1,16 @@
 -- Countersteer FFB telemetry sender (Countersteer, the Oversteer fork).
 -- Sends the steering rack force and each tyre's load and slip to Oversteer over UDP on this computer, at up to
 -- 500 Hz, in a small fixed binary packet ("CSB1", 96 bytes, little endian; the layout is repeated in
--- oversteer/telemetry_formats.py). Nothing here touches the vehicle: every call is guarded, and a failed send
--- (Oversteer not running) is only backed off from.
+-- oversteer/telemetry_formats.py). Nothing here changes the vehicle. Only the player's vehicle runs the physics-step
+-- hook (it is enabled once that vehicle is seated by the player, main.lua:526); the setup is in a pcall, the step
+-- body is in one pcall (an error is logged once and the sender goes quiet), and a failed send (Oversteer not
+-- running) is only backed off from.
 --
 -- Optional /settings/countersteer_ffb.json in the user folder: {"port": 5320, "hz": 500}.
 --
 -- Every API used was found in BeamNG.drive 0.40.4's own Lua (paths below are under lua/vehicle/):
 --   enablePhysicsStepHook()                               main.lua:65 (as extensions/test/ffbCalibration.lua:264 calls it)
---   onPhysicsStep(dtPhys) hook, onReset hook              main.lua:83, main.lua:454
+--   onPhysicsStep(dtPhys), onReset, onPlayersChanged      main.lua:83, :454, :526 (hooks); playerInfo.firstPlayerSeated main.lua:507
 --   hydros.hydros, h.inputSource, h.bcid, h.beamCID,      hydros.lua:32, :668 (the source is renamed to
 --     h.inputFactor, h.fIsBroken                          "steering_input"), :618, :324, :354
 --   obj:getBeamStress(bcid) * h.inputFactor               hydros.lua:324 (the game's own rack stress, in N)
@@ -61,6 +63,7 @@ local rackHydros = {} -- {bcid, factor, isBroken}, flat arrays so the step alloc
 local rackCount = 0
 local wheelSlots = {} -- [1..4] = wheel data (FL, FR, RL, RR) or false
 local mask = 0
+local hooked = false
 
 local function setupSocket()
   udp = nil
@@ -160,8 +163,7 @@ local function send()
   end
 end
 
-local function onPhysicsStep(dtPhys)
-  if not udp then return end
+local function step(dtPhys)
   if not ready then setup() end
   local sum = 0
   for i = 1, rackCount do
@@ -178,12 +180,35 @@ local function onPhysicsStep(dtPhys)
     if sendWait > 0 then
       sendWait = sendWait - stepsPerSend
       rackSum, rackSteps = 0, 0
-    elseif playerInfo.firstPlayerSeated then
-      send()
     else
-      rackSum, rackSteps = 0, 0
+      send()
     end
   end
+end
+
+local failed = false
+
+local function onPhysicsStep(dtPhys)
+  if not udp or not playerInfo.firstPlayerSeated then return end
+  local ok, err = pcall(step, dtPhys)
+  if not ok then
+    udp = nil -- quiet from here on
+    if not failed then
+      failed = true
+      log("E", "countersteer_ffb", "stopped: " .. tostring(err))
+    end
+  end
+end
+
+local function enableHook()
+  if hooked then return end
+  hooked = true
+  enablePhysicsStepHook()
+end
+
+local function onPlayersChanged()
+  -- AI traffic and props never enable the hook: only the vehicle the player sits in
+  if udp and playerInfo.firstPlayerSeated then enableHook() end
 end
 
 local function onReset()
@@ -200,7 +225,7 @@ local function onExtensionLoaded()
     packet = ffi.new("csb1_packet")
     packetSize = ffi.sizeof(packet)
     setupSocket()
-    enablePhysicsStepHook()
+    if udp and playerInfo.firstPlayerSeated then enableHook() end
   end)
   if not ok then
     udp = nil
@@ -213,5 +238,6 @@ end
 M.onExtensionLoaded = onExtensionLoaded
 M.onPhysicsStep = onPhysicsStep
 M.onReset = onReset
+M.onPlayersChanged = onPlayersChanged
 
 return M

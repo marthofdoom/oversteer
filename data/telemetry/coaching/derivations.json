@@ -1095,7 +1095,7 @@
   "rack_force": {
    "kind": "sample",
    "unit": "N",
-   "description": "The steering rack force in BeamNG, from the Countersteer mod (CSB1): the steering hydros' beam stress times their input factor, averaged over the physics steps since the last packet. Sign unverified.",
+   "description": "The steering rack force in BeamNG, from the Countersteer mod (CSB1): the steering hydros' beam stress times their input factor, averaged over the physics steps since the last packet. Positive = the rack pushes steering_input positive (hydros.lua:324-327); to confirm on a capture.",
    "convention": "BeamNG input space, as the game's own force feedback reads it",
    "rate": "packet"
   },

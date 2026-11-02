@@ -5,6 +5,9 @@ BeamNGForceSource takes the Countersteer BeamNG mod's "CSB1" packets (data/beamn
 127.0.0.1:PORT. The rack force is the mean over the physics steps since the last packet (up to 500 Hz); the
 wheels' load, slip and side slip are written by the game at its graphics rate (about 60 Hz), so they repeat across
 packets and must not be differentiated or counted as new at the packet rate.
+
+Arrival times are bursty (the game steps physics in clumps per frame): consumers should go by the sample's game_time
+and `seq`, not by when a packet was taken. `latest()` is None once nothing has arrived for STALE_S.
 """
 
 import logging
@@ -15,7 +18,8 @@ import time
 from .telemetry_formats import CSB_SIZE, decode_sample
 
 PORT = 5320                     # free of every game's default, of the presets and of Forza's 5200-5300
-STALE_S = 0.050                 # a sample older than this is not the car's now: latest() gives None
+STALE_S = 0.100                 # a sample older than this is not the car's now: latest() gives None. BeamNG runs its
+                                # physics steps in bursts per frame, so packets arrive in clumps with gaps of a frame
 RECV_TIMEOUT = 0.1              # s a recv waits, so stop() is noticed
 
 
@@ -27,8 +31,7 @@ class BeamNGForceSource:
         self.port, self.host, self.stale = port, host, stale
         self.seq = 0
         self.bound_port = None
-        self._sample = None
-        self._at = 0.0
+        self._last = None            # (sample, monotonic arrival time) as one tuple, replaced atomically
         self._sock = None
         self._thread = None
         self._stop = threading.Event()
@@ -59,15 +62,15 @@ class BeamNGForceSource:
         if self._sock is not None:
             self._sock.close()
             self._sock = None
-        self._sample = None
+        self._last = None
 
     def latest(self, now=None):
         """(The newest Sample, or None if none arrived or the last is older than `stale`)."""
-        sample = self._sample
-        if sample is None:
+        last = self._last
+        if last is None:
             return None
         now = time.monotonic() if now is None else now
-        return sample if now - self._at <= self.stale else None
+        return last[0] if now - last[1] <= self.stale else None
 
     def _run(self):
         sock = self._sock
@@ -82,6 +85,5 @@ class BeamNGForceSource:
                 continue
             sample = decode_sample(data)
             if sample is not None and sample.game == 'beamng-ffb':
-                self._sample = sample
-                self._at = time.monotonic()
+                self._last = (sample, time.monotonic())
                 self.seq += 1
