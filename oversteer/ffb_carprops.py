@@ -33,6 +33,10 @@ TRAIL_RANGE = (0.0, 0.060)               # m
 SCRUB_RANGE = (0.0, 0.040)
 TRAIL_SLEW = 0.001                       # m per second at most
 SCRUB_SLEW = 0.0005
+FY_MIN = 800.0                           # N: a sample with less front side force and ...
+DFX_MIN = 300.0                          # N: ... less left-right difference of Fx says nothing about either
+                                         # (a straight): it is not added and does not age the window, so the
+                                         # learnt values hold through a long straight instead of eroding to the prior
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
 
 
@@ -129,6 +133,8 @@ class TorqueLearner:
     def add(self, mz, fy, dfx, raw, dt, a_hint):
         """One unclipped moving sample (the front torque's three parts and the game's raw level); a_hint: the
         strength fitted on the torque (ext_force per Nm), which the prior's b and c scale with."""
+        if abs(fy) < FY_MIN and abs(dfx) < DFX_MIN:
+            return
         decay = math.exp(-dt / TAU)
         z = (mz / SIGMA[0], fy / SIGMA[1], dfx / SIGMA[2])
         s, v = self._s, self._v
@@ -137,7 +143,7 @@ class TorqueLearner:
                 s[i][j] = s[i][j] * decay + z[i] * z[j]
             v[i] = v[i] * decay + z[i] * raw
         self.weight = self.weight * decay + 1.0
-        self._since += dt
+        self._since += dt                        # (informative time only)
         if self._since >= SOLVE_EVERY:
             self._solve(a_hint)
             self._slew(self._since)
@@ -166,12 +172,15 @@ class TorqueLearner:
     def _slew(self, dt):
         if self.fit_trail is None:
             return
-        want = min(max(self.fit_trail, TRAIL_RANGE[0]), TRAIL_RANGE[1])
-        step = TRAIL_SLEW * dt
-        self.trail = min(max(want, self.trail - step), self.trail + step)
-        want = min(max(self.fit_scrub, SCRUB_RANGE[0]), SCRUB_RANGE[1])
-        step = SCRUB_SLEW * dt
-        self.scrub = min(max(want, self.scrub - step), self.scrub + step)
+        held = PRIOR_W * 0.3                     # the window must carry more than the prior does, else hold
+        if self._s[1][1] >= held:
+            want = min(max(self.fit_trail, TRAIL_RANGE[0]), TRAIL_RANGE[1])
+            step = TRAIL_SLEW * dt
+            self.trail = min(max(want, self.trail - step), self.trail + step)
+        if self._s[2][2] >= held:
+            want = min(max(self.fit_scrub, SCRUB_RANGE[0]), SCRUB_RANGE[1])
+            step = SCRUB_SLEW * dt
+            self.scrub = min(max(want, self.scrub - step), self.scrub + step)
 
 
 def _solve3(m, b):

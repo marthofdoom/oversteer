@@ -89,3 +89,27 @@ def test_the_implemented_signs_match_the_regression_on_the_dump():
     t = X[:, 0] - fe.CASTER_TRAIL * X[:, 1] - fe.SCRUB * X[:, 2]
     assert np.corrcoef(t, d['ffb'][m])[0, 1] > np.corrcoef(X[:, 0], d['ffb'][m])[0, 1] + 0.02
     assert -b / a == pytest.approx(fe.CASTER_TRAIL, abs=0.008) and -c / a == pytest.approx(fe.SCRUB, abs=0.015)
+
+
+def straight(rack, seconds, a=30.0):
+    """A straight: no side force or Fx couple worth the name; the game's force is only a * Mz."""
+    rng = random.Random(5)
+    t0 = rack._last or 0.0
+    for n in range(int(seconds * 333)):
+        s = Sample(6000.0, 7500.0, gear=3, speed=30.0, car=rack.car, game='acr')
+        mz = rng.gauss(0, 3)
+        s.tyre_mz, s.tyre_fy, s.tyre_fx = (mz / 2, mz / 2, 0, 0), (rng.gauss(0, 100), 0, 0, 0), (rng.gauss(0, 50), 0, 0, 0)
+        rack.feed(t0 + (n + 1) / 333.0, s, a * mz)
+
+
+def test_a_long_straight_keeps_what_was_learnt():
+    rack = drive(fe.RackForce(), 0.008, 0.012, 90.0)
+    trail, scrub = rack.trail, rack.scrub
+    straight(rack, 120.0)
+    assert rack.trail == pytest.approx(trail, abs=0.0005) and rack.scrub == pytest.approx(scrub, abs=0.0005)
+
+
+def test_the_strength_fit_is_not_thrown_by_the_trail_stepping():
+    rack = drive(fe.RackForce(), 0.008, 0.012, 90.0)           # the trail walks from 27 to 8 mm on the way
+    assert rack.scale == pytest.approx(30.0, rel=0.07)         # (1 mm/s against a 10 s window: harmless; the rest
+    # is the ridge's 1.6 mm of trail still to come, which moves the ratio fit by 5 %)
