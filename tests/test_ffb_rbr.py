@@ -52,8 +52,15 @@ def test_ngp_levels_are_on_wines_grid_and_others_mostly_not():
 
 # -- the knee --
 
+def proven(linearity=r.LINEARITY):
+    """An RbrForce that has seen the game's force at full scale (its STRENGTH 1.0)."""
+    force = r.RbrForce(linearity=linearity)
+    force.peak = float(r.FULL)
+    return force
+
+
 def test_linearity_0_is_the_games_curve_100_linear_70_exact_to_the_knee():
-    force = r.RbrForce(linearity=0)
+    force = proven(linearity=0)
     for m in range(0, int(r.X_MAX * r.DI_MAX), 37):        # (past X_MAX it is not inverted further)
         level = r.level_of(m)
         assert abs(force.force(level) - level) <= 1
@@ -73,7 +80,7 @@ def test_linearity_0_is_the_games_curve_100_linear_70_exact_to_the_knee():
 
 
 def test_the_same_strength_at_small_forces_and_more_above():
-    force = r.RbrForce()
+    force = proven()
     for level in (30, 100, 300):
         assert force.force(level) == pytest.approx(level, rel=0.02, abs=1)
     for x in (0.3, 0.5, 0.6):
@@ -94,11 +101,13 @@ def test_the_knee_is_continuous_and_the_slopes_cross_at_u_1():
 
 
 def test_the_ceiling_follows_the_drivers_cap():
-    force = r.RbrForce(linearity=70)
+    force = proven()
     force.set_ceiling(0.8 * r.FULL)
     assert force.force(int(0.99 * r.FULL)) <= 0.8 * r.FULL + 1
     force.set_ceiling(None)
     assert force.ceiling == r.FULL
+    force.peak = 0.6 * r.FULL                            # never past the game's own peak
+    assert force.ceiling == pytest.approx(0.6 * r.FULL) and force.force(int(0.99 * r.FULL)) <= 0.6 * r.FULL + 1
 
 
 # -- a drive --
@@ -115,15 +124,18 @@ def rbr_sample(car=CAR, speed=20.0):
 class Drive:
     """1 ms engine passes, NGP uploading every 1.15 ms, RBR's telemetry every 1/236 s."""
 
-    def __init__(self, engine, amp=36.0, s=100.0, upload_hz=870.0, tel_hz=236.0, level=None):
+    def __init__(self, engine, amp=36.0, s=100.0, upload_hz=870.0, tel_hz=236.0, level=None, strength=1.0,
+                 hits=True, car=CAR):
         self.engine, self.amp, self.s, self.upload_hz, self.tel_hz = engine, amp, s, upload_hz, tel_hz
-        self.level = level or (lambda t: ngp_level(self.torque(t), self.s))
+        self.hits, self.car = hits, car
+        self.level = level or (lambda t: r.level_of(r.magnitude(r.ngp_curve(self.torque(t), self.s), strength)))
         self.t = self.next_up = self.next_tel = 0.0
         self.uploads = True
         self.telemetry = True
 
     def torque(self, t):
-        return self.amp * math.sin(2 * math.pi * 0.3 * t) + 1.5 * math.sin(2 * math.pi * 23.0 * t)
+        hit = 250.0 if self.hits and (t % 4.0) > 3.94 else 0.0      # a big hit every 4 s, 60 ms: the curve's top
+        return self.amp * math.sin(2 * math.pi * 0.3 * t) + 1.5 * math.sin(2 * math.pi * 23.0 * t) + hit
 
     def run(self, seconds):
         end = self.t + seconds
@@ -133,7 +145,7 @@ class Drive:
                 upload(self.level(t))
                 self.next_up += 1.0 / self.upload_hz
             if self.telemetry and t >= self.next_tel:
-                self.engine.offer(t, rbr_sample())
+                self.engine.offer(t, rbr_sample(self.car))
                 self.next_tel += 1.0 / self.tel_hz
             if not self.uploads:
                 self.next_up = t
@@ -205,8 +217,8 @@ def test_levels_off_the_grid_do_not_follow_the_curve(tmp_path):
     engine, path = engine_on(tmp_path)
     rng = random.Random(1)
     Drive(engine, level=lambda t: rng.randint(-20000, 20000)).run(6.0)
-    assert engine.status[:2] == ('model', 'rbr-curve') and FakeDriver.log == []
-    assert 'curve' in fe.status_text(engine.status)[1]
+    assert engine.status[:2] == ('model', 'rbr-grid') and FakeDriver.log == []
+    assert 'DirectInput' in fe.status_text(engine.status)[1]
 
 
 def test_a_saturated_force_is_left_to_the_game(tmp_path):
@@ -220,7 +232,7 @@ def test_linearity_0_is_no_improvement(tmp_path):
     Drive(engine).run(6.0)
     assert engine.rbr.linearity == 0
     assert engine.status[:2] == ('model', 'rbr-no-gain') and FakeDriver.log == []
-    assert engine.status.gain == pytest.approx(1.0, abs=0.01)
+    assert engine.status.gain <= 1.0
 
 
 def test_a_driver_without_game_ffb_raw_is_grey(tmp_path):
@@ -272,11 +284,11 @@ def test_under_the_drivers_cap_ours_rounds_off_below_it(tmp_path):
     engine.step(0.0)
     engine.set_device(path)
     engine.step(0.0)
-    assert engine.rbr.ceiling == pytest.approx(0.8 * r.FULL)
-    Drive(engine, amp=45.0).run(8.0)
+    assert engine.rbr.cap == pytest.approx(0.8 * r.FULL)
+    Drive(engine, amp=30.0).run(9.0)
     assert engine.status.active and max(abs(v) for v in forces()) <= 0.8 * r.FULL + 1
     assert not engine.status.clipping
-    assert max(abs(v) for v in forces()) > 0.7 * r.FULL                # the knee, under the cap
+    assert max(abs(v) for v in forces()) > 0.7 * r.FULL                # the knee (the hits), under the cap
 
 
 def test_the_cap_counts_against_the_gain(tmp_path):
@@ -291,3 +303,129 @@ def test_the_cap_counts_against_the_gain(tmp_path):
     engine.step(0.0)
     Drive(engine, amp=55.0).run(8.0)
     assert engine.status[:2] == ('model', 'rbr-no-gain')
+
+
+# -- the game's STRENGTH, the car key, app_gain, the write rate, every way out while playing --
+
+@pytest.mark.parametrize('strength', [0.7, 0.5])
+def test_a_strength_under_1_never_makes_ours_the_stronger(tmp_path, strength):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine, amp=60.0, strength=strength).run(12.0)
+    game_peak = engine.rbr.peak
+    assert game_peak <= strength * r.FULL + 4
+    assert engine.status[:2] == ('model', 'rbr-strength') and FakeDriver.log == []
+    assert max([abs(v) for v in forces()] or [0]) <= game_peak
+    assert 'strength' in fe.status_text(engine.status)[1]
+    assert drive
+
+
+def test_a_strength_near_1_plays_under_the_games_own_peak(tmp_path):
+    engine, path = engine_on(tmp_path)
+    Drive(engine, amp=36.0, strength=0.9).run(12.0)
+    assert engine.status.active
+    assert max(abs(v) for v in forces()) <= engine.rbr.peak
+
+
+def test_the_car_key_narrowing_keeps_the_fit_and_the_force(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine, car='rbr/unknown').run(7.0)
+    assert engine.status.active and engine.rbr.s is None
+    changes, peak = engine.rbr.changes, engine.rbr.peak
+    drive.car = CAR                                       # told from its gearing
+    drive.run(0.5)
+    assert engine.status.active and levels() == [0]
+    assert engine.rbr.changes > changes and engine.rbr.peak >= peak and engine.rbr.s == 100.0
+
+
+def test_app_gain_on_is_refused(tmp_path):
+    engine, path = engine_on(tmp_path)
+    with open(path + '/app_gain', 'w') as f:
+        f.write('1\n')
+    engine.set_device(None)
+    engine.step(0.0)
+    engine.set_device(path)
+    engine.step(0.0)
+    Drive(engine).run(7.0)
+    assert engine.status[:2] == ('model', 'rbr-app-gain') and FakeDriver.log == []
+
+
+def test_never_two_writes_in_a_millisecond_and_fades_keep_writing(tmp_path, monkeypatch):
+    times = []
+    real = FakeDriver.force
+
+    def timed(self, value):
+        times.append(engine._written_at)
+        real(self, value)
+    monkeypatch.setattr(FakeDriver, 'force', timed)
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine, upload_hz=2000.0).run(7.0)     # uploads faster than the passes
+    assert engine.status.active
+    engine.set_enabled(False)
+    n = len(times)
+    drive.run(0.4)
+    assert len(times) - n >= 150                          # the 200 ms fade, written each pass
+    assert all(b - a >= fe.MIN_WRITE for a, b in zip(times, times[1:]))
+    assert forces()[-1] == 0 and levels() == [0, 100]
+
+
+def test_quit_while_playing_gives_the_game_its_force(tmp_path):
+    engine, path = engine_on(tmp_path)
+    Drive(engine).run(7.0)
+    assert engine.status.active
+    engine.stop()
+    assert levels() == [0, 100] and forces()[-1] == 0
+
+
+def test_another_owner_takes_the_wheel_while_playing(tmp_path):
+    from oversteer import wheel_owner
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(7.0)
+    assert engine.status.active
+    assert wheel_owner.acquire(path, 'wheel-test', exclusive=True, timeout=0.0) is False   # asked to let go
+    drive.run(0.01)
+    assert not engine.status.active and levels() == [0, 100] and forces()[-1] == 0
+    assert wheel_owner.acquire(path, 'wheel-test', exclusive=True)
+    wheel_owner.release(path, 'wheel-test')
+
+
+def test_a_failed_write_while_playing_restores_the_game(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(7.0)
+    assert engine.status.active
+    FakeDriver.fail_force = True
+    drive.run(0.05)
+    assert not engine.status.active and levels() == [0, 100] and engine.last_stop == 'write'
+
+
+def test_the_ini_is_read_off_the_engine_thread(tmp_path, monkeypatch):
+    from oversteer import rbr_install
+    monkeypatch.setattr(rbr_install, 'ASYNC', True)
+    root = tmp_path / 'rbr'
+    root.mkdir()
+    (root / 'RichardBurnsRally.ini').write_text('[NGP]\r\nForceFeedbackSensitivityGravel=50\r\n'
+                                                'ForceFeedbackSensitivityTarmac=50\r\n'
+                                                'ForceFeedbackSensitivitySnow=50\r\n')
+    force = r.RbrForce()
+    force.set_car(CAR, None, root=str(root))
+    assert force.s is None                                # being read
+    force._lookup.join(2.0)
+    force.set_car(CAR, None, root=str(root))
+    assert force.s == 50.0
+
+
+def test_profiles_keep_the_linearity(tmp_path):
+    from oversteer.model import Model
+    from tests.fake_wheel import FakeDevice
+    device = FakeDevice(ext_force_support=True)
+    model = Model(device, None)
+    assert model.data['countersteer_linearity'] == 70 and model.get_countersteer_linearity() == 70
+    model.data['countersteer_linearity'] = 40
+    profile = str(tmp_path / 'p.ini')
+    model.save(profile)
+    fresh = Model(device, None)
+    fresh.load(profile)
+    assert fresh.get_countersteer_linearity() == 40
+    (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\n')
+    fresh.load(str(tmp_path / 'old.ini'))
+    assert fresh.get_countersteer_linearity() == 70
+    assert Model(FakeDevice(), None).data['countersteer_linearity'] is None

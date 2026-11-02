@@ -31,7 +31,7 @@ log and the texture to come).
 
 v grows without bound, so it goes through a knee instead of the game's curve
 (`shape`): linear up to K = linearity of the ceiling A (the game's full scale,
-or the driver's ext_force cap if that is lower), then an exponential knee
+the driver's ext_force cap or the game's own peak if lower: STRENGTH below), then a knee
 with the slope carried on, saturating at A:
 
     out = v                                     v <= K*A
@@ -62,25 +62,39 @@ the force up there.
 
 Checks on the raw (`refused`):
 
-- 'curve': the levels are not on Wine's grid of DirectInput magnitudes
-  (m * DI_LEVEL, within 1). An upload from another program, or a game not
-  sending its force this way, lands on it about 60 % of the time; NGP's on
-  every upload. Taking a level to m, x, T and back through the curve and
-  the floor (`round_trip`) gives the level again only on that grid.
+- 'grid': the levels are not on Wine's grid of DirectInput magnitudes
+  (int(m * DI_LEVEL), or one more where Wine rounds). An upload from another
+  program, or a game not sending its force this way, lands on it about 61 %
+  of the time; NGP's always (GRID_GO: 90 %). `round_trip` takes a level to
+  its nearest magnitude, x, T and back through the curve, the floor and
+  Wine: `on_grid` is the level within GRID_TOL above what comes back.
 - 'saturated': the game's force is over SAT_X of full scale more than
   SAT_SHARE of the time: the inversion is ill-conditioned there (one
   magnitude step is a large torque step) and the knee would hold ours at
   the ceiling anyway.
 - 'no-gain': the gain above.
 
-The full scale C is 32767 times the game's STRENGTH, assumed 1.0 (it lives
-in the profile, a binary file not read here): a raw level above it raises
-it. A strength under 1 leaves C too high: the curve is then under-undone
-(ours closer to the game's), never over-undone.
+- 'strength': the game's own force has not yet reached STRENGTH_PROVEN of
+  full scale.
+
+STRENGTH. The full scale C is 32767 times the game's STRENGTH (0..1), which
+lives in the profile, a binary file not read here: C is taken as 32767. A
+STRENGTH under 1 would leave C too high and let ours, slope-matched at small
+forces, go past anything the game can send (up to -ln(1 - s) / s times it).
+So the ceiling A is also the game's own highest level so far (PEAK_MARGIN 1):
+ours is never stronger than what the game itself sent. Bounding ours that
+low costs the gain (ours flattens where the game still rises: on a weave
+peaking at 60 % the gain is 0.78), so it plays only once the game's own
+force has reached STRENGTH_PROVEN of full scale (a big hit; with STRENGTH
+1.0 the curve gets there, under 0.85 it never can): the STRENGTH is then
+known to be 0.85 or more and the ceiling is near full scale. Until then the
+state is amber 'strength' (set the game's force feedback strength to 100 %
+and use the wheel's own strength).
 """
 import logging
 import math
-import os
+import threading
+import time
 
 FULL = 32767                             # ext_force full scale (ffb_engine.FULL)
 DI_MAX = 10000                           # DirectInput's magnitude range
@@ -101,6 +115,9 @@ MIN_FORCE_TIME = 2.0                     # s of uploads over FORCE_MIN before th
 GRID_EVENTS = 500                        # changed levels the grid share is weighted over
 TAU_SAT, TAU_GAIN = 5.0, 10.0              # s
 MAX_DT = 0.05                            # s: one upload never counts for more than this (a pause)
+STRENGTH_PROVEN = 0.85                   # the game's own peak, share of full scale, that shows its STRENGTH is near 1
+PEAK_MARGIN = 1.0                        # ours never past the game's own peak times this
+INI_RETRY = 30.0                         # s between looks for RichardBurnsRally.ini while none was found
 
 
 def ngp_curve(torque, sensitivity):
@@ -214,17 +231,18 @@ class RbrForce:
 
     def __init__(self, linearity=LINEARITY):
         self.linearity = linearity
-        self._percents = None            # (ini path, mtime, {surface: %})
+        self.cap = None                  # the driver's ext_force cap in ext_force units (None: none known)
+        self._percents = None            # (ini path, mtime, {surface: %}) read off the engine thread
+        self._lookup = None              # the thread reading the ini
+        self._lookup_at = None
         self.reset()
 
     def reset(self, car=None):
+        """Everything learnt: a new stream (the device set again). A car key narrowing keeps all but S (set_car)."""
         self.car = car
         self.full = float(FULL)          # C: the game's full-scale level (STRENGTH 1.0 assumed)
-        self.base_s = None               # the car's ForceFeedbackSensitivity_NGP (None: not in the car table)
-        self.s = None                    # S with the surface's %
-        self.s_note = None
-        self.surface = None
-        self.torque = None               # NGP's T of the last upload (None without S): the texture's hook
+        self.peak = 0.0                  # the game's own highest |level| since the stream started
+        self._clear_s()
         self._last_level = None
         self._last_t = None
         self._grid = _Share(GRID_EVENTS)
@@ -236,21 +254,40 @@ class RbrForce:
         self.refused = None
         self.waiting = 'raw'
         self.gain = None
-        self.ceiling = float(FULL)
+
+    def _clear_s(self):
+        self.base_s = None               # the car's ForceFeedbackSensitivity_NGP (None: not in the car table)
+        self.s = None                    # S with the surface's %
+        self.s_note = None
+        self.surface = None
+        self.torque = None               # NGP's T of the last upload (None without S): the texture's hook
+
+    @property
+    def ceiling(self):
+        """A: the game's full scale, the driver's cap and the game's own peak, whichever is lowest: ours is never
+        stronger than anything the game itself sent (a STRENGTH under 1, not readable, cannot make it so)."""
+        return min(self.full, self.cap or self.full, max(self.peak * PEAK_MARGIN, 1.0))
 
     def set_linearity(self, value):
         self.linearity = min(max(int(value), 0), 100)
 
-    def set_car(self, car, stage=None, root=None):
-        """A telemetry sample's car and stage: S from the car table and the ini (only for `torque`)."""
+    def set_car(self, car, stage=None, root=None, now=None):
+        """A telemetry sample's car and stage: S from the car table and the ini (only for `torque`). A new key
+        (the car told from its gearing, a candidate set narrowing) clears S alone: the curve and the fit are
+        the game's, not the car's."""
         if car != self.car:
-            self.reset(car)
+            self.car = car
+            self._clear_s()
         if self.base_s is None and car:
             from . import car_data
             self.base_s = (car_data.entry(car) or {}).get('ffb_sensitivity')
-        if self.base_s is None or (self.surface is not None and self.surface[0] == stage):
+        if self.base_s is None:
             return
-        percents = self._ini(root)
+        percents = self._ini(root, now)
+        if percents is False:
+            return                       # being read
+        if self.surface is not None and self.surface[0] == stage and self.surface[2] == (percents is not None):
+            return
         surface = None
         if percents and len(set(percents.values())) > 1 and stage:
             from . import stage_tables
@@ -262,23 +299,32 @@ class RbrForce:
         else:
             percent = percents.get(surface or 'gravel', 100)
             self.s_note = None if surface else "stage surface unknown: gravel's sensitivity used"
-        self.surface = (stage, surface)
+        self.surface = (stage, surface, percents is not None)
         self.s = sensitivity(self.base_s, percent)
 
-    def _ini(self, root):
+    def _ini(self, root, now):
+        """{surface: %}, None (no install, or unreadable), or False while a read runs. Read on a thread of its
+        own (rbr_install.ASYNC), never on the engine's; a missing install is looked for again every INI_RETRY s
+        (the search finds it later)."""
         from . import rbr_install
-        root = root or rbr_install.current_root()
-        path = rbr_install.resolve(root, 'RichardBurnsRally.ini') if root else None
-        if not path:
-            return None
-        try:
-            mtime = os.stat(path).st_mtime
-        except OSError:
-            return None
         cached = self._percents
-        if cached is None or cached[:2] != (path, mtime):
-            self._percents = cached = (path, mtime, ngp_percents(root))
-        return cached[2]
+        now = time.monotonic() if now is None else now
+        if cached is not None and (cached[2] is not None or now - cached[3] < INI_RETRY):
+            if root is None or cached[0] == root:
+                return cached[2]
+        if self._lookup is not None and self._lookup.is_alive():
+            return False
+
+        def read():
+            base = root or rbr_install.current_root()
+            path = rbr_install.resolve(base, 'RichardBurnsRally.ini') if base else None
+            self._percents = (root, path, ngp_percents(base) if path else None, now)
+        if rbr_install.ASYNC:
+            self._lookup = threading.Thread(target=read, name='rbr-ffb-ini', daemon=True)
+            self._lookup.start()
+            return False
+        read()
+        return self._percents[2]
 
     def _x(self, level):
         return min(abs(level) / self.full, 1.0)
@@ -289,6 +335,7 @@ class RbrForce:
         self._last_t = t
         if abs(level) > self.full:
             self.full = float(abs(level))     # the game's STRENGTH is above the assumed: follow it
+        self.peak = max(abs(level), self.peak)
         x = self._x(level)
         if level != self._last_level:
             if level:
@@ -299,7 +346,9 @@ class RbrForce:
         if x > FORCE_MIN and dt:
             v = self.full * linear(x)
             decay = math.exp(-dt / TAU_GAIN)
-            self._ours = self._ours * decay + dt * shape_slope(v, self.linearity / 100.0, self.ceiling)
+            # Judged at the ceiling it would play at: once the game's top is seen (it plays only then)
+            ceiling = min(self.full, self.cap or self.full, max(self.peak, STRENGTH_PROVEN * self.full) * PEAK_MARGIN)
+            self._ours = self._ours * decay + dt * shape_slope(v, self.linearity / 100.0, ceiling)
             self._game = self._game * decay + dt * (1.0 - min(x, X_MAX))
             self.force_time += dt
         # m = floor(-10000 x): the level's sign is -T's (with the game's DIRECTION normal, not INVERSE)
@@ -313,7 +362,7 @@ class RbrForce:
             self._set(None, 'raw')
             return
         if grid < (GRID_HOLD if holding else GRID_GO):
-            self._set('curve')
+            self._set('grid')
             return
         if sat is not None and sat > (SAT_HOLD if holding else SAT_SHARE):
             self._set('saturated')
@@ -321,13 +370,16 @@ class RbrForce:
         if self.force_time < MIN_FORCE_TIME or self.gain is None:
             self._set(None, 'corners')
             return
+        if self.peak < STRENGTH_PROVEN * self.full:
+            self._set('strength')        # the game's top not seen yet: its STRENGTH may be under 1 (docstring)
+            return
         if self.gain < (GAIN_HOLD if holding else GAIN_GO):
             self._set('no-gain')
             return
         self._set(None, None)
 
     def _set(self, refused, waiting=None):
-        if refused != self.refused and refused:
+        if refused != self.refused and refused and refused != 'strength':
             logging.info("Countersteer FFB: RBR %s: %s (grid %.2f, over %.0f %% %.3f, gain %s)", self.car, refused,
                          self._grid.share() or 0.0, SAT_X * 100, self._sat.share() or 0.0,
                          'none' if self.gain is None else '%.2f' % self.gain)
@@ -335,8 +387,8 @@ class RbrForce:
         self.ready = refused is None and waiting is None
 
     def set_ceiling(self, clip_at):
-        """A: the game's full scale, or the driver's ext_force cap if lower."""
-        self.ceiling = min(self.full, clip_at) if clip_at else self.full
+        """The driver's ext_force cap (ext_force units), None for none."""
+        self.cap = clip_at
 
     def force(self, level):
         """ext_force for the game's raw level (0 for 0)."""
@@ -347,7 +399,7 @@ class RbrForce:
         return int(round(math.copysign(min(out, FULL), level)))
 
     def describe(self):
-        return ("linearity %d %%, full scale %.0f, ceiling %.0f, gain %s, S %s%s" % (
-            self.linearity, self.full, self.ceiling, 'none' if self.gain is None else '%.2f' % self.gain,
+        return ("linearity %d %%, full scale %.0f, ceiling %.0f (the game's peak %.0f), gain %s, S %s%s" % (
+            self.linearity, self.full, self.ceiling, self.peak, 'none' if self.gain is None else '%.2f' % self.gain,
             'unknown (not in the car table)' if self.s is None else '%.1f' % self.s,
             '; ' + self.s_note if self.s_note else ''))
