@@ -17,7 +17,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from . import coach, coach_context as cc, coach_diagnosis, potential, stage_tables
+from . import coach, coach_context as cc, coach_diagnosis, potential, stage_tables, terrain
 from .telemetry_formats import plan_xy
 
 SLACK = 5.0                      # m a run may stop short of the grid's end, or start past its start, and still be drawn there
@@ -494,6 +494,7 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
         this = _rounded(resample(rows, grid))
         ref = _rounded(resample(other_rows, grid)) if other_rows else None
         xs, zs = _positions(rows, grid, run['stage'].partition(':')[0])
+        profile = terrain.elevation(rows, run['stage'].partition(':')[0])
         numbers = {}
         info = None
         if other_rows:
@@ -506,6 +507,11 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
                 'time': run['result_time'] if run['finished'] == 1 else None,
                 'ref_time': other['result_time'] if other_rows else None, 'channels': list(CHANNELS),
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,
+                'elev': None if profile is None else {
+                    'h': terrain.on_grid(profile, grid), 'range': round(profile['range'], 1),
+                    'max_grade': round(profile['max_grade'], 1),
+                    'crests': [{'d': round(c['d']), 'h': round(c['h'], 1), 'drop': round(c['drop'], 1)}
+                               for c in profile['crests']]},
                 'potential': potential.layers(pot, _sum_of_best(reader, run['stage'], run['car'], pot)) if pot else None,
                 'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot),
                 'sectors': _sector_rows(run['stage'], rows, other_rows, reader, (run, other))}

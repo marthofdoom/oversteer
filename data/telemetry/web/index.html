@@ -1686,7 +1686,7 @@ setInterval(() => { if (!document.hidden && carId != null) loadCar(); }, 30000);
 
 const RV = {car: null, runs: [], id: null, vs: "pb", head: null, data: null, cache: new Map(), cursor: 0, view: [0, 1], zoom: -1,
   sel: -1, hover: -1, token: 0, mode: "live", picked: false, wantId: null, wantD: null, showAll: false, delta: [], adv: {}, raf: 0};
-const RV_STRIPS = [["delta", "Δ s", 56], ["v", "km/h", 84], ["pedals", "PEDAL", 56], ["steer", "STEER", 44], ["gear", "GEAR", 40], ["rpm", "RPM", 56]];
+const RV_STRIPS = [["delta", "Δ s", 56], ["v", "km/h", 84], ["pedals", "PEDAL", 56], ["steer", "STEER", 44], ["gear", "GEAR", 40], ["rpm", "RPM", 56], ["elev", "ELEV m", 40]];
 const RV_LANE = 16, RV_LANE2 = 12, RV_GAP = 6, RV_GUT = 34;
 const rvCss = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function rvColors() {
@@ -1877,7 +1877,7 @@ function rvDist(i) { const D = RV.data; return Math.min(D.length, i * D.step); }
 let rvMap = null;                                   // px -> distance for the strips, set by the last draw
 function rvDrawStrips() {
   const D = RV.data, cv = $("c-strips"), C = rvColors(), m = rvMult();
-  const strips = RV_STRIPS.filter((s) => s[0] !== "delta" || D.cmp).map((s) => [s[0], s[1], Math.round(s[2] * m)]);
+  const strips = RV_STRIPS.filter((s) => (s[0] !== "delta" || D.cmp) && (s[0] !== "elev" || (D.elev && D.elev.h))).map((s) => [s[0], s[1], Math.round(s[2] * m)]);
   const lane2 = D.sectors ? RV_LANE2 : 0, top0 = RV_LANE + lane2;
   const total = top0 + strips.reduce((a, s) => a + s[2] + RV_GAP, 0);
   const {g, w} = rvSized(cv, total), W = w - RV_GUT - 6, [a, z] = RV.view;
@@ -1969,6 +1969,20 @@ function rvDrawStrips() {
       g.fillStyle = C.faint; g.fillText((lim / 1000).toFixed(1) + "k", RV_GUT + W - 24, Y(lim) + 9);
       if (D.cmp) rvLine(g, pts(D.cmp.rpm, Y), C.ref, 1, .8);
       rvLine(g, pts(D.this.rpm, Y), C.rpm, 1.75);
+    } else if (key === "elev") {
+      // the stage's height from its positions, its crests ticked
+      const seen = D.elev.h.filter((v) => v != null), lo = Math.min(...seen), hi = Math.max(Math.max(...seen), lo + 5);
+      const Y = (v) => bot - 2 - (v - lo) / (hi - lo) * (H - 4);
+      const p = pts(D.elev.h, Y).filter((q) => q);
+      if (p.length > 1) {
+        g.fillStyle = C.dim; g.globalAlpha = .18; g.beginPath(); g.moveTo(p[0][0], bot - 2);
+        for (const q of p) g.lineTo(q[0], q[1]);
+        g.lineTo(p[p.length - 1][0], bot - 2); g.fill(); g.globalAlpha = 1;
+        rvLine(g, p, C.dim, 1.5);
+      }
+      g.fillStyle = C.accent;
+      for (const c of D.elev.crests) if (c.d >= a && c.d <= z) g.fillRect(Math.round(X(c.d)), Y(c.h) - 4, 2, 4);
+      g.fillStyle = C.faint; g.fillText((hi - lo).toFixed(0), 4, top + 24);
     }
     y = bot + RV_GAP;
   }

@@ -4305,8 +4305,24 @@
    "id": "balance.slip_angle",
    "name": "Slip angle management",
    "category": "balance",
-   "description": "Body slip angle through corners: how much the car is driven sideways, peak and time over a threshold.",
+   "description": "Drift (body slip) angle through corners: the angle between where the car points and where it travels, peak and mean per corner.",
    "derivations": [
+    {
+     "id": "heading",
+     "formula": "The car's heading is the yaw rate's integral, anchored to the path's direction (positions) on the straights; drift = heading - direction of travel, signed positive when angled into the corner; per corner peak and mean in degrees.",
+     "requires": {
+      "channels": [
+       "pos",
+       "yaw_rate"
+      ],
+      "aspects": [
+       "context.corners"
+      ]
+     },
+     "sent_only": true,
+     "status": "implemented",
+     "module": "oversteer/terrain.py drift"
+    },
     {
      "id": "body",
      "formula": "beta = atan2(vel.y, vel.x) above 5 m/s; per corner peak |beta| and time over 10 degrees.",
@@ -4344,19 +4360,26 @@
     {
      "name": "slip.over",
      "unit": "s per corner"
+    },
+    {
+     "name": "drift.mean",
+     "unit": "deg"
     }
    ],
    "validation": {
-    "status": "untested"
+    "status": "validated",
+    "evidence": "marth's ACR runs 2026-11-01 (32 runs over 3 km, 1141 corners): mean drift positive (angled into the corner) in 91 % of corners, median mean 5.0 and median peak 9.8 deg (p90 of the peak 37 deg), hairpins 40-60 deg and fast bends 7-12 deg; WRC Generations and DiRT trace no yaw rate (0 in every row), so they are not available"
    },
    "implementation": {
-    "status": "planned",
+    "status": "partial",
     "metrics": [],
-    "clickup": "86e3ev2dy"
+    "clickup": "86e3kfj8v",
+    "module": "oversteer/terrain.py drift",
+    "note": "derivation only so far: the corner facts do not name it yet"
    },
    "acr": {
-    "coverage": "planned",
-    "note": "local velocity confirmed"
+    "coverage": "validated",
+    "note": "yaw rate is the game's own; Richard Burns Rally sends one too (sign agrees on one run) but its winding stages give few straight anchors: not enabled"
    }
   },
   {
@@ -5079,6 +5102,59 @@
    },
    "acr": {
     "coverage": "implemented"
+   }
+  },
+  {
+   "id": "terrain.elevation",
+   "name": "Elevation, gradient and crests",
+   "category": "corners",
+   "description": "The stage's height profile from the positions: gradient per 100 m section, the steepest gradient and the crests (a rising road whose gradient falls away).",
+   "derivations": [
+    {
+     "id": "positions",
+     "formula": "Height is the up axis of the position (telemetry_formats.plan_xyz: ACR and DiRT y, WRC Generations and Richard Burns Rally z), against the run's distance, jumps rejected, smoothed over 20 m; gradient = dh/dd; a crest is a local maximum rising by 1 % or more into it and losing 6 points of gradient across it.",
+     "requires": {
+      "channels": [
+       "pos",
+       "run_distance"
+      ]
+     },
+     "status": "implemented",
+     "module": "oversteer/terrain.py elevation"
+    }
+   ],
+   "fallbacks": [],
+   "gates": {
+    "discipline": "any",
+    "surface": "any"
+   },
+   "outputs": [
+    {
+     "name": "elev.h",
+     "unit": "m"
+    },
+    {
+     "name": "elev.grade",
+     "unit": "%"
+    },
+    {
+     "name": "elev.crest",
+     "unit": "m along the stage"
+    }
+   ],
+   "validation": {
+    "status": "validated",
+    "evidence": "marth's runs, 2026-11-01: Richard Burns Rally Monster HC (rbr:309) climbs 232 m in 2.5 km, monotone, steepest 100 m section 17.8 %; ACR Cwmbiga - Afon Biga falls 75-95 m net over 11.6 km, 162 m of range, steepest section 10.4 %; five runs of one stage agree on range (162.7 m) and steepest section (10.4 %)"
+   },
+   "implementation": {
+    "status": "implemented",
+    "metrics": [],
+    "clickup": "86e3kfj8v",
+    "module": "oversteer/terrain.py elevation; oversteer/run_analysis.py (the Run view's ELEV strip)"
+   },
+   "acr": {
+    "coverage": "validated",
+    "note": "positions the bridge sends since 2026-09-27; games whose plan axes are unchecked (telemetry_formats.plan_xyz) give none"
    }
   }
  ]
