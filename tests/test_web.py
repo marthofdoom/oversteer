@@ -91,10 +91,18 @@ def test_the_page_and_its_headers(served):
     assert "default-src 'self'" in csp and "script-src 'sha256-" in csp and "style-src 'sha256-" in csp
     assert 'unsafe-inline' not in csp
     # The keep-awake video is made in the page: blob: media, nothing fetched
-    assert "media-src 'self' blob:" in csp
+    assert "media-src 'self' data:" in csp
     page = body.decode('utf-8')
     assert "navigator.wakeLock.request(\"screen\")" in page and 'visibilitychange' in page
-    assert 'captureStream' in page and 'MediaRecorder' in page
+    # The keep-awake video is NoSleep.js's embedded clips (WebM and MP4 data URIs), nothing generated in the page
+    assert 'captureStream' not in page and 'MediaRecorder' not in page
+    assert 'data:video/webm;base64,GkXfow' in page and 'data:video/mp4;base64,' in page and 'playsInline = true' in page
+    # The chip says "Screen on" only for a granted Wake Lock; the video fallback says "Trying (video)"
+    assert 'video: "Trying (video)"' in page and 'video: "Screen on"' not in page
+    assert page.count('showWake("on")') == 1 and 'window.isSecureContext) return false;' in page
+    # Plain HTTP: the flags guide with the page's origin and a copy that falls back to execCommand
+    assert 'chrome://flags/#unsafely-treat-insecure-origin-as-secure' in page and 'id="wake-origin"' in page
+    assert 'document.execCommand("copy")' in page and 'Stay awake' in page
     # The compact splits row reads "Best 3:17.7 · SoB 3:14.5 (−3.2)": the label Best, the gain after the SoB
     assert '<i>Best</i><b id="sp-pb">' in page and '<i>PB</i>' not in page and 'id="sp-gain"' in page
     assert 'signed(-sp.gain)' in page
