@@ -292,3 +292,86 @@ def test_ovst_before_v5_and_v5_at_60_are_saved_as_they_come(tmp_path):
     v4 = [(t, d[:4] + b'\x04' + d[5:]) for t, d in v4]
     _, kept = _saved(tmp_path, v4, 'v4.ovcap.gz')
     assert len(kept) == len(v4)
+
+
+def _ffb_recorder(tmp_path, limits=(1200.0, 250e6)):
+    from oversteer import telemetry_capture as tc
+    ticks = iter(range(10 ** 6))                       # one start time a second: the files sort in the order written
+    return tc.Recorder(str(tmp_path), version='t', threaded=False, clock=lambda: 1.7e9 + next(ticks), ffb_limits=limits)
+
+
+def _ffb_files(tmp_path):
+    from oversteer import telemetry_capture as tc
+    return sorted(p for p, _s, _l in tc.list_captures(str(tmp_path)))     # (names sort by start time)
+
+
+def _kept_count(path):
+    return sum(1 for _ in read_capture(path)[1])
+
+
+def test_ffb_tuning_saves_unthinned_and_labels_the_header(tmp_path):
+    packets = _ovst5_stream(seconds=2.0)
+    thin = _ffb_recorder(tmp_path / 'thin')
+    for t, d in packets:
+        thin.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
+    thin.close()
+    full = _ffb_recorder(tmp_path / 'full')
+    full.set_ffb_tuning(True)
+    for t, d in packets:
+        full.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
+    full.close()
+    (path,), (thin_path,) = _ffb_files(tmp_path / 'full'), _ffb_files(tmp_path / 'thin')
+    assert _kept_count(path) == len(packets) > _kept_count(thin_path) * 3
+    assert read_capture(path)[0]['ffb_tuning'] is True
+    assert 'ffb_tuning' not in read_capture(thin_path)[0]
+
+
+def test_ffb_tuning_ends_at_the_time_limit_and_thinning_resumes(tmp_path):
+    rec = _ffb_recorder(tmp_path, limits=(1.0, 1e12))
+    rec.set_ffb_tuning(True)
+    packets = _ovst5_stream(seconds=3.0)
+    for t, d in packets:
+        rec.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
+    rec.close()
+    assert rec.ffb_stopped == 'time' and not rec.ffb_tuning
+    first, second = _ffb_files(tmp_path)
+    assert read_capture(first)[0].get('ffb_tuning') is True and 'ffb_tuning' not in read_capture(second)[0]
+    assert _kept_count(first) >= 333 and _kept_count(second) < 2 * 60 + 10       # thinned again after the stop
+
+
+def test_ffb_tuning_ends_at_the_size_limit(tmp_path):
+    rec = _ffb_recorder(tmp_path, limits=(1e9, 100000))
+    rec.set_ffb_tuning(True)
+    for t, d in _ovst5_stream(seconds=3.0):
+        rec.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
+    rec.close()
+    assert rec.ffb_stopped == 'size' and not rec.ffb_tuning
+    first = _ffb_files(tmp_path)[0]
+    record = len(_ovst5_stream(seconds=0.01)[0][1]) + 14           # packet and its record header (tc.RECORD)
+    assert 100000 / record <= _kept_count(first) <= 100000 / record + 1
+
+
+def test_ffb_tuning_off_again_clears_the_reason_and_can_restart(tmp_path):
+    rec = _ffb_recorder(tmp_path, limits=(1e9, 1000))
+    rec.set_ffb_tuning(True)
+    for t, d in _ovst5_stream(seconds=0.5):
+        rec.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
+    assert rec.ffb_stopped == 'size'
+    rec.set_ffb_tuning(True)
+    assert rec.ffb_stopped is None and rec.ffb_tuning
+    rec.close()
+
+
+def test_prune_skips_captures_recorded_for_ffb_tuning(tmp_path):
+    from oversteer import telemetry_capture as tc
+    paths = []
+    for i in range(3):
+        path = str(tmp_path / '2026010{}-120000.ovcap.gz'.format(i + 1))
+        CaptureWriter(path, extra={'ffb_tuning': True} if i == 0 else None).close()
+        with open(path, 'ab') as f:
+            f.write(b'x' * 1000)
+        os.utime(path, (1.7e9 + i * 100, 1.7e9 + i * 100))
+        paths.append(path)
+    assert tc.capture_summary(str(tmp_path))[2] == 1
+    assert tc.prune(str(tmp_path), 0) == paths[1:]
+    assert os.path.exists(paths[0])
