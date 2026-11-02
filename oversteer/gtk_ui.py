@@ -1623,7 +1623,8 @@ class GtkUi:
               "force feedback. It stops by itself after 20 minutes or 250 MB, then recording goes back to the "
               "usual rate; those captures are never deleted for space. Works only while recording is on, and "
               "starts off every time Oversteer starts."),
-            lambda state: self.controller.set_ffb_tuning(state))
+            lambda state: self._ffb_syncing or self.controller.set_ffb_tuning(state))
+        self._ffb_syncing = False
         self.telemetry_ffb_tuning.set_sensitive(False)
         record.add(row)
         self.telemetry_capture_cap = Gtk.SpinButton.new_with_range(1, 100, 1)
@@ -1768,7 +1769,11 @@ class GtkUi:
         """The "Record for FFB tuning" switch: shown on or off, usable while recording is on."""
         self.telemetry_ffb_tuning.set_sensitive(sensitive)
         if self.telemetry_ffb_tuning.get_active() != active:
-            self.telemetry_ffb_tuning.set_active(active)
+            self._ffb_syncing = True          # not the user's doing: the controller is not told
+            try:
+                self.telemetry_ffb_tuning.set_active(active)
+            finally:
+                self._ffb_syncing = False
 
     @staticmethod
     def _clear_rows(listbox, keep=0):

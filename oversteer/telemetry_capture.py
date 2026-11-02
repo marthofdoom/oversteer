@@ -77,9 +77,9 @@ THIN_FROZEN = 0.1           # s of the packets' own clock the stage clock must s
 OVST_THIN_RATE = 60.0
 # "Record for FFB tuning": a bounded exception. While it is on, THIN and OVST v5+ packets are saved at the full rate
 # in files whose header says 'ffb_tuning': true; those files are never pruned (they count toward the folder's size
-# but are skipped like labelled captures, so delete them by hand). The exception ends by itself after
-# FFB_MAX_SECONDS since its first packet or FFB_MAX_BYTES of packets saved (uncompressed, header and record
-# framing included), and thinning resumes in a new file.
+# and are not counted toward the folder's cap either: they are listed apart, delete them by hand). The exception
+# ends by itself after FFB_MAX_SECONDS of driving (the gaps between packets, each at most CAPTURE_GAP, so a menu
+# does not use it up) or FFB_MAX_BYTES written to disk (compressed), and thinning resumes in a new file.
 FFB_MAX_SECONDS = 20 * 60.0
 FFB_MAX_BYTES = 250 * 1000 * 1000
 OVST_THIN_STEP_LEAP = 1000  # physics steps the packet id may leap forward before both packets are kept (a new session)
@@ -126,7 +126,6 @@ class CaptureWriter:
         self._file.flush()
         self._first = None
         self.packets = 0
-        self.bytes = 0                    # packet bytes written, record headers included (not the gzip size)
         self.thinned = 0                  # packets not saved (THIN)
         self._seen = None                 # the last packet's (steps, stage, clock, distance to the end, frozen)
         self._moved = None                # steps at which the stage clock last changed
@@ -153,7 +152,6 @@ class CaptureWriter:
         self._file.write(RECORD.pack(now - self._first, _ipv4(addr[0]), len(data)))
         self._file.write(data)
         self.packets += 1
-        self.bytes += RECORD.size + len(data)
 
     def _keep(self, now, addr, data):
         """Whether a packet of a THIN format is saved: one in every 1/rate of its own steps, and every one where
@@ -207,6 +205,10 @@ class CaptureWriter:
         self._held = (now, addr, data)
         self.thinned += 1
         return False
+
+    def disk_bytes(self):
+        """Compressed bytes that have reached the file so far (the gzip stream buffers a little)."""
+        return self._file.fileobj.tell() if self._file is not None else 0
 
     def close(self):
         if self._file is not None:
@@ -274,19 +276,45 @@ def ffb_tuning(path):
         return False
 
 
+_TUNING = {}          # path -> whether its header says ffb_tuning (a header never changes)
+
+
+def _is_tuning(path):
+    found = _TUNING.get(path)
+    if found is None:
+        found = _TUNING[path] = ffb_tuning(path)
+    return found
+
+
+def tuning_captures(folder):
+    """[(path, bytes)] of the captures recorded for FFB tuning, oldest first. They are never pruned and do
+    not count toward the folder's cap."""
+    return [(p, s) for p, s in _scan(folder) if _is_tuning(p)]
+
+
 def list_captures(folder):
     """[(path, bytes, labelled)] of the captures in `folder`, oldest
     first (by when they were last written). The bytes include the wheel
     sidecar, which goes with the capture. Labelled: a label sidecar, or
-    recorded for FFB tuning (both are kept when pruning)."""
+    a label sidecar. Captures recorded for FFB tuning are not in it (see tuning_captures)."""
     found = []
     for path in glob.glob(os.path.join(glob.escape(folder), '*' + SUFFIX)):
         try:
             found.append((os.path.getmtime(path), path, os.path.getsize(path) + _wheel_size(path),
-                          os.path.exists(path + '.json') or ffb_tuning(path)))
+                          os.path.exists(path + '.json')))
         except OSError:
             continue                     # deleted meanwhile
-    return [(path, size, labelled) for _mtime, path, size, labelled in sorted(found)]
+    return [(path, size, labelled) for _mtime, path, size, labelled in sorted(found) if not _is_tuning(path)]
+
+
+def _scan(folder):
+    found = []
+    for path in glob.glob(os.path.join(glob.escape(folder), '*' + SUFFIX)):
+        try:
+            found.append((os.path.getmtime(path), path, os.path.getsize(path) + _wheel_size(path)))
+        except OSError:
+            continue
+    return [(path, size) for _mtime, path, size in sorted(found)]
 
 
 def sidecars(path):
@@ -545,8 +573,10 @@ class Recorder:
         self.ffb_tuning = False           # "Record for FFB tuning" is on (set_ffb_tuning)
         self.ffb_stopped = None           # 'time' or 'size': why the exception ended by itself
         self._ffb_limits = ffb_limits     # (seconds, bytes)
-        self._ffb_t0 = None               # arrival time of the first packet saved in the mode
-        self._ffb_bytes = 0
+        self._ffb_pending = None          # a switch the writer has yet to apply (set_ffb_tuning)
+        self._ffb_prev = None             # arrival time of the last packet in the mode
+        self._ffb_time = 0.0              # driving seconds in the mode
+        self._ffb_bytes = 0               # compressed bytes written in the mode
         self._writer = None
         self._file_port = None            # the port in the open file's header
         self._last = 0.0
@@ -586,41 +616,57 @@ class Recorder:
             self.dropped += 1
 
     def set_ffb_tuning(self, on):
-        """Full-rate saving in labelled files, until switched off or its
-        limits are reached (`ffb_stopped`). Takes effect in a new file."""
+        """Full-rate saving in files of their own, until switched off or its
+        limits are reached (`ffb_stopped`). Takes effect in a new file.
+        Never blocks: the writer applies it with its next packet."""
         if self._closed:
             return
-        self.ffb_stopped = None           # now, not when the writer gets to it: the UI reads it meanwhile
+        if on:
+            self.ffb_stopped = None       # now, not when the writer gets to it: the UI reads it meanwhile
+        self._ffb_pending = bool(on)
         if not self._threaded:
-            self._ffb(on)
+            self._ffb_apply()
             return
         try:
-            self._queue.put(('ffb', bool(on)), timeout=1.0)
+            self._queue.put_nowait(('ffb',))
         except queue.Full:
-            self.dropped += 1
+            pass                          # busy writing: it looks at the flag with every packet
+
+    def _ffb_apply(self):
+        on, self._ffb_pending = self._ffb_pending, None
+        if on is not None:
+            self._ffb(on)
 
     def _ffb(self, on):
-        if on == self.ffb_tuning and self.ffb_stopped is None:
+        if on == self.ffb_tuning:
             return
         try:
             self._close_all()             # a file is wholly full-rate or wholly thinned, as its header says
         except OSError as e:
             logging.warning("telemetry capture: %s", e)
-        self.ffb_tuning, self.ffb_stopped = bool(on), None
-        self._ffb_t0, self._ffb_bytes = None, 0
+        self.ffb_tuning = bool(on)
+        self._ffb_prev, self._ffb_time, self._ffb_bytes = None, 0.0, 0
 
-    def _ffb_check(self, now, saved):
+    def _ffb_stop(self, reason):
+        logging.info("telemetry capture: FFB tuning recording ended (%s limit)", reason)
+        self._ffb(False)
+        self.ffb_stopped = reason
+
+    def _ffb_advance(self, now):
+        """A packet arrives: the driving time of the mode, before any file is opened for it."""
         if not self.ffb_tuning:
             return
-        self._ffb_bytes += saved
-        if self._ffb_t0 is None:
-            self._ffb_t0 = now
-        seconds, size = self._ffb_limits
-        reason = 'size' if self._ffb_bytes >= size else 'time' if now - self._ffb_t0 >= seconds else None
-        if reason is not None:
-            logging.info("telemetry capture: FFB tuning recording ended (%s limit)", reason)
-            self._ffb(False)
-            self.ffb_stopped = reason
+        if self._ffb_prev is not None:
+            self._ffb_time += min(max(now - self._ffb_prev, 0.0), CAPTURE_GAP)
+        self._ffb_prev = now
+        if self._ffb_time >= self._ffb_limits[0]:
+            self._ffb_stop('time')
+
+    def _ffb_check(self, saved):
+        if self.ffb_tuning:
+            self._ffb_bytes += saved
+            if self._ffb_bytes >= self._ffb_limits[1]:
+                self._ffb_stop('size')
 
     def check(self, now):
         """Close the files once telemetry has stopped for CAPTURE_GAP."""
@@ -647,6 +693,7 @@ class Recorder:
             try:
                 item = self._queue.get(timeout=1.0)
             except queue.Empty:
+                self._ffb_apply()
                 self.check(time.monotonic())
                 continue
             if item is None:
@@ -656,13 +703,16 @@ class Recorder:
                 self._main(item[1], item[2])
                 continue
             if item[0] == 'ffb':
-                self._ffb(item[1])
+                self._ffb_apply()
                 continue
             self._write(*item)
 
     def _write(self, now, addr, data, port=None):
         if self.error is not None:
             return
+        if self._ffb_pending is not None:
+            self._ffb_apply()
+        self._ffb_advance(now)
         if port is None:
             port = self.port
         try:
@@ -676,13 +726,13 @@ class Recorder:
             if self._writer is None:
                 self._open(port, data)
             first = self._writer.packets == 0
-            before = self._writer.bytes
             writer = self._writer
+            before = writer.disk_bytes()
             writer.write(now, addr, data)
             if first:
                 self._start_wheel(now)
             self._last = now
-            self._ffb_check(now, writer.bytes - before)
+            self._ffb_check(writer.disk_bytes() - before)
         except OSError as e:
             logging.warning("telemetry capture: %s", e)
             self.error = str(e)
@@ -696,10 +746,10 @@ class Recorder:
         if side is None:
             writer, path, started = self._new_file(port, data)
             side = self._side[port] = [writer, path, now, started]
-        before = side[0].bytes
+        before = side[0].disk_bytes()
         side[0].write(now, addr, data)
         side[2] = now
-        self._ffb_check(now, side[0].bytes - before)
+        self._ffb_check(side[0].disk_bytes() - before)
 
     def _main(self, port, now):
         if self.error is not None or (self._writer is not None and self._file_port == port):

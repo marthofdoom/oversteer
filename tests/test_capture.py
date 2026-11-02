@@ -302,7 +302,7 @@ def _ffb_recorder(tmp_path, limits=(1200.0, 250e6)):
 
 def _ffb_files(tmp_path):
     from oversteer import telemetry_capture as tc
-    return sorted(p for p, _s, _l in tc.list_captures(str(tmp_path)))     # (names sort by start time)
+    return [p for p, _s in tc._scan(str(tmp_path))]         # all captures, tuning ones too, oldest first
 
 
 def _kept_count(path):
@@ -339,22 +339,43 @@ def test_ffb_tuning_ends_at_the_time_limit_and_thinning_resumes(tmp_path):
     assert _kept_count(first) >= 333 and _kept_count(second) < 2 * 60 + 10       # thinned again after the stop
 
 
-def test_ffb_tuning_ends_at_the_size_limit(tmp_path):
-    rec = _ffb_recorder(tmp_path, limits=(1e9, 100000))
+def _noisy_stream(seconds):
+    """_ovst5_stream with the tail of each packet random, so it does not compress away (the limit counts disk bytes)."""
+    out = []
+    for t, d in _ovst5_stream(seconds=seconds):
+        out.append((t, d[:332] + os.urandom(len(d) - 332)))
+    return out
+
+
+def test_ffb_tuning_ends_at_the_size_limit_on_disk(tmp_path):
+    rec = _ffb_recorder(tmp_path, limits=(1e9, 3000))
     rec.set_ffb_tuning(True)
-    for t, d in _ovst5_stream(seconds=3.0):
+    stream = _noisy_stream(3.0)
+    for t, d in stream:
         rec.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
     rec.close()
     assert rec.ffb_stopped == 'size' and not rec.ffb_tuning
     first = _ffb_files(tmp_path)[0]
-    record = len(_ovst5_stream(seconds=0.01)[0][1]) + 14           # packet and its record header (tc.RECORD)
-    assert 100000 / record <= _kept_count(first) <= 100000 / record + 1
+    assert 3000 <= os.path.getsize(first) < 3000 + 70000 and _kept_count(first) < len(stream)
+
+
+def test_ffb_tuning_time_counts_driving_not_menu_gaps(tmp_path):
+    rec = _ffb_recorder(tmp_path, limits=(1.0, 1e12))
+    rec.set_ffb_tuning(True)
+    data = _ovst5_stream(seconds=0.01)[0][1]
+    for t in (0.0, 0.1, 500.0, 500.1):                      # a long pause between: capped at CAPTURE_GAP, not 500 s
+        rec.packet(100.0 + t, ('127.0.0.1', 1), data, 5300)
+    assert rec.ffb_stopped == 'time'
+    # ... and no full-rate file is opened just to trip the limit: the packet that tripped it opens a thinned one
+    rec.close()
+    files = _ffb_files(tmp_path)
+    assert [read_capture(f)[0].get('ffb_tuning', False) for f in files] == [True, False]
 
 
 def test_ffb_tuning_off_again_clears_the_reason_and_can_restart(tmp_path):
-    rec = _ffb_recorder(tmp_path, limits=(1e9, 1000))
+    rec = _ffb_recorder(tmp_path, limits=(1e9, 3000))
     rec.set_ffb_tuning(True)
-    for t, d in _ovst5_stream(seconds=0.5):
+    for t, d in _noisy_stream(3.0):
         rec.packet(100.0 + t, ('127.0.0.1', 1), d, 5300)
     assert rec.ffb_stopped == 'size'
     rec.set_ffb_tuning(True)
@@ -372,6 +393,8 @@ def test_prune_skips_captures_recorded_for_ffb_tuning(tmp_path):
             f.write(b'x' * 1000)
         os.utime(path, (1.7e9 + i * 100, 1.7e9 + i * 100))
         paths.append(path)
-    assert tc.capture_summary(str(tmp_path))[2] == 1
+    assert [p for p, _s in tc.tuning_captures(str(tmp_path))] == paths[:1]
+    assert tc.capture_summary(str(tmp_path))[0] == 2
+    assert tc.capture_summary(str(tmp_path))[2] == 0              # not "labelled"; apart, and not in the cap's total
     assert tc.prune(str(tmp_path), 0) == paths[1:]
     assert os.path.exists(paths[0])
