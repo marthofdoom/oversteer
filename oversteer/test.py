@@ -1,4 +1,5 @@
 import errno
+from locale import gettext as _
 from evdev import ecodes, ff
 import logging
 import numpy as np
@@ -15,8 +16,11 @@ class Test:
     # How long test 1 waits for the user to feel the wheel move and press a button
     ACTION_TIMEOUT = 120
 
-    def __init__(self, device, callback):
+    def __init__(self, device, callback, restore=None):
         self.device = device
+        # The settings to put back afterwards (keys range, ff_gain, autocenter), when the application
+        # knows them: a driver without the sysfs files can't read them back (it answers 100 and 0)
+        self.restore = restore or {}
         self.input_device = self.device.get_input_device()
         self.notify = callback
         self.collecting_data = False
@@ -59,12 +63,12 @@ class Test:
         self.output_values = []
         self.effects = []
         if self.input_device is None:
-            raise TestAborted('The wheel\'s input device could not be opened.')
+            raise TestAborted(_('The wheel\'s input device could not be opened.'))
 
         # Save wheel settings
-        self.current_range = self.device.get_range()
-        self.current_ff_gain = self.device.get_ff_gain()
-        self.current_autocenter = self.device.get_autocenter()
+        self.current_range = self._setting('range', self.device.get_range)
+        self.current_ff_gain = self._setting('ff_gain', self.device.get_ff_gain)
+        self.current_autocenter = self._setting('autocenter', self.device.get_autocenter)
 
         # Prepare wheel
         try:
@@ -76,6 +80,10 @@ class Test:
         self.device.set_range(900)
         self.device.set_ff_gain(100)
         self.device.set_autocenter(0)
+
+    def _setting(self, key, read):
+        value = self.restore.get(key)
+        return value if value is not None else read()
 
     def stop(self):
         # Drop any effect a failed run left behind
@@ -100,8 +108,8 @@ class Test:
             effect.id = self.input_device.upload_effect(effect)
         except OSError as e:
             if e.errno == errno.ENOSYS:
-                raise TestAborted('This wheel or its driver does not support the force feedback effects the '
-                                  'tests use.') from e
+                raise TestAborted(_('This wheel or its driver does not support the force feedback effects the '
+                                    'tests use.')) from e
             raise
         self.effects.append(effect)
         return effect.id
@@ -194,7 +202,7 @@ class Test:
         deadline = time.monotonic() + self.ACTION_TIMEOUT
         while not self.action_triggered:
             if time.monotonic() > deadline:
-                raise TestAborted('Timed out waiting for the wheel to move.')
+                raise TestAborted(_('Timed out waiting for you to press a button on the wheel.'))
             time.sleep(0.5)
         self.action_triggered = False
         self.notify('running')

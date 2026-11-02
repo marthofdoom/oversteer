@@ -841,6 +841,11 @@ class Gui:
             self.ui.safe_call(self.refresh_telemetry_cars)
 
     def on_quit(self):
+        if self.test is not None:
+            try:
+                self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
+            except Exception:
+                logging.exception("restoring the wheel at quit")
         if self.telemetry_web is not None:
             self.telemetry_web.stop()
             self.telemetry_web = None
@@ -1920,7 +1925,8 @@ class Gui:
                 self.ui.safe_call(self.ui.show_test_running, self.test_run, 1)
             elif name == 'error':
                 self.ui.safe_call(self.abort_test, message)
-        self.test = Test(self.device, test_callback)
+        self.test = Test(self.device, test_callback, {'range': self.model.get_range(),
+                'ff_gain': self.model.get_ff_gain(), 'autocenter': self.model.get_autocenter()})
         self.test_run = 0
         self.ui.switch_test_panel(self.test_run)
 

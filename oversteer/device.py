@@ -87,6 +87,7 @@ class Device:
                 owner, group, path)
         if os.access(path, os.R_OK | os.W_OK):
             return True
+        logging.warning("no read/write access to %s", path)
         return False
 
     def get_max_range(self):

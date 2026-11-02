@@ -115,6 +115,17 @@ def test_a_finished_test_restores_settings_and_notifies_end(monkeypatch):
     assert not test.is_collecting_data()
 
 
+def test_restores_the_profile_when_the_device_cannot_read_back():
+    # mainline hid-logitech: no gain/autocenter files, the getters answer a hardcoded 100 and 0
+    wheel = FakeWheel(FakeInput())
+    wheel.settings = {'range': 900, 'gain': 100, 'autocenter': 0}
+    wheel.get_ff_gain = lambda: 100
+    wheel.get_autocenter = lambda: 0
+    test = Test(wheel, lambda *a: None, {'range': 540, 'ff_gain': 60, 'autocenter': 20})
+    run_guarded(test, lambda: None)
+    assert wheel.settings == {'range': 540, 'gain': 60, 'autocenter': 20}
+
+
 def test_leftover_effects_are_erased_on_failure():
     wheel = FakeWheel(FakeInput())
     test = Test(wheel, lambda *a: None)
