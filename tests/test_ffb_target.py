@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from oversteer import ffb_carprops, ffb_engine as fe, wheel_torque
+from oversteer import ffb_carprops, ffb_engine as fe, ffb_texture, wheel_torque
 from oversteer.telemetry_formats import Sample
 from tests.test_ffb_engine import FakeDriver, acr, forces, run, upload, wheel, game_raw, HZ, fitted  # noqa: F401
 from tests.test_ffb_engine import _clean_log  # noqa: F401 (the autouse fixture)
@@ -49,58 +49,111 @@ def test_a_division_past_full_scale_clips_and_is_counted(tmp_path):
 
 
 def test_a_gain_change_in_play_does_not_step_what_is_written(tmp_path):
-    engine, path = engine_with_gain(tmp_path, 65535)
-    t = run(engine, 0.0, 6.0)
-    FakeDriver.log.clear()
-    with open(path + '/gain', 'w') as f:
-        f.write('%d\n' % 32768)                   # the slider to 50 %: the written value doubles, smoothly
-    run(engine, t, 2.0)
-    out = forces()
-    steps = [abs(b - a) for a, b in zip(out, out[1:])]
-    assert max(steps) < 0.05 * max(abs(v) for v in out)
+    def drive(sub, change):
+        (tmp_path / sub).mkdir()
+        engine, path = engine_with_gain(tmp_path / sub, 65535)
+        t = run(engine, 0.0, 6.0)
+        FakeDriver.log.clear()
+        if change:
+            with open(path + '/gain', 'w') as f:
+                f.write('%d\n' % 32768)               # the slider to 50 %: the written value doubles, smoothly
+        run(engine, t, 2.0)
+        out = forces()
+        return max(abs(b - a) for a, b in zip(out, out[1:]))
+    # the same drive without the change shows the drive's own sample-to-sample movement
+    assert drive('a', True) < 2.3 * drive('b', False) + 50      # (the written value doubles with the gain halved)
 
 
-def stream_rack(peak, p99_nm=400.0, seconds=900.0, hz=50.0, **kw):
-    """A RackForce that drove `seconds` of torque uniform in |x| up to a known p99 (front Mz alone)."""
+def rack_for(peak=None, assist=None, ratio=None):
     rack = fe.RackForce()
     rack.LEARNS = False
     rack.wheel_peak = peak
     rack.reset('acr/x')
-    top = p99_nm / 0.99
-    n = int(seconds * hz)
-    for i in range(n):
-        s = Sample(6000.0, 7500.0, gear=3, speed=20.0, car='acr/x', game='acr')
-        mz = top * (((i * 0.6180339887) % 1.0) * 2.0 - 1.0)
-        s.tyre_mz = (mz / 2, mz / 2, 0, 0)
-        rack.feed(i / hz, s, None)
-    return rack, top
+    if assist is not None:
+        rack.assist = assist
+    if ratio is not None:
+        rack.ratio = ratio
+    return rack
 
 
-def force_at(rack, nm):
-    s = Sample(6000.0, 7500.0, gear=3, speed=20.0, car='acr/x', game='acr')
-    s.tyre_mz = (nm / 2, nm / 2, 0, 0)
-    return abs(rack.force(s)) / fe.FULL
+def sample_at(front_nm, speed=25.0):
+    s = Sample(6000.0, 7500.0, gear=3, speed=speed, car='acr/x', game='acr')
+    s.tyre_mz = (front_nm / 2, front_nm / 2, 0, 0)
+    return s
 
 
-def test_the_cars_p99_maps_to_070_of_full_scale_on_an_unknown_wheel():
-    rack, _ = stream_rack(None, 400.0)
-    assert rack.p99 == pytest.approx(400.0, rel=0.08)
-    assert force_at(rack, 400.0) == pytest.approx(0.70, rel=0.08)
+def force_at(rack, nm, speed=25.0):
+    return abs(rack.force(sample_at(nm, speed))) / fe.FULL
 
 
-def test_a_weak_wheel_falls_back_to_p99_at_070():
-    rack, _ = stream_rack(wheel_torque.peak_nm('046d:c24f'), 540.0)       # G29: 2.1 Nm
-    assert force_at(rack, rack.p99) == pytest.approx(0.70, rel=0.01)
+def test_the_boost_curve_is_monotone_and_invertible():
+    for speed in (0.0, 5.0, 15.0, 30.0, 60.0):
+        for assist in (1.0, 0.5, 0.0):
+            prev = -1.0
+            for i in range(0, 600):
+                tc = i * 0.1
+                td = ffb_carprops.driver_from_column(tc, speed, assist)
+                assert td >= prev - 1e-12 and td <= tc + 1e-9          # monotone, and never more than the column
+                prev = td
+                assert ffb_carprops.column_from_driver(td, speed, assist) == pytest.approx(tc, abs=1e-6)
+            assert ffb_carprops.driver_from_column(-3.0, speed, assist) == -ffb_carprops.driver_from_column(3.0, speed, assist)
 
 
-def test_a_strong_wheel_plays_the_real_rim_torque_up_to_its_ceiling():
-    # 100 Nm of kingpin torque: 100 / 13 x 0.4 = 3.1 Nm at the rim = 15 % of a 20 Nm wheel
-    rack, _ = stream_rack(20.0, 100.0)
-    assert force_at(rack, rack.p99) == pytest.approx(0.4 / 13.0 * rack.p99 / 20.0, rel=0.02)
-    # a car whose p99 would be 16 Nm at the rim plays at 10 Nm (the safety ceiling), never above it
-    rack, _ = stream_rack(20.0, 540.0)
-    assert force_at(rack, rack.p99) == pytest.approx(10.0 / 20.0, rel=0.02)
-    assert force_at(rack, 5000.0) == pytest.approx(10.0 / 20.0, rel=0.001)
+def test_assist_is_heavy_parked_and_light_at_speed():
+    parked = ffb_carprops.driver_from_column(20.0, 0.0)
+    fast = ffb_carprops.driver_from_column(20.0, 30.0)
+    assert parked < fast < 20.0
+
+
+def test_on_centre_and_at_the_limit_torques_are_a_real_cars():
+    rack = rack_for()
+    # the dump's p50 (85 Nm of kingpin torque) is an easy corner, its p99 (550 Nm) the grip limit, at 25 m/s
+    easy = abs(rack.rim_torque(sample_at(85.0)))
+    limit = abs(rack.rim_torque(sample_at(550.0)))
+    assert 0.4 <= easy <= 1.0
+    assert 2.0 <= limit <= 3.2
+    assert abs(rack.rim_torque(sample_at(10.0))) < 0.3          # near the centre almost nothing
+
+
+def test_the_rim_torque_is_played_one_to_one_up_to_the_knee_then_softly_limited():
+    peak = 2.1
+    rack = rack_for(peak)
+    low = rack.rim_torque(sample_at(60.0))
+    assert low / peak < wheel_torque.KNEE_FROM
+    assert force_at(rack, 60.0) == pytest.approx(low / peak, rel=1e-6)
+    shares = [force_at(rack, nm) for nm in range(0, 4000, 5)]
+    assert all(b >= a for a, b in zip(shares, shares[1:]))                       # monotone, no step
+    assert max(shares) <= wheel_torque.STEER_BUDGET + 1e-9
+    assert force_at(rack, 5000.0) == pytest.approx(wheel_torque.STEER_BUDGET, abs=0.01)
+    above = [b - a for a, b in zip(shares, shares[1:]) if a > wheel_torque.KNEE_FROM * 0.8]
+    assert max(above) < 0.015                                                    # a smooth knee
+
+
+def test_an_unknown_wheel_counts_as_the_g29_class():
+    assert force_at(rack_for(None), 300.0) == pytest.approx(force_at(rack_for(2.1), 300.0))
+
+
+def test_a_strong_wheel_plays_the_same_nm_and_never_passes_the_ceiling():
+    weak, strong = rack_for(2.1), rack_for(20.0)
+    nm = abs(strong.rim_torque(sample_at(300.0)))
+    assert force_at(strong, 300.0) == pytest.approx(nm / 20.0, rel=1e-6)
+    assert force_at(strong, 300.0) < force_at(weak, 300.0)
+    unassisted = rack_for(20.0, assist=0.0)
+    assert force_at(unassisted, 5000.0) == pytest.approx(fe.RackForce.RIM_SAFE_NM / 20.0, rel=0.001)
+
+
+def test_an_unassisted_car_passes_the_column_torque():
+    rack = rack_for(20.0, assist=0.0, ratio=13.0)
+    assert rack.rim_torque(sample_at(130.0)) == pytest.approx(10.0)
+    assert rack.rim_torque(sample_at(-130.0)) == pytest.approx(-10.0)
+
+
+def test_the_steering_budget_leaves_the_texture_its_quarter():
+    rack = rack_for(2.1)
+    steering = force_at(rack, 5000.0) * fe.FULL
+    assert fe.FULL - steering >= 0.24 * fe.FULL
+    # the texture's own limit is FULL - |steering|: still room for its cap at the budget's edge
+    assert fe.FULL - steering > ffb_texture.TOTAL_CAP * fe.FULL
 
 
 def test_wheel_table_knows_only_usable_wheels():
@@ -109,22 +162,16 @@ def test_wheel_table_knows_only_usable_wheels():
     assert wheel_torque.peak_nm(None) is None and wheel_torque.peak_nm('dead:beef') is None
 
 
-def test_the_scale_slews_to_a_new_target_and_a_car_change_holds_it():
-    rack, _ = stream_rack(None, 400.0, seconds=60.0)
-    before = rack.play_scale
+def test_a_car_change_holds_the_playing_model_through_the_fade():
+    rack = rack_for(2.1, assist=0.0)
     rack.hold()
-    rack.target_scale = before * 2
-    s = Sample(6000.0, 7500.0, gear=3, speed=20.0, car='acr/x', game='acr')
-    s.tyre_mz = (100.0, 100.0, 0, 0)
-    rack.feed(100.0, s, None)
-    rack.feed(100.01, s, None)
-    assert rack.play_scale == pytest.approx(before * math.exp(rack.SCALE_SLEW * 0.01), rel=1e-3)   # a slew, no step
-    held = rack.play_scale
+    held = rack.force(sample_at(130.0))
     rack.reset('acr/y')
     rack.ready = False
-    rack._held_fit = (held, rack.trail, rack.scrub)
+    rack._held_fit = (rack.trail, rack.scrub, 13.0, 0.0)
+    s = sample_at(130.0)
     s.car = 'acr/y'
-    assert rack.force(s) == pytest.approx(held * fe.front_torque(s, rack.trail, rack.scrub))
+    assert rack.force(s) == pytest.approx(held)
 
 
 def test_the_gates_still_use_the_games_raw_force_not_its_level():
@@ -140,14 +187,12 @@ def test_the_gates_still_use_the_games_raw_force_not_its_level():
 
 
 def test_the_cars_p99_is_kept_between_runs(tmp_path):
-    rack, _ = stream_rack(None, 300.0, seconds=300.0)
-    rack.LEARNS = True
-    ffb_carprops.STORE.put('acr/x', 0.02, 0.01, force=True, p99=rack.p99)
+    ffb_carprops.STORE.put('acr/x', 0.02, 0.01, force=True, p99=300.0)
     ffb_carprops.STORE.use(ffb_carprops.STORE.path)           # a new run reads the file
-    assert ffb_carprops.STORE.get_p99('acr/x') == pytest.approx(rack.p99, rel=0.01)
+    assert ffb_carprops.STORE.get_p99('acr/x') == pytest.approx(300.0, rel=0.01)
     again = fe.RackForce()
     again.reset('acr/x')
-    assert again.p99 == pytest.approx(rack.p99, rel=0.01)
+    assert again.p99 == pytest.approx(300.0, rel=0.01)
 
 
 def test_the_engine_takes_the_wheel_model_for_the_peak():

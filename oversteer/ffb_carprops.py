@@ -37,6 +37,24 @@ FY_MIN = 800.0                           # N: a sample with less front side forc
 DFX_MIN = 300.0                          # N: ... less left-right difference of Fx says nothing about either
                                          # (a straight): it is not added and does not age the window, so the
                                          # learnt values hold through a long straight instead of eroding to the prior
+# The steering model: rack (kingpin) torque -> column torque -> the driver's torque at the rim.
+# Column torque T_c = front torque / STEER_RATIO (the overall ratio steering wheel : road wheel; a rally car's
+# typical 12-15, 13 as the default; where a game gives lock and wheel rotation the ratio is their quotient).
+# Power assist is a boost curve: the driver's torque T_d and the column torque are related by
+#     T_c = T_d + A(T_d, v),   A = k(v) * T_d^2 / (T0 + T_d)          (T_d >= 0, odd in the sign)
+# The assist share of the column torque grows with T_d (a hydraulic valve / EPS map is near-zero boost around the
+# centre, then ramps up with the torsion-bar torque), so the driver feels a stiffness of about 1 / (1 + k) of the
+# rack's: the usual "boost curve" shape of HPS / EPS (e.g. Bosch / ZF EPS characteristic maps, parametrised by
+# driver torque and vehicle speed; here a smooth analytic form, assumed - no car's real map is known). k(v) falls
+# with speed (heavy assist parked, light on the road). Parameters are fitted so that marth's ACR dump (front
+# torque / 13: p50 6.5 Nm, p90 22 Nm, p99 43 Nm at speed) gives about 0.5-1 Nm at the rim for an easy corner and
+# 2-3 Nm near the grip limit, the range a driver reports from a real power-steered car.
+# The map T_d -> T_c is monotone, so it inverts exactly (a quadratic in T_d, solved in closed form).
+STEER_RATIO = 13.0
+BOOST_T0 = 0.5                           # Nm: the driver torque where the boost reaches half of its slope
+BOOST_K_PARK = 40.0                      # boost slope k when parked ...
+BOOST_K_ROAD = 15.0                      # ... falling to this at speed
+BOOST_V0 = 8.0                           # m/s: the speed scale of that fall: k = ROAD + (PARK - ROAD) / (1 + (v/V0)^2)
 P99_RANGE = (5.0, 4000.0)                # Nm: the front steering torque's p99 kept per car
 SAVE_P99_STEP = 0.03                     # a p99 moved this share from what was saved is worth saving
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
@@ -44,8 +62,9 @@ MIN_A = 0.05                             # share of the strength hint: a fit wit
 
 class Store:
     """{car: (trail, scrub)} in a JSON file in the data folder; read once, written atomically. Per car it also keeps
-    the learnt p99 of the front steering torque (Nm, `p99`) and the steering ratio and assist share the rim
-    torque is worked out with (`ratio`, `assist`; absent = RackForce's defaults, set_rack() for a refined one)."""
+    the learnt p99 of the front steering torque (Nm, `p99`, a diagnostic) and the steering ratio and power-assist
+    class the rim torque is worked out with (`ratio`, `assist`: 1.0 = a road / rally car's power steering, 0.0 =
+    unassisted; absent = the defaults below, set_rack() for a refined one)."""
 
     def __init__(self):
         self.path = None                 # None: the data folder's file
@@ -77,7 +96,7 @@ class Store:
                             self._p99[car] = float(p99)
                         ratio, assist = v.get('ratio'), v.get('assist')
                         if isinstance(ratio, (int, float)) and isinstance(assist, (int, float)) \
-                                and 3.0 <= ratio <= 40.0 and 0.0 <= assist < 1.0:
+                                and 3.0 <= ratio <= 40.0 and 0.0 <= assist <= 2.0:
                             self._rack[car] = (float(ratio), float(assist))
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 pass
@@ -102,7 +121,7 @@ class Store:
             return self._p99.get(car)
 
     def get_rack(self, car):
-        """(steering ratio, assist share) kept for the car, None for the defaults."""
+        """(steering ratio, assist class) kept for the car, None for the defaults."""
         with self._lock:
             self._load()
             return self._rack.get(car)
@@ -164,6 +183,28 @@ class Store:
 
 
 STORE = Store()
+
+
+def boost_k(speed, assist=1.0):
+    """The boost curve's slope k at `speed` (m/s) for an assist class (1.0 road / rally, 0.0 unassisted)."""
+    v = abs(speed) if speed is not None and math.isfinite(speed) else 0.0
+    return assist * (BOOST_K_ROAD + (BOOST_K_PARK - BOOST_K_ROAD) / (1.0 + (v / BOOST_V0) ** 2))
+
+
+def column_from_driver(driver, speed, assist=1.0):
+    """The column torque (signed, Nm) that a driver torque `driver` balances: T_d + k T_d^2 / (T0 + |T_d|)."""
+    mag = abs(driver)
+    return math.copysign(mag + boost_k(speed, assist) * mag * mag / (BOOST_T0 + mag), driver)
+
+
+def driver_from_column(column, speed, assist=1.0):
+    """The driver's torque at the rim (signed, Nm) for a column torque, the exact inverse of column_from_driver:
+    (1 + k) T_d^2 + (T0 - T_c) T_d - T_c T0 = 0, the positive root. Unassisted (k = 0): the column torque."""
+    mag = abs(column)
+    k = boost_k(speed, assist)
+    b = mag - BOOST_T0
+    d = (b + math.sqrt(b * b + 4.0 * (1.0 + k) * mag * BOOST_T0)) / (2.0 * (1.0 + k))
+    return math.copysign(d, column)
 
 
 class Quantile:

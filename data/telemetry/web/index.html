@@ -2728,7 +2728,7 @@ function buildFfb() {
   const cs = mkPanel(a, "Countersteer FFB");
   cs.appendChild(reg(mkCsStatus()));
   cs.appendChild(reg(T("Countersteer FFB", "Our own steering force from the game's telemetry; it takes over only while the light is green.", "countersteer_ffb")));
-  cs.appendChild(reg(S("Steering strength", percent, "% of the car's real steering torque, limited by the wheel. Independent of the global gain and of the game's FFB setting; 100 % puts hard cornering at about 70 % of the wheel. Lower it if the wheel feels heavy or runs warm.", "countersteer_strength")));
+  cs.appendChild(reg(S("Steering strength", percent, "100 % = the car's real steering torque at the rim, played 1:1 on the wheel's peak and softly limited to leave a quarter of its range for texture and impacts. Independent of the global gain and of the game's FFB setting. Lower it if the wheel feels heavy or runs warm.", "countersteer_strength")));
   cs.appendChild(reg(S("Texture", percent, "Small vibrations on top of the steering force.", "countersteer_texture")));
   for (const [part, label] of [["road", "Road"], ["impact", "Landings"], ["lock", "Front lock"], ["engine", "Engine"]])
     cs.appendChild(reg(T("Texture: " + label, null, "countersteer_texture_" + part)));
