@@ -1188,14 +1188,65 @@ class GtkUi:
         self.countersteer_light.connect('map', self._start_countersteer_poll)
         self._countersteer_shown = ('off', '')
         self.countersteer_status = self._status_label()
+        def switched(state):
+            self._show_countersteer_texture(state)
+            self.controller.model.set_countersteer_ffb(state)
         row, self.countersteer_switch = self._switch_row(
-            _("Countersteer FFB"), _(self.COUNTERSTEER_TOOLTIP),
-            lambda state: self.controller.model.set_countersteer_ffb(state),
+            _("Countersteer FFB"), _(self.COUNTERSTEER_TOOLTIP), switched,
             status=self.countersteer_status, extra=(self.countersteer_light,))
         self.countersteer_switch.set_sensitive(False)
         anchor.get_parent().insert(row, anchor.get_index() + 1)
         row.show_all()
         self._countersteer_polling = False
+        self._build_countersteer_texture(row)
+
+    COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
+                                    "it: road texture from the front suspension, a jolt on landings and hits, and a "
+                                    "buzz while the front wheels lock under braking. Kept very low on purpose: at "
+                                    "100 % they still stay under 8 % of the wheel's full force. Assetto Corsa Rally "
+                                    "only for now. Saved with the profile.")
+    COUNTERSTEER_TEXTURE_PARTS = (('road', "Road"), ('impact', "Landings"), ('lock', "Front lock"))
+
+    def _build_countersteer_texture(self, anchor):
+        """The texture's rows under the Countersteer FFB row (shown while it is on):
+        the master level and a check box per part."""
+        scale = self._response_scale(0, 100, 10)
+        scale.set_size_request(160, -1)
+        scale.connect('value-changed', lambda w: self.controller.model.set_countersteer_texture(int(w.get_value())))
+        self.countersteer_texture = scale
+        level = self._setting_row(_("Texture"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP),
+                                  (self._response_row(scale),))
+        boxes = []
+        self.countersteer_texture_parts = {}
+        for part, label in self.COUNTERSTEER_TEXTURE_PARTS:
+            box = Gtk.CheckButton(label=_(label))
+            box.connect('toggled', lambda w, part=part:
+                        self.controller.model.set_countersteer_texture_part(part, w.get_active()))
+            self.countersteer_texture_parts[part] = box
+            boxes.append(box)
+        parts = self._setting_row(_("Texture parts"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP), tuple(boxes))
+        parent = anchor.get_parent()
+        self.countersteer_texture_rows = (level, parts)
+        for i, row in enumerate(self.countersteer_texture_rows):
+            parent.insert(row, anchor.get_index() + 1 + i)
+            row.show_all()
+            row.set_no_show_all(True)
+            row.set_visible(False)
+
+    def _show_countersteer_texture(self, on):
+        for row in getattr(self, 'countersteer_texture_rows', ()):
+            row.set_visible(bool(on))
+
+    def set_countersteer_texture(self, level, parts):
+        """The texture's level (0..100, None where the driver has no replace mode) and parts."""
+        if not hasattr(self, 'countersteer_texture'):
+            return
+        if level is not None and int(self.countersteer_texture.get_value()) != int(level):
+            self.countersteer_texture.set_value(int(level))
+        for part, box in self.countersteer_texture_parts.items():
+            value = parts.get(part)
+            if value is not None and box.get_active() != bool(value):
+                box.set_active(bool(value))
 
     def set_countersteer_ffb(self, value):
         """The switch: None where the driver has no replace mode (insensitive, the tooltip says why)."""
@@ -1206,6 +1257,7 @@ class GtkUi:
         switch.set_tooltip_text(_(self.COUNTERSTEER_NO_DRIVER) if value is None else None)
         if value is not None and switch.get_active() != bool(value):
             switch.set_active(bool(value))
+        self._show_countersteer_texture(bool(value))
 
     def _start_countersteer_poll(self, *args):
         if not self._countersteer_polling:

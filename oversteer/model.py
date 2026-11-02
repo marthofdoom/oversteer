@@ -67,6 +67,10 @@ class Model:
         'profile_note': None,
         'apply_on_plug': None,
         'countersteer_ffb': None,
+        'countersteer_texture': None,
+        'countersteer_texture_road': None,
+        'countersteer_texture_impact': None,
+        'countersteer_texture_lock': None,
     }
 
     types = {
@@ -105,6 +109,10 @@ class Model:
         'profile_note': 'string',
         'apply_on_plug': 'boolean',
         'countersteer_ffb': 'boolean',
+        'countersteer_texture': 'integer',
+        'countersteer_texture_road': 'boolean',
+        'countersteer_texture_impact': 'boolean',
+        'countersteer_texture_lock': 'boolean',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -195,7 +203,19 @@ class Model:
             'apply_on_plug': False,
             # Countersteer FFB, a feel preference kept per profile; None where the driver has no replace mode
             'countersteer_ffb': False if self.device.get_ext_force_support() else None,
+            # Its texture (ffb_texture): the master level in %, and each part on or off
+            **self._texture_defaults(self.device.get_ext_force_support()),
         }
+
+    TEXTURE_PARTS = ('road', 'impact', 'lock')
+
+    @classmethod
+    def _texture_defaults(cls, supported):
+        from .ffb_texture import LEVEL
+        data = {'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
+        for part in cls.TEXTURE_PARTS:
+            data['countersteer_texture_' + part] = True if supported else None
+        return data
 
     def pedal_bit(self, name):
         """The invert_pedals bit (also the driver's pedal_response_* key) of
@@ -349,6 +369,13 @@ class Model:
         # A profile from before Countersteer FFB: off (kept None where the driver has no replace mode)
         if data['countersteer_ffb'] is None:
             data['countersteer_ffb'] = None if self.data.get('countersteer_ffb') is None else False
+        # ... or from before its texture: the defaults
+        texture = self._texture_defaults(self.data.get('countersteer_ffb') is not None)
+        for key, value in texture.items():
+            if data[key] is None:
+                data[key] = value
+        if data['countersteer_texture'] is not None:
+            data['countersteer_texture'] = min(max(data['countersteer_texture'], 0), 100)
 
         self.data = data
         self.save_reference_values()
@@ -609,6 +636,23 @@ class Model:
     def get_countersteer_ffb(self):
         return bool(self.data['countersteer_ffb'])
 
+    def set_countersteer_texture(self, value):
+        """The texture's master level, 0..100 %."""
+        value = min(max(int(value), 0), 100)
+        if self.set_if_changed('countersteer_texture', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_texture()
+
+    def set_countersteer_texture_part(self, part, value):
+        if self.set_if_changed('countersteer_texture_' + part, bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_texture()
+
+    def get_countersteer_texture(self):
+        """(level 0..1, {part: on}) for the engine."""
+        from .ffb_texture import LEVEL
+        level = self.data['countersteer_texture']
+        parts = {part: self.data['countersteer_texture_' + part] is not False for part in self.TEXTURE_PARTS}
+        return (LEVEL if level is None else level / 100.0), parts
+
     def set_rev_leds(self, value):
         value = bool(value)
         if self.set_if_changed('rev_leds', value) and self.ui is not None:
@@ -851,6 +895,8 @@ class Model:
         self.ui.set_profile_note(data['profile_note'])
         self.ui.set_apply_on_plug(data['apply_on_plug'])
         self.ui.set_countersteer_ffb(data['countersteer_ffb'])
+        self.ui.set_countersteer_texture(data['countersteer_texture'],
+                                         {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()

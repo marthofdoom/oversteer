@@ -1,0 +1,446 @@
+"""Countersteer FFB texture (oversteer/ffb_texture.py) and its mix into the engine's replace path: zero mean,
+the caps under any input, the steering force bit for bit when off, the band-pass on the suspension, the lock
+cue only braking with the fronts locked, the landing pulse, and the engine's fade gain over it. Nothing here
+touches a real wheel or /sys."""
+import math
+import random
+
+import pytest
+
+from oversteer import ffb_engine as fe, ffb_texture as ft
+from oversteer.telemetry_formats import Sample
+from tests.test_ffb_engine import FakeDriver, _clean_log, acr, engine_on, forces, game_raw, upload  # noqa: F401
+
+HZ = 333.0
+DT = 1.0 / HZ
+FULL = ft.FULL
+UP = (0.0, 1.0, 0.0)
+
+
+def car(speed=20.0, susp=(0.1, 0.1, 0.1, 0.1), load=(3000.0, 3000.0, 2500.0, 2500.0), normal=UP, brake=0.0,
+        rot=None, game='acr', vel=True):
+    s = Sample(6000.0, 7500.0, gear=3, speed=speed, car='acr/Skoda Fabia RS Rally2', game=game, brake=brake)
+    s.susp, s.tyre_load = susp, load
+    s.contact_normal = None if normal is None else (normal, normal, UP, UP)
+    radius = 0.32
+    s.wheel_rot = rot if rot is not None else (speed / radius,) * 4
+    s.vel = (speed, 0.0, 0.0) if vel else None
+    return s
+
+
+def texture(level=1.0, **parts):
+    tx = ft.Texture()
+    tx.set(level, {name: parts.get(name, False) for name in ft.PARTS})
+    return tx
+
+
+def drive(tx, samples, steering=8000.0, t0=0.0):
+    """Texture values for (sample) at 333 Hz, from t0."""
+    out = []
+    for i, s in enumerate(samples):
+        out.append(tx.force(t0 + i * DT, s, steering))
+    return out
+
+
+def rough(seconds, seed=1, amp=0.002, roll=0.0, roll_hz=1.0):
+    """Gravel: independent random bumps under each front wheel (amp m per step, smoothed a little) and, if
+    asked, body roll of `roll` m at roll_hz."""
+    rnd = random.Random(seed)
+    fl = fr = 0.0
+    out = []
+    for i in range(int(seconds * HZ)):
+        t = i * DT
+        fl = 0.7 * fl + rnd.gauss(0.0, amp)
+        fr = 0.7 * fr + rnd.gauss(0.0, amp)
+        body = roll * math.sin(2 * math.pi * roll_hz * t)
+        out.append(car(susp=(0.1 + fl + body, 0.1 + fr - body, 0.1, 0.1)))
+    return out
+
+
+def mean_rms(values):
+    mean = sum(values) / len(values)
+    rms = math.sqrt(sum(v * v for v in values) / len(values))
+    return mean, rms
+
+
+# -- the parts --
+
+def test_road_texture_averages_to_zero_and_stays_under_its_cap():
+    tx = texture(road=True)
+    out = drive(tx, rough(20.0))
+    mean, rms = mean_rms(out[int(HZ):])
+    assert rms > 0.004 * FULL                          # there is texture ...
+    assert abs(mean) < 0.02 * rms                      # ... and it never pulls
+    assert max(abs(v) for v in out) <= ft.TOTAL_CAP * FULL
+    road = ft.RoadTexture()
+    assert max(abs(road.step(DT, x)) for x in rough(5.0, amp=0.05)) <= ft.RoadTexture.CAP * FULL
+
+
+def kerb(seconds, hz=12.0, depth=0.03):
+    """A kerb's sawtooth under FL only: pushed up quickly (20 % of the period), let down slowly."""
+    out = []
+    for i in range(int(seconds * HZ)):
+        phase = (i * DT * hz) % 1.0
+        up = phase / 0.2 if phase < 0.2 else 1.0 - (phase - 0.2) / 0.8
+        out.append(car(susp=(0.1 + depth * up, 0.1, 0.1, 0.1)))
+    return out
+
+
+def test_a_lopsided_input_never_pulls():
+    """The road part alone (tanh after the band-pass) turns the sawtooth into a steady pull; the sum's DC
+    blocker takes it out."""
+    road = ft.RoadTexture()
+    raw = [road.step(DT, x) for x in kerb(6.0)][int(HZ):]
+    raw_mean, raw_rms = mean_rms(raw)
+    assert abs(raw_mean) > 0.05 * raw_rms                       # the pull is there before the blocker
+    out = drive(texture(1.0, road=True), kerb(6.0))[int(2 * HZ):]
+    mean, rms = mean_rms(out)
+    assert rms > 0.002 * FULL
+    assert abs(mean) < 0.01 * rms and abs(mean) < 0.0005 * FULL
+
+
+def test_it_stays_within_the_headroom_left_by_the_steering_force():
+    for steering in (32767.0, 32500.0, -32700.0):
+        out = drive(texture(1.0, road=True, impact=True, lock=True), rough(3.0, amp=0.02), steering=steering)
+        assert max(abs(v) for v in out) <= 32767.0 - abs(steering) + 1e-6
+    assert all(v == 0.0 for v in drive(texture(1.0, road=True), rough(1.0, amp=0.02), steering=32767.0))
+
+
+def test_a_new_car_starts_the_impact_mean_again():
+    impact = ft.ImpactPulse()
+    for _ in range(int(HZ)):
+        impact.step(DT, car(load=(9000.0, 9000.0, 0.0, 0.0)))
+    s = car(load=(2000.0, 2000.0, 0.0, 0.0))
+    s.car = 'acr/Another'
+    impact.step(DT, s)
+    assert impact._mean == pytest.approx(4000.0)
+
+
+def test_the_high_pass_removes_slow_suspension_motion():
+    """Body roll at 1.5 Hz (5 cm each way, far more travel than any bump) against a 20 Hz bump of the same
+    velocity: the roll is 20+ dB down."""
+    def response(hz, amp):
+        road = ft.RoadTexture()
+        samples = [car(susp=(0.1 + amp * math.sin(2 * math.pi * hz * i * DT), 0.1, 0.1, 0.1))
+                   for i in range(int(4 * HZ))]
+        values = [road.step(DT, s) for s in samples]
+        return max(abs(v) for v in values[int(2 * HZ):])
+    slow = response(1.5, 0.05)
+    fast = response(20.0, 0.05 * 1.5 / 20.0)            # the same peak velocity
+    assert fast > 0.1 * ft.RoadTexture.CAP * FULL
+    assert slow < 0.1 * fast
+    # Both wheels moving together (heave, a symmetric bump) does not steer
+    road = ft.RoadTexture()
+    heave = [road.step(DT, car(susp=(0.1 + 0.01 * math.sin(2 * math.pi * 20 * i * DT),) * 2 + (0.1, 0.1)))
+             for i in range(int(HZ))]
+    assert max(abs(v) for v in heave) == 0.0
+
+
+def test_a_suspension_reset_or_nan_never_spikes_it():
+    road = ft.RoadTexture()
+    values = [road.step(DT, car(susp=(0.1, 0.1, 0.1, 0.1))) for _ in range(50)]
+    values.append(road.step(DT, car(susp=(30.0, -30.0, 0.1, 0.1))))       # a teleport: 18000 m/s
+    values.append(road.step(DT, car(susp=(float('nan'), 0.1, 0.1, 0.1))))
+    values.append(road.step(DT, car(susp=None)))
+    values += [road.step(DT, car(susp=(0.1, 0.1, 0.1, 0.1))) for _ in range(50)]
+    assert all(math.isfinite(v) and abs(v) <= ft.RoadTexture.CAP * FULL for v in values)
+
+
+def landing(t_air=0.3, t_land=1.0, seconds=2.0, left=6000.0, right=6000.0, normal_step=False):
+    """Rolling, airborne (no front load) from t_air to t_land, then down hard (loads to left/right)."""
+    out = []
+    for i in range(int(seconds * HZ)):
+        t = i * DT
+        if t < t_air:
+            load, normal = (3000.0, 3000.0, 2500.0, 2500.0), UP
+        elif t < t_land:
+            load, normal = (0.0, 0.0, 0.0, 0.0), UP
+        else:
+            k = min((t - t_land) / 0.02, 1.0)
+            load = (k * left, k * right, 2500.0, 2500.0)
+            normal = UP
+        out.append(car(load=load, normal=normal))
+    return out
+
+
+def test_a_landing_gives_one_zero_area_pulse():
+    impact = ft.ImpactPulse()
+    values = [impact.step(DT, s) for s in landing()]
+    assert impact.count == 1
+    assert max(abs(v) for v in values) <= ft.ImpactPulse.CAP * FULL
+    assert max(abs(v) for v in values) > 0.25 * ft.ImpactPulse.CAP * FULL
+    # Zero area: the pulse's sum is a small part of its size times its length
+    area = sum(values) * DT
+    assert abs(area) < 0.01 * max(abs(v) for v in values) * ft.ImpactPulse.LENGTH
+    # Starts from nothing (no step)
+    start = next(i for i, v in enumerate(values) if v != 0.0)
+    assert abs(values[start]) < 0.2 * max(abs(v) for v in values)
+    # The wheel that came down harder sets its direction
+    a = ft.ImpactPulse()
+    b = ft.ImpactPulse()
+    va = [a.step(DT, s) for s in landing(left=9000.0, right=4000.0)]
+    vb = [b.step(DT, s) for s in landing(left=4000.0, right=9000.0)]
+    assert next(v for v in va if abs(v) > 50) == pytest.approx(-next(v for v in vb if abs(v) > 50))
+
+
+def test_ordinary_bumps_do_not_jolt_and_pulses_are_rate_limited():
+    impact = ft.ImpactPulse()
+    # The front load x4 every 0.1 s, never off the ground, the road flat: no pulse
+    for i in range(int(3 * HZ)):
+        k = 1.0 + 3.0 * ((i // 33) % 2)
+        impact.step(DT, car(load=(3000.0 * k, 3000.0 * k, 2500.0, 2500.0)))
+    assert impact.count == 0
+    # The same with the contact normals stepping 15+ degrees (a ledge): one pulse per HOLD at most
+    impact = ft.ImpactPulse()
+    tilted = (0.0, math.cos(0.3), math.sin(0.3))
+    for i in range(int(3 * HZ)):
+        k = 1.0 + 3.0 * ((i // 33) % 2)
+        impact.step(DT, car(load=(3000.0 * k, 3000.0 * k, 2500.0, 2500.0), normal=tilted if k > 1 else UP))
+    assert 1 <= impact.count <= int(3.0 / ft.ImpactPulse.HOLD) + 1
+
+
+def rolling(seconds=2.0, speed=25.0):
+    return [car(speed=speed) for _ in range(int(seconds * HZ))]
+
+
+def locking(seconds=1.0, speed=25.0, brake=0.8, rot_share=0.1):
+    rot = (rot_share * speed / 0.32,) * 2 + (speed / 0.32,) * 2
+    return [car(speed=speed, brake=brake, rot=rot) for _ in range(int(seconds * HZ))]
+
+
+def test_the_lock_cue_only_braking_with_the_fronts_locked():
+    lock = ft.LockCue()
+    [lock.step(DT, s) for s in rolling()]                   # it learns the radius rolling free
+    assert lock.radius == pytest.approx(0.32, rel=0.01)
+    on = [lock.step(DT, s) for s in locking()]
+    assert max(abs(v) for v in on) > 0.5 * ft.LockCue.CAP * FULL
+    assert max(abs(v) for v in on) <= ft.LockCue.CAP * FULL
+    mean, rms = mean_rms(on[int(0.2 * HZ):])
+    assert abs(mean) < 0.05 * rms
+    # About 40 Hz: sign changes per second
+    flips = sum(1 for a, b in zip(on, on[1:]) if a * b < 0)
+    assert 70 <= flips <= 90
+    # Locked but off the brake (a jump, the handbrake): nothing
+    off = [lock.step(DT, s) for s in locking(brake=0.0)]
+    assert max(abs(v) for v in off[int(0.5 * HZ):]) == 0.0
+    # Braking but rolling (under the slip threshold): nothing
+    rolling_brake = [lock.step(DT, s) for s in locking(rot_share=0.85)]
+    assert max(abs(v) for v in rolling_brake[int(0.3 * HZ):]) == 0.0
+    # Slow: nothing
+    slow = [lock.step(DT, s) for s in locking(speed=3.0)]
+    assert max(abs(v) for v in slow[int(0.3 * HZ):]) == 0.0
+
+
+def test_the_lock_cue_eases_in_and_out():
+    lock = ft.LockCue()
+    [lock.step(DT, s) for s in rolling()]
+    on = [lock.step(DT, s) for s in locking(seconds=0.5)]
+    assert abs(on[0]) < 0.2 * ft.LockCue.CAP * FULL
+    off = [lock.step(DT, s) for s in rolling(0.5)]
+    assert abs(off[0]) <= max(abs(v) for v in on[-10:]) + 1.0
+    assert off[-1] == 0.0
+
+
+def test_the_lock_cue_falls_back_on_the_games_slip_ratio_and_the_wheel_speed():
+    lock = ft.LockCue()
+    s = car(brake=0.9)
+    s.wheel_rot = None
+    s.tyre_slip_ratio = (-0.9, -0.85, 0.0, 0.0)
+    assert lock.target(s) > 0.5
+    s = car(brake=0.9)
+    s.wheel_speed = (2.0, 2.0, 20.0, 20.0)
+    assert lock.target(s) > 0.5
+
+
+# -- all of it --
+
+def test_off_is_exactly_zero_and_other_games_get_none():
+    tx = texture(0.0, road=True, impact=True, lock=True)
+    assert all(v == 0.0 for v in drive(tx, rough(1.0)))
+    tx = texture(1.0)                                   # every part off
+    assert all(v == 0.0 for v in drive(tx, rough(1.0)))
+    tx = texture(1.0, road=True, impact=True, lock=True)
+    assert all(v == 0.0 for v in drive(tx, [car(susp=s.susp, game='acc') for s in rough(1.0)]))
+    assert ft.TEXTURE_GAMES == ('acr',)
+
+
+def chaos(seconds=5.0, seed=7):
+    rnd = random.Random(seed)
+    nan = float('nan')
+    pick = lambda *values: rnd.choice(values)
+    out = []
+    for _ in range(int(seconds * HZ)):
+        s = car(speed=pick(25.0, 25.0, nan, 1e9, -5.0),
+                susp=pick((rnd.uniform(-1e6, 1e6), rnd.uniform(-1e6, 1e6), 0.1, 0.1), (nan, 0.1, 0.1, 0.1),
+                          None, (0.1 + rnd.gauss(0, 0.01), 0.1 + rnd.gauss(0, 0.01), 0.1, 0.1)),
+                load=pick((rnd.uniform(0, 1e9), rnd.uniform(0, 1e9), 0.0, 0.0), (nan, nan, nan, nan), None,
+                          (0.0, 0.0, 0.0, 0.0), (20000.0, 20000.0, 0.0, 0.0)),
+                normal=pick(UP, (nan, 1.0, 0.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), None),
+                brake=pick(0.0, 1.0, nan, None, 1e6),
+                rot=pick((0.0, 0.0, 80.0, 80.0), (nan, nan, nan, nan), (1e9, -1e9, 0.0, 0.0), None))
+        s.tyre_slip_ratio = pick(None, (nan, 1e9, 0, 0), (-1.0, -1.0, 0.0, 0.0))
+        out.append(s)
+    return out
+
+
+@pytest.mark.parametrize('steering', [0.0, 300.0, 4000.0, 32767.0, float('nan'), 1e12])
+def test_the_caps_hold_under_any_input(steering):
+    tx = texture(1.0, road=True, impact=True, lock=True)
+    values = drive(tx, chaos(), steering=steering)
+    s = 0.0 if not math.isfinite(steering) else abs(steering)
+    limit = min(ft.TOTAL_CAP * FULL, ft.STEER_SHARE * s + ft.FLOOR * FULL)
+    assert all(math.isfinite(v) for v in values)
+    assert max(abs(v) for v in values) <= limit + 1e-9
+
+
+def test_the_level_scales_it_and_the_steering_force_bounds_it():
+    full = drive(texture(1.0, road=True, impact=True, lock=True), rough(5.0, amp=0.02), steering=32767.0)
+    low = drive(texture(0.3, road=True, impact=True, lock=True), rough(5.0, amp=0.02), steering=32767.0)
+    assert max(abs(v) for v in full) <= ft.TOTAL_CAP * FULL
+    assert max(abs(v) for v in low) <= 0.3 * ft.TOTAL_CAP * FULL + 1e-9
+    assert max(abs(v) for v in low) == pytest.approx(0.3 * max(abs(v) for v in full), rel=0.05)
+    centred = drive(texture(1.0, road=True), rough(5.0, amp=0.02), steering=0.0)
+    assert max(abs(v) for v in centred) <= ft.FLOOR * FULL + 1e-6
+
+
+def test_it_ramps_in_after_a_start_or_a_gap_and_slews_with_the_level():
+    tx = texture(1.0, road=True)
+    samples = rough(3.0, amp=0.02)
+    out = drive(tx, samples)
+    peak = max(abs(v) for v in out[int(HZ):])
+    assert max(abs(v) for v in out[:int(0.05 * HZ)]) < 0.3 * peak       # no step at the start
+    # A gap (the engine stopped): it starts again from nothing
+    again = drive(tx, samples[:int(0.05 * HZ)], t0=10.0)
+    assert max(abs(v) for v in again) < 0.3 * peak
+    # The level dropped to 0: it slews down over SLEW, not at once
+    tx = texture(1.0, road=True)
+    drive(tx, samples[:int(2 * HZ)])
+    tx.set(0.0)
+    down = drive(tx, samples[int(2 * HZ):], t0=2 * HZ * DT)
+    assert max(abs(v) for v in down[:int(0.05 * HZ)]) > 0.0
+    assert all(v == 0.0 for v in down[int(1.1 * ft.SLEW * HZ):])
+
+
+def test_everything_together_has_no_dc():
+    tx = texture(1.0, road=True, impact=True, lock=True)
+    samples = rough(5.0, amp=0.01) + rolling(1.0) + locking(1.0) + landing() + rough(5.0, seed=3, amp=0.01)
+    out = drive(tx, samples)
+    mean, rms = mean_rms(out)
+    assert rms > 0.0
+    assert abs(mean) < 0.03 * rms
+
+
+# -- in the engine --
+
+def acr_rough(t, rnd, **kw):
+    s = acr(t, **kw)
+    if s.packet_id is not None:
+        s.susp = (0.1 + rnd.gauss(0, 0.004), 0.1 + rnd.gauss(0, 0.004), 0.1, 0.1)
+        s.tyre_load = (3000.0, 3000.0, 2500.0, 2500.0)
+        s.wheel_rot = (20.0 / 0.32,) * 4
+        s.vel = (20.0, 0.0, 0.0)
+        s.brake = 0.0
+    return s
+
+
+def feed(engine, t0, seconds, rnd, **kw):
+    t = t0
+    for _ in range(int(round(seconds * HZ))):
+        s = acr_rough(t, rnd, **kw)
+        if s.game_ffb is not None:
+            upload(game_raw(s))
+        engine.offer(t, s)
+        engine.step(t)
+        t += DT
+    return t
+
+
+def _original_play(self, t, sample):
+    """FfbEngine._play before the texture (master e87ab6d), to check it bit for bit."""
+    g = self._gain(t)
+    value = int(round(self.model.force(sample) * g))
+    self._driver.force(value)
+    self.writes += 1
+    self._last_value = value
+    if self._phase == 'out' and g <= 0.0:
+        self._phase = 'idle'
+        self._let_go()
+
+
+def run_engine(tmp_path, name, level, play=None, off_at=None, monkeypatch=None):
+    engine, path = engine_on(tmp_path / name)
+    if play is not None:
+        monkeypatch.setattr(engine, '_play', play.__get__(engine))
+    engine.set_texture(level, dict.fromkeys(ft.PARTS, True))
+    start = len(forces())
+    rnd = random.Random(5)
+    t = feed(engine, 0.0, 8.0, rnd)
+    assert engine.status.active
+    if off_at is not None:
+        engine.set_enabled(False)
+    feed(engine, t, 1.0, rnd)
+    return forces()[start:]
+
+
+def test_texture_off_is_the_steering_force_bit_for_bit(tmp_path, monkeypatch):
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'b').mkdir()
+    (tmp_path / 'c').mkdir()
+    off = run_engine(tmp_path, 'a', 0.0)
+    before = run_engine(tmp_path, 'b', 1.0, play=_original_play, monkeypatch=monkeypatch)
+    assert off == before and len(off) > 1000
+    on = run_engine(tmp_path, 'c', 1.0)
+    assert len(on) == len(off) and on != off
+    diff = [a - b for a, b in zip(on, off)]
+    assert max(abs(d) for d in diff) <= ft.TOTAL_CAP * FULL + 1
+
+
+def test_the_fade_gain_applies_to_the_texture(tmp_path):
+    (tmp_path / 'a').mkdir()
+    (tmp_path / 'b').mkdir()
+    with_tx = run_engine(tmp_path, 'a', 1.0, off_at=True)
+    without = run_engine(tmp_path, 'b', 0.0, off_at=True)
+    first_on = next(i for i, v in enumerate(without) if v != 0)
+    # Fading in: the texture is scaled by the same gain (tiny at the start, like the steering force)
+    early = [abs(a - b) for a, b in zip(with_tx[first_on:first_on + 5], without[first_on:first_on + 5])]
+    assert max(early) < 0.05 * ft.TOTAL_CAP * FULL
+    # Faded out: the last write is 0 with the texture on too
+    assert with_tx[-1] == 0 and without[-1] == 0
+
+
+def test_the_engine_takes_the_texture_settings_on_its_thread(tmp_path):
+    engine, path = engine_on(tmp_path)
+    engine.set_texture(0.5, {'road': True, 'impact': False, 'lock': True})
+    assert engine.texture.level == ft.LEVEL                 # not before its step
+    engine.step(0.0)
+    assert engine.texture.level == 0.5 and engine.texture.parts == {'road': True, 'impact': False, 'lock': True}
+    assert engine.texture.describe() == '50 % (road, lock)'
+    # Applied once per request; a request made after it is taken, not lost
+    engine.texture.set(0.9)
+    engine.step(0.01)
+    assert engine.texture.level == 0.9
+    engine.set_texture(0.2, {'road': True, 'impact': True, 'lock': True})
+    engine.set_texture(0.4, {'road': True, 'impact': True, 'lock': True})
+    engine.step(0.02)
+    assert engine.texture.level == 0.4
+
+
+def test_profiles_keep_the_texture(tmp_path):
+    from oversteer.model import Model
+    from tests.fake_wheel import FakeDevice
+    device = FakeDevice(ext_force_support=True)
+    model = Model(device, None)
+    assert model.data['countersteer_texture'] == 30
+    assert model.get_countersteer_texture() == (0.3, {'road': True, 'impact': True, 'lock': True})
+    model.data['countersteer_texture'] = 55
+    model.data['countersteer_texture_impact'] = False
+    profile = str(tmp_path / 'p.ini')
+    model.save(profile)
+    fresh = Model(device, None)
+    fresh.load(profile)
+    assert fresh.get_countersteer_texture() == (0.55, {'road': True, 'impact': False, 'lock': True})
+    (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\n')
+    fresh.load(str(tmp_path / 'old.ini'))
+    assert fresh.data['countersteer_texture'] == 30 and fresh.data['countersteer_texture_lock'] is True
+    none = Model(FakeDevice(), None)
+    assert none.data['countersteer_texture'] is None

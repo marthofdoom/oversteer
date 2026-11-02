@@ -612,6 +612,7 @@ class Gui:
         or stopped where only the switch needs it."""
         from .telemetry import NoLeds
         wanted = self._countersteer_wanted()
+        self.apply_countersteer_texture()
         self.ffb_engine.set_enabled(wanted)
         telemetry = self.telemetry
         if wanted and telemetry is None:
@@ -619,6 +620,10 @@ class Gui:
         elif not wanted and telemetry is not None and isinstance(telemetry.leds, NoLeds) \
                 and not self.telemetry_learn and not self._forward_targets:
             self.apply_rev_leds()           # it ran for the switch alone
+
+    def apply_countersteer_texture(self):
+        """The texture's level and parts (FFB tab, under the Countersteer switch) to the engine."""
+        self.ffb_engine.set_texture(*self.model.get_countersteer_texture())
 
     def _countersteer_wanted(self):
         return self.device is not None and self.model.get_device() is self.device \
@@ -1547,6 +1552,7 @@ class Gui:
         self.model.flush_ui()
         self.update_pedals()
         self.update_learner_directory()
+        self.apply_countersteer_texture()
         self.ffb_engine.set_enabled(self._countersteer_wanted())
         self.apply_rev_leds()
         self._remember_profile(profile_name)
