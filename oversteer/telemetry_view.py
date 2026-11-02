@@ -487,10 +487,12 @@ def web_status(running, error, addresses, remote_seen, bind, port, control=False
     return '\n'.join(lines)
 
 
-def capture_status(on, listening, folder, summary, cap_gb, error=None, dropped=0):
+def capture_status(on, listening, folder, summary, cap_gb, error=None, dropped=0, ffb=False, tuning=()):
     """The line under "Record raw telemetry": where the captures go and
     how much they take, or why nothing is being recorded. `summary` is
-    telemetry_capture.capture_summary() of the folder."""
+    telemetry_capture.capture_summary() of the folder. `ffb`: True while
+    "Record for FFB tuning" is on, 'time' or 'size' once it ended by itself.
+    `tuning`: [(path, bytes)] of the captures recorded for it, apart from the others."""
     count, size, labelled = summary
     if not count:
         kept = _("no captures yet")
@@ -499,6 +501,9 @@ def capture_status(on, listening, folder, summary, cap_gb, error=None, dropped=0
             _(", {:.0f} MB of {} GB").format(size / 1e6, cap_gb)
     if labelled:
         kept += _(", {} labelled").format(labelled)
+    if tuning:
+        kept += _("; {} FFB tuning captures ({:.0f} MB) kept apart, delete them by hand").format(
+            len(tuning), sum(size for _p, size in tuning) / 1e6)
     if error:
         return _("Recording stopped: {}. Turn it off and on again to retry.").format(error)
     if not on:
@@ -509,6 +514,11 @@ def capture_status(on, listening, folder, summary, cap_gb, error=None, dropped=0
                "labelled are kept.").format(folder, kept)]
     if not listening:
         lines.append(_("Nothing is listening: turn on the rev lights or \"Learn from game telemetry\"."))
+    if ffb is True:
+        lines.append(_("Recording for FFB tuning at the full rate: it stops after 20 minutes or 250 MB."))
+    elif ffb:
+        lines.append(_("FFB tuning recording ended (the {} limit): recording is at the usual rate again.").format(
+            _("20 minute") if ffb == 'time' else _("250 MB")))
     if dropped:
         lines.append(_("{} packets were lost: the disk was too slow.").format(dropped))
     return '\n'.join(lines)

@@ -101,6 +101,8 @@ class Gui:
         self.web_token = ''                     # pairs a browser to change settings (config.ini web_token)
         self.telemetry_recorder = None          # telemetry_capture.Recorder, while recording
         self._capture_shown_at = 0.0
+        self.ffb_tuning_on = False              # "Record for FFB tuning": never saved, off at every start
+        self.ffb_stop_reason = None             # 'time' or 'size' once it ended by itself, until it is switched on again
         # App preferences (config.ini): learn with the rev lights off (D4),
         # the web page and recording, all off by default
         from .telemetry_view import read_preferences
@@ -1120,6 +1122,14 @@ class Gui:
             self.save_preferences()
             self.apply_telemetry_capture()
 
+    def set_ffb_tuning(self, on):
+        self.ffb_tuning_on = bool(on)
+        if on:
+            self.ffb_stop_reason = None
+        if self.telemetry_recorder is not None:
+            self.telemetry_recorder.set_ffb_tuning(self.ffb_tuning_on)
+        self.refresh_capture_status()
+
     def apply_telemetry_capture(self):
         """Start or stop recording raw telemetry to match the preferences.
         The recorder outlives the listener (a change of port or wheel
@@ -1132,6 +1142,7 @@ class Gui:
             recorder.close()
             recorder = self.telemetry_recorder = None
         if self.telemetry_capture_on and recorder is None:
+            self.ffb_tuning_on, self.ffb_stop_reason = False, None      # a new recorder starts at the usual rate
             recorder = self.telemetry_recorder = Recorder(
                 self.capture_folder(), port=self.telemetry.port if self.telemetry is not None else None,
                 version=self.app.version, wheel=lambda: wheel_from_device(self.device))
@@ -1139,20 +1150,25 @@ class Gui:
             recorder.cap = self.telemetry_capture_cap << 30
         if self.telemetry is not None:
             self.telemetry.recorder = recorder
+        if recorder is None:
+            self.ffb_tuning_on, self.ffb_stop_reason = False, None
         self.refresh_capture_status()
 
     def refresh_capture_status(self):
-        from .telemetry_capture import capture_summary
+        from .telemetry_capture import capture_summary, tuning_captures
         from .telemetry_view import capture_status
         if getattr(self, 'ui', None) is None:
             return
         self._capture_shown_at = time.monotonic()
         recorder = self.telemetry_recorder
         folder = self.capture_folder()
+        if recorder is not None and recorder.ffb_stopped and self.ffb_tuning_on:
+            self.ffb_tuning_on, self.ffb_stop_reason = False, recorder.ffb_stopped     # ended by itself: the switch follows
+        self.ui.set_ffb_tuning_switch(self.ffb_tuning_on, recorder is not None)
         self.ui.set_telemetry_capture_status(capture_status(
             self.telemetry_capture_on, self.telemetry is not None, folder, capture_summary(folder),
             self.telemetry_capture_cap, recorder.error if recorder is not None else None,
-            recorder.dropped if recorder is not None else 0))
+            recorder.dropped if recorder is not None else 0, self.ffb_stop_reason or self.ffb_tuning_on, tuning_captures(folder)))
         self.refresh_diagnostics_status()
 
     def _web_status(self):

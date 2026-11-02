@@ -1,5 +1,6 @@
-"""The 0.16 data repair (oversteer/data_repair.py): the version gate, the PB kept through the reanalysis, the DiRT
-stage re-key, the phantom runs' limits, resuming after a crash, the car names and the re-timing from captures."""
+"""The data repairs (oversteer/data_repair.py): the version gate, the PB kept through the reanalysis, the DiRT stage
+re-key, the phantom runs' limits, resuming after a crash, the car names, the re-timing from captures, the RBR runs
+(data version 2) and the corners stored back to front (data version 3)."""
 import glob
 import os
 import sqlite3
@@ -551,10 +552,10 @@ def test_a_file_at_data_version_1_has_its_rbr_runs_worked_over_and_nothing_else(
     runs = store._do('SELECT id, run_class, result_time FROM runs ORDER BY id').fetchall()
 
     summary = data_repair.migrate(store)
-    assert store.data_version() == DATA_VERSION == 2
+    assert store.data_version() == DATA_VERSION == 3
     assert summary['rbr'] == dict(summary['rbr'], potentials_dropped=1, envelopes_dropped=1, rbr_runs_queued=2)
     assert 'phantoms_deleted' not in summary                         # the 0.16 repair is not run again
-    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.17-v1-v2-*.bak'))) == 1
+    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.17-v1-v3-*.bak'))) == 1
     assert store._do('SELECT stage FROM stage_potential').fetchall() == [(EL_RODEO,)]
     assert store._do('SELECT game FROM envelopes').fetchall() == [('dirt',)]
     assert {r[0] for r in store._do('SELECT run FROM reanalyse')} == {pb, slower}   # with a trace: the RBR ones
@@ -573,5 +574,119 @@ def test_a_file_from_before_016_gets_both_repairs_in_one(tmp_path):
     summary = data_repair.migrate(d.store)
     assert summary['queued'] == 1 and summary['rbr']['rbr_runs_queued'] == 1
     assert d.store.data_version() == DATA_VERSION
-    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.16-v0-v2-*.bak'))) == 1
+    assert len(glob.glob(str(tmp_path / 'telemetry.db.pre-0.16-v0-v3-*.bak'))) == 1
+    d.store.close()
+
+
+# -- data version 3 (0.18): corners stored back to front --
+
+def _at_version_2(store):
+    store._do("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('data_version', '2')")
+    store.commit()
+
+
+def _invert_a_corner(store, run):
+    """One corner of the run stored as the corner detection of before 0.18 left one the car reversed in: d1 < d0."""
+    cid = store._do('SELECT id FROM corners WHERE run = ? AND d1 > d0 ORDER BY id LIMIT 1', (run,)).fetchone()[0]
+    store._do('UPDATE corners SET d0 = d1, d1 = d0 WHERE id = ?', (cid,))
+    store.commit()
+
+
+def _inverted(store):
+    return store._do('SELECT COUNT(*) FROM corners WHERE d1 < d0').fetchone()[0]
+
+
+def test_a_run_with_a_corner_back_to_front_is_worked_over_and_the_pb_stays(tmp_path):
+    from oversteer.drive_log import backfill_step
+    learner, reader = drive_stages(tmp_path, (30.0, 26.0, 30.0))
+    store = learner.log.store
+    runs = [r[0] for r in store._do('SELECT id FROM runs ORDER BY id')]
+    stage, car = store.run(runs[0])['stage'], store.run(runs[0])['car']
+    pb = coach_context.stage_pb_id(store, stage, car)
+    assert pb is not None
+    other = [r for r in runs if r != pb][0]
+    inverted = sorted((pb, other))
+    classes = store._do('SELECT id, run_class, result_time FROM runs ORDER BY id').fetchall()
+    corners = len(store.corners(pb))
+    _invert_a_corner(store, pb)
+    _invert_a_corner(store, other)
+    _at_version_2(store)
+    assert data_repair.inverted_corner_runs(store) == inverted
+
+    summary = data_repair.migrate(store)
+    assert store.data_version() == DATA_VERSION == 3
+    assert 'rbr' not in summary and 'queued' not in summary            # the earlier repairs are not run again
+    assert summary['corners'] == dict(summary['corners'], inverted_corners=2, runs=inverted,
+                                      runs_queued=inverted)
+    [backup] = glob.glob(str(tmp_path / 'telemetry.db.pre-0.18-v2-v3-*.bak'))
+    assert summary['corners']['backup'] == backup
+    assert set(store.runs_to_reanalyse(10)) == set(inverted)          # only those: the clean run is not queued
+    assert store._do('SELECT id, run_class, result_time FROM runs ORDER BY id').fetchall() == classes
+    assert coach_context.stage_pb_id(store, stage, car) == pb        # the PB stays the PB while queued
+    assert store.prune_traces(cap=1) == 0
+    while backfill_step(learner, 3):
+        pass
+    assert store.reanalysis_pending() == 0 and _inverted(store) == 0
+    assert len(store.corners(pb)) == corners
+    assert coach_context.stage_pb_id(store, stage, car) == pb
+    assert store._do('SELECT id, run_class, result_time FROM runs ORDER BY id').fetchall() == classes
+    assert data_repair.migrate(store) is None                         # once
+    assert store.reanalysis_pending() == 0
+    learner.close()
+
+
+def test_a_clean_file_at_data_version_2_is_only_marked_done(tmp_path):
+    learner, reader = drive_stages(tmp_path, (30.0, 26.0))
+    store = learner.log.store
+    store._do("INSERT INTO stage_potential (stage, car, data_version, sections, profile) VALUES ('x', "
+              "(SELECT MIN(id) FROM cars), 'v', '[]', '{}')")
+    _at_version_2(store)
+    tables = ('runs', 'traces', 'corners', 'events', 'metrics', 'stage_potential')
+    counts = [store._do('SELECT COUNT(*) FROM ' + t).fetchone()[0] for t in tables]
+    corners = store._do('SELECT * FROM corners ORDER BY id').fetchall()
+    summary = data_repair.migrate(store)
+    assert store.data_version() == DATA_VERSION
+    assert summary['corners'] == dict(summary['corners'], inverted_corners=0, runs=[], runs_queued=[])
+    assert store.reanalysis_pending() == 0 and not store.meta(telemetry_store.REBUILD_META)
+    assert [store._do('SELECT COUNT(*) FROM ' + t).fetchone()[0] for t in tables] == counts
+    assert store._do('SELECT * FROM corners ORDER BY id').fetchall() == corners
+    assert data_repair.migrate(store) is None
+    learner.close()
+
+
+def test_a_back_to_front_corner_without_a_trace_is_kept(tmp_path):
+    learner, reader = drive_stages(tmp_path, (30.0, 26.0))
+    store = learner.log.store
+    run = store._do('SELECT MAX(id) FROM runs').fetchone()[0]
+    _invert_a_corner(store, run)
+    store._do('DELETE FROM traces WHERE run = ?', (run,))
+    _at_version_2(store)
+    summary = data_repair.migrate(store)
+    assert summary['corners'] == dict(summary['corners'], inverted_corners=1, runs=[run], runs_queued=[])
+    assert store.reanalysis_pending() == 0 and _inverted(store) == 1
+    assert store.run(run) is not None
+    learner.close()
+
+
+def test_the_corner_repair_is_idempotent(tmp_path):
+    learner, reader = drive_stages(tmp_path, (30.0, 26.0))
+    store = learner.log.store
+    run = store._do('SELECT MIN(id) FROM runs').fetchone()[0]
+    _invert_a_corner(store, run)
+    assert data_repair.repair_corners(store)[2] == [run]
+    assert data_repair.repair_corners(store)[2] == [run]              # queued once, wherever it was
+    assert store._do('SELECT COUNT(*) FROM reanalyse').fetchone()[0] == 1
+    learner.close()
+
+
+def test_every_step_of_a_file_at_data_version_1_runs_once(tmp_path):
+    d = Dirt(tmp_path, game='rbr', key='rbr/unknown', name='RBR car')
+    d.run('rbr:81', 2500.0, 1, 150.0, 2500.0, (0, 0), (500, 500), 'clean')
+    d.store._do("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('data_version', '1')")
+    d.store.commit()
+    summary = data_repair.migrate(d.store)
+    assert summary['rbr']['rbr_runs_queued'] == 1 and summary['corners']['runs'] == []
+    assert d.store.meta(data_repair.REPAIR_RBR) and d.store.meta(data_repair.REPAIR_CORNERS)
+    assert d.store.data_version() == DATA_VERSION and d.store.meta(data_repair.BACKUP_META) is None
+    assert data_repair.migrate(d.store) is None
     d.store.close()
