@@ -76,6 +76,10 @@ class Gui:
         self.equipment = []
         self.telemetry = None
         self.telemetry_generation = 0
+        # Countersteer FFB: its own thread, fed by the listener, writing the wheel's ext_force (ffb_engine)
+        from .ffb_engine import FfbEngine
+        self.ffb_engine = FfbEngine()
+        self.ffb_engine.start()
         # Pedals as pressed fractions for the rev lights' launch mode; the
         # input thread writes, the telemetry thread reads (plain floats).
         # shift_press: (monotonic time, 'gear'/'sequential'/'paddle') of the
@@ -517,6 +521,9 @@ class Gui:
             self.telemetry.stop()
             self.telemetry = None
         self.device = self.device_manager.get_device(device_id)
+        ready = self.device is not None and self.device.is_ready()
+        # The old wheel's game force is restored by the engine before it takes the new one
+        self.ffb_engine.set_device(self.device.dev_path if ready else None)
         self.ffb_pending = {}
         self.ui.safe_call(self.ui.reset_ffb_meter)
 
@@ -569,6 +576,29 @@ class Gui:
             self.model.flush_device()
             self.model.flush_ui()
         self.update_pedals()
+        self.apply_countersteer_ffb()
+
+    def apply_countersteer_ffb(self):
+        """The "Countersteer FFB" switch to the engine; the listener started
+        or stopped where only the switch needs it."""
+        from .telemetry import NoLeds
+        wanted = self._countersteer_wanted()
+        self.ffb_engine.set_enabled(wanted)
+        telemetry = self.telemetry
+        if wanted and telemetry is None:
+            self.apply_rev_leds()
+        elif not wanted and telemetry is not None and isinstance(telemetry.leds, NoLeds) \
+                and not self.telemetry_learn and not self._forward_targets:
+            self.apply_rev_leds()           # it ran for the switch alone
+
+    def _countersteer_wanted(self):
+        return self.device is not None and self.model.get_device() is self.device \
+            and self.model.get_countersteer_ffb()
+
+    def countersteer_view(self):
+        """(light, text) for the FFB tab's Countersteer FFB row."""
+        from .ffb_engine import status_text
+        return status_text(self.ffb_engine.status, listening=self.telemetry is not None)
 
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory
@@ -620,7 +650,7 @@ class Gui:
                 self.ui.set_rev_leds_status(_("no LEDs"))
                 leds = None
         if leds is None:
-            if not self.telemetry_learn and not self._forward_targets:
+            if not self.telemetry_learn and not self._forward_targets and not self._countersteer_wanted():
                 if self.device is None or not self.model.get_rev_leds():
                     self.ui.set_rev_leds_status('')
                 self.refresh_capture_status()
@@ -678,6 +708,7 @@ class Gui:
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry.recorder = self.telemetry_recorder
+        self.telemetry.ffb = self.ffb_engine
         if self.telemetry_recorder is not None and not self.telemetry.auto:
             self.telemetry_recorder.port = self.telemetry.port   # Auto: each packet brings its port
         self.telemetry_status = show
@@ -884,6 +915,7 @@ class Gui:
 
     def on_quit(self):
         self._forward_stop.set()
+        self.ffb_engine.stop()              # the game's force feedback back before anything else
         if self.test is not None:
             try:
                 self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
@@ -1438,6 +1470,7 @@ class Gui:
         self.model.flush_ui()
         self.update_pedals()
         self.update_learner_directory()
+        self.ffb_engine.set_enabled(self._countersteer_wanted())
         self.apply_rev_leds()
         self._remember_profile(profile_name)
 

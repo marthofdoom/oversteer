@@ -471,6 +471,12 @@ class Device:
             file.write(peak_ffb_level)
         return True
 
+    def get_ext_force_support(self):
+        """Whether the driver has replace mode (ext_force, game_ffb_level) and
+        both can be written: Countersteer FFB can play its own force."""
+        return all(os.access(self.device_file(name), os.F_OK | os.R_OK | os.W_OK)
+                   for name in ('ext_force', 'game_ffb_level'))
+
     def get_ffb_clip_count(self):
         """The driver's count of force feedback ticks above full scale, a
         free-running u32; None when the driver has no such attribute."""
