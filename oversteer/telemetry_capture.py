@@ -56,7 +56,7 @@ WHEEL_RECORD = struct.Struct('<dHHi')
 WHEEL_SUFFIX = '.wheel.gz'
 EV_KEY, EV_ABS = 0x01, 0x03          # linux/input-event-codes.h
 CAPTURE_GAP = 60.0          # seconds without telemetry that close a capture file: a menu or a pause does not
-RECORD_QUEUE = 4096         # packets waiting for the writer (about 30 s at 120 a second)
+RECORD_QUEUE = 4096         # packets waiting for the writer (about 34 s at 120 a second, 12 s at ACR's 333, 6 s at RBR's 720)
 DEFAULT_CAP = 1 << 30       # bytes kept in the folder; the oldest unlabelled captures go first
 
 # A format that sends faster than a capture needs is thinned when saved (the listener still gets every packet):
