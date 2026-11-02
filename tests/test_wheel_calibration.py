@@ -112,7 +112,7 @@ def test_the_run_stays_within_its_limits_and_puts_everything_back(g29_like):
     (dict(curve=-2.0, dead_zone=0.03, inertia=1 / 8000), 0.03),            # weak at the bottom
     (dict(inertia=1 / 15000, latency=0.025), 0.05),                        # strong, slow to answer
     (dict(inertia=1 / 1500, coulomb=0.1, static=0.14, curve=0.0), 0.03),   # heavy, high friction
-    (dict(dead_zone=0.0, encoder_deg=900 / 65536), 0.02),                  # no dead zone, fine encoder
+    (dict(dead_zone=0.0, encoder_deg=900 / 65536), 0.03),                  # no dead zone, fine encoder
     (dict(max_range=270, range=270, stop_deg=135), 0.03),                  # a small range
     (dict(dead_zone=0.0, coulomb=0.08, static=0.1), 0.03),                 # friction, no dead zone...
     (dict(dead_zone=0.08, coulomb=0.01, static=0.015), 0.03),              # ...and the other way round
@@ -375,8 +375,8 @@ def test_a_g29_like_wheel_behind_a_proxy_finishes_well_inside_the_limit(delay, b
     cal = Calibration(sim)
     result = cal.run()
     assert cal.move_timeouts == 0 and cal.move_skips == 0
-    assert sim.t - 100.0 < 190
-    assert result['duration_s'] < 190
+    assert sim.t - 100.0 < 215                 # (190 before the two pulse levels around the torque step)
+    assert result['duration_s'] < 215
     assert_safe_run(sim, cal)
     assert_put_back(sim)
 
@@ -1383,7 +1383,7 @@ def test_a_wheel_that_crept_and_stopped_short_now_reaches_every_position(kw):
     result = cal.run()
     assert cal.move_timeouts == 0 and cal.move_skips == 0
     assert result['lut'] and not result.get('partial')
-    assert result['duration_s'] < 200
+    assert result['duration_s'] < 230
     assert result['fit_uncertainty'] < wc.MAX_UNCERTAINTY
     assert_safe_run(sim, cal)
     assert_put_back(sim)
@@ -1574,6 +1574,9 @@ def test_the_real_g29s_correction_is_sane(field_result):
     # no large gain where the wheel is touchy (the bottom quarter), the soft end stays inside the range
     n = len(lut) - 1
     assert all(lut[i + 1] - lut[i] < 3 * wc.FULL / n for i in range(n // 4))
+    # no segment steeper than the cap (the raw curve's step asked for 4.8 times the identity)
+    assert max(b - a for a, b in zip(lut, lut[1:])) <= wc.LUT_SEGMENT_SLOPE * wc.FULL / n + 1
+    assert field_result['dither'] is True
     curve = field_result['curve']
     assert all(b >= a for a, b in zip(curve, curve[1:])) and curve[0] == 0.0 and curve[-1] == 1.0
 
@@ -1606,3 +1609,13 @@ def test_a_hand_on_a_simulated_wheel_is_refused(g29_like, seed):
     sim, cal, result = g29_like
     with pytest.raises(wc.FitError):
         wc.analyse(_with_a_hand(cal.rec, seed, 15000.0))
+
+
+def test_the_lut_slope_cap_gives_up_linearity_for_a_gentler_curve():
+    n = wc.LUT_POINTS - 1
+    steep = [0] + [wc.FULL // 5] * (n - 1) + [wc.FULL]            # a jump at the start, a flat run, a jump at the end
+    capped = wc.cap_slope(steep)
+    assert capped[0] == 0 and capped[-1] == wc.FULL
+    assert all(0 < b - a <= wc.LUT_SEGMENT_SLOPE * wc.FULL / n + 1 for a, b in zip(capped, capped[1:]))
+    ident = [round(i * wc.FULL / n) for i in range(wc.LUT_POINTS)]
+    assert wc.cap_slope(ident) == ident

@@ -35,7 +35,8 @@ import numpy as np
 FULL = 32767                 # full-scale force (driver units)
 LUT_POINTS = 33              # ffb_lut values: input i * 32767 / 32
 # Command levels (full-scale units) the pulses are played at; the torque curve is solved at these
-KNOTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.0)
+KNOTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25, 0.30, 0.33, 0.36, 0.40, 0.50,
+         0.60, 0.70, 0.80, 0.90, 1.0)
 
 GRID_S = 0.001               # positions are resampled to 1 ms
 SG_HALVES = (3, 5, 8, 12, 20)        # Savitzky-Golay half windows in samples (7 to 41 ms), all used together...
@@ -49,12 +50,16 @@ CHUNK = 250                  # samples (ms) in a stretch
 LATENCIES_S = tuple(i / 1000 for i in range(0, 101, 5))   # latency candidates (a proxy hop adds to the driver's),
                                                           # refined to 1 ms around the best
 DEADBAND_FLOOR = 0.02        # below 2 % of the full-scale torque the motor counts as giving nothing
-MIN_R2 = 0.3                 # a fit explaining less of the measured acceleration than this is not trusted (the
-                             # rest is mostly the encoder's step, large for a heavy wheel)...
+MIN_R2 = 0.75                # a fit explaining less of the measured acceleration than this is not trusted (clean runs:
+                             # 0.90 to 0.999 over nine simulated wheels and the field G29; with a random hand on
+                             # the wheel, up to 0.84 for a heavy wheel and up to 0.72 otherwise)...
 MAX_UNCERTAINTY = 0.05       # ...nor one leaving a point of the torque curve this uncertain (share of full)
 MAX_DEAD_ZONE = 0.15         # a motor dead zone above 15 % of full scale is a measurement gone wrong
 LUT_SLOPE_MAX = 4.0          # no LUT point above 4 times the identity (plus LUT_MARGIN): a curve that steep
 LUT_MARGIN = 1024            # means a torque curve measured wrong at the bottom
+LUT_SEGMENT_SLOPE = 3.0      # no LUT segment steeper than 3 times the identity: a small change of the game's force is
+                             # at most 3 times as big a change of the motor command (the field G29's step in its
+                             # torque curve asked for 4.8, which would chatter)
 DITHER_RATIO = 1.5           # dither when one 8-bit step spans this many native steps of the game's force
 
 
@@ -184,11 +189,11 @@ def rolling_min(x, half):
     return np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1).min(axis=1)
 
 
-def isotonic(y):
-    """The non-decreasing sequence closest to y in least squares (pool adjacent violators)."""
+def isotonic(y, weights=None):
+    """The non-decreasing sequence closest to y in (weighted) least squares (pool adjacent violators)."""
     blocks = []                     # [mean, weight, count]
-    for v in y:
-        blocks.append([float(v), 1.0, 1])
+    for i, v in enumerate(y):
+        blocks.append([float(v), 1.0 if weights is None else float(weights[i]), 1])
         while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
             m2, w2, c2 = blocks.pop()
             m1, w1, c1 = blocks.pop()
@@ -309,13 +314,26 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
 
 # --- the correction ---
 
-def relative_curve(curve):
-    """The torque curve over the knots as a share of full scale, non-decreasing and >= 0."""
+def relative_curve(curve, se=None):
+    """The torque curve over the knots as a share of full scale, non-decreasing and >= 0. With the knots'
+    uncertainties `se` the monotone fit weighs each knot by 1/se^2 (a doubtful knot gives way to its
+    neighbours), and a light smoothing (1-2-1 over neighbouring knots, the ends kept) takes the knot-to-knot
+    scatter out, which would otherwise come out of the LUT as steps."""
     a_fs = float(curve[-1])
     if not a_fs > 0:
         raise FitError("the wheel did not respond to full force")
-    r = isotonic(np.clip(np.asarray(curve, dtype=float) / a_fs, 0.0, None))
+    y = np.clip(np.asarray(curve, dtype=float) / a_fs, 0.0, None)
+    wts = None
+    if se is not None:
+        s = np.asarray(se, dtype=float) / a_fs
+        wts = 1.0 / np.maximum(s, 0.003) ** 2          # (the fixed zero knot and any unmeasured ones: floor)
+        wts[0] = wts.max()
+    r = isotonic(y, wts)
     r[0] = 0.0
+    if len(r) > 3:
+        sm = r.copy()
+        sm[1:-1] = 0.25 * r[:-2] + 0.5 * r[1:-1] + 0.25 * r[2:]      # (a mean of non-decreasing: non-decreasing)
+        r = sm
     return r / r[-1], a_fs
 
 
@@ -371,9 +389,28 @@ def build_lut(knots, r, d, points=LUT_POINTS):
         lut.append(int(round(min(max(v, 0.0), 1.0) * FULL)))
     lut[0] = 0
     lut[-1] = FULL
-    for i in range(1, points):
-        lut[i] = max(lut[i], lut[i - 1])
+    lut = cap_slope(lut)
     return lut, int(round(d * FULL))
+
+
+def cap_slope(lut, cap=LUT_SEGMENT_SLOPE):
+    """The LUT with no segment steeper than `cap` times the identity's and none flat. Where the torque curve
+    asks for more (a step in the motor's curve), the torque is left less linear instead: a steep jump would
+    turn a small change in what the game asks into a large step of the motor."""
+    n = len(lut) - 1
+    top = FULL / n
+    step = cap * top
+    out = [float(v) for v in lut]
+    for i in range(n - 1, -1, -1):                 # it must still be able to reach full scale
+        out[i] = max(out[i], out[i + 1] - step)
+    out[0] = 0.0
+    for i in range(1, n + 1):
+        out[i] = min(max(out[i], out[i - 1] + 1.0), out[i - 1] + step)
+    out = [int(round(v)) for v in out]
+    out[-1] = FULL
+    for i in range(n - 1, 0, -1):                  # (rounding at the end)
+        out[i] = min(out[i], out[i + 1] - 1)
+    return out
 
 
 def plausible_lut(lut, points=LUT_POINTS):
@@ -441,12 +478,12 @@ def onset_latency(onsets):
 def analyse(rec, knots=KNOTS):
     """Everything a run gives: the fitted model, the correction and the numbers stored per wheel."""
     fit = fit_dynamics(rec, knots)
-    r, a_fs = relative_curve(fit['curve'])
+    r, a_fs = relative_curve(fit['curve'], fit['curve_se'])
     uncertainty = float(np.max(fit['curve_se'])) / a_fs
     if uncertainty > MAX_UNCERTAINTY:
         try:
             slow = fit_dynamics(rec, knots, halves=SG_HALVES_SLOW)
-            r_slow, a_slow = relative_curve(slow['curve'])
+            r_slow, a_slow = relative_curve(slow['curve'], slow['curve_se'])
             u_slow = float(np.max(slow['curve_se'])) / a_slow
             if u_slow < uncertainty:
                 fit, r, a_fs, uncertainty = slow, r_slow, a_slow, u_slow
