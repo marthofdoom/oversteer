@@ -270,6 +270,53 @@ def test_the_time_limit_stops_the_run(monkeypatch):
     assert_put_back(sim)
 
 
+def _run_cut_after(force_units, cancel=False):
+    """A run whose time limit falls (or which is cancelled) right after `force_units` force-response steps."""
+    sim = SimWheel()
+    state = {'n': 0}
+
+    def progress(fraction, text):
+        if text.startswith('Force response'):
+            state['n'] += 1
+            if state['n'] == force_units:
+                if cancel:
+                    cal.cancel()
+                else:
+                    cal.TOTAL_S = cal._now() - cal.t0 + 0.5
+
+    cal = Calibration(sim, progress)
+    return sim, cal
+
+
+def test_the_time_limit_in_the_second_pass_keeps_the_first_pass(caplog):
+    sim, cal = _run_cut_after(2 * len(wc.KNOTS) + 3)
+    with caplog.at_level('INFO'):
+        result = cal.run()
+    assert result['partial'] and result['timed_out_in']
+    assert cal.timed_out_in == result['timed_out_in']
+    assert result['timed_out_in'] in wcal.summary(result)
+    assert any(r.levelname == 'WARNING' and result['timed_out_in'] in r.getMessage() for r in caplog.records)
+    assert sim.t - cal.t0 < cal.TOTAL_S + Calibration.WIND_DOWN_S + 1.0
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_the_time_limit_in_the_first_pass_still_aborts():
+    sim, cal = _run_cut_after(3)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'timeout'
+    assert_put_back(sim)
+
+
+def test_cancel_in_the_second_pass_still_aborts():
+    sim, cal = _run_cut_after(2 * len(wc.KNOTS) + 3, cancel=True)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'cancelled'
+    assert_put_back(sim)
+
+
 def test_the_time_limit_says_where_and_the_summary_is_logged(monkeypatch, caplog):
     monkeypatch.setattr(Calibration, 'TOTAL_S', 20.0)
     sim = SimWheel()

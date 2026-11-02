@@ -53,6 +53,10 @@ class ProxyLost(Exception):
     """The proxy whose virtual device the wheel is read through stopped or restarted (DeviceIO)."""
 
 
+class _TimeUp(Exception):
+    """The time limit passed after the first force-response pass was complete: the run ends with what it has."""
+
+
 class _NearLock(Exception):
     """Within the lock margin: the current step is dropped and the wheel centred."""
 
@@ -62,7 +66,7 @@ def _sign(x):
 
 
 class Calibration:
-    """One run on one wheel. run() blocks for about two minutes and returns the analysis (wheel_calib.analyse
+    """One run on one wheel. run() blocks for a few minutes and returns the analysis (wheel_calib.analyse
     plus the run's date and range) or raises Aborted; cancel() may be called from any thread."""
 
     SWEEP_MAX = 0.6             # largest force outside the short pulses (full-scale share)
@@ -87,7 +91,8 @@ class Calibration:
     STILL_DEG_S = 15.0
     SHOT_START_TOL_DEG = 20.0   # a pulse starts from this close to where it should if the wheel can't be moved there
     VEL_WINDOW_S = 0.010
-    TOTAL_S = 300.0
+    TOTAL_S = 480.0             # a hard stop (a real wheel behind a proxy takes about twice the simulator's 170 s)
+    WIND_DOWN_S = 4.0           # past TOTAL_S, a run that keeps its data may take this long to stop and centre
     PREP_S = 0.35               # game force ramps to 0 over 200 ms
     BREAKAWAY_ANGLES = 8
     REPEATS = 2
@@ -136,6 +141,9 @@ class Calibration:
         self.phase_marks = []           # (phase, time)
         self.move_timeouts = 0
         self.move_skips = 0
+        self.first_pass_done = False    # every level both ways measured once: enough to keep if time runs out
+        self.winding_down = False
+        self.timed_out_in = None        # the step the time limit ended a kept run in
 
     # --- the public side ---
 
@@ -186,6 +194,10 @@ class Calibration:
             result['range'] = int(round(self.lock * 2))
             result['near_lock_events'] = self.near_lock_events
             result['duration_s'] = round(self.rec.cmd_t[-1] - self.rec.cmd_t[0], 1) if self.rec.cmd_t else 0
+            if self.timed_out_in is not None:
+                result['partial'] = True
+                result['timed_out_in'] = self.timed_out_in
+                outcome = 'ok (partial: time limit)'
             return result
         except Aborted as e:
             outcome = e.reason
@@ -338,8 +350,10 @@ class Calibration:
             self._zero()
             raise Aborted('cancelled', _("Calibration cancelled."))
         now = self.io.now()
-        if now - self.t0 > self.TOTAL_S:
+        if now - self.t0 > self.TOTAL_S + (self.WIND_DOWN_S if self.winding_down else 0.0):
             self._zero()
+            if self.first_pass_done:
+                raise _TimeUp()
             raise Aborted('timeout', _("The calibration took too long (more than {:.0f} s, in the step \"{}\").")
                           .format(self.TOTAL_S, self.step_text or _("start")))
         if self._last_tick is not None and now - self._last_tick > self.TICK_GAP_S and \
@@ -809,6 +823,41 @@ class Calibration:
 
         # Pulses at each level, both ways, up then down
         self._enter('force response')
+        try:
+            self._passes()
+            self._enter('finish')
+            self._step(self._move_to, 0.0)
+            self._step(self._settle, 0.2, False)
+        except _TimeUp:
+            self._wind_down()
+        self._unit(_("Done"))
+
+    def _wind_down(self):
+        """The time limit passed with the first pass complete: force 0, then (a few seconds at most) brake and
+        centre if that can be done, and the run goes on to the analysis with what it recorded."""
+        self.timed_out_in = self.step_text or _("start")
+        self._zero()
+        logging.warning("calibration: time limit (%.0f s) reached in the step \"%s\"; keeping the measurement "
+                        "made so far", self.TOTAL_S, self.timed_out_in)
+        self.log.append((self._now(), 'time limit: kept what was measured'))
+        self.winding_down = True
+        self.recovering = True
+        try:
+            self._brake()
+            self._move_to(0.0, tol=10.0, timeout=self.WIND_DOWN_S)
+            self._settle(0.1, check=False)
+        except _TimeUp:
+            pass
+        except Aborted as e:
+            if e.reason == 'cancelled':
+                raise
+            logging.info("calibration: not centred after the time limit (%s)", e)
+        finally:
+            self.winding_down = False
+            self.recovering = False
+            self._zero()
+
+    def _passes(self):
         pass_start = pass_s = None
         for rep in range(self.REPEATS):
             if pass_start is not None:
@@ -825,11 +874,8 @@ class Calibration:
                 for d in (1.0, -1.0):
                     self._step(self._shot, level, d)
                     self._unit(_("Force response {:.0f}%").format(level * 100))
-
-        self._enter('finish')
-        self._step(self._move_to, 0.0)
-        self._step(self._settle, 0.2, False)
-        self._unit(_("Done"))
+            if rep == 0:
+                self.first_pass_done = True
 
 
 def restore_saved(io, saved, asked=None):
@@ -1324,4 +1370,8 @@ def summary(result):
         parts.append(_("latency {:.0f} ms").format(result['fit_latency_ms']))
     if result.get('encoder_deg'):
         parts.append(_("encoder step {:.3f}°").format(result['encoder_deg']))
-    return ', '.join(parts)
+    text = ', '.join(parts)
+    if result.get('partial'):
+        text += ' ' + _("(the time ran out in \"{}\": only the first pass was measured)").format(
+            result.get('timed_out_in') or '')
+    return text

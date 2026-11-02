@@ -2395,7 +2395,7 @@ class Gui:
             return
         if not self.ui.confirmation_dialog(
                 _("Hands off the wheel: it will turn by itself.") + "\n\n" +
-                _("For about two minutes the wheel turns left and right on its own, at times with full force, to "
+                _("For a few minutes the wheel turns left and right on its own, at times with full force, to "
                   "measure how it responds. Let go of it completely and keep hands, cables and anything else "
                   "clear of the rim. The game's force feedback is switched off meanwhile and everything is put "
                   "back afterwards. Cancel stops it at any time.")):
