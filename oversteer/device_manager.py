@@ -54,6 +54,7 @@ class DeviceManager:
         }
         self.devices = {}
         self.changed = True
+        self.plugged = []       # ids of wheels hot-plugged since the app last looked (not those present at start)
 
     def start(self):
         context = pyudev.Context()
@@ -77,6 +78,7 @@ class DeviceManager:
             if device:
                 time.sleep(5)
                 device.enable()
+                self.plugged.append(id)
                 self.changed = True
         if action == 'remove':
             device = self.get_device(id)
@@ -143,6 +145,11 @@ class DeviceManager:
         if did in self.devices:
             return self.devices[did]
         return next((item for item in self.devices.values() if item.dev_name == did), None)
+
+    def take_plugged(self):
+        """The ids of the wheels plugged in since the last call."""
+        plugged, self.plugged = self.plugged, []
+        return plugged
 
     def is_changed(self):
         changed = self.changed

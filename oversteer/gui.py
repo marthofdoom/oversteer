@@ -1,5 +1,6 @@
 import configparser
 import csv
+import json
 from datetime import datetime
 from evdev import ecodes, InputEvent
 import glob
@@ -21,7 +22,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
 from . import diagnostics, hotkeys
-from .model import Model
+from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
 from .combined_chart import CombinedChart
 from .linear_chart import LinearChart
@@ -118,6 +119,7 @@ class Gui:
         self.keyboard_session_failed = False
         self.global_hotkeys = {}
         self.last_profile = ''                  # reopened at start (preferences)
+        self.recent_profiles = []               # profile names, most recently selected first (preferences)
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
 
@@ -453,6 +455,32 @@ class Gui:
                 if device.is_ready():
                     device_list.append((device.get_id(), device.name))
             self.ui.set_devices(device_list)
+        plugged = self.device_manager.take_plugged()
+        if plugged:
+            self.apply_plug_profile(plugged[-1])
+
+    # Today (before the "apply on plug" flag) a hot-plugged wheel only got
+    # selected in the device list; a profile was applied to it only if its
+    # model still remembered one, and then not written to the device again.
+    def apply_plug_profile(self, device_id):
+        """A wheel was just plugged in: apply the profile marked "apply when
+        the wheel is plugged in" to it (the most recently selected of those
+        marked, see pick_plug_profile); none marked: leave it alone."""
+        flagged = []
+        for profile_file in glob.iglob(os.path.join(self.app.profile_path, "*.ini")):
+            if read_apply_on_plug(profile_file):
+                flagged.append(os.path.splitext(os.path.basename(profile_file))[0])
+        name = pick_plug_profile(flagged, self.recent_profiles)
+        if name is None:
+            return
+        logging.debug("wheel %s plugged in: applying profile %s", device_id, name)
+        self.ui.select_device(device_id)
+        if self.device is None or self.device.get_id() != device_id:
+            return
+        if self.ui.profile_combobox.get_active_id() != name:
+            self.ui.set_profile(name)       # loads it through the profile handler
+        else:
+            self.load_profile(name, force=True)
 
     def populate_profiles(self):
         profiles = []
@@ -1259,7 +1287,7 @@ class Gui:
             text += _("  ·  combined device active ({})").format(proxied)
         self.ui.set_driver_status('<small>{}</small>'.format(GLib.markup_escape_text(text)))
 
-    def load_profile(self, profile_name):
+    def load_profile(self, profile_name, force=False):
         if profile_name is None or profile_name == '':
             return
 
@@ -1268,7 +1296,7 @@ class Gui:
             self.ui.info_dialog(_("Error opening profile"), _("The selected profile can't be loaded."))
             return
 
-        self.model.load(profile_file)
+        self.model.load(profile_file, force)
         self.model.flush_device()
         self.model.flush_ui()
         self.update_pedals()
@@ -1287,8 +1315,10 @@ class Gui:
         return any(getattr(self.app.args, name, None) is not None for name in self.COMMAND_LINE_SETTINGS)
 
     def _remember_profile(self, name):
-        if name != self.last_profile:
+        recent = [name] + [n for n in self.recent_profiles if n != name] if name else self.recent_profiles
+        if name != self.last_profile or recent[:20] != self.recent_profiles:
             self.last_profile = name
+            self.recent_profiles = recent[:20]
             self.save_preferences()
 
     def save_profile(self, profile_name, check_exists = False):
@@ -1309,6 +1339,7 @@ class Gui:
         current_file = os.path.join(self.app.profile_path, current_name + '.ini')
         new_file = os.path.join(self.app.profile_path, new_name + '.ini')
         os.rename(current_file, new_file)
+        self.recent_profiles = [new_name if n == current_name else n for n in self.recent_profiles]
         if self.last_profile == current_name:
             self._remember_profile(new_name)
 
@@ -1351,6 +1382,11 @@ class Gui:
             if 'check_permissions' in config['DEFAULT']:
                 self.check_permissions = config['DEFAULT']['check_permissions'] == '1'
             self.last_profile = config['DEFAULT'].get('last_profile', '')
+            try:
+                recent = json.loads(config['DEFAULT'].get('recent_profiles', '[]'))
+                self.recent_profiles = [n for n in recent if isinstance(n, str)] if isinstance(recent, list) else []
+            except ValueError:
+                self.recent_profiles = []
             from .telemetry_view import read_preferences
             for name, value in read_preferences(config['DEFAULT']).items():
                 setattr(self, name, value)
@@ -1393,6 +1429,7 @@ class Gui:
             'button_config': ','.join(map(str, self.button_config[1:])),
             'hotkeys': hotkeys.serialize(self.global_hotkeys),
             'last_profile': self.last_profile,
+            'recent_profiles': json.dumps(self.recent_profiles),
             'web_token': self.web_token,
         }
         from .telemetry_view import write_preferences

@@ -402,6 +402,12 @@ class GtkHandlers:
     def on_test_panel_run_clicked(self, widget):
         self.controller.run_test()
 
+    def on_profile_note_changed(self, widget):
+        self.model.set_profile_note(widget.get_text())
+
+    def on_profile_apply_on_plug_toggled(self, widget):
+        self.model.set_apply_on_plug(widget.get_active())
+
     def on_start_app_manually_state_set(self, widget, state):
         self.model.set_start_app_manually(state)
 
