@@ -1,18 +1,17 @@
 """The peak torque (Nm at the rim) of the wheels Countersteer FFB may play on, keyed by USB id (wheel_ids), for the
-physical target in ffb_engine.RackForce: the driver's torque at the rim of a real car is played 1:1 in Nm on the wheel.
+physical target in ffb_engine.RackForce: the driver's torque at the rim of a real car, scaled by one uniform impedance
+factor s per car (s = 1 where the wheel is strong enough to play it 1:1 in Nm), so the car's p99 lands at P99_TARGET of full scale.
 
 Only a wheel on the new-lg4ff driver takes ext_force, so only those are `usable`; the rest are listed for later.
 A wheel not here (or not usable) gets None, and the target then assumes the 2.1 Nm class (DEFAULT_PEAK_NM: the
 G29 and its kin, the wheels Countersteer FFB is built and tested on). The figures are the makers' peak torque, rounded; the Logitech belt and gear
 wheels peak lower than their sheets for long (the thermal limit is the driver's own)."""
-import math
-
 from . import wheel_ids as wid
 
 DEFAULT_PEAK_NM = 2.1                    # an unknown wheel is taken to peak like a G29
 STEER_BUDGET = 0.75                      # share of full scale the steering torque may reach; the other 25 % stay free
                                          # for texture and impacts (ffb_texture fits in FULL - |steering force|)
-KNEE_FROM = 0.5                          # share of full scale up to which the steering torque is played 1:1
+P99_TARGET = 0.70                        # share of full scale the car's p99 driver torque is scaled to land at
 
 # usb id: (peak torque Nm, usable)
 PEAK_NM = {
@@ -39,14 +38,20 @@ def peak_nm(usb_id):
     return entry[0] if entry is not None and entry[1] else None
 
 
-def rim_share(torque_nm, peak_nm=None):
-    """The driver's rim torque (Nm, signed) as a share of the wheel's full scale (signed): 1:1 against the wheel's
-    peak up to KNEE_FROM, then a smooth knee (tanh, slope 1 where it starts, so no step in the feel) that
-    approaches STEER_BUDGET and never passes it, so a hard corner on a weak wheel leaves the reserve for texture
-    free instead of clipping. An unknown wheel (None) is taken as DEFAULT_PEAK_NM."""
-    share = torque_nm / (peak_nm or DEFAULT_PEAK_NM)
-    mag = abs(share)
-    if mag > KNEE_FROM:
-        room = STEER_BUDGET - KNEE_FROM
-        mag = KNEE_FROM + room * math.tanh((mag - KNEE_FROM) / room)
-    return math.copysign(mag, share)
+def impedance_scale(p99_nm, peak_nm=None):
+    """The uniform impedance scale s of a car on a wheel: the factor that brings the car's p99 driver torque (Nm at
+    the rim) to P99_TARGET of the wheel's full scale, at most 1 (a strong wheel plays the car 1:1). The same s
+    scales the column's damping, friction and stiffness that the driver renders, so the whole steering is the
+    real car's, shrunk to what the wheel can do (verification report item 7: s about 0.35-0.5 on a G29)."""
+    if not p99_nm or not p99_nm > 0.0:
+        return 1.0
+    return min(1.0, P99_TARGET * (peak_nm or DEFAULT_PEAK_NM) / p99_nm)
+
+
+def rim_share(torque_nm, peak_nm=None, scale=1.0):
+    """The driver's rim torque (Nm, signed) as a share of the wheel's full scale (signed): scale * torque against
+    the wheel's peak, in a straight line up to STEER_BUDGET and hard-clamped there (no knee: the p90-p99 range keeps
+    its shape; the scale puts a car's p99 under the budget), so the reserve for texture and impacts stays free. An
+    unknown wheel (None) is taken as DEFAULT_PEAK_NM."""
+    share = scale * torque_nm / (peak_nm or DEFAULT_PEAK_NM)
+    return max(-STEER_BUDGET, min(STEER_BUDGET, share))

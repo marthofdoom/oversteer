@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from oversteer import ffb_carprops, ffb_engine as fe, ffb_texture, wheel_torque
+from oversteer import ffb_carprops, ffb_engine as fe, ffb_spring, ffb_texture, wheel_torque
 from oversteer.telemetry_formats import Sample
 from tests.test_ffb_engine import FakeDriver, acr, forces, run, upload, wheel, game_raw, HZ, fitted  # noqa: F401
 from tests.test_ffb_engine import _clean_log  # noqa: F401 (the autouse fixture)
@@ -110,23 +110,54 @@ def test_on_centre_and_at_the_limit_torques_are_a_real_cars():
     # the dump's p50 (85 Nm of kingpin torque) is an easy corner, its p99 (550 Nm) the grip limit, at 25 m/s
     easy = abs(rack.rim_torque(sample_at(85.0)))
     limit = abs(rack.rim_torque(sample_at(550.0)))
-    assert 0.4 <= easy <= 1.0
-    assert 2.0 <= limit <= 3.2
+    assert 0.4 <= easy <= 1.2
+    assert 3.5 <= limit <= 6.0
     assert abs(rack.rim_torque(sample_at(10.0))) < 0.3          # near the centre almost nothing
 
 
-def test_the_rim_torque_is_played_one_to_one_up_to_the_knee_then_softly_limited():
-    peak = 2.1
-    rack = rack_for(peak)
-    low = rack.rim_torque(sample_at(60.0))
-    assert low / peak < wheel_torque.KNEE_FROM
-    assert force_at(rack, 60.0) == pytest.approx(low / peak, rel=1e-6)
+def test_the_boost_curve_follows_the_measured_steering():
+    # on centre ~0.2 Nm per degree at the rim: the dump's tyre torque gives K0 / ratio^2 = 0.589 Nm per degree
+    column_per_deg = 5700.0 / 13.0 ** 2 * math.pi / 180.0
+    assert column_per_deg * ffb_carprops.driver_slope(0.0, 25.0, 1.0) == pytest.approx(0.2, rel=0.05)
+    # the highway gain 3-6 in the mid range, the centre zone wider at speed, the assist saturating at high load
+    mid = ffb_carprops.driver_from_column(10.0, 30.0)
+    assert 10.0 / mid - 1.0 == pytest.approx(5.0, abs=2.0)
+    assert ffb_carprops.driver_slope(0.5, 30.0) > ffb_carprops.driver_slope(0.5, 3.0)       # (zone 1.0 vs 0.3 Nm)
+    slopes = [ffb_carprops.driver_slope(tc, 30.0) for tc in (5.0, 20.0, 50.0, 150.0)]
+    assert slopes[-1] > 5 * slopes[1] and slopes[-1] > 0.5                                 # past saturation the driver feels it
+
+
+def test_the_uniform_impedance_scale_puts_the_cars_p99_at_70_percent_and_is_one_for_a_strong_wheel():
+    rack = rack_for(2.1)
+    rack.p99 = 550.0
+    t99 = abs(rack.rim_torque(sample_at(550.0)))
+    s = rack.impedance()
+    assert s == pytest.approx(0.7 * 2.1 / t99) and 0.2 < s < 0.6
+    assert force_at(rack, 550.0) == pytest.approx(0.7, abs=0.01)
+    # a strong wheel plays the car 1:1
+    strong = rack_for(10.0)
+    strong.p99 = 550.0
+    assert strong.impedance() == 1.0
+    assert force_at(strong, 550.0) == pytest.approx(t99 / 10.0)
+    # a car with a lighter p99 needs less shrinking
+    rack.p99 = 250.0
+    assert rack.impedance() > s
+
+
+def test_the_played_share_is_in_proportion_to_the_rim_torque_and_clamps_hard_at_the_budget():
+    rack = rack_for(2.1)
+    rack.p99 = 550.0
+    s = rack.impedance()
+    for nm in (30.0, 85.0, 200.0, 300.0):
+        assert force_at(rack, nm) == pytest.approx(s * abs(rack.rim_torque(sample_at(nm))) / 2.1, rel=1e-6)   # uniform
     shares = [force_at(rack, nm) for nm in range(0, 4000, 5)]
-    assert all(b >= a for a, b in zip(shares, shares[1:]))                       # monotone, no step
-    assert max(shares) <= wheel_torque.STEER_BUDGET + 1e-9
-    assert force_at(rack, 5000.0) == pytest.approx(wheel_torque.STEER_BUDGET, abs=0.01)
-    above = [b - a for a, b in zip(shares, shares[1:]) if a > wheel_torque.KNEE_FROM * 0.8]
-    assert max(above) < 0.015                                                    # a smooth knee
+    assert all(b >= a for a, b in zip(shares, shares[1:]))
+    assert max(shares) == wheel_torque.STEER_BUDGET                 # a hard clamp: no knee under it
+    assert force_at(rack, 5000.0) == wheel_torque.STEER_BUDGET
+    below = [x for x in shares if x < wheel_torque.STEER_BUDGET]
+    assert max(b - a for a, b in zip(below, below[1:])) < 0.03       # (no step either: the assist saturating steepens it a little)
+    p90, p99 = force_at(rack, 240.0), force_at(rack, 550.0)
+    assert p99 - p90 > 0.2                                           # the p90-p99 range keeps its shape
 
 
 def test_an_unknown_wheel_counts_as_the_g29_class():
@@ -221,15 +252,55 @@ def test_the_aligning_split_is_off_by_default_and_changes_nothing():
     assert rack.force(s) == before and not seen
 
 
-def test_the_aligning_spring_rebuilds_the_model_torque_and_points_at_zero_slip():
+def test_the_aligning_spring_uses_the_tangent_stiffness_and_points_at_zero_slip():
     rack = rack_for(2.1)
     s = slipping(-300.0, 0.05, 0.3)                        # steered left of where it goes: slip > 0
     split = rack.align(s)
     assert split['k'] > 0 and split['theta_a_deg'] < split['theta_deg']      # zero slip is further right
-    assert split['k'] * (split['theta_a_deg'] - split['theta_deg']) == pytest.approx(split['model'])
+    secant = split['model'] / (split['theta_a_deg'] - split['theta_deg'])
+    assert 0 < split['k'] < secant                                           # the tangent is softer than the secant
     assert split['model'] < 0                                                # aligning: pushes back to the right
+    # numerically the tangent: the model's torque against theta, at a slightly different slip
+    ratio, deg = rack.ratio, 180.0 / math.pi
+    other = rack.align(slipping(-300.0, 0.0501, 0.3))
+    d_model = other['model'] - split['model']
+    d_err = (other['theta_a_deg'] - other['theta_deg']) - (split['theta_a_deg'] - split['theta_deg'])
+    assert split['k'] == pytest.approx(d_model / d_err, rel=0.01)
     drift = rack.align(slipping(100.0, -0.4, -0.3))
     assert drift['theta_a_deg'] > drift['theta_deg']
+    # on centre: K / ratio^2 per degree times the boost curve's centre slope
+    centre = rack.align(slipping(0.0, 0.0, 0.0))
+    assert centre['k'] == pytest.approx(rack.align_stiffness() / ratio ** 2 / deg
+                                        * ffb_carprops.driver_slope(0.0, 25.0, 1.0), rel=1e-6)
+
+
+def test_the_road_wheel_lock_is_the_cars_own():
+    rack = rack_for(2.1)
+    s = slipping(-300.0, 0.05, 0.3)
+    base = rack.align(s)
+    rack.lock = 0.2
+    assert rack.align(s)['theta_deg'] == pytest.approx(base['theta_deg'] * 0.2 / rack.ALIGN_LOCK)
+
+
+def test_the_driver_spring_mirror_follows_the_drivers_limits():
+    sp = ffb_spring.DriverSpring()
+    assert sp.force(10.0, 0.0, 0.05, 0.75, 0.06, 0.0) == 0.0                 # faded out at the start
+    for _ in range(100):
+        f = sp.force(10.0, 0.0, 0.05, 0.75, 0.06, 0.002)
+    assert f == pytest.approx(0.75 * ffb_spring.sat(0.05 * 10.0 / 0.75))      # settled: tau_max sat(k e / tau_max)
+    sp.reset()
+    for _ in range(100):
+        g = sp.force(10.0, 0.0, 0.2, 0.75, 0.06, 0.002)
+    assert g == pytest.approx(0.75 * ffb_spring.sat(0.06 * 10.0 / 0.75))      # k clamped to the driver's limit
+    sp.reset()
+    for _ in range(100):
+        h = sp.force(1000.0, 0.0, 0.05, 0.75, 0.06, 0.002)                    # saturated: tau_max
+    assert 0.0 < h <= 0.75
+    sp.reset()
+    sp.force(0.0, 0.0, 0.05, 0.75, 0.06, 0.002)
+    sp.force(300.0, 0.0, 0.05, 0.75, 0.06, 0.002)
+    assert sp.cur == pytest.approx(2.0)                                       # slewed at 1000 deg/s
+    assert ffb_spring.sat(5.0) == 1.0 and ffb_spring.sat(-5.0) == -1.0 and ffb_spring.sat(0.0) == 0.0
 
 
 def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_spring():
@@ -237,13 +308,23 @@ def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_
     s = slipping(-300.0, 0.05, 0.3)
     plain = rack.force(s)
     seen = []
-    rack.align_on, rack.align_writer = True, lambda theta_a, k: seen.append((theta_a, k))
-    resid = rack.force(s)
+    rack.align_on, rack.align_writer = True, lambda theta_a, k, tau: seen.append((theta_a, k, tau))
+    assert rack.force(s) == pytest.approx(plain)                       # the spring is still faded out: all through ext_force
+    for _ in range(200):                                               # the fade-in (0.2 s) and the slew
+        rack._now += 0.005
+        resid = rack.force(s)
     split = rack.align(s)
-    assert seen and seen[0] == pytest.approx((split['theta_a_deg'], split['k']))
-    want = rack.rim_torque(s) - split['model']
-    assert resid == pytest.approx(fe.FULL * wheel_torque.rim_share(want, 20.0), rel=1e-6)
+    scale = rack.impedance()
+    k_fs = scale * split['k'] / 20.0
+    assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, wheel_torque.STEER_BUDGET))
+    spring = ffb_spring.DriverSpring()
+    for _ in range(200):
+        want = spring.force(split['theta_a_deg'], split['theta_deg'], k_fs, wheel_torque.STEER_BUDGET, rack.align_k_limit, 0.005)
+    assert resid == pytest.approx(plain - fe.FULL * want, rel=1e-6)
     assert abs(resid) < abs(plain)
+    rack.align_k_limit = 0.0                                           # a driver that allows no spring: all through ext_force
+    rack._now += 0.005
+    assert rack.force(s) == pytest.approx(plain)
 
 
 # -- power steering: detection and the INI keys --
@@ -270,9 +351,9 @@ def test_the_detector_calls_a_linear_game_absent_and_a_boost_curve_present(speed
     lin = feed_detector(ffb_carprops.AssistDetector(), linear_game, speed)
     assert lin.state is False and lin.ratio() > 0.85
     boost = feed_detector(ffb_carprops.AssistDetector(), boost_game, speed)
-    assert boost.state is True and boost.ratio() < 0.65
+    assert boost.state is True and boost.ratio() < 0.85
     curve = boost.curve(500.0)
-    assert [c for _, c in curve] == sorted((c for _, c in curve), reverse=True) and curve[-1][1] < 0.7
+    assert [c for _, c in curve] == sorted((c for _, c in curve), reverse=True) and curve[-1][1] < 0.75
 
 
 def test_the_detector_waits_for_load_range_and_holds_between_thresholds():
@@ -282,9 +363,9 @@ def test_the_detector_waits_for_load_range_and_holds_between_thresholds():
     assert det.state is None and det.ratio() is None
     det = feed_detector(ffb_carprops.AssistDetector(), boost_game, 20.0)
     assert det.state is True
-    mid = lambda t, v, p: 1.0 - 0.3 * min(t / p, 1.0)       # ratio ~0.7: between the thresholds, no flip
+    mid = lambda t, v, p: 1.0 - 0.3 * min(t / p, 1.0)       # ratio ~0.92: between the thresholds, no flip
     feed_detector(det, mid, 20.0, seconds=400.0)
-    assert 0.6 < det.ratio() < 0.78 and det.state is True
+    assert 0.88 < det.ratio() < 0.94 and det.state is True
 
 
 def test_the_game_curve_is_followed_not_stacked_and_the_ini_modes_decide(tmp_path):

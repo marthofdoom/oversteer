@@ -40,24 +40,39 @@ DFX_MIN = 300.0                          # N: ... less left-right difference of 
                                          # learnt values hold through a long straight instead of eroding to the prior
 # The steering model: rack (kingpin) torque -> column torque -> the driver's torque at the rim.
 # Column torque T_c = front torque / STEER_RATIO (the overall ratio steering wheel : road wheel; a rally car's
-# typical 12-15, 13 as the default; where a game gives lock and wheel rotation the ratio is their quotient).
+# typical 12-15, 13 as the default; where telemetry gives the road-wheel angle the ratio is learnt, RatioLearner).
 # Power assist is a boost curve: the driver's torque T_d and the column torque are related by
-#     T_c = T_d + A(T_d, v),   A = k(v) * T_d^2 / (T0 + T_d)          (T_d >= 0, odd in the sign)
-# The assist share of the column torque grows with T_d (a hydraulic valve / EPS map is near-zero boost around the
-# centre, then ramps up with the torsion-bar torque), so the driver feels a stiffness of about 1 / (1 + k) of the
-# rack's: the usual "boost curve" shape of HPS / EPS (e.g. Bosch / ZF EPS characteristic maps, parametrised by
-# driver torque and vehicle speed; here a smooth analytic form, assumed - no car's real map is known). k(v) falls
-# with speed (heavy assist parked, light on the road). Parameters are fitted so that marth's ACR dump (front
-# torque / 13: p50 6.5 Nm, p90 22 Nm, p99 43 Nm at speed) gives about 0.5-1 Nm at the rim for an easy corner and
-# 2-3 Nm near the grip limit, the range a driver reports from a real power-steered car.
-# The map T_d -> T_c is monotone, so it inverts exactly (a quadratic in T_d, solved in closed form).
+#     T_c = T_d + A(T_d, v),   A = softmin(raw, ASSIST_SAT),   raw = Kc T_d + (K(v) - Kc) T_d^2 / (T0(v) + T_d)
+# (T_d >= 0, odd in the sign). The boost gain is Kc right at the centre and rises to K(v) with the torsion-bar
+# torque over a centre zone of T0(v) Nm; K(v) and T0(v) fall / rise with speed; the assist saturates (a motor or a
+# relief valve has a limit), past which the driver feels the rest. The sources behind the figures are the
+# verification report (ffb-verify-dyn/report.md, items 7 and 9): real steering at the rim has an on-centre
+# gradient of about 0.2 N.m per degree of steering wheel (20 N.m/g; Chugh et al. 2024, Gröndahl 2018, Niu 2021,
+# Balachandran & Gerdes 2014, Li et al. AMEE 2017), 2.4-2.8 N.m at 0.1 g and about 3.6 N.m at 0.3 g, and falls
+# past about 0.65 g (the tyres', not the boost's); EPS / hydraulic maps (UN R79; patents US 6282472, 5458153,
+# 7136732, 6382345) have a dead band of 0.3-1.0 N.m about the centre, a highway boost gain of 3-6 and a
+# saturating assist (30 N.m in the report's curve set). Kc: the ACR dump's tyre torque gives 0.589 N.m per
+# degree of wheel on centre (K0 5700 N.m/rad over ratio^2), so Kc = 0.589 / 0.2 - 1 = 2 brings it to the
+# measured 0.2. K(v) = 6 at speed (the top of 3-6; the first model's 15-17 was too heavy), T0 0.3 N.m parked
+# to 1.0 N.m at speed (the dead band's range); the park gain 40 is the first model's, unchanged (the app plays nothing
+# below MIN_SPEED). ASSIST_SAT is assumed: set past the dump's usual loads so that it only
+# bites beyond a car's p99 and the p90-p99 range keeps its shape (the report: the old knee squashed it into 5.5 % FS).
+# The sim's tyre torque at 0.1 g is weaker than the measured rim torque (which includes the column's own friction),
+# so the absolute level is not matched here: the uniform impedance scale (wheel_torque.impedance_scale) sets it
+# from the car's own p99.
+# The map T_d -> T_c is monotone, so it inverts (by bisection: the softmin has no closed form).
 STEER_RATIO = 13.0
-BOOST_T0 = 0.5                           # Nm: the driver torque where the boost reaches half of its slope
-BOOST_K_PARK = 40.0                      # boost slope k when parked ...
-BOOST_K_ROAD = 15.0                      # ... falling to this at speed
-BOOST_V0 = 8.0                           # m/s: the speed scale of that fall: k = ROAD + (PARK - ROAD) / (1 + (v/V0)^2)
+BOOST_K_CENTRE = 2.0                     # boost gain at the centre: T_d / T_c = 1 / (1 + 2) there
+BOOST_K_PARK = 40.0                      # boost gain when parked ...
+BOOST_K_ROAD = 6.0                       # ... falling to this at speed: K = ROAD + (PARK - ROAD) / (1 + (v/V0)^2)
+BOOST_T0_PARK = 0.3                      # Nm: the centre zone's width (driver torque where the gain is half way
+BOOST_T0_ROAD = 1.0                      # from Kc to K) parked, widening to this at speed
+BOOST_V0 = 8.0                           # m/s: the speed scale of that fall
+ASSIST_SAT = 100.0                       # Nm at the column: the assist's limit (softmin of order SAT_ORDER)
+SAT_ORDER = 4
 P99_RANGE = (5.0, 4000.0)                # Nm: the front steering torque's p99 kept per car
 SAVE_P99_STEP = 0.03                     # a p99 moved this share from what was saved is worth saving
+LOCK_RANGE = (0.02, 1.2)                 # rad: the road wheels' steering lock per unit of steer, kept in this
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
 
 
@@ -65,13 +80,16 @@ class Store:
     """{car: (trail, scrub)} in a JSON file in the data folder; read once, written atomically. Per car it also keeps
     the learnt p99 of the front steering torque (Nm, `p99`, a diagnostic) and the steering ratio and power-assist
     class the rim torque is worked out with (`ratio`, `assist`: 1.0 = a road / rally car's power steering, 0.0 =
-    unassisted; absent = the defaults below, set_rack() for a refined one)."""
+    unassisted; absent = the defaults below, set_rack() for a refined one) and the road wheels' steering lock (`lock`,
+    rad, centre to full lock of the game's -1..1 steer; RatioLearner)."""
 
     def __init__(self):
         self.path = None                 # None: the data folder's file
         self._cars = None
         self._p99 = {}
         self._rack = {}
+        self._steer_lock = {}
+        self._dirty = False
         self._lock = threading.Lock()
         self._saved = {}                 # what the file holds, to tell what changed
         self._saved_p99 = {}
@@ -83,7 +101,7 @@ class Store:
     def _load(self):
         if self._cars is None:
             self._cars = {}
-            self._p99, self._rack = {}, {}
+            self._p99, self._rack, self._steer_lock = {}, {}, {}
             try:
                 with open(self._file()) as f:
                     for car, v in json.load(f).items():
@@ -99,6 +117,9 @@ class Store:
                         if isinstance(ratio, (int, float)) and isinstance(assist, (int, float)) \
                                 and 3.0 <= ratio <= 40.0 and 0.0 <= assist <= 2.0:
                             self._rack[car] = (float(ratio), float(assist))
+                        lock = v.get('lock')
+                        if isinstance(lock, (int, float)) and math.isfinite(lock) and LOCK_RANGE[0] <= lock <= LOCK_RANGE[1]:
+                            self._steer_lock[car] = float(lock)
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 pass
             self._saved = dict(self._cars)
@@ -109,6 +130,7 @@ class Store:
         with self._lock:
             self.path, self._cars, self._saved, self._last_save = path, None, {}, 0.0
             self._saved_p99 = {}
+            self._dirty = False
 
     def get(self, car):
         with self._lock:
@@ -130,7 +152,23 @@ class Store:
     def set_rack(self, car, ratio, assist):
         with self._lock:
             self._load()
+            if self._rack.get(car) != (float(ratio), float(assist)):
+                self._dirty = True
             self._rack[car] = (float(ratio), float(assist))
+
+    def get_lock(self, car):
+        """The road wheels' steering lock kept for the car (rad per unit of steer), None if not learnt."""
+        with self._lock:
+            self._load()
+            return self._steer_lock.get(car)
+
+    def set_lock(self, car, lock):
+        with self._lock:
+            self._load()
+            old = self._steer_lock.get(car)
+            if old is None or abs(old - lock) > 0.02 * old:
+                self._dirty = True
+            self._steer_lock[car] = float(lock)
 
     def put(self, car, trail, scrub, force=False, p99=None):
         """The car's learnt values; written when they moved enough and SAVE_EVERY s have passed (or `force`)."""
@@ -140,7 +178,7 @@ class Store:
             self._load()
             self._cars[car] = (trail, scrub)
             old = self._saved.get(car)
-            moved = old is None or abs(old[0] - trail) >= SAVE_STEP[0] or abs(old[1] - scrub) >= SAVE_STEP[1]
+            moved = old is None or abs(old[0] - trail) >= SAVE_STEP[0] or abs(old[1] - scrub) >= SAVE_STEP[1] or self._dirty
             if p99 is not None:
                 old99 = self._saved_p99.get(car)
                 self._p99[car] = p99
@@ -149,6 +187,7 @@ class Store:
             if not moved or (not force and now - self._last_save < SAVE_EVERY):
                 return
             self._last_save = now
+            self._dirty = False
             self._saved[car] = (trail, scrub)
             self._saved_p99 = dict(self._p99)
             data = {}
@@ -158,6 +197,8 @@ class Store:
                     data[c]['p99'] = round(self._p99[c], 1)
                 if c in self._rack:
                     data[c]['ratio'], data[c]['assist'] = self._rack[c]
+                if c in self._steer_lock:
+                    data[c]['lock'] = round(self._steer_lock[c], 4)
         if ASYNC:
             threading.Thread(target=self._write, args=(data,), daemon=True).start()
         else:
@@ -186,26 +227,125 @@ class Store:
 STORE = Store()
 
 
+def _speed(speed):
+    return abs(speed) if speed is not None and math.isfinite(speed) else 0.0
+
+
 def boost_k(speed, assist=1.0):
-    """The boost curve's slope k at `speed` (m/s) for an assist class (1.0 road / rally, 0.0 unassisted)."""
-    v = abs(speed) if speed is not None and math.isfinite(speed) else 0.0
-    return assist * (BOOST_K_ROAD + (BOOST_K_PARK - BOOST_K_ROAD) / (1.0 + (v / BOOST_V0) ** 2))
+    """The boost curve's gain K at `speed` (m/s) for an assist class (1.0 road / rally, 0.0 unassisted)."""
+    f = 1.0 / (1.0 + (_speed(speed) / BOOST_V0) ** 2)
+    return assist * (BOOST_K_ROAD + (BOOST_K_PARK - BOOST_K_ROAD) * f)
+
+
+def boost_t0(speed):
+    """The centre zone's width (Nm of driver torque) at `speed`."""
+    f = 1.0 / (1.0 + (_speed(speed) / BOOST_V0) ** 2)
+    return BOOST_T0_ROAD + (BOOST_T0_PARK - BOOST_T0_ROAD) * f
+
+
+def _assist_raw(mag, speed, assist):
+    """(A_raw, dA_raw/dT_d) before the saturation, at driver torque `mag` >= 0."""
+    kc, k, t0 = BOOST_K_CENTRE * assist, boost_k(speed, assist), boost_t0(speed)
+    raw = kc * mag + (k - kc) * mag * mag / (t0 + mag)
+    slope = kc + (k - kc) * mag * (mag + 2.0 * t0) / (t0 + mag) ** 2
+    return raw, slope
+
+
+def _assist(mag, speed, assist):
+    """(A, dA/dT_d) at driver torque `mag` >= 0: the saturated assist torque and its slope."""
+    raw, slope = _assist_raw(mag, speed, assist)
+    q = 1.0 + (raw / ASSIST_SAT) ** SAT_ORDER
+    return raw * q ** (-1.0 / SAT_ORDER), slope * q ** (-1.0 / SAT_ORDER - 1.0)
 
 
 def column_from_driver(driver, speed, assist=1.0):
-    """The column torque (signed, Nm) that a driver torque `driver` balances: T_d + k T_d^2 / (T0 + |T_d|)."""
+    """The column torque (signed, Nm) that a driver torque `driver` balances: T_d + A(T_d, v)."""
     mag = abs(driver)
-    return math.copysign(mag + boost_k(speed, assist) * mag * mag / (BOOST_T0 + mag), driver)
+    return math.copysign(mag + _assist(mag, speed, assist)[0], driver)
 
 
 def driver_from_column(column, speed, assist=1.0):
-    """The driver's torque at the rim (signed, Nm) for a column torque, the exact inverse of column_from_driver:
-    (1 + k) T_d^2 + (T0 - T_c) T_d - T_c T0 = 0, the positive root. Unassisted (k = 0): the column torque."""
+    """The driver's torque at the rim (signed, Nm) for a column torque: the inverse of column_from_driver (T_c is
+    strictly increasing in T_d, and T_d <= T_c: bisection). Unassisted (assist 0): the column torque."""
     mag = abs(column)
-    k = boost_k(speed, assist)
-    b = mag - BOOST_T0
-    d = (b + math.sqrt(b * b + 4.0 * (1.0 + k) * mag * BOOST_T0)) / (2.0 * (1.0 + k))
-    return math.copysign(d, column)
+    if assist <= 0.0 or mag <= 0.0:
+        return column
+    lo, hi = 0.0, mag
+    for _ in range(48):
+        mid = 0.5 * (lo + hi)
+        if mid + _assist(mid, speed, assist)[0] < mag:
+            lo = mid
+        else:
+            hi = mid
+    return math.copysign(0.5 * (lo + hi), column)
+
+
+def driver_slope(column, speed, assist=1.0):
+    """dT_d / dT_c at a column torque: how much of a change of the column torque the driver feels (1 / (1 + dA/dT_d))."""
+    if assist <= 0.0:
+        return 1.0
+    td = abs(driver_from_column(column, speed, assist))
+    return 1.0 / (1.0 + _assist(td, speed, assist)[1])
+
+
+# -- the steering ratio from telemetry --
+RATIO_ARM = 0.13                         # m: the steering arm (rack travel to road-wheel angle) until a car's is learnt
+RATIO_RANGE = (3.0, 40.0)
+WHEELBASE = 2.6                          # m: ASSUMED (a rally / GT car's 2.5-2.7); telemetry has none. An error of x %
+                                         # in it is an error of x % in the learnt lock and ratio
+RATIO_MIN_SPEED = 8.0                    # m/s
+RATIO_MAX_AY = 2.0                       # m/s^2: lateral acceleration under which the understeer gradient is negligible
+RATIO_MIN_SXX = 0.1                      # unit^2 s of steer evidence before the lock is believed
+RATIO_SLEW = 0.1                         # ratio units per second at most
+
+
+def table_ratio(entry, arm=RATIO_ARM):
+    """The overall steering ratio of a car from its table entry (Richard Burns Rally: steering_wheel_lock_deg,
+    steering wheel centre to full lock, and rack_travel_m, the rack's travel from centre to lock): the wheel's
+    lock over the road wheel's, asin(travel / arm) for a steering arm of `arm` m. None without both."""
+    if not entry:
+        return None
+    wheel, travel = entry.get('steering_wheel_lock_deg'), entry.get('rack_travel_m')
+    if not (isinstance(wheel, (int, float)) and isinstance(travel, (int, float))) or wheel <= 0.0 or not 0.0 < travel < arm:
+        return None
+    ratio = wheel / math.degrees(math.asin(travel / arm))
+    return min(max(ratio, RATIO_RANGE[0]), RATIO_RANGE[1])
+
+
+class RatioLearner:
+    """The road wheels' steering lock, and with it the overall steering ratio, from telemetry. At low lateral
+    acceleration the road-wheel angle is the Ackermann one, delta = wheelbase * yaw rate / speed (positive left,
+    like steer); regressed on the game's steer (-1..1) through the origin it gives the lock in rad per unit of
+    steer. Where the steering wheel's own lock is known (a car table's steering_wheel_lock_deg) the ratio is
+    their quotient. A few multiplies per sample."""
+    TAU = 120.0                                      # s of moving samples the sums remember
+
+    def __init__(self):
+        self.sxx = self.sxy = 0.0
+
+    def add(self, steer, yaw, speed, dt):
+        if not (dt > 0.0 and speed is not None and speed >= RATIO_MIN_SPEED and steer is not None and yaw is not None
+                and math.isfinite(steer) and math.isfinite(yaw) and math.isfinite(speed)):
+            return
+        if abs(speed * yaw) > RATIO_MAX_AY:
+            return
+        decay = math.exp(-dt / self.TAU)
+        self.sxx = self.sxx * decay + steer * steer * dt
+        self.sxy = self.sxy * decay + steer * (WHEELBASE * yaw / speed) * dt
+
+    def lock(self):
+        """The road wheels' lock (rad per unit of steer), None until there is enough evidence."""
+        if self.sxx < RATIO_MIN_SXX or self.sxy <= 0.0:
+            return None
+        lock = self.sxy / self.sxx
+        return lock if LOCK_RANGE[0] <= lock <= LOCK_RANGE[1] else None
+
+    def ratio(self, wheel_lock_deg):
+        """The steering ratio for a steering wheel that turns `wheel_lock_deg` to full lock, None until learnt."""
+        lock = self.lock()
+        if lock is None or not wheel_lock_deg or wheel_lock_deg <= 0.0:
+            return None
+        return min(max(math.radians(wheel_lock_deg) / lock, RATIO_RANGE[0]), RATIO_RANGE[1])
 
 
 class Quantile:
@@ -344,18 +484,21 @@ def _solve3(m, b):
 class AssistDetector:
     """Whether the game's own steering force already includes power assist, from the game's force against the
     front steering torque of the same samples. Without assist the game's force is linear in the torque (a constant
-    ratio over the load range; ACR's dump: the gain at 0.75-1.5 x p99 is 0.83-0.98 of the gain at 0.05-0.25 x p99
-    on every car, speed or not). A boost curve is compressive: the gain falls with load (a typical car: to about
-    0.07 at its p99, but the curve flattens to 1 / (1 + k) past a few Nm, so the full-range ratio is only about
-    0.5-0.7). Torque is binned by its share of the car's p99 (EDGES); `ratio()` is the gain over the top two
-    bins (>= 0.5 p99) over the gain in the bottom one (0.05-0.15 p99). It needs MIN_W seconds in each group before it
-    says anything. `state`: None undecided (taken as absent), False / True; it flips only after the other side's
-    threshold has held DWELL s (hysteresis: between ABSENT_ABOVE and ASSIST_BELOW it keeps what it had)."""
+    ratio over the load range). A boost curve bends the gain down where it ramps up: past the centre zone, at
+    low and mid loads, before the tyres' own fall-off at the limit (which makes the full-range ratio of an
+    unassisted car fall, and a saturating assist's rise) can confuse it. Torque is binned by its share of the car's
+    p99 (EDGES); `ratio()` is the gain over 0.15-0.5 of p99 (bins 1 and 2) over the gain at 0.05-0.15 (bin 0). The
+    verification report's curve set (ffb-verify-dyn/app_model.py, mid/low): unassisted 1.0, with tyre fall-off 0.98,
+    our own torque model 15 % off 0.97, a constant-ratio assist 1.0; every assist 0.51-0.81 (a straight boost with a
+    0.3 Nm dead band 0.81, with 1.0 Nm 0.61, a saturating EPS 0.51, a hydraulic valve 0.60, with relief 0.60). It
+    needs MIN_W seconds in each group before it says anything. `state`: None undecided (taken as absent), False /
+    True; it flips only after the other side's threshold has held DWELL s (hysteresis: between ASSIST_BELOW and
+    ABSENT_ABOVE it keeps what it had)."""
     EDGES = (0.05, 0.15, 0.3, 0.5, 0.75, 1.5)        # of the car's p99
     TAU = 300.0                                      # s of moving samples the sums remember
-    MIN_W = 10.0                                     # s of weight in the low and in the high group
-    ASSIST_BELOW = 0.7
-    ABSENT_ABOVE = 0.8
+    MIN_W = 10.0                                     # s of weight in the low and in the mid group
+    ASSIST_BELOW = 0.88
+    ABSENT_ABOVE = 0.94
     DWELL = 3.0
 
     def __init__(self):
@@ -395,8 +538,8 @@ class AssistDetector:
         return None if w < self.MIN_W or t <= 0.0 else sum(self.r[i] for i in bins) / t
 
     def ratio(self):
-        """Gain at high load over gain at low load, None until both have enough."""
-        lo, hi = self._gain((0,)), self._gain((3, 4))
+        """Gain at mid load over gain at low load, None until both have enough."""
+        lo, hi = self._gain((0,)), self._gain((1, 2))
         return None if lo is None or hi is None or lo <= 0.0 else hi / lo
 
     def _judge(self, dt):

@@ -113,3 +113,129 @@ def test_the_strength_fit_is_not_thrown_by_the_trail_stepping():
     rack = drive(fe.RackForce(), 0.008, 0.012, 90.0)           # the trail walks from 27 to 8 mm on the way
     assert rack.scale == pytest.approx(30.0, rel=0.07)         # (1 mm/s against a 10 s window: harmless; the rest
     # is the ridge's 1.6 mm of trail still to come, which moves the ratio fit by 5 %)
+
+
+# -- the assist detector on the verification report's curve set --
+
+def _detector_ratio(curve, p99=43.0, seconds=300.0, hz=50.0):
+    """The detector on a column-torque -> driver-torque `curve`, torque uniform in log between 0.05 and 1.5 of p99 (time
+    weighted), the game's force = the driver's torque scaled by 30 (the gain is what the detector sees)."""
+    det = cp.AssistDetector()
+    lo, hi = math.log(0.05), math.log(1.5)
+    for i in range(int(seconds * hz)):
+        x = p99 * math.exp(lo + (hi - lo) * ((i * 0.6180339887) % 1.0))
+        det.add(x, 30.0 * curve(x), p99, 1.0 / hz)
+    return det
+
+
+def _lin_db(gain, dead, amax=1e9):
+    """T_c = T_d + min(gain max(T_d - dead, 0), amax), inverted by bisection."""
+    def f(tc):
+        lo, hi = 0.0, tc
+        for _ in range(60):
+            m = 0.5 * (lo + hi)
+            lo, hi = (m, hi) if m + min(gain * max(m - dead, 0.0), amax) < tc else (lo, m)
+        return lo
+    return f
+
+
+def _hps(c, relief=1e9):
+    def f(tc):
+        lo, hi = 0.0, tc
+        for _ in range(60):
+            m = 0.5 * (lo + hi)
+            lo, hi = (m, hi) if m + min(c * m ** 2, relief) < tc else (lo, m)
+        return lo
+    return f
+
+
+ASSIST_CURVES = {
+    'straight boost, 1.0 Nm dead band': _lin_db(5.0, 1.0),
+    'straight boost, 0.3 Nm dead band': _lin_db(5.0, 0.3),
+    'saturating EPS': _lin_db(10.0, 1.0, 30.0),
+    'hydraulic': _hps(2.0),
+    'hydraulic with relief': _hps(2.0, 25.0),
+    'our boost curve at 100 km/h': lambda tc: cp.driver_from_column(tc, 27.8),
+}
+UNASSISTED_CURVES = {
+    'unassisted': lambda tc: tc,
+    'unassisted with tyre fall-off': lambda tc: tc * (1 - 0.2 * (tc / 43.0) ** 2),
+    'unassisted with 15 % model error': lambda tc: tc / (1 + 0.15 * min(tc / 43.0, 1.5)),
+}
+
+
+@pytest.mark.parametrize('name', sorted(ASSIST_CURVES))
+def test_the_detector_calls_every_assist_curve_of_the_report_present(name):
+    det = _detector_ratio(ASSIST_CURVES[name])
+    assert det.ratio() < cp.AssistDetector.ASSIST_BELOW and det.state is True, det.ratio()
+
+
+@pytest.mark.parametrize('name', sorted(UNASSISTED_CURVES))
+def test_the_detector_calls_every_unassisted_curve_of_the_report_absent(name):
+    det = _detector_ratio(UNASSISTED_CURVES[name])
+    assert det.ratio() > cp.AssistDetector.ABSENT_ABOVE and det.state is False, det.ratio()
+
+
+# -- the steering ratio from telemetry --
+
+def test_the_table_ratio_is_the_wheel_lock_over_the_road_wheel_lock_of_a_0_13_m_arm():
+    entry = {'steering_wheel_lock_deg': 270.0, 'rack_travel_m': 0.042}
+    assert cp.table_ratio(entry) == pytest.approx(270.0 / math.degrees(math.asin(0.042 / 0.13)))
+    assert 14.0 < cp.table_ratio(entry) < 14.7
+    assert cp.table_ratio(entry, arm=0.15) > cp.table_ratio(entry)             # a longer arm: less road-wheel lock ... more ratio
+    assert cp.table_ratio({}) is None and cp.table_ratio(None) is None
+    assert cp.table_ratio({'steering_wheel_lock_deg': 270.0, 'rack_travel_m': 0.2}) is None     # travel beyond the arm
+
+
+def _drive_ratio(learner, lock_rad, seconds=60.0, speed=20.0, hz=100.0):
+    rng = random.Random(4)
+    for i in range(int(seconds * hz)):
+        steer = 0.4 * math.sin(i / hz * 1.3) + rng.gauss(0, 0.01)
+        yaw = speed * steer * lock_rad / cp.WHEELBASE            # Ackermann, as the learner assumes
+        learner.add(steer, yaw, speed, 1.0 / hz)
+    return learner
+
+
+def test_the_ratio_is_learnt_from_the_road_wheel_angle():
+    lock = math.radians(18.8)
+    learner = _drive_ratio(cp.RatioLearner(), lock, speed=8.0)
+    assert learner.lock() == pytest.approx(lock, rel=0.02)
+    assert learner.ratio(270.0) == pytest.approx(270.0 / 18.8, rel=0.02)
+    assert learner.ratio(None) is None
+
+
+def test_the_ratio_waits_for_evidence_and_ignores_hard_cornering_and_standing():
+    learner = cp.RatioLearner()
+    assert learner.lock() is None
+    for _ in range(3000):
+        learner.add(0.5, 0.9, 3.0, 0.01)                 # slow
+        learner.add(0.5, 0.9, 30.0, 0.01)                # 27 m/s^2 lateral
+    assert learner.lock() is None
+
+
+def test_the_engine_learns_the_lock_and_the_ratio_and_keeps_them(tmp_path):
+    cp.STORE.use(str(tmp_path / 'props.json'))
+    cp.ASYNC = False
+    entry = {'steering_wheel_lock_deg': 270.0, 'rack_travel_m': 0.042}
+    from oversteer import car_data
+    car_data.set_cars({'rbr/test': entry})
+    try:
+        rack = fe.RackForce()
+        rack.reset('rbr/test')
+        assert rack.ratio == pytest.approx(cp.table_ratio(entry))          # the table until it is learnt
+        true_lock = math.radians(22.0)                                      # != the table's 18.8 deg
+        rng = random.Random(2)
+        for n in range(int(90 * 100)):
+            steer = 0.08 * math.sin(n / 100.0 * 1.3) + rng.gauss(0, 0.002)    # gentle: under the learner's lateral limit
+            s = Sample(6000.0, 7500.0, gear=3, speed=12.0, car='rbr/test', game='rbr')
+            s.steer, s.yaw_rate = steer, 12.0 * steer * true_lock / cp.WHEELBASE
+            s.tyre_mz, s.tyre_fy, s.tyre_fx = (5.0, 5.0, 0, 0), (500.0, 500.0, 0, 0), (0, 0, 0, 0)
+            rack.feed(n / 100.0, s, 1000.0)
+        assert rack.lock == pytest.approx(true_lock, rel=0.03)
+        assert rack.ratio == pytest.approx(270.0 / 22.0, rel=0.05)          # slewed from 14.4 toward 12.3
+        rack.reset('other')                                                 # saved on the way out
+        cp.STORE.use(cp.STORE.path)
+        assert cp.STORE.get_lock('rbr/test') == pytest.approx(true_lock, rel=0.03)
+        assert cp.STORE.get_rack('rbr/test')[0] == pytest.approx(270.0 / 22.0, rel=0.05)
+    finally:
+        car_data.set_cars(None)

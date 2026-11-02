@@ -70,9 +70,9 @@ def test_acr_replay_follows_finalff(acr):
     _d, _rep, _cases, fit = acr
     # the boost curve bends finalFF's linear shape (monotone, but not linear): R^2 0.90 where a linear scale gave 0.97
     assert fit['r2_moving'] > 0.88 and fit['r_moving'] > 0.94
-    assert 0.55 < fit['p50_p90_p99_ours'][2] <= 0.75      # the rim torque on a G29-class wheel: within the 75 % budget
+    assert 0.65 < fit['p50_p90_p99_ours'][2] <= 0.75      # the scaled rim torque on a G29-class wheel: p99 about 70 %, within the budget
     assert abs(fit['lag_s']) < 0.1                     # (snapshots 0.26 s apart: a lag under ~0.1 s is not resolved)
-    assert fit['clip_share_ours'] < 0.003                # the knee keeps it under the budget: nothing clips
+    assert fit['clip_share_ours'] < 0.003                # the hard clamp at the budget (75 %): nothing reaches full scale
     assert fit['ready_share'] > 0.95
 
 
@@ -86,7 +86,7 @@ def test_acr_cases_against_the_games_force(acr):
     assert drift['toward_countersteer'] > drift['mz_only_toward_countersteer'] + 0.15   # the caster arm does it
     assert c['front past peak (front slip > 0.3 rad)']['sign_agree'] > 0.93
     assert c['airborne fronts (load < 300 N)']['ours_p95_abs'] < 0.02          # no force in the air
-    assert c['full lock (|steer| > 0.99)']['r'] > 0.95                         # finalFF has no lock term to miss
+    assert c['full lock (|steer| > 0.99)']['r'] > 0.93                         # finalFF has no lock term to miss (the boost bends the shape a little)
     assert c['front lock-up (brake, front slip ratio > 0.3)']['sign_agree'] > 0.9
     assert c['standing (< 0.5 km/h)']['ours_p95_abs'] < 0.01                   # no buzz standing
     land = c['landing (front load > 2.5x its median)']
@@ -102,6 +102,42 @@ def test_acr_level_and_thermal_headroom_in_normal_driving(acr):
     assert mean.max() < R.THERMAL_LIMIT * (1 - R.THERMAL_BAND) / 2          # 2x headroom before the derate starts
     moving = d['speed'] / 3.6 > fe.MIN_SPEED
     assert np.mean(np.abs(rep['force'][moving]) / FULL > 0.8) == 0.0       # the steering budget is 75 %
+
+
+@needs_dump
+def test_each_cars_impedance_scale_puts_its_p99_near_70_percent_on_the_g29(acr):
+    d, rep, _c, _fit = acr
+    moving = d['speed'] / 3.6 > fe.MIN_SPEED
+    out = np.abs(rep['force']) / FULL
+    assert 0.6 < np.percentile(out[moving], 99) <= 0.75
+    scales = [float(np.median(rep['scale'][moving & (d['seg'] == seg)])) for seg in np.unique(d['seg'])
+              if (moving & (d['seg'] == seg)).sum() > 20]
+    assert all(0.1 < s < 1.0 for s in scales) and 0.3 < np.median(scales) < 0.6       # the report: s about 0.35-0.5
+    assert np.mean(out[moving] >= 0.7499) < 0.02                                       # the clamp is rare
+    p50, p90, p99 = np.percentile(out[moving], [50, 90, 99])
+    assert p99 - p90 > 0.2 and p90 > 2.5 * p50                                         # p90-p99 not squashed
+
+
+@needs_dump
+def test_acr_slip_angle_follows_steer_minus_flow(acr):
+    d, _rep, _c, _fit = acr
+    check = R.slip_sign_check(d)
+    assert check['r_alpha_steer_cornering'] > 0.5 and check['sign_agree_cornering'] > 0.75
+    assert check['r_dalpha_dsteer_fast'] > 0.4 and check['n_fast'] > 1000      # the fast changes are the steering's
+
+
+@needs_dump
+def test_the_aligning_spring_the_driver_renders_is_a_part_of_the_model_torque(acr):
+    d, rep, _c, _fit = acr
+    al = rep['align']
+    ok = np.isfinite(al['k']) & (d['speed'] / 3.6 > fe.MIN_SPEED)
+    assert np.all(al['k'][ok] > 0)
+    spring = R.rendered_spring_nm(al['k'], al['theta_a_deg'] - al['theta_deg'], rep['scale'], rep['peak'])
+    rim = rep['rim']
+    same = np.sign(spring[ok]) == np.sign(rim[ok])
+    big = np.abs(rim[ok]) > 0.5
+    assert np.mean(same[big]) > 0.7                      # the spring pushes the way the model's torque does
+    assert np.mean(np.abs(spring[ok]) <= np.abs(rim[ok]) * 1.5 + 0.2) > 0.9
 
 
 @needs_dump

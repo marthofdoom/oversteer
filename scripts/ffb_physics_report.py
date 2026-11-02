@@ -35,6 +35,7 @@ from oversteer import ffb_addon as fa  # noqa: E402
 from oversteer import ffb_carprops as cp  # noqa: E402
 from oversteer import ffb_engine as fe  # noqa: E402
 from oversteer import ffb_rbr as fr  # noqa: E402
+from oversteer import ffb_spring  # noqa: E402
 from oversteer import ffb_texture as ft  # noqa: E402
 from oversteer import wheel_torque  # noqa: E402
 from oversteer import wheel_calib as wc  # noqa: E402
@@ -103,6 +104,7 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     p99 = np.zeros(n)
     torque = np.zeros(n)
     rim = np.zeros(n)
+    scale = np.ones(n)
     assist_ratio = np.full(n, np.nan)
     assist_state = np.zeros(n)
     al = {k: np.full(n, np.nan) for k in ('theta_a_deg', 'theta_deg', 'k', 'model')}
@@ -118,6 +120,7 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
         p99[i] = rack.p99
         torque[i] = fe.front_torque(s, rack.trail, rack.scrub) or 0.0
         rim[i] = rack.rim_torque(s) or 0.0
+        scale[i] = rack.impedance()
         r_ = rack._assist.ratio()
         assist_ratio[i] = np.nan if r_ is None else r_
         assist_state[i] = {None: 0, False: -1, True: 1}[rack._assist.state]
@@ -135,12 +138,41 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     rack.reset(None)
     cp.STORE.use(kept[0])
     cp.ASYNC = kept[1]
-    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque, 'rim': rim, 'align': al, 'assist_ratio': assist_ratio, 'assist_state': assist_state}
+    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque, 'rim': rim, 'scale': scale, 'peak': wheel_peak or wheel_torque.DEFAULT_PEAK_NM, 'align': al, 'assist_ratio': assist_ratio, 'assist_state': assist_state}
+
+
+def rendered_spring_nm(k, error_deg, scale, peak, k_limit=fe.RackForce.align_k_limit, tau_max=wheel_torque.STEER_BUDGET):
+    """The spring the driver renders at an angle error, in Nm at the rim of the car (before the impedance scale):
+    tau_max sat(min(k, k_limit) e / tau_max) in FS (ffb_spring.sat), k in FS per degree = scale k / peak."""
+    k_fs = np.minimum(scale * k / peak, k_limit)
+    fs = tau_max * np.vectorize(ffb_spring.sat)(k_fs * error_deg / tau_max)
+    return fs * peak / scale
+
+
+def slip_sign_check(d, fast_s=0.5):
+    """ACR's slip angle follows 'steer minus flow' (alpha = delta - flow angle, the sign the engine takes: positive
+    when the car is steered further left than it travels). Steer is positive left (the dump's is the other way).
+    Three views of it: alpha and steer agree in sign while cornering; the changes of alpha and of steer between
+    neighbouring snapshots (<= fast_s apart, the dump's shortest scale) are positively correlated, since the flow
+    is slow against the steering at high frequency; and steer minus the front flow (from the velocity at the
+    front axle, yaw and the steer angle) leaves alpha's sign. Returns the numbers."""
+    sp = d['speed'] / 3.6
+    st = -d['steer']
+    alpha = 0.5 * (d['sa'][:, 0] + d['sa'][:, 1])
+    moving = sp > fe.MIN_SPEED
+    gap = np.diff(d['t'])
+    ok = (d['seg'][1:] == d['seg'][:-1]) & moving[1:] & moving[:-1] & (gap > 0) & (gap <= fast_s)
+    corner = moving & (np.abs(d['accG'][:, 0]) > 0.3)
+    return {'r_alpha_steer_cornering': float(np.corrcoef(alpha[corner], st[corner])[0, 1]),
+            'r_dalpha_dsteer_fast': float(np.corrcoef(np.diff(alpha)[ok], np.diff(st)[ok])[0, 1]), 'n_fast': int(ok.sum()),
+            'sign_agree_cornering': float(np.mean(np.sign(alpha[corner & (np.abs(st) > 0.02)]) == np.sign(st[corner & (np.abs(st) > 0.02)])))}
 
 
 def align_report(d, rep):
-    """The aligning split on the dump: theta_a's distribution, its side in drifts, and how well the spring
-    k (theta_a - theta) rebuilds the rim torque (R^2 against rack.rim_torque; residual in Nm)."""
+    """The aligning split on the dump: theta_a's distribution, its side in drifts, and how well the spring the
+    driver will render (rendered_spring_nm: the tangent k clamped to the driver's k limit, tau_max saturation; the
+    slew and fades are dynamics a static view leaves out) rebuilds the rim torque (R^2 against rack.rim_torque;
+    residual in Nm, the part that goes through ext_force)."""
     al = rep['align']
     sp = d['speed'] / 3.6
     ok = (sp > fe.MIN_SPEED) & np.isfinite(al['k'])
@@ -149,7 +181,7 @@ def align_report(d, rep):
     sa_f = np.max(np.abs(d['sa'][:, :2]), axis=1)
     sa_r = np.max(np.abs(d['sa'][:, 2:]), axis=1)
     rim = rep['rim']
-    spring = al['k'] * (al['theta_a_deg'] - al['theta_deg'])
+    spring = rendered_spring_nm(al['k'], al['theta_a_deg'] - al['theta_deg'], rep['scale'], rep['peak'])
     cases = {
         'moving': ok,
         'normal cornering (|accG| > 0.3, low slip)': ok & (np.abs(d['accG'][:, 0]) > 0.3) & (sa_f < 0.1),
@@ -678,11 +710,25 @@ def main():
         rim = np.abs(rep['rim'])
         peak = args.peak_nm or wheel_torque.DEFAULT_PEAK_NM
         spd = d['speed'] / 3.6
-        print('  rim torque T_d (Nm) p50/p90/p99, moving: %s; at speed > 15 m/s: %s; of full scale on a %.1f Nm wheel (after the knee): %s' % (
-            np.percentile(rim[moving], [50, 90, 99]).round(2), np.percentile(rim[spd > 15], [50, 90, 99]).round(2), peak,
-            np.percentile(np.abs(ours[moving]) / FULL, [50, 90, 99]).round(3)))
-        print('  share of moving time past the knee start (%.2f of full scale, unlimited) %.3f; output above 70 %% %.4f; max %.3f' % (
-            wheel_torque.KNEE_FROM, float(np.mean(rim[moving] / peak > wheel_torque.KNEE_FROM)),
+        print('  rim torque T_d (Nm) p50/p90/p99, moving: %s; at speed > 15 m/s: %s' % (
+            np.percentile(rim[moving], [50, 90, 99]).round(2), np.percentile(rim[spd > 15], [50, 90, 99]).round(2)))
+        print('  played share of full scale on a %.1f Nm wheel p50/p90/p99 (moving): %s' % (
+            peak, np.percentile(np.abs(ours[moving]) / FULL, [50, 90, 99]).round(3)))
+        per_car = {}
+        for seg in np.unique(d['seg']):
+            m = moving & (d['seg'] == seg)
+            if m.sum() > 20:
+                per_car[int(seg)] = {'s': round(float(np.median(rep['scale'][m])), 3),
+                                     'T_d_p99_nm': round(float(np.percentile(rim[m], 99)), 2),
+                                     'played_p99': round(float(np.percentile(np.abs(ours[m]) / FULL, 99)), 3)}
+        print('  impedance scale s per car (stretch): %s' % json.dumps(per_car))
+        print('  on-centre gradient of the rim torque at 25 m/s (tangent at the dump\'s mean K %.0f Nm/rad, ratio %.1f): %.3f Nm per degree' % (
+            fe.RackForce.ALIGN_K0, cp.STEER_RATIO, fe.RackForce.ALIGN_K0 / cp.STEER_RATIO ** 2 * math.pi / 180.0
+            * cp.driver_slope(0.0, 25.0, 1.0)))
+        print('  slip-angle sign (steer minus flow):', json.dumps({k: round(v, 3) if isinstance(v, float) else v
+                                                                  for k, v in slip_sign_check(d).items()}))
+        print('  share of moving time with the rim torque scaled past the budget (clamped) %.4f; output above 70 %% %.4f; max %.3f' % (
+            float(np.mean(rep['scale'][moving] * rim[moving] / peak > wheel_torque.STEER_BUDGET)),
             float(np.mean(np.abs(ours[moving]) / FULL > 0.70)), float(np.abs(ours[moving]).max() / FULL)))
         print('  ours above 50 / 80 / 98 %% of full scale: %.4f / %.4f / %.4f of moving time' % tuple(
             float(np.mean(np.abs(ours[moving]) / FULL > x)) for x in (0.5, 0.8, 0.98)))
