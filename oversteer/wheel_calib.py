@@ -93,6 +93,15 @@ def resample(pos_t, pos, h=GRID_S, gap=0.010, report=0.002):
         raise FitError("no wheel movement was recorded")
     order = np.argsort(t, kind='stable')
     t, p = t[order], p[order]
+    # Reports that reached us together (a proxy hop delivers them in bunches) carry one time: only the last
+    # of a bunch is the wheel's position at that time, the earlier ones would be steps in the signal
+    last = np.append(t[1:] > t[:-1], True)
+    t, p = t[last], p[last]
+    if len(t) < 2:
+        raise FitError("no wheel movement was recorded")
+    # Bunched, the spacing of the bunches is the normal gap: only a longer pause means the wheel stood still
+    spacing = np.diff(t)
+    gap = max(gap, 1.5 * float(np.percentile(spacing, 25)))
     gaps = np.flatnonzero(np.diff(t) > gap)
     if len(gaps):
         t = np.insert(t, gaps + 1, t[gaps + 1] - report)

@@ -1037,7 +1037,7 @@ class GtkUi:
         if not supported:
             return _("Needs a newer new-lg4ff driver (with ext_force, game_ffb_level and ffb_lut) and permission "
                      "to write its settings.")
-        return _("Measures your wheel, hands off, in about two minutes: where its motor starts to push (dead "
+        return _("Measures your wheel, hands off, in a few minutes: where its motor starts to push (dead "
                  "zone), how its force grows with the command, its friction, inertia and latency. The result "
                  "corrects the force in every game so it grows evenly from the lightest to the strongest effect. "
                  "The wheel turns by itself while it runs.")
