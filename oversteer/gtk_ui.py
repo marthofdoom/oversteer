@@ -1171,9 +1171,10 @@ class GtkUi:
     COUNTERSTEER_TOOLTIP = ("Countersteer plays its own steering force, from the tyre forces in the game's "
                               "telemetry, in place of the game's force feedback, where it can do better: the light "
                               "is green when the game sends what that needs, fast enough (measured live). Amber: "
-                              "a force model is possible but not built yet; grey: the game keeps its own force. "
-                              "It only takes over while the light is green and gives the game its force back at "
-                              "once otherwise. Saved with the profile.")
+                              "the game keeps its own force and Countersteer adds to it (Forza Horizon: lighter as "
+                              "the front tyres run out of grip), or a force model is possible but not built yet; "
+                              "grey: the game keeps its own force. It only takes over while the light is green and "
+                              "gives the game its force back at once otherwise. Saved with the profile.")
     COUNTERSTEER_NO_DRIVER = ("Needs the new-lg4ff driver with replace mode (ext_force): update the driver")
 
     def _build_countersteer_ffb(self):
@@ -1211,6 +1212,12 @@ class GtkUi:
                                       "curve as it is; 100 % plays the steering torque straight, clipped at full "
                                       "force. In between the force is exact up to that share of full force and "
                                       "rounds off smoothly above it. 70 % by default. Saved with the profile.")
+    COUNTERSTEER_LIGHTNESS_TOOLTIP = ("Forza Horizon only. Forza keeps its own force feedback; Countersteer makes "
+                                      "it lighter as the front tyres run out of grip (from the front slip in the "
+                                      "game's telemetry), so understeer is felt in the wheel. 0 % leaves the game's "
+                                      "force as it is; 100 % plays the whole drop, down to 40 % of the game's "
+                                      "force at most. Never stronger than the game. 60 % by default. Saved with the "
+                                      "profile.")
 
     def _build_countersteer_texture(self, anchor):
         """The texture's rows under the Countersteer FFB row (shown while it is on):
@@ -1237,8 +1244,15 @@ class GtkUi:
         self.countersteer_linearity = linear
         linearity = self._setting_row(_("RBR linearity"), None, _(self.COUNTERSTEER_LINEARITY_TOOLTIP),
                                       (self._response_row(linear),))
+        light = self._response_scale(0, 100, 10)
+        light.set_size_request(160, -1)
+        light.connect('value-changed',
+                      lambda w: self.controller.model.set_countersteer_lightness(int(w.get_value())))
+        self.countersteer_lightness = light
+        lightness = self._setting_row(_("Forza understeer lightness"), None, _(self.COUNTERSTEER_LIGHTNESS_TOOLTIP),
+                                      (self._response_row(light),))
         parent = anchor.get_parent()
-        self.countersteer_texture_rows = (level, parts, linearity)
+        self.countersteer_texture_rows = (level, parts, linearity, lightness)
         for i, row in enumerate(self.countersteer_texture_rows):
             parent.insert(row, anchor.get_index() + 1 + i)
             row.show_all()
@@ -1266,6 +1280,13 @@ class GtkUi:
             return
         if int(self.countersteer_linearity.get_value()) != int(value):
             self.countersteer_linearity.set_value(int(value))
+
+    def set_countersteer_lightness(self, value):
+        """Forza Horizon's understeer lightness, 0..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_lightness') or value is None:
+            return
+        if int(self.countersteer_lightness.get_value()) != int(value):
+            self.countersteer_lightness.set_value(int(value))
 
     def set_countersteer_ffb(self, value):
         """The switch: None where the driver has no replace mode (insensitive, the tooltip says why)."""
