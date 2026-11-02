@@ -104,9 +104,6 @@ def test_acr_level_and_thermal_headroom_in_normal_driving(acr):
 
 
 @needs_dump
-@pytest.mark.xfail(strict=True, reason="defect: ffb_carprops.TorqueLearner._solve ridges b and c toward -a_prior t0 / "
-                   "-a_prior s0 but not a; with Mz and Fy collinear the prior drags a negative, the MIN_A check rejects "
-                   "every later solve and the learner freezes on an early value (stretch 2: scrub 1 mm vs 16.6 mm OLS)")
 def test_the_learner_fits_every_car(acr):
     # every stretch fits finalFF with R^2 0.946-0.995 by its own least squares (trail 6-46 mm, scrub 13-35 mm)
     _d, _rep, _c, fit = acr
@@ -180,9 +177,6 @@ def test_forza_gain_on_the_fh6_capture_stays_in_bounds():
     assert 0.8 < lv['mean_moving'] < 1.0
 
 
-@pytest.mark.xfail(strict=True, reason="defect: ffb_addon.lightness clamps max(exp(-s^q), G_MIN), so the caster "
-                   "share fades along with the pneumatic trail until the floor; physics (its own docstring) is "
-                   "G_MIN + (1 - G_MIN) exp(-s^q): up to 0.24 too light at a pneumatic share of 0.4")
 def test_forza_lightness_keeps_the_caster_share():
     gap, _x = R.lightness_gap()
     assert gap < 0.02
