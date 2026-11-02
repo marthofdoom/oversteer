@@ -1000,6 +1000,44 @@ def test_a_proxy_lost_mid_run_stops_the_run_with_the_forces_zeroed(monkeypatch):
     assert_put_back(sim)
 
 
+def test_a_proxy_lost_while_preparing_is_an_abort_and_everything_is_put_back():
+    from oversteer import wheel_owner
+
+    class LosingWheel(SimWheel):
+        def position_raw(self):
+            raise wcal.ProxyLost('the combined device restarted')
+
+    sim = LosingWheel()
+    with pytest.raises(Aborted) as e:
+        Calibration(sim).run()
+    assert e.value.reason == 'proxy'
+    assert wheel_owner.current(sim.wheel_id) is None
+    assert_put_back(sim)
+
+
+def test_the_correction_follows_the_active_device(tmp_path):
+    wheel = _Wheel()
+    wheel.dev_name = REAL
+    wheel.is_ready = lambda: True
+    wheel._input_node = lambda: REAL
+    gui = _gui(tmp_path, wheel)
+    calls = []
+    gui.apply_wheel_correction = lambda: (calls.append('apply'), setattr(gui, 'correction_key', wcal.wheel_key(wheel)))
+    gui.refresh_wheel_correction = lambda: calls.append('refresh')
+    gui.correction_key = wcal.wheel_key(wheel)
+    gui.check_active_device()
+    assert calls == []                                           # nothing changed
+    wheel._input_node = lambda: NODE                             # the proxy takes the wheel
+    gui.check_active_device()
+    assert calls == ['apply', 'refresh']
+    gui.check_active_device()
+    assert calls == ['apply', 'refresh']                         # once
+    gui.calibration = object()                                   # not while a run is going
+    wheel._input_node = lambda: REAL
+    gui.check_active_device()
+    assert calls == ['apply', 'refresh']
+
+
 def test_the_owner_hook_is_released(monkeypatch):
     calls = []
     monkeypatch.setattr(Calibration, '_acquire_owner', lambda self: calls.append('acquire') or 'token')

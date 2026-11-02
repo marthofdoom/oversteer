@@ -335,9 +335,19 @@ class Gui:
         try:
             self.refresh_equipment()
             self.update_handbrake()
+            self.check_active_device()
         except Exception as e:
             logging.debug("combine status: %s", e)
         return True
+
+    def check_active_device(self):
+        """The wheel's stored correction belongs to the device that is active (its own or the combined
+        device's): when the proxy comes or goes, the other entry's correction is put on."""
+        if self.calibration is not None or self.device is None or not self._wheel_supported():
+            return
+        if wcal.wheel_key(self.device) != getattr(self, 'correction_key', None):
+            self.apply_wheel_correction()
+            self.refresh_wheel_correction()
 
     def _confirm_wine_running(self):
         """True when it is fine to re-create the combined device: no Wine
@@ -2317,6 +2327,7 @@ class Gui:
         calibrated, the driver lacks the attributes or a calibration is running."""
         if self.calibration is not None or not self._wheel_supported():
             return
+        self.correction_key = wcal.wheel_key(self.device)
         entry = self._wheel_entry()
         if entry is not None:
             held = self._wheel_held()

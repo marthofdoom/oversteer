@@ -152,6 +152,9 @@ class Calibration:
             try:
                 self._prepare()
                 self._measure()
+            except ProxyLost as e:
+                self._zero()
+                raise Aborted('proxy', str(e)) from e
             except PermissionError as e:
                 raise Aborted('permission', _("Oversteer may not change this wheel's settings ({}). The udev "
                                               "rules that come with Oversteer give that permission.").format(e)) from e
