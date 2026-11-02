@@ -20,6 +20,7 @@ import json
 import os
 import random
 import sys
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from oversteer import ffb_metrics  # noqa: E402
@@ -55,13 +56,14 @@ def blind(args):
     rnd.shuffle(states)
     os.makedirs(KEY_DIR, exist_ok=True)
     stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-    path = os.path.join(KEY_DIR, 'ab-%s.json' % stamp)
+    path = os.path.join(KEY_DIR, 'ab-%s-%s.json' % (stamp, uuid.uuid4().hex[:6]))
     key = {'created': stamp, 'runs': [{'run': i + 1, 'switch': s} for i, s in enumerate(states)]}
     with open(path, 'w') as f:
         json.dump(key, f, indent=1)
     for entry in key['runs']:
         print("run %d: Countersteer FFB switch %s" % (entry['run'], entry['switch'].upper()))
     print("key: %s" % path)
+    print("Not blind for the driver: you set the switch, so you know. The order only keeps you from always testing one state first.")
     print("Record each run with \"Record for FFB tuning\" on; then: scripts/ffb-ab.py --reveal %s RUN1 RUN2 ..." % path)
     return 0
 

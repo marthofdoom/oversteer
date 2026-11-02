@@ -147,7 +147,7 @@ def test_analyse_a_synthetic_capture(tmp_path):
     assert result['meta']['ready_share'] > 0.5
     # finalFF is Mz / 582: the game follows Mz closely and with no lag; ours is the same signal scaled
     assert result['game']['corr'] > 0.99 and result['ours']['corr'] > 0.99
-    assert abs(result['game']['lag_ms']) < 6 and abs(result['ours']['lag_ms']) < 6
+    assert abs(result['game']['lag_ms']) < 0.5 and abs(result['ours']['lag_ms']) < 0.5
     assert result['game']['clip'] == 0.0 and result['ours']['rms_diff'] < 0.1
     assert result['ours']['band_rms'] is not None and result['game']['band_rms'] is not None
     assert len(result['sections']) >= 1 and result['sections'][0]['label'].startswith('section')
@@ -204,3 +204,29 @@ def test_blind_order_key_and_reveal(tmp_path):
     again = script('--reveal', keys[0], home=tmp_path)
     assert again.returncode == 0 and 'switch ' + key['runs'][0]['switch'] in again.stdout
     assert script('--reveal', keys[0], tmp_path / 'one.ovcap.gz', home=tmp_path).returncode == 2
+
+
+def test_a_hole_in_the_capture_is_not_data():
+    t = np.concatenate((np.arange(0, 5, 1 / HZ), np.arange(5.19, 10, 1 / HZ)))
+    g = fm._grid({'t': t, 'x': np.sin(t)}, HZ)
+    hole = (g['t'] > 5.02) & (g['t'] < 5.17)
+    assert hole.any() and not g['near'][hole].any()
+    assert g['near'][g['t'] < 4.9].all() and g['near'][g['t'] > 5.3].all()
+
+
+def test_times_that_do_not_increase_are_left_out(tmp_path):
+    path = tmp_path / 'tune.ovcap.gz'
+    write_capture(path, seconds=10.0)
+    _meta, items = load_items(path)
+    items = items[:500] + items[300:400] + items[500:]            # a stretch repeated: times go back
+    series = fm.replay_forces(items, 0.0)
+    assert (np.diff(series['t']) > 0).all()
+
+
+def test_ours_is_the_games_force_until_the_engine_plays(tmp_path):
+    path = tmp_path / 'tune.ovcap.gz'
+    write_capture(path, seconds=20.0)
+    _meta, items = load_items(path)
+    s = fm.replay_forces(items, 0.0)
+    assert not any(s['playing'][:100]) and s['ours'][:100] == s['game'][:100]
+    assert any(s['playing'])

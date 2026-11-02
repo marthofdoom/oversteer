@@ -5,8 +5,13 @@ Two force signals over the same drive, both in fractions of full scale (-1..1):
 - game: the game's own force. A capture has finalFF (Sample.game_ffb), which stands in for the
   driver's game_ffb_raw (not in captures).
 - ours: what the engine would send, computed offline: RackForce (fitted to finalFF as it would be
-  to the raw level, ready only when it fits) plus Texture on the same samples, on the capture's own
-  clock, clamped to full scale like FfbEngine._play does.
+  to the raw level) plus Texture on the same samples, on the capture's own clock, started, faded and
+  clamped like FfbEngine does (see `replay_forces`); judged only where it plays.
+
+On ACR finalFF is about Mz / 582, so the game's force follows Mz almost exactly and ours is RackForce's
+scaled Mz: expect both to score near 1.0 on corr and going-light, and near 0 ms lag. The numbers that
+tell them apart on ACR are the clipping, the detail band and the rms difference; the rest mostly
+guards against a regression in the replay.
 
 and the reference they are judged against, the front tyres' Mz (FL + FR).
 
@@ -34,8 +39,10 @@ import numpy as np
 CLIP_AT = 0.98
 BAND = (5.0, 30.0)
 MAX_LAG_MS = 250.0
+LAG_RUN = 5.0                            # s: shorter stretches are not used for the lag (few overlapping samples at the far lags)
 MIN_RUN = 2.0                            # s: shorter contiguous stretches are not analysed for lag and band
-GAP = 0.1                                # s: grid points further than this from a real sample are not valid
+HOLE = 3.0                               # a grid point is valid only inside a sample interval of at most HOLE periods
+HOLE_MIN = 0.02                          # s: ... and never less than this
 MIN_SPEED = 5.0 / 3.6                    # m/s (the engine's MIN_SPEED)
 LIGHT_SMOOTH = 0.05                      # s
 LIGHT_WINDOW = 0.5                       # s
@@ -85,7 +92,7 @@ def lag_ms(ref, x, rate, valid=None, max_ms=MAX_LAG_MS):
     span = int(round(max_ms / 1000.0 * rate))
     total = np.zeros(2 * span + 1)
     used = 0
-    for a, b in runs(valid, max(int(MIN_RUN * rate), 2 * span + 2)):
+    for a, b in runs(valid, max(int(LAG_RUN * rate), 2 * span + 2)):
         r, s = ref[a:b] - ref[a:b].mean(), x[a:b] - x[a:b].mean()
         size = 1 << (2 * (b - a) - 1).bit_length()
         c = np.fft.irfft(np.fft.rfft(s, size) * np.conj(np.fft.rfft(r, size)), size)   # c[k] = sum r[n] s[n+k]
@@ -220,44 +227,80 @@ def metrics(force, mz, slip, rate, valid, ref_force=None):
     return out
 
 
-def front_slip(sample):
-    """The front tyres' combined slip (the larger of FL and FR), else their slip angle; None without either."""
-    for values in (sample.combined_slip, sample.tyre_slip_angle):
-        if values is not None:
-            front = [abs(v) for v in values[:2] if v is not None and math.isfinite(v)]
-            if front:
-                return max(front)
-    return None
+def slip_source(items):
+    """'combined' if any sample carries the game's combined slip, else 'angle': one source for a whole capture,
+    so the slip peak is not judged on a mix of units."""
+    return 'combined' if any(s.combined_slip is not None for _t, s in items) else 'angle'
+
+
+def front_slip(sample, source='combined'):
+    """The front tyres' slip (the larger of FL and FR) from the source ('combined' or 'angle'); None without."""
+    values = sample.combined_slip if source == 'combined' else sample.tyre_slip_angle
+    if values is None:
+        return None
+    front = [abs(v) for v in values[:2] if v is not None and math.isfinite(v)]
+    return max(front) if front else None
 
 
 def replay_forces(items, texture_level=None):
-    """Drive the engine's own RackForce and Texture with (t, Sample) pairs on the capture clock, the
-    game's raw level being finalFF at full scale. Samples without finalFF or front Mz are left out.
-    Returns a dict of lists: t, mz, game, ours (fractions of full scale), slip, speed, ready (bool),
-    lap_distance, stage_length, sector, stage_time."""
-    from .ffb_engine import FULL, RackForce, front_mz
+    """Drive the engine's own classes with (t, Sample) pairs on the capture clock, the way FfbEngine._sample and
+    _play do: SupportClassifier (its 'replace' verdict, with the HOLD limits once playing) and RackForce.ready
+    start it, it fades in and out over FADE, and Texture is called only while it plays. The game's raw level is
+    finalFF at full scale. Samples without finalFF or front Mz, and times that do not increase, are left out.
+    Where it is not playing 'ours' is the game's own force (the game has it). Returns a dict of lists: t, mz,
+    game, ours (fractions of full scale), slip, speed, ready (RackForce), playing (fully faded in), lap_distance,
+    stage_length, sector, stage_time. Not mirrored: REARM after a release."""
+    from .ffb_engine import FADE, FULL, RackForce, SupportClassifier, front_mz
     from .ffb_texture import Texture
 
-    rack, texture = RackForce(), Texture()
+    rack, texture, classifier = RackForce(), Texture(), SupportClassifier()
+    classifier.has_game_ffb_raw = True
     if texture_level is not None:
         texture.set(texture_level)
-    out = {k: [] for k in ('t', 'mz', 'game', 'ours', 'slip', 'speed', 'ready', 'lap_distance', 'stage_length',
-                           'sector', 'stage_time')}
+    source = slip_source(items)
+    out = {k: [] for k in ('t', 'mz', 'game', 'ours', 'slip', 'speed', 'ready', 'playing', 'lap_distance',
+                           'stage_length', 'sector', 'stage_time')}
+    phase, fade_at, fade_from, last = 'idle', 0.0, 0.0, None
     for t, s in items:
         mz = front_mz(s)
-        if s.game_ffb is None or mz is None:
+        if s.game_ffb is None or mz is None or (last is not None and not t > last):
             continue
+        last = t
+        classifier.feed(t, s)
         rack.feed(t, s, s.game_ffb * FULL, True)
-        base = rack.force(s)
-        value = min(max(base + texture.force(t, s, base), -FULL), FULL)
-        slip = front_slip(s)
+        want = classifier.verdict(t, holding=phase in ('in', 'on')).state == 'replace' and rack.ready
+        if phase in ('in', 'on') and not want:
+            phase, fade_at, fade_from = 'out', t, 1.0 if phase == 'on' else min((t - fade_at) / FADE, 1.0)
+        elif phase == 'out' and want:
+            phase, fade_at = 'in', t - fade_from * FADE
+        elif phase == 'idle' and want:
+            phase, fade_at = 'in', t
+        gain = 0.0
+        if phase == 'in':
+            gain = min((t - fade_at) / FADE, 1.0)
+            if gain >= 1.0:
+                phase = 'on'
+        elif phase == 'on':
+            gain = 1.0
+        elif phase == 'out':
+            gain = max(fade_from - (t - fade_at) / FADE, 0.0)
+            if gain <= 0.0:
+                phase = 'idle'
+        if phase == 'idle' and gain <= 0.0:
+            ours = s.game_ffb
+        else:
+            base = rack.force(s)
+            value = min(max(base + texture.force(t, s, base), -FULL), FULL) / FULL
+            ours = value * gain + s.game_ffb * (1.0 - gain)     # the driver's crossfade with the game's force
+        slip = front_slip(s, source)
         out['t'].append(t)
         out['mz'].append(mz)
         out['game'].append(s.game_ffb)
-        out['ours'].append(value / FULL)
+        out['ours'].append(ours)
         out['slip'].append(math.nan if slip is None else slip)
         out['speed'].append(s.speed or 0.0)
         out['ready'].append(bool(rack.ready))
+        out['playing'].append(phase == 'on')
         out['lap_distance'].append(math.nan if s.lap_distance is None else s.lap_distance)
         out['stage_length'].append(math.nan if not s.stage_length else s.stage_length)
         out['sector'].append(-1 if s.sector is None else s.sector)
@@ -266,18 +309,19 @@ def replay_forces(items, texture_level=None):
 
 
 def _grid(series, rate):
-    """Every series on a uniform grid at `rate`, plus `valid` (a real sample within GAP)."""
+    """Every series on a uniform grid at `rate`, plus `valid` (a sample interval no longer than a few periods)."""
     t = np.asarray(series['t'], dtype=float)
     grid = np.arange(t[0], t[-1], 1.0 / rate)
     near = np.searchsorted(t, grid)
     left, right = np.clip(near - 1, 0, t.size - 1), np.clip(near, 0, t.size - 1)
-    gap = np.minimum(np.abs(grid - t[left]), np.abs(t[right] - grid))
-    out = {'t': grid, 'near': gap <= GAP}
+    raw_rate = estimate_rate(t) or rate
+    # Straight lines across a hole in the capture are not data: the interval holding the point must be a normal one
+    out = {'t': grid, 'near': (t[right] - t[left]) <= max(HOLE / raw_rate, HOLE_MIN)}
     for name, values in series.items():
         if name == 't':
             continue
         v = np.asarray(values, dtype=float)
-        if name in ('ready', 'sector'):
+        if name in ('ready', 'playing', 'sector'):
             out[name] = v[np.where(np.abs(grid - t[left]) <= np.abs(t[right] - grid), left, right)]
         elif name == 'slip' or name.startswith('lap') or name.startswith('stage'):
             good = np.isfinite(v)
@@ -319,7 +363,7 @@ def analyse(items, sections=0, texture_level=None, only_ready=True, rate=None):
     raw_rate = estimate_rate(series['t'])
     rate = float(rate or min(max(round(raw_rate or 60.0), 30), 333))
     g = _grid(series, rate)
-    ready = g['ready'] > 0.5
+    ready = g['playing'] > 0.5
     moving = g['speed'] > MIN_SPEED
     base = g['near'] & moving
     valid = base & ready if only_ready and (base & ready).sum() >= MIN_RUN * rate else base
@@ -370,7 +414,7 @@ def table(result, title=''):
     lines = []
     if title:
         lines.append(title)
-    lines.append('%d samples, capture %s Hz, grid %.0f Hz, %.1f s judged (%s), engine ready %.0f %% of the time moving'
+    lines.append('%d samples, capture %s Hz, grid %.0f Hz, %.1f s judged (%s), engine ready %.0f %% of the time moving (playing share)'
                  % (meta['samples'], _num(meta['capture_rate_hz'], '%.0f'), meta['grid_rate_hz'], meta['seconds'],
                     'ready only' if meta['only_ready'] else 'all moving', meta['ready_share'] * 100))
     if meta['low_rate']:
