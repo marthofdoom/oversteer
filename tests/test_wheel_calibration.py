@@ -270,6 +270,68 @@ def test_the_time_limit_stops_the_run(monkeypatch):
     assert_put_back(sim)
 
 
+def test_the_time_limit_says_where_and_the_summary_is_logged(monkeypatch, caplog):
+    monkeypatch.setattr(Calibration, 'TOTAL_S', 20.0)
+    sim = SimWheel()
+    cal = Calibration(sim)
+    with caplog.at_level('INFO'):
+        with pytest.raises(Aborted) as e:
+            cal.run()
+    assert e.value.reason == 'timeout'
+    assert cal.step_text and '"{}"'.format(cal.step_text) in str(e.value)
+    text = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith('calibration: ') and 'Finding the direction' in m for m in text)     # each step's start
+    summary = next(m for m in text if m.startswith('calibration summary: timeout'))
+    for part in ('phases', 'direction', 'breakaway', 'move timeouts', 'near-lock events', 'latency', 'a_kick',
+                 'a_fs', 'breakaway_max', 'last log'):
+        assert part in summary
+
+
+def test_a_good_run_logs_its_summary_too(g29_like, caplog):
+    sim, cal, result = g29_like
+    with caplog.at_level('INFO'):
+        cal._log_summary('ok')
+    summary = caplog.records[-1].getMessage()
+    assert summary.startswith('calibration summary: ok') and 'force response' in summary and 'rim breakaway' in summary
+
+
+def test_a_pulse_that_cannot_be_started_is_dropped_not_waited_for(monkeypatch):
+    real = Calibration._move_to
+    state = {'failed': 0}
+
+    def move_to(self, target, *args, **kwargs):
+        if self.phase == 'force response' and not state['failed']:
+            state['failed'] = 1
+            self._hold(0.05)
+            self.log.append((self._now(), 'move timeout'))
+            self.move_timeouts += 1
+            return False
+        return real(self, target, *args, **kwargs)
+
+    monkeypatch.setattr(Calibration, '_move_to', move_to)
+    sim = SimWheel()
+    cal = Calibration(sim)
+    result = cal.run()
+    assert cal.move_skips == 1 and any(e.startswith('shot skipped') for _t, e in cal.log)
+    assert result['duration_s'] < 180
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+@pytest.mark.parametrize('delay, batch', [(0.015, 0.004), (0.030, 0.0)])
+def test_a_g29_like_wheel_behind_a_proxy_finishes_well_inside_the_limit(delay, batch):
+    """Breakaway about 13 %, positions arriving late (a proxy hop) and in batches: no move time-outs, and the
+    whole run far from TOTAL_S."""
+    sim = SimWheel(dead_zone=0.11, static=0.07, coulomb=0.05, read_delay=delay, read_batch=batch)
+    cal = Calibration(sim)
+    result = cal.run()
+    assert cal.move_timeouts == 0 and cal.move_skips == 0
+    assert sim.t - 100.0 < 190
+    assert result['duration_s'] < 190
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
 def test_a_wheel_that_does_not_move_stops_the_run():
     sim = SimWheel(static=0.9, coulomb=0.8)                      # blocked
     with pytest.raises(Aborted) as e:

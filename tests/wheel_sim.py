@@ -21,7 +21,7 @@ class SimWheel:
     def __init__(self, inertia=1 / 5000.0, coulomb=0.035, static=0.05, static_wobble=0.25, damping=4e-5,
                  dead_zone=0.06, curve=3.0, latency=0.012, encoder_deg=360 / 4096, ext_sign=-1,
                  max_range=900, range=540, gain=110, autocenter=30, start_deg=0.0, game_spring=0.002,
-                 stop_deg=450.0, dt=0.0005, tick=0.002, report=0.001):
+                 stop_deg=450.0, dt=0.0005, tick=0.002, report=0.001, read_delay=0.0, read_batch=0.0):
         self.J = inertia                    # full scale per deg/s^2
         self.coulomb = coulomb              # full scale
         self.static = static
@@ -42,6 +42,9 @@ class SimWheel:
         self.tick = tick
         self.tick_s = tick
         self.report = report
+        self.read_delay = read_delay        # extra delay of every position that reaches the application (a proxy hop)
+        self.read_batch = read_batch        # ...and they arrive in batches this far apart (0: as they come)
+        self._pos_hist = []                 # (time it reaches the application, raw) for position_now
         self.wheel_id = 'sim-wheel-{}'.format(id(self))     # its wheel_owner key
         self.attrs = {'game_ffb_level': '100', 'game_const_scale': '100', 'ext_force': '0', 'ext_force_cap': '80',
                       'ffb_lut': 'identity', 'ffb_deadband': '0', 'ffb_dither': '0', 'ffb_soft_clip': '0'}
@@ -180,7 +183,14 @@ class SimWheel:
         if self.t >= self.next_report:
             raw = self.raw()
             if raw != self.last_raw:
-                self.reports.append((self.next_report, raw))
+                emit = self.next_report + self.read_delay
+                if self.read_batch:
+                    emit = math.ceil(emit / self.read_batch - 1e-9) * self.read_batch
+                if self.read_delay or self.read_batch:
+                    self._pos_hist.append((emit, raw))
+                    if len(self._pos_hist) > 400:
+                        del self._pos_hist[:200]
+                self.reports.append((emit, raw))
                 self.last_raw = raw
             self.next_report += self.report
 
@@ -241,13 +251,22 @@ class SimWheel:
 
     def poll(self):
         self._fail()
-        out, self.reports = self.reports, []
+        if self.read_delay or self.read_batch:
+            out = [r for r in self.reports if r[0] <= self.t]
+            self.reports = [r for r in self.reports if r[0] > self.t]
+        else:
+            out, self.reports = self.reports, []
         if self.blind_at is not None and self.t >= self.blind_at:
             return []
         return out
 
     def position_now(self):
         self._fail()
+        if self.read_delay or self.read_batch:
+            for emit, raw in reversed(self._pos_hist):
+                if emit <= self.t:
+                    return raw
+            return self._pos_hist[0][1] if self._pos_hist else self.raw()
         return self.raw()
 
     def blind(self, after):
