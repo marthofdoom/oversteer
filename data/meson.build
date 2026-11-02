@@ -50,6 +50,10 @@ install_data('telemetry/oversteer-shm-bridge.exe', 'telemetry/oversteer-shm-brid
 install_data('telemetry/eawrc/oversteer.json',
   install_dir: join_paths(get_option('datadir'), 'oversteer', 'telemetry', 'eawrc')
 )
+# Countersteer's BeamNG.drive mod (sources of mods/countersteer_ffb.zip): oversteer/beamng_mod.py
+install_subdir('beamng',
+  install_dir: join_paths(get_option('datadir'), 'oversteer')
+)
 # The stage tables of the rally games that name no stage (DiRT Rally 2.0,
 # WRC Generations, Assetto Corsa Rally): oversteer/stage_tables.py
 install_subdir('telemetry/stages',
