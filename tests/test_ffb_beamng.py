@@ -420,3 +420,20 @@ def test_app_gain_turned_on_while_playing_hands_rbr_and_beamng_back(tmp_path):
         f.write('1\n')
     drive.run(1.5)
     assert engine._app_gain
+
+
+def test_a_stop_published_as_0_is_not_fitted_against_the_rack(tmp_path):
+    """BeamNG stops its constant effect while the car moves: the driver publishes 0 with a count step. No game
+    force: not a data point against a rack force that is not 0."""
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(7.0)
+    b = engine.beamng
+    assert engine.status.active and b.ready
+    before, moving, centre = list(b._long.s), b.moving_time, b.centre_time
+    drive.raw = False
+    upload(0)
+    drive.run(0.08)                                          # within RAW_FRESH: the 0 is fresh
+    assert abs(engine._csb_sample.rack_force) > 100
+    assert b._long.s == before and b.moving_time == moving and b.centre_time == centre
+    drive.run(1.0)
+    assert not b.ready and b.waiting == 'raw'

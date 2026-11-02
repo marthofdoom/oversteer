@@ -15,8 +15,8 @@ from oversteer.wheel_calibration import Aborted, Calibration
 from .wheel_sim import SimWheel
 
 
-DEFAULT_ATTRS = {'game_ffb_level': '100', 'ext_force': '0', 'ext_force_cap': '80', 'ffb_lut': 'identity',
-                 'ffb_deadband': '0', 'ffb_dither': '0', 'ffb_soft_clip': '0'}
+DEFAULT_ATTRS = {'game_ffb_level': '100', 'game_const_scale': '100', 'ext_force': '0', 'ext_force_cap': '80',
+                 'ffb_lut': 'identity', 'ffb_deadband': '0', 'ffb_dither': '0', 'ffb_soft_clip': '0'}
 
 
 def linearity_error(sim, result, low=0.05):

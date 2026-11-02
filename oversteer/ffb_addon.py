@@ -1,8 +1,10 @@
 """Countersteer FFB add-on for Forza Horizon (FH6's 324-byte Data Out): the
 game keeps its own force feedback (game_ffb_level stays 100, it is never
-lowered) and Countersteer adds ext_force = (g - 1) x the game's constant
-force now (the driver's game_ffb_raw, fresh), so the wheel gets g x the
-game's constant force: lighter as the front tyres run out of grip.
+written) and the wheel gets g x the game's constant force: lighter as the
+front tyres run out of grip. With a driver that has game_const_scale the
+driver does the scaling (game_const_scale = round(100 g), no lag, never the
+other way: ffb_engine); an older driver gets ext_force = (g - 1) x the
+game's constant force now (the driver's game_ffb_raw, fresh), force() below.
 
 Why an add-on and not a replacement (~/.cache/ffb-slip/report.md,
 2026-11-01): Forza sends no tyre forces and only ~60 packets a second, and
@@ -24,7 +26,8 @@ So it scales the game's force by that and nothing else:
   low-pass at LOWPASS_HZ, then a slew limit of SLEW per second, advanced
   each engine pass (the force is written at the game's upload rate, not
   the telemetry's).
-- ext = -sign(raw) x (1 - g_eff) x max(0, |raw| - D): always against the
+- ext_force (older drivers only):
+  ext =-sign(raw) x (1 - g_eff) x max(0, |raw| - D): always against the
   game's level, never more than it (force()). D (`margin`) is the largest
   change of the game's level from one upload to the next over the last
   MARGIN_WINDOW s: ours is written after the upload it answers, so the
@@ -32,15 +35,17 @@ So it scales the game's force by that and nothing else:
   this one can neither flip the total's sign nor be exceeded by ours.
   ext_force and game_ffb_raw share units and sign (the driver applies the
   effect's direction to raw), so no sign is learnt for the force itself.
-- A held raw level says nothing of a force that is gone (the game stopping
-  or erasing its effect, quitting, losing focus publishes no new level):
-  the engine cuts ext_force to 0 at once when raw goes stale, the
-  telemetry stalls or two effects show, and fades it only while raw is
-  fresh.
+- A held raw level says nothing of a force that is gone when the game
+  publishes nothing (quitting, losing focus); the game stopping or erasing
+  its effect publishes a 0 (with a count step), so ext = 0 there. The
+  engine cuts ext_force to 0 at once when raw goes stale, the telemetry
+  stalls or two effects show, and fades it only while raw is fresh.
 
-This ext_force approach is a stopgap: a driver-side scale of the game's
-constant force (coming in new-lg4ff) will replace it, with no upload lag
-and nothing played against a level that is gone.
+That ext_force path is the fallback for drivers without game_const_scale
+(new-lg4ff), which scales the game's constant effects in the FF timer: no
+upload lag and nothing played against a level that is gone. The same gates
+(fresh raw, the upload rate, one effect, the fit below) hold for both; the
+engine writes game_const_scale 100 on every stop.
 
 What is learnt live, per car (`ready`, `refused`, `waiting`): that the game's
 constant force is its steering force. Forza could drive the wheel through

@@ -38,6 +38,7 @@ class FakeDriver(fe.DriverReplace):
     test sets it (FakeDriver.raw), the way the game's uploads would leave it."""
     log = []                 # (path, name, value), shared so tests see every instance's writes
     fail_force = False
+    fail_scale = False
     raw = None               # (level, count, id) the game left, None: read the file
 
     def set_game_level(self, level):
@@ -49,6 +50,12 @@ class FakeDriver(fe.DriverReplace):
             raise OSError(19, 'No such device')
         FakeDriver.log.append((self.path, 'ext_force', value))
         super().force(value)
+
+    def set_const_scale(self, value):
+        if FakeDriver.fail_scale:
+            raise OSError(19, 'No such device')
+        FakeDriver.log.append((self.path, 'game_const_scale', value))
+        super().set_const_scale(value)
 
     def read_raw(self):
         return FakeDriver.raw if FakeDriver.raw is not None else super().read_raw()
@@ -65,11 +72,14 @@ def game_raw(s, raw_sign=1.0):
     return raw_sign * 32767 * s.game_ffb
 
 
-def wheel(tmp_path, name='wheel', level=100, raw=True):
+def wheel(tmp_path, name='wheel', level=100, raw=True, scale=True):
+    """A fake driver directory; scale=False: an older driver without game_const_scale."""
     d = tmp_path / name
     d.mkdir()
     (d / 'ext_force').write_text('0\n')
     (d / 'game_ffb_level').write_text('%d\n' % level)
+    if scale:
+        (d / 'game_const_scale').write_text('100\n')
     (d / 'ext_force_cap').write_text('80\n')
     if raw:
         (d / 'game_ffb_raw').write_text('0 0 -1\n')
@@ -85,6 +95,7 @@ def read(path, name):
 def _clean_log():
     FakeDriver.log = []
     FakeDriver.fail_force = False
+    FakeDriver.fail_scale = False
     FakeDriver.raw = None
     yield
 
@@ -118,6 +129,10 @@ def levels(path=None):
 
 def forces():
     return [v for _p, name, v in FakeDriver.log if name == 'ext_force']
+
+
+def scales(path=None):
+    return [v for p, name, v in FakeDriver.log if name == 'game_const_scale' and (path is None or p == path)]
 
 
 # -- the classifier --
@@ -834,3 +849,20 @@ def test_a_test_that_fails_to_start_gives_the_wheel_back(monkeypatch):
     with pytest.raises(OSError):
         gui.Gui.start_test(me)
     assert wheel_owner.current('/fake/wheel-raise') is None
+
+
+def test_a_stop_published_as_0_is_no_game_force_for_the_fit(tmp_path):
+    """The driver publishes level 0 with a count step when the game's constant effect stops: while the car is
+    moving that is no game force, not a 0 to fit against front Mz."""
+    engine, path = engine_on(tmp_path)
+    t = run(engine, 0.0, 6.0)
+    model = engine.model
+    assert model.ready and engine.status.active
+    before, moving = list(model._long.s), model.moving_time
+    upload(0)                                                # the game stops its effect, still driving
+    t = run(engine, t, 0.08, raw=False)                      # within RAW_FRESH: the 0 is fresh
+    assert model._long.s == before and model.moving_time == moving
+    assert engine._raw(t, stops=True) == (None, False) and engine._raw(t)[0] == 0
+    # As with no upload at all: once front Mz moves on with none, the fit is dropped and waits for the game
+    run(engine, t, 1.0, raw=False)
+    assert not model.ready and model.waiting == 'raw'

@@ -52,13 +52,20 @@ Three parts:
   Both are read each pass (FAST_POLL, 1 ms) while they may play, not per
   telemetry sample: the telemetry only names the game and the car.
 - ForzaLightness (ffb_addon): Forza Horizon keeps its own force (its
-  game_ffb_level stays 100, never lowered) and ext_force takes a share of
-  the game's constant force off as the front tyres run out of grip: the
-  wheel gets g x the game's force, g from the front slip. Read each pass
-  like RBR (the game's uploads, not the telemetry's ~60 a second, set the
-  write rate); stops at once (a fade of ext_force) on stale raw, a low
-  upload rate, two constant effects, app_gain on, or a constant force that
-  is not the steering force (Forza on the spring/damper only).
+  game_ffb_level stays 100, never written) and the wheel gets g x the
+  game's constant force as the front tyres run out of grip, g from the
+  front slip. With a driver that has game_const_scale, the driver scales
+  the game's constant effects itself: game_const_scale = round(100 g),
+  written with each Forza sample and at least every FH_SCALE_KEEP s while
+  under 100 (the driver's watchdog puts it back to 100 after 500 ms
+  without a write), ext_force never written; every stop writes 100 at once
+  (or leaves it to that watchdog if the write fails). An older driver
+  without it: ext_force takes the share off, (g - 1) x the game's level
+  read each pass like RBR. Either way it stops at once on stale raw, a low
+  upload rate, two constant effects, Forza using no constant effect, or a
+  constant force that is not the steering force (Forza on the
+  spring/damper only); on app_gain too with ext_force (with the scale the
+  game's FF_GAIN and ours apply to the same force).
 - Texture (ffb_texture): small vibrations from the same samples (road,
   landings, front lock), added on top of RackForce's force before the
   clamp and the fade gain, very low by default. ACR only for now.
@@ -723,14 +730,15 @@ class _CsbRate:
 
 class DriverReplace:
     """The driver's replace-mode attributes of one wheel (its sysfs
-    directory): ext_force through one file kept open and written at offset
-    0, game_ffb_raw through one kept open and read at offset 0,
-    game_ffb_level opened for each (rare) write."""
+    directory): ext_force and game_const_scale each through one file kept
+    open and written at offset 0, game_ffb_raw through one kept open and
+    read at offset 0, game_ffb_level opened for each (rare) write."""
 
     def __init__(self, path):
         self.path = path
         self._fd = None
         self._raw_fd = None
+        self._scale_fd = None
 
     def _file(self, name):
         return os.path.join(self.path, name)
@@ -740,6 +748,20 @@ class DriverReplace:
 
     def has_game_ffb_raw(self):
         return os.access(self._file('game_ffb_raw'), os.R_OK)
+
+    def has_const_scale(self):
+        """The driver scales the game's FF_CONSTANT effects itself (game_const_scale, 0..100 %)."""
+        return os.access(self._file('game_const_scale'), os.R_OK | os.W_OK)
+
+    def const_scale(self):
+        """game_const_scale's target (None if unreadable)."""
+        return self._int('game_const_scale')
+
+    def set_const_scale(self, value):
+        """game_const_scale through one file kept open, written at offset 0."""
+        if self._scale_fd is None:
+            self._scale_fd = os.open(self._file('game_const_scale'), os.O_WRONLY)
+        os.pwrite(self._scale_fd, b'%d\n' % value, 0)
 
     def game_level(self):
         """game_ffb_level's target (None if unreadable)."""
@@ -789,7 +811,7 @@ class DriverReplace:
         os.pwrite(self._fd, b'%d\n' % value, 0)
 
     def close(self):
-        for name in ('_fd', '_raw_fd'):
+        for name in ('_fd', '_raw_fd', '_scale_fd'):
             fd = getattr(self, name)
             if fd is not None:
                 try:
@@ -825,6 +847,8 @@ CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ah
 FH_STALL = 0.05                          # s without a Forza sample while adding (3 of its ~60/s): cut at once
 FH_FRESH_UPLOADS = 3.0                   # Forza: raw is fresh for this many of the game's upload intervals ...
 FH_FRESH_MIN = 0.03                      # ... at least (s), at most RAW_FRESH
+FH_SCALE_KEEP = 0.2                      # s: game_const_scale written at least this often while under 100 (the
+                                         # driver's watchdog: 500 ms)
 FH_REARM = 0.3                           # s after a release before the add-on starts again (the game is never
                                          # muted, so no crossfade to protect: only no flapping)
 
@@ -870,6 +894,11 @@ class FfbEngine:
         self._lightness_req = None       # its strength (0..1) from the GUI
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
+        self._fh_scale = False           # the driver has game_const_scale: Forza is lightened through it
+        self._scale_last = None          # the last game_const_scale written (None: none since the wheel was set)
+        self._scale_at = None            # ... when
+        self._scale_seen = 0             # the slot seq of the Forza sample the last scale write answered
+        self.scale_writes = 0            # game_const_scale writes (tests, the log)
         self.texture = Texture()
         self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng', 'forza'
                                          # (each pass)
@@ -988,6 +1017,7 @@ class FfbEngine:
                     # ext_force file and its state are left to it
                     logging.warning("Countersteer FFB: the engine thread did not stop; restoring the game's force")
                     self._safe_game_level(100)
+                    self._restore_scale(self._clock())
                     self._let_go()
                     return
             self._quick_release('quit', self._clock())
@@ -1072,6 +1102,7 @@ class FfbEngine:
             self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
             self.addon.reset()
             self._fh_level = self._fh_fresh = None
+            self._fh_scale, self._scale_last, self._scale_at = False, None, None
             self.classifier.has_game_ffb_raw = False
             if path is not None:
                 self._driver = self._driver_type(path)
@@ -1083,16 +1114,26 @@ class FfbEngine:
                     if level is not None and level < 100:
                         # Left muted by an earlier run (the driver would restore it after 1 s anyway)
                         self._safe_game_level(100)
+                    self._fh_scale = self._driver.has_const_scale()
+                    if self._fh_scale:
+                        scale = self._driver.const_scale()
+                        if scale is not None and scale < 100:
+                            # Left lightened by an earlier run (the driver's watchdog would restore it anyway)
+                            self._write_scale(now, 100)
             self._publish(None, force=True)
         enabled = self._enabled_req
         if enabled != self._enabled:
             self._enabled = enabled
             self._publish(None, force=True)
 
-    def _raw(self, t, fresh=RAW_FRESH):
+    def _raw(self, t, fresh=RAW_FRESH, stops=False):
         """(level, new): the game's constant force level now, or None (none
         sent within `fresh` s, two effects, no attribute); `new`: uploaded
-        since the last sample."""
+        since the last sample. `stops` (the fits): a level of 0 is None too.
+        The driver publishes 0 with a count step, as for an upload, when the
+        constant effect stops: no game force, not a force of 0 to fit
+        against the car's (an upload of exactly 0 looks the same and is left
+        out with it)."""
         driver = self._driver
         if driver is None or not self.classifier.has_game_ffb_raw:
             return None, False
@@ -1123,6 +1164,8 @@ class FfbEngine:
             return None, False
         if self._raw_id_at is not None and t - self._raw_id_at < RAW_TWO_EFFECTS:
             return None, False
+        if stops and level == 0:
+            return None, False
         return level, new
 
     def _sample(self, slot):
@@ -1149,7 +1192,7 @@ class FfbEngine:
             return                               # its force is taken in step() after this
         if self._phase != 'idle' and self._played_mode != 'acr':
             self._release('state', t)
-        self.model.feed(t, sample, *self._raw(t))
+        self.model.feed(t, sample, *self._raw(t, stops=True))
         playing = self._phase in ('in', 'on')
         verdict = self._verdict = self.classifier.verdict(t, holding=playing)
         want = (self._enabled and self._available and not self._broken and verdict.state == 'replace'
@@ -1334,7 +1377,7 @@ class FfbEngine:
                 self.beamng.reset(self.beamng.car)
             self._csb.feed(now, sample)
             self._csb_sample = sample
-            self.beamng.feed(now, sample, *self._raw(now))
+            self.beamng.feed(now, sample, *self._raw(now, stops=True))
         self._regains(now)
         v = self._verdict = self._beamng_verdict(now, sample, playing)
         want = self._enabled and self._available and v.state == 'replace' and self.beamng.ready
@@ -1350,7 +1393,8 @@ class FfbEngine:
         self._publish(now)
 
     def _forza_tick(self, now):
-        """Forza Horizon's add-on: the game's constant force read each pass, ext_force = (g - 1) x it written on
+        """Forza Horizon's add-on: the game's constant force read each pass; game_const_scale = round(100 g) with
+        each Forza sample (_scale_play), or on an older driver ext_force = (g - 1) x the game's level written on
         each new upload (and as g moves); the game's own level never touched."""
         rate = self.raw_rate
         fresh = min(max(FH_FRESH_UPLOADS / rate, FH_FRESH_MIN), RAW_FRESH) if rate else RAW_FRESH
@@ -1365,8 +1409,9 @@ class FfbEngine:
         g = addon.gain(now)
         stalled = self._last_t is None or now - self._last_t > FH_STALL
         if self._phase != 'idle' and self._played_mode == 'forza' and (level is None or stalled):
-            # A held level says nothing of a force that is gone (an effect stopped or erased publishes no new
-            # level; Forza quit or out of focus): never played against it, not even as a fade
+            # An effect stopped or erased publishes 0 (with a count step), but a held level says nothing of a
+            # force that is gone when the game publishes nothing (Forza quit or out of focus): never played
+            # against it, not even as a fade (with game_const_scale: 100 at once)
             self._cut(now, 'stall' if stalled else 'raw')
         playing = self._phase in ('in', 'on')
         v = self._verdict = self._forza_verdict(now, level, playing)
@@ -1374,13 +1419,64 @@ class FfbEngine:
                 and level is not None and not stalled)
         self._decide(now, playing, want, 'stall' if stalled else 'raw' if level is None else 'state')
         if self._phase != 'idle' and self._played_mode == 'forza':
-            value = addon.force(self._fh_level or 0, g, addon.margin(now))
-            if self._write_due(now, new or value != self._last_value):
-                self._out(now, value)
+            if self._fh_scale:
+                self._scale_play(now, g)
+            else:
+                value = addon.force(self._fh_level or 0, g, addon.margin(now))
+                if self._write_due(now, new or value != self._last_value):
+                    self._out(now, value)
         self._publish(now)
 
+    def _scale_play(self, now, g):
+        """game_const_scale = round(100 g), faded in and out toward 100 with the engine's fade: written with each
+        new Forza sample, at least every FH_SCALE_KEEP s while under 100 (the driver's watchdog), and 100 when
+        the fade out ends. The driver slews it (100 % per 50 ms), so steps at 60 a second never step the force.
+        ext_force is never written."""
+        fade = self._gain(now)
+        ended = self._phase == 'out' and fade <= 0.0
+        value = 100 if ended else min(max(int(round(100.0 * (1.0 - fade * (1.0 - min(max(g, 0.0), 1.0))))), 0),
+                                      100)
+        last, at = self._scale_last, self._scale_at
+        sample = self._seen != self._scale_seen
+        due = (ended or last is None or at is None or (sample and (value < 100 or value != last))
+               or (value < 100 and now - at >= FH_SCALE_KEEP))
+        if due:
+            self._scale_seen = self._seen
+            if not self._write_scale(now, value):
+                self._broken, self._available = True, False      # until the device is set again
+                self._release('write', now)
+                return
+        if ended:
+            self._phase = 'idle'         # faded out (100 written last): the game has all its force back
+            self._let_go()
+
+    def _write_scale(self, now, value):
+        """game_const_scale = value; False if the write failed (the driver's watchdog then restores 100 within
+        0.8 s of the last write)."""
+        try:
+            self._driver.set_const_scale(value)
+        except OSError as e:
+            logging.warning("Countersteer FFB: game_const_scale %d: %s", value, e)
+            return False
+        self.scale_writes += 1
+        self._scale_last, self._scale_at = value, now
+        return True
+
+    def _restore_scale(self, now):
+        """Every way out: game_const_scale 100 at once if ours was written under it (a failed write leaves it to
+        the driver's watchdog)."""
+        if self._fh_scale and self._driver is not None and self._scale_last is not None \
+                and self._scale_last != 100:
+            self._write_scale(now, 100)
+
     def _cut(self, now, reason):
-        """Forza's add-on: ext_force 0 now (no fade) and released."""
+        """Forza's add-on: game_const_scale 100 (an older driver: ext_force 0) now, no fade, and released."""
+        if self._fh_scale:
+            if not self._write_scale(now, 100):
+                self._broken, self._available = True, False     # the driver's watchdog restores it
+                reason = 'write'
+            self._release(reason, now)
+            return
         try:
             self._driver.force(0)
             self.writes += 1
@@ -1401,8 +1497,9 @@ class FfbEngine:
         addon = self.addon
         if not self.classifier.has_game_ffb_raw:
             return no('old-driver')
-        if self._app_gain:
-            # The driver scales the game's force by its FF_GAIN and not ours: (g - 1) x raw could even reverse it
+        if self._app_gain and not self._fh_scale:
+            # The driver scales the game's force by its FF_GAIN and not ext_force: (g - 1) x raw could even
+            # reverse it (game_const_scale scales the game's force itself, so FF_GAIN applies to both alike)
             return no('fh-app-gain')
         if addon.no_slip(now):
             return no('fh-no-slip')
@@ -1459,8 +1556,9 @@ class FfbEngine:
             self._phase, self._fade_at, self._played_mode = 'in', t, 'forza'
             self._read_gains()
             a = self.addon
-            logging.info("Countersteer FFB: adding to Forza Horizon's force (%.0f/s, game uploads %s/s, strength "
-                         "%.0f %%, r %s, raw %s with lateral acceleration to the left)", self._verdict.rate,
+            logging.info("Countersteer FFB: lightening Forza Horizon's force through %s (%.0f/s, game uploads %s/s, "
+                         "strength %.0f %%, r %s, raw %s with lateral acceleration to the left)",
+                         'game_const_scale' if self._fh_scale else 'ext_force', self._verdict.rate,
                          'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, a.strength * 100.0,
                          'none' if a.fit is None else '%.2f' % a.fit,
                          'rising' if a.sign == 1.0 else 'falling' if a.sign == -1.0 else 'unclear')
@@ -1527,6 +1625,7 @@ class FfbEngine:
         self._phase = 'idle'
         if self._muted and self._safe_game_level(100):
             self._muted = False
+        self._restore_scale(now)
         self._let_go()
         if was:
             self._released_at = now
