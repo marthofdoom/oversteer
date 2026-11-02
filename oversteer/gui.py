@@ -64,6 +64,7 @@ class Gui:
         self.model = model
         self.device_manager = self.app.device_manager
         self.device = None
+        self.ffb_pending = {}       # FFB meter consumer -> highest level not yet handed over
         self.grab_input = False
         self.test = None
         self.linear_chart = None
@@ -478,6 +479,8 @@ class Gui:
             self.telemetry.stop()
             self.telemetry = None
         self.device = self.device_manager.get_device(device_id)
+        self.ffb_pending = {}
+        self.ui.safe_call(self.ui.reset_ffb_meter)
 
         if self.device is None or not self.device.is_ready():
             self.handbrake_axis = None
@@ -1800,14 +1803,34 @@ class Gui:
             wrange = max_range
         self.ui.set_range(wrange)
 
-    def read_ffbmeter(self):
-        level = self.device.get_peak_ffb_level()
-        if level is None:
-            return level
-        level = int(level)
-        if level > 0:
-            self.device.set_peak_ffb_level(0)
+    def ffb_consumer_start(self, consumer):
+        """A meter timer starts: forget what accumulated while it was off."""
+        self.ffb_pending[consumer] = 0
+
+    def read_ffbmeter(self, consumer='overlay'):
+        """The highest force level since this consumer last asked. One read
+        (which resets the driver's peak) serves every running consumer: the
+        level is folded into each one's pending maximum."""
+        if not self.device:
+            return None
+        try:
+            level = self.device.get_peak_ffb_level()
+            if level is None:
+                return None
+            level = int(level)
+            if level > 0:
+                self.device.set_peak_ffb_level(0)
+        except (OSError, ValueError):
+            return None
+        self.ffb_pending.setdefault(consumer, 0)
+        for key in self.ffb_pending:
+            self.ffb_pending[key] = max(self.ffb_pending[key], level)
+        level = self.ffb_pending[consumer]
+        self.ffb_pending[consumer] = 0
         return level
+
+    def read_ffb_tick_ms(self):
+        return self.device.get_ffb_tick_ms() if self.device else 2
 
     def read_ffb_clips(self):
         """The driver's clip counter, None if the wheel or driver has none."""
