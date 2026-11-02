@@ -423,9 +423,21 @@ class RackForce:
     PRIOR_S = 120.0                      # s of weight the prior counts for
     P99_EVERY = 0.25                     # s of sample time between p99 updates
     STEER_RATIO = ffb_carprops.STEER_RATIO   # steering wheel : road wheel, overall, a rally car's typical 12-15
+    GAME_SHAPE_SPEED = 25.0              # m/s: the speed the game-shaped assist is levelled at (its p99 torque)
     ASSIST = 1.0                         # assist class: 1.0 road / rally power steering, 0.0 unassisted (race cars)
     RIM_SAFE_NM = 10.0                   # hard ceiling on the torque at the rim whatever the car and the wheel
     wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the 2.1 Nm class
+    # The aligning torque split (feature flag, off: the driver's local spring `ffb_align` does not exist yet). With
+    # it on, force() plays only the residual rim torque - k (theta_a - theta) through ext_force, and the spring's
+    # parameters go to `align_writer(theta_a_deg, k_nm_per_deg)` (None: nothing written; the writer is abstract).
+    align_on = False
+    align_writer = None
+    ALIGN_LOCK = 0.52                    # rad: the road wheels' steering lock (~30 deg), steer -1..1 spans +-this
+    ALIGN_PK = 0.04                      # rad: front slip angle at which the kingpin torque's growth has halved
+    ALIGN_K0 = 5700.0                    # Nm/rad: the small-signal kingpin torque per front slip angle (pooled dump)
+    ALIGN_K_RANGE = (300.0, 20000.0)     # the per-car learnt stiffness is held in this (dump cars: 650-9100 linear)
+    ALIGN_MIN_N = 600.0                  # samples of weight before the learnt stiffness replaces the prior
+    ALIGN_EPS = 1e-3                     # rad: under this slip the small-signal stiffness is used
 
     def __init__(self):
         self.learner = None
@@ -448,6 +460,8 @@ class RackForce:
         self.p99 = stored or self.POOLED_P99
         self._q.seed(self.p99, self.PRIOR_S)
         self._q_since = 0.0
+        self._align = _Moments(self.TAU)
+        self._assist = ffb_carprops.AssistDetector()
         self.ratio, self.assist = (ffb_carprops.STORE.get_rack(car) if car is not None else None) \
             or (self.STEER_RATIO, self.ASSIST)
         self.refused = None
@@ -506,6 +520,9 @@ class RackForce:
         if mz is None or not (sample.speed or 0.0) > MIN_SPEED:
             return                       # standing: a game may well stop uploading a force that does not change
         self._track(mz, dt)
+        alpha = self._slip(sample)
+        if alpha is not None and dt > 0.0:
+            self._align.add(self._sat(alpha), mz, dt)
         ff = sample.game_ffb
         if ff is not None:
             self._ff.add(mz, ff, dt, abs(ff) < self.FF_CLIPPED)
@@ -517,6 +534,8 @@ class RackForce:
             return                       # the fit is frozen until the game uploads again
         self.moving_time += dt
         self._long.add(mz, raw, dt, abs(raw) < self.RAW_CLIPPED)
+        if abs(raw) < self.RAW_CLIPPED:
+            self._assist.add(mz, raw, self.p99, dt)
         self._short.add(mz, raw, dt)
         if self.learner is not None and abs(raw) < self.RAW_CLIPPED:
             self._learn(sample, raw, dt)
@@ -601,16 +620,86 @@ class RackForce:
     def release(self):
         self._held_fit = None
 
+    @staticmethod
+    def _slip(sample):
+        """The mean front slip angle (rad, positive when the car is steered further left than it travels), None
+        without it."""
+        sa = sample.tyre_slip_angle
+        if sa is None or len(sa) < 2 or not (math.isfinite(sa[0]) and math.isfinite(sa[1])):
+            return None
+        return 0.5 * (sa[0] + sa[1])
+
+    def _sat(self, alpha):
+        """The kingpin torque's shape in the slip angle: alpha / (1 + |alpha| / ALIGN_PK), saturating like the
+        lateral force (so past the peak the caster share stays while the pneumatic part fades)."""
+        return alpha / (1.0 + abs(alpha) / self.ALIGN_PK)
+
+    def align_stiffness(self):
+        """Kingpin torque per unit of _sat(slip), Nm: learnt per car (through the origin) once there is enough."""
+        s = self._align.s
+        if s[0] < self.ALIGN_MIN_N or s[3] <= 0.0:
+            return self.ALIGN_K0
+        return min(max(-s[5] / s[3], self.ALIGN_K_RANGE[0]), self.ALIGN_K_RANGE[1])
+
+    def align(self, sample):
+        """The aligning split at this sample: a dict of theta_a_deg (the steering wheel angle where the front tyres'
+        slip angle would be zero, left positive, in degrees of steering wheel with the road wheels' lock at
+        ALIGN_LOCK and the overall ratio), theta_deg (where the wheel is now, same frame), k (Nm per degree: the
+        secant of the model's rim torque against the angle error, so k (theta_a - theta) is the model's rim torque
+        at this slip: the kingpin torque from the learnt stiffness and the saturating shape, through the column
+        ratio and the boost curve), and model (that torque, Nm); None without steer or slip. Tangent at zero slip
+        is K / ratio^2 per radian (the boost curve's slope is 1 there)."""
+        alpha, steer = self._slip(sample), getattr(sample, 'steer', None)
+        if alpha is None or steer is None or not math.isfinite(steer):
+            return None
+        ratio = self.ratio
+        deg = 180.0 / math.pi
+        theta = steer * self.ALIGN_LOCK * ratio * deg
+        theta_a = theta - alpha * ratio * deg
+        kp = -self.align_stiffness() * self._sat(alpha)
+        off = ffb_carprops.power_settings()[0] == 'off'
+        model = ffb_carprops.driver_from_column(kp / ratio, getattr(sample, 'speed', None),
+                                                0.0 if off else self.assist * ffb_carprops.power_settings()[1])
+        if abs(alpha) > self.ALIGN_EPS:
+            k = model / (theta_a - theta)
+        else:
+            k = self.align_stiffness() / (ratio * ratio) / deg
+        return {'theta_a_deg': theta_a, 'theta_deg': theta, 'k': k, 'model': model}
+
+    def power_steering(self):
+        """Where the assist comes from now: 'game' (the game's force has it: its curve is followed), 'model' (ours)
+        or 'off' (column torque), by countersteer_power_steering (auto / on / off) and the detector."""
+        mode = ffb_carprops.power_settings()[0]
+        if mode == 'off':
+            return 'off'
+        if mode == 'auto' and self._assist.state:
+            return 'game'
+        return 'model'
+
     def rim_torque(self, sample, trail=None, scrub=None, ratio=None, assist=None):
-        """The driver's torque at the rim (Nm, signed like the front torque) for this sample, None without Mz."""
+        """The driver's torque at the rim (Nm, signed like the front torque) for this sample, None without Mz.
+        Our boost curve (class `assist` x countersteer_assist_strength) where the game's force has no assist;
+        where it has, the game's own gain-against-load curve (fitted live, AssistDetector.curve) scaled so the
+        car's p99 lands where our class model puts it, so the assist is not stacked."""
         trail = self.trail if trail is None else trail
         scrub = self.scrub if scrub is None else scrub
         mz = front_torque(sample, trail, scrub)
         if mz is None:
             return None
-        return ffb_carprops.driver_from_column(mz / (self.ratio if ratio is None else ratio),
-                                               getattr(sample, 'speed', None),
-                                               self.assist if assist is None else assist)
+        ratio = self.ratio if ratio is None else ratio
+        speed = getattr(sample, 'speed', None)
+        cls = self.assist if assist is None else assist
+        source = self.power_steering()
+        if source == 'off':
+            return ffb_carprops.driver_from_column(mz / ratio, speed, 0.0)
+        cls *= ffb_carprops.power_settings()[1]
+        if source == 'game':
+            curve = self._assist.curve(self.p99)
+            if curve:
+                target = ffb_carprops.driver_from_column(self.p99 / ratio, self.GAME_SHAPE_SPEED, cls)
+                level = target / (self.p99 * ffb_carprops.game_shape(self.p99, curve))
+                return math.copysign(level * abs(mz) * ffb_carprops.game_shape(mz, curve), mz)
+        return ffb_carprops.driver_from_column(mz / ratio, speed, cls)
 
     def force(self, sample):
         """ext_force for this sample at full strength (0 without Mz): the rim torque (rim_torque) as a share of
@@ -622,6 +711,12 @@ class RackForce:
         torque = self.rim_torque(sample, *held) if held is not None else self.rim_torque(sample)
         if torque is None:
             return 0
+        if self.align_on:
+            split = self.align(sample)
+            if split is not None:
+                torque -= split['k'] * (split['theta_a_deg'] - split['theta_deg'])      # the residual: the spring plays the rest
+                if self.align_writer is not None:
+                    self.align_writer(split['theta_a_deg'], split['k'])
         limit = FULL * self._ceiling()
         vel = getattr(sample, 'vel', None)
         if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:

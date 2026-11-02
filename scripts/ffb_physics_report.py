@@ -103,6 +103,9 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     p99 = np.zeros(n)
     torque = np.zeros(n)
     rim = np.zeros(n)
+    assist_ratio = np.full(n, np.nan)
+    assist_state = np.zeros(n)
+    al = {k: np.full(n, np.nan) for k in ('theta_a_deg', 'theta_deg', 'k', 'model')}
     t0 = d['t'][0]
     for i in range(n):
         car = 'acr/seg%d' % d['seg'][i]
@@ -115,6 +118,13 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
         p99[i] = rack.p99
         torque[i] = fe.front_torque(s, rack.trail, rack.scrub) or 0.0
         rim[i] = rack.rim_torque(s) or 0.0
+        r_ = rack._assist.ratio()
+        assist_ratio[i] = np.nan if r_ is None else r_
+        assist_state[i] = {None: 0, False: -1, True: 1}[rack._assist.state]
+        split = rack.align(s)
+        if split is not None:
+            for key in al:
+                al[key][i] = split[key]
         if i + 1 < n and d['seg'][i + 1] == d['seg'][i] and hz:
             gap = d['t'][i + 1] - d['t'][i]
             k = int(gap * hz)
@@ -125,7 +135,45 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     rack.reset(None)
     cp.STORE.use(kept[0])
     cp.ASYNC = kept[1]
-    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque, 'rim': rim}
+    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque, 'rim': rim, 'align': al, 'assist_ratio': assist_ratio, 'assist_state': assist_state}
+
+
+def align_report(d, rep):
+    """The aligning split on the dump: theta_a's distribution, its side in drifts, and how well the spring
+    k (theta_a - theta) rebuilds the rim torque (R^2 against rack.rim_torque; residual in Nm)."""
+    al = rep['align']
+    sp = d['speed'] / 3.6
+    ok = (sp > fe.MIN_SPEED) & np.isfinite(al['k'])
+    steer_left = -d['steer']
+    yaw = d['angvel'][:, 1]
+    sa_f = np.max(np.abs(d['sa'][:, :2]), axis=1)
+    sa_r = np.max(np.abs(d['sa'][:, 2:]), axis=1)
+    rim = rep['rim']
+    spring = al['k'] * (al['theta_a_deg'] - al['theta_deg'])
+    cases = {
+        'moving': ok,
+        'normal cornering (|accG| > 0.3, low slip)': ok & (np.abs(d['accG'][:, 0]) > 0.3) & (sa_f < 0.1),
+        'drift (rear slip > 0.15 rad, countersteer)': ok & (sa_r > 0.15) & (np.sign(steer_left) == -np.sign(yaw))
+        & (np.abs(yaw) > 0.2) & (np.abs(steer_left) > 0.05),
+        'front past peak (front slip > 0.3 rad)': ok & (sa_f > 0.3),
+    }
+    out = {'theta_a_deg_abs_p50_p90_p99': [round(float(v), 1) for v in np.percentile(np.abs(al['theta_a_deg'][ok]), [50, 90, 99])],
+           'theta_deg_abs_p50_p90_p99': [round(float(v), 1) for v in np.percentile(np.abs(al['theta_deg'][ok]), [50, 90, 99])],
+           'k_nm_per_deg_p10_p50_p90': [round(float(v), 4) for v in np.percentile(al['k'][ok], [10, 50, 90])]}
+    for name, m in cases.items():
+        if not m.any():
+            continue
+        res = rim[m] - spring[m]
+        out[name] = {'n': int(m.sum()), 'r2_spring_vs_rim': round(r2(rim[m], spring[m]), 3),
+                     'residual_abs_nm_p50_p90_p99': [round(float(v), 2) for v in np.percentile(np.abs(res), [50, 90, 99])],
+                     'rim_abs_nm_p50_p90_p99': [round(float(v), 2) for v in np.percentile(np.abs(rim[m]), [50, 90, 99])]}
+    m = cases['drift (rear slip > 0.15 rad, countersteer)']
+    if m.any():
+        out['drift: theta_a on the countersteer side (sign = -yaw)'] = round(float(np.mean(np.sign(al['theta_a_deg'][m]) == -np.sign(yaw[m]))), 3)
+        out['drift: the wheel is on that side (theta)'] = round(float(np.mean(np.sign(al['theta_deg'][m]) == -np.sign(yaw[m]))), 3)
+        out['drift: theta_a beyond theta (more countersteer needed to zero the slip)'] = round(float(np.mean(
+            np.sign(al['theta_a_deg'][m] - al['theta_deg'][m]) == -np.sign(yaw[m]))), 3)
+    return out
 
 
 def r2(y, x):
@@ -606,6 +654,11 @@ def main():
         for name, c in acr_cases(d, rep).items():
             print('  %-50s %s' % (name, json.dumps({k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items()})))
         fit = acr_fit(d, rep)
+        for seg in np.unique(d['seg']):
+            last = np.flatnonzero(d['seg'] == seg)[-1]
+            print('  game power assist detector, stretch %d: gain ratio high/low load %.2f, state %s (decided at end; 0 = undecided, -1 absent, 1 present); decisions made: any present %s' % (
+                seg, rep['assist_ratio'][last], rep['assist_state'][last], bool((rep['assist_state'][d['seg'] == seg] == 1).any())))
+        print('  aligning split (ffb_align, off in the app):', json.dumps(align_report(d, rep), indent=1))
         print('  fit:', json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in fit.items()}))
         # Thermal: our force through the G29 correction, mean square over 90 s
         res = load_wheel(args.wheel) if os.path.exists(args.wheel) else None

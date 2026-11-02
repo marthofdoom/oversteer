@@ -202,3 +202,119 @@ def test_the_engine_takes_the_wheel_model_for_the_peak():
     assert engine.model.wheel_peak == 2.1
     engine.usb_id = None
     assert engine.model.wheel_peak is None
+
+
+def slipping(front_nm, alpha, steer):
+    s = sample_at(front_nm)
+    s.tyre_slip_angle = (alpha, alpha, 0.0, 0.0)
+    s.steer = steer
+    return s
+
+
+def test_the_aligning_split_is_off_by_default_and_changes_nothing():
+    rack = rack_for(2.1)
+    s = slipping(-300.0, 0.05, 0.3)
+    assert rack.align_on is False and rack.align_writer is None
+    before = rack.force(s)
+    seen = []
+    rack.align_writer = lambda *a: seen.append(a)
+    assert rack.force(s) == before and not seen
+
+
+def test_the_aligning_spring_rebuilds_the_model_torque_and_points_at_zero_slip():
+    rack = rack_for(2.1)
+    s = slipping(-300.0, 0.05, 0.3)                        # steered left of where it goes: slip > 0
+    split = rack.align(s)
+    assert split['k'] > 0 and split['theta_a_deg'] < split['theta_deg']      # zero slip is further right
+    assert split['k'] * (split['theta_a_deg'] - split['theta_deg']) == pytest.approx(split['model'])
+    assert split['model'] < 0                                                # aligning: pushes back to the right
+    drift = rack.align(slipping(100.0, -0.4, -0.3))
+    assert drift['theta_a_deg'] > drift['theta_deg']
+
+
+def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_spring():
+    rack = rack_for(20.0)
+    s = slipping(-300.0, 0.05, 0.3)
+    plain = rack.force(s)
+    seen = []
+    rack.align_on, rack.align_writer = True, lambda theta_a, k: seen.append((theta_a, k))
+    resid = rack.force(s)
+    split = rack.align(s)
+    assert seen and seen[0] == pytest.approx((split['theta_a_deg'], split['k']))
+    want = rack.rim_torque(s) - split['model']
+    assert resid == pytest.approx(fe.FULL * wheel_torque.rim_share(want, 20.0), rel=1e-6)
+    assert abs(resid) < abs(plain)
+
+
+# -- power steering: detection and the INI keys --
+
+def feed_detector(det, gain_of_load, speed, p99=500.0, seconds=200.0, hz=50.0):
+    n = int(seconds * hz)
+    for i in range(n):
+        torque = p99 * 1.2 * ((i * 0.6180339887) % 1.0)
+        det.add(torque, 30.0 * gain_of_load(torque, speed, p99) * torque, p99, 1.0 / hz)
+    return det
+
+
+def linear_game(torque, speed, p99):
+    return 1.0 - 0.08 * min(torque / p99, 1.0)          # ACR-like: a mild droop only
+
+
+def boost_game(torque, speed, p99):
+    td = ffb_carprops.driver_from_column(torque / 13.0, speed, 1.0)
+    return max(td, 1e-9) / max(torque / 13.0, 1e-9)       # the gain a boost curve gives, speed-dependent
+
+
+@pytest.mark.parametrize('speed', [8.0, 30.0])
+def test_the_detector_calls_a_linear_game_absent_and_a_boost_curve_present(speed):
+    lin = feed_detector(ffb_carprops.AssistDetector(), linear_game, speed)
+    assert lin.state is False and lin.ratio() > 0.85
+    boost = feed_detector(ffb_carprops.AssistDetector(), boost_game, speed)
+    assert boost.state is True and boost.ratio() < 0.65
+    curve = boost.curve(500.0)
+    assert [c for _, c in curve] == sorted((c for _, c in curve), reverse=True) and curve[-1][1] < 0.7
+
+
+def test_the_detector_waits_for_load_range_and_holds_between_thresholds():
+    det = ffb_carprops.AssistDetector()
+    for i in range(2000):                                  # small loads only: no decision
+        det.add(10.0 + (i % 20), 300.0, 500.0, 0.02)
+    assert det.state is None and det.ratio() is None
+    det = feed_detector(ffb_carprops.AssistDetector(), boost_game, 20.0)
+    assert det.state is True
+    mid = lambda t, v, p: 1.0 - 0.3 * min(t / p, 1.0)       # ratio ~0.7: between the thresholds, no flip
+    feed_detector(det, mid, 20.0, seconds=400.0)
+    assert 0.6 < det.ratio() < 0.78 and det.state is True
+
+
+def test_the_game_curve_is_followed_not_stacked_and_the_ini_modes_decide(tmp_path):
+    ini = tmp_path / 'config.ini'
+    ffb_carprops.CONFIG_PATH = str(ini)
+    try:
+        assert ffb_carprops.power_settings() == ('auto', 1.0)            # no file: defaults
+        rack = rack_for(20.0)
+        rack._assist = feed_detector(ffb_carprops.AssistDetector(), boost_game, 25.0)
+        rack.p99 = 500.0
+        s = sample_at(500.0)
+        model = ffb_carprops.driver_from_column(500.0 / 13.0, 25.0, 1.0)
+        assert rack.power_steering() == 'game'
+        assert rack.rim_torque(s) == pytest.approx(model, rel=1e-6)       # levelled at the p99 on our class
+        half = rack.rim_torque(sample_at(250.0))
+        assert half < 0.5 * model * 1.01 or half > 0                       # follows the game's shape
+        ini.write_text('[DEFAULT]\ncountersteer_power_steering = off\n')
+        assert ffb_carprops.power_settings() == ('off', 1.0) and rack.power_steering() == 'off'
+        assert rack.rim_torque(s) == pytest.approx(500.0 / 13.0)          # column torque
+        ini.write_text('[DEFAULT]\ncountersteer_power_steering = on\ncountersteer_assist_strength = 0.5\n')
+        assert rack.power_steering() == 'model'
+        assert rack.rim_torque(s) == pytest.approx(ffb_carprops.driver_from_column(500.0 / 13.0, 25.0, 0.5))
+        ini.write_text('[DEFAULT]\ncountersteer_power_steering = bogus\ncountersteer_assist_strength = 9\n')
+        assert ffb_carprops.power_settings() == ('auto', 2.0)             # bad mode: auto; strength clamped
+        ini.write_text('[DEFAULT]\ncountersteer_assist_strength = x\n')
+        assert ffb_carprops.power_settings() == ('auto', 1.0)
+    finally:
+        ffb_carprops.CONFIG_PATH = None
+
+
+def test_without_a_detection_the_model_is_applied():
+    rack = rack_for(2.1)
+    assert rack._assist.state is None and rack.power_steering() == 'model'
