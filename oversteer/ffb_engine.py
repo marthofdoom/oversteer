@@ -822,7 +822,9 @@ REGAINS = 1.0                            # s between reads of app_gain while RBR
 RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
 CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time at most (one per physics step) ...
 CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ahead is another vehicle's
-FH_STALL = 0.1                           # s without a Forza sample while adding: stop (its gain cannot follow)
+FH_STALL = 0.05                          # s without a Forza sample while adding (3 of its ~60/s): cut at once
+FH_FRESH_UPLOADS = 3.0                   # Forza: raw is fresh for this many of the game's upload intervals ...
+FH_FRESH_MIN = 0.03                      # ... at least (s), at most RAW_FRESH
 FH_REARM = 0.3                           # s after a release before the add-on starts again (the game is never
                                          # muted, so no crossfade to protect: only no flapping)
 
@@ -1087,10 +1089,10 @@ class FfbEngine:
             self._enabled = enabled
             self._publish(None, force=True)
 
-    def _raw(self, t):
+    def _raw(self, t, fresh=RAW_FRESH):
         """(level, new): the game's constant force level now, or None (none
-        sent lately, two effects, no attribute); `new`: uploaded since the
-        last sample."""
+        sent within `fresh` s, two effects, no attribute); `new`: uploaded
+        since the last sample."""
         driver = self._driver
         if driver is None or not self.classifier.has_game_ffb_raw:
             return None, False
@@ -1117,7 +1119,7 @@ class FfbEngine:
             if self._raw_id is not None:
                 self._raw_id_at = t
             self._raw_id = effect
-        if t - self._raw_at > RAW_FRESH:
+        if t - self._raw_at > fresh:
             return None, False
         if self._raw_id_at is not None and t - self._raw_id_at < RAW_TWO_EFFECTS:
             return None, False
@@ -1350,24 +1352,44 @@ class FfbEngine:
     def _forza_tick(self, now):
         """Forza Horizon's add-on: the game's constant force read each pass, ext_force = (g - 1) x it written on
         each new upload (and as g moves); the game's own level never touched."""
-        level, new = self._raw(now)
-        playing = self._phase in ('in', 'on')
+        rate = self.raw_rate
+        fresh = min(max(FH_FRESH_UPLOADS / rate, FH_FRESH_MIN), RAW_FRESH) if rate else RAW_FRESH
+        level, new = self._raw(now, fresh)
+        addon = self.addon
+        if new and level is not None:
+            addon.upload(now, level)
         self._regains(now)
         self._fh_fresh = level
         if level is not None:
             self._fh_level = level
-        addon = self.addon
         g = addon.gain(now)
-        v = self._verdict = self._forza_verdict(now, level, playing)
         stalled = self._last_t is None or now - self._last_t > FH_STALL
+        if self._phase != 'idle' and self._played_mode == 'forza' and (level is None or stalled):
+            # A held level says nothing of a force that is gone (an effect stopped or erased publishes no new
+            # level; Forza quit or out of focus): never played against it, not even as a fade
+            self._cut(now, 'stall' if stalled else 'raw')
+        playing = self._phase in ('in', 'on')
+        v = self._verdict = self._forza_verdict(now, level, playing)
         want = (self._enabled and self._available and v.reason == 'fh-addon' and addon.ready
                 and level is not None and not stalled)
         self._decide(now, playing, want, 'stall' if stalled else 'raw' if level is None else 'state')
         if self._phase != 'idle' and self._played_mode == 'forza':
-            value = addon.force(self._fh_level or 0, g)
+            value = addon.force(self._fh_level or 0, g, addon.margin(now))
             if self._write_due(now, new or value != self._last_value):
                 self._out(now, value)
         self._publish(now)
+
+    def _cut(self, now, reason):
+        """Forza's add-on: ext_force 0 now (no fade) and released."""
+        try:
+            self._driver.force(0)
+            self.writes += 1
+            self._last_value = 0
+        except OSError as e:
+            logging.warning("Countersteer FFB: ext_force: %s", e)
+            self._broken, self._available = True, False
+            reason = 'write'
+        self._release(reason, now)
 
     def _forza_verdict(self, now, level, holding):
         v = self.classifier.verdict(now)
@@ -1516,7 +1538,11 @@ class FfbEngine:
         """The wheel wanted elsewhere, or quitting: the game's level back at
         once, the last value faded out over QUICK_FADE (in 10 ms steps, on
         this thread: there are no samples to wait for), then released."""
-        if self._phase != 'idle' and not self._broken and self._driver is not None:
+        live = self._phase != 'idle' and not self._broken and self._driver is not None
+        if live and self._played_mode == 'forza':
+            self._cut(now, reason)               # its last value is against a level not read again: 0 at once
+            return
+        if live:
             if self._muted and self._safe_game_level(100):
                 self._muted = False
             value, steps = self._last_value, 10

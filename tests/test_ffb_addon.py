@@ -59,7 +59,7 @@ class Drive:
     The car weaves: lateral acceleration 8 sin(2 pi 0.2 t) m/s^2, the front slip angle following it up to
     `peak` (Forza-normalised: past ~0.7 the trail goes), the game's force `raw_sign` x 2500 x lat."""
 
-    def __init__(self, engine, upload_hz=250.0, tel_hz=60.0, peak=0.9, raw_sign=1.0, speed=25.0, kappa=0.0,
+    def __init__(self, engine, upload_hz=60.0, tel_hz=60.0, peak=0.9, raw_sign=1.0, speed=25.0, kappa=0.0,
                  level=None, slip=True, effects=(0,)):
         self.engine, self.upload_hz, self.tel_hz = engine, upload_hz, tel_hz
         self.peak, self.raw_sign, self.speed, self.kappa, self.slip = peak, raw_sign, speed, kappa, slip
@@ -221,7 +221,7 @@ def test_forza_adds_lightness_on_top_of_its_own_force(tmp_path, raw_sign):
     n = len(RecordingDriver.writes)
     drive.run(5.0)
     writes = RecordingDriver.writes[n:]
-    assert len(writes) > 1000                                # at the game's upload rate and as g moves, not 60/s
+    assert len(writes) > 400                                 # on each upload and as g moves, not only 60/s
     for ext, raw in writes:
         assert abs(ext) <= 0.6 * abs(raw) + 1               # never past the clamp's share of the game's own
         assert ext == 0 or (ext > 0) != (raw > 0)            # always against it: |total| only ever drops
@@ -267,20 +267,30 @@ def test_slow_cars_get_the_games_force_untouched(tmp_path):
     assert all(ext == 0 for ext, _raw in RecordingDriver.writes)
 
 
-def test_stale_raw_fades_out_and_never_touches_the_level(tmp_path):
+def last_nonzero_after(engine, drive, seconds):
+    """Run `seconds` more passes; the time of the last non-zero ext_force write in them (None: none)."""
+    last, end = None, drive.t + seconds
+    while drive.t < end:
+        n = len(RecordingDriver.writes)
+        t = drive.t
+        drive.run(0.001)
+        if any(ext for ext, _raw in RecordingDriver.writes[n:]):
+            last = t
+    return last
+
+
+def test_an_effect_stopped_with_raw_held_cuts_within_20_ms(tmp_path):
+    """The game stops or erases its effect: no new level is published, the old one stays. Within three upload
+    intervals (60/s: 50 ms) plus 20 ms ext_force is 0: never played, nor faded, against a level that is gone."""
     engine, path = engine_on(tmp_path)
     drive = Drive(engine).run(6.0)
-    assert engine.status.active
+    assert engine.status.active and engine.raw_rate == pytest.approx(60, abs=3)
     drive.uploads = False
-    drive.run(0.15)
-    assert engine._phase == 'out' and engine.last_stop == 'raw'
-    drive.run(0.3)
+    stop = drive.t
+    last = last_nonzero_after(engine, drive, 0.3)
+    assert last is not None and last - stop <= 3.0 / 60.0 + 0.020
     assert not engine.status.active and forces()[-1] == 0 and engine._phase == 'idle'
-    assert engine.status.reason in ('fh-raw-stale', 'fh-raw-rate')
-    # The fade went down from the last value, against the held level, never past it
-    fade = RecordingDriver.writes[-60:]
-    assert all(abs(ext) <= 0.6 * abs(raw) + 1 for ext, raw in fade)
-    assert never_lowered(path)
+    assert engine.last_stop == 'raw' and never_lowered(path)
     # Uploads again: back on its own
     drive.uploads = True
     drive.run(2.0)
@@ -363,12 +373,69 @@ def test_switched_off_fades_out(tmp_path):
     assert forces()[-1] == 0 and engine.last_stop == 'off' and never_lowered(path)
 
 
-def test_the_telemetry_stopping_stops_it(tmp_path):
+def test_the_telemetry_stopping_cuts_within_20_ms(tmp_path):
     engine, path, drive = playing(tmp_path)
-    drive.telemetry = False
-    drive.run(0.5)
+    drive.telemetry = False                  # Forza quit, crashed or out of focus; its last level may stay put
+    stop = drive.t
+    last = last_nonzero_after(engine, drive, 0.3)
+    assert last is not None and last - stop <= fe.FH_STALL + 1 / 60.0 + 0.020
     assert not engine.status.active and engine.last_stop == 'stall' and forces()[-1] == 0
     assert never_lowered(path)
+
+
+def test_raw_turning_or_collapsing_between_writes_is_never_added_to():
+    """Ours answers the last upload; the game's next lands on top of it. Any next level within D (the recent
+    upload-to-upload change) of the last keeps the total's sign and is never exceeded."""
+    rng = random.Random(8)
+    for trial in range(300):
+        a = fa.ForzaLightness()
+        t, level = 0.0, rng.uniform(-30000, 30000)
+        for i in range(60):
+            t += 1 / 60.0
+            level = min(max(level + rng.uniform(-3000, 3000), -32768), 32768)
+            a.upload(t, level)
+        g = rng.uniform(fa.G_MIN, 1.0)
+        d = a.margin(t)
+        ext = fa.ForzaLightness.force(level, g, d)
+        for nxt in (level + d, level - d, level + rng.uniform(-d, d)):
+            total = nxt + ext
+            assert abs(total) <= abs(nxt) + 1e-9
+            assert total == 0 or nxt == 0 or (total > 0) == (nxt > 0)
+    # A collapse to 0 or a flip past D: held at most one pass, then answered against the new level
+    a = fa.ForzaLightness()
+    for i in range(30):
+        a.upload(i / 60.0, 20000.0 + 300.0 * (i % 2))
+    assert a.margin(29 / 60.0) == 300.0
+    assert fa.ForzaLightness.force(20000, 0.64, 300.0) == -int((1 - 0.64) * 19700)
+    assert fa.ForzaLightness.force(200, 0.64, 300.0) == 0     # within D of 0: nothing to take
+
+
+def test_a_sign_flip_is_answered_on_the_next_pass(tmp_path):
+    engine, path, drive = playing(tmp_path)
+    flip = drive.t
+    drive.level = lambda t: -20000.0 if t >= flip else 20000.0
+    drive.next_up = flip                                      # the flip uploads now
+    drive.run(0.003)
+    after = [(ext, raw) for ext, raw in RecordingDriver.writes[-3:]]
+    assert after and all(raw < 0 and ext >= 0 for ext, raw in after[-1:])
+    assert never_lowered(path)
+
+
+def test_a_pause_keeps_what_was_learnt(tmp_path):
+    engine, path, drive = playing(tmp_path)
+    fit, car = engine.addon.fit, engine.addon.car
+    paused = decode_sample(bytes(324))                       # race_on 0: a menu or the pause screen
+    assert paused.game == 'forza-fh' and paused.car is None
+    t = drive.t
+    for i in range(120):                                     # two seconds paused, the game still uploading
+        engine.offer(t + i / 60.0, paused)
+        upload(0.0)
+        engine.step(t + i / 60.0)
+    assert engine.addon.ready and engine.addon.car == car and engine.addon.fit == fit
+    assert all(ext == 0 for ext, _raw in RecordingDriver.writes[-50:])
+    drive.t = drive.next_up = drive.next_tel = t + 2.0
+    drive.run(1.0)
+    assert engine.status.active and never_lowered(path)
 
 
 def test_device_change_quit_inhibit_and_write_failure(tmp_path):

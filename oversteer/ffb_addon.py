@@ -24,10 +24,23 @@ So it scales the game's force by that and nothing else:
   low-pass at LOWPASS_HZ, then a slew limit of SLEW per second, advanced
   each engine pass (the force is written at the game's upload rate, not
   the telemetry's).
-- ext = -sign(raw) x |raw| x (1 - g_eff): always against the game's level,
-  never more than it (force()). ext_force and game_ffb_raw share units and
-  sign (the driver applies the effect's direction to raw), so no sign is
-  learnt for the force itself.
+- ext = -sign(raw) x (1 - g_eff) x max(0, |raw| - D): always against the
+  game's level, never more than it (force()). D (`margin`) is the largest
+  change of the game's level from one upload to the next over the last
+  MARGIN_WINDOW s: ours is written after the upload it answers, so the
+  game's next one lands on top of it; with D off, a next level within D of
+  this one can neither flip the total's sign nor be exceeded by ours.
+  ext_force and game_ffb_raw share units and sign (the driver applies the
+  effect's direction to raw), so no sign is learnt for the force itself.
+- A held raw level says nothing of a force that is gone (the game stopping
+  or erasing its effect, quitting, losing focus publishes no new level):
+  the engine cuts ext_force to 0 at once when raw goes stale, the
+  telemetry stalls or two effects show, and fades it only while raw is
+  fresh.
+
+This ext_force approach is a stopgap: a driver-side scale of the game's
+constant force (coming in new-lg4ff) will replace it, with no upload lag
+and nothing played against a level that is gone.
 
 What is learnt live, per car (`ready`, `refused`, `waiting`): that the game's
 constant force is its steering force. Forza could drive the wheel through
@@ -39,11 +52,13 @@ ready). `sign`: the sign of r(raw, lateral acceleration to the left), the
 game's convention, logged and kept for diagnosis (a capture confirms it).
 The engine checks the rest: the raw upload rate, its freshness, app_gain,
 two constant effects."""
+import collections
 import logging
 import math
 
 A = 0.7                                  # Forza-normalised slip angle at which the trail has gone (report: 0.6-0.8)
-K = 0.2                                  # ... slip ratio (report: 0.15-0.2; the gentler end: braking lightens less)
+K = 0.35                                 # ... slip ratio: ~2x the weight of the angle (the report's ACR fit); its
+                                         # Forza scale is unconfirmed: calibrate A and K on an FH6 capture
 Q = 3.0                                  # exp(-s^Q)'s shape (report: 2-4)
 G_MIN = 0.4                              # the lightest: 40 % of the game's force
 STRENGTH = 0.6                           # "Understeer lightness" default
@@ -51,6 +66,7 @@ MIN_SPEED = 5.0                          # m/s: none below
 LOWPASS_HZ = 20.0
 SLEW = 6.0                               # g_eff per second at most (1 -> 0.4 in 100 ms)
 SLIP_GONE = 0.5                          # s without the front slip channels: `no_slip`
+MARGIN_WINDOW = 0.5                      # s: the upload-to-upload change D is the max over this
 
 TAU = 10.0                               # s: the window the game's force is judged over
 MIN_TIME = 3.0                           # s of moving samples with a fresh raw level before judging
@@ -132,6 +148,33 @@ class ForzaLightness:
         self.target = 1.0                # g_eff the last sample asks for
         self.g = 1.0                     # g_eff now (smoothed)
         self._g_at = None
+        self.clear_uploads()
+
+    def clear_uploads(self):
+        """Forget the game's upload-to-upload changes (a new stream)."""
+        self._deltas = collections.deque()      # (t, |change|), decreasing: the window's max first
+        self._upload_level = None
+
+    def upload(self, t, level):
+        """A new upload of the game's constant force: its change from the last one counts toward `margin`."""
+        if self._upload_level is not None:
+            delta = abs(level - self._upload_level)
+            deltas = self._deltas
+            while deltas and deltas[-1][1] <= delta:
+                deltas.pop()
+            deltas.append((t, delta))
+        self._upload_level = level
+        self._expire(t)
+
+    def _expire(self, t):
+        deltas = self._deltas
+        while deltas and deltas[0][0] < t - MARGIN_WINDOW:
+            deltas.popleft()
+
+    def margin(self, t):
+        """D: the largest upload-to-upload change of the game's level over the last MARGIN_WINDOW s."""
+        self._expire(t)
+        return self._deltas[0][1] if self._deltas else 0.0
 
     def set_strength(self, value):
         self.strength = min(max(float(value), 0.0), 1.0)
@@ -145,6 +188,10 @@ class ForzaLightness:
         return self._moving_at is not None and t - self._moving_at <= within
 
     def feed(self, t, sample, raw):
+        if sample.car is None:
+            # Menus and pause (race_on 0): no car named, not another car; what was learnt stands
+            self.target = 1.0
+            return
         if sample.car != self.car:
             self.reset(sample.car)
         dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
@@ -210,9 +257,11 @@ class ForzaLightness:
         return self.g
 
     @staticmethod
-    def force(raw, g):
-        """ext_force that leaves g x raw on the wheel: against raw's sign, never more than |raw|."""
+    def force(raw, g, margin=0.0):
+        """ext_force that leaves about g x raw on the wheel: against raw's sign, never more than |raw| - margin
+        (a next level within `margin` of raw keeps its sign under it and is never exceeded)."""
         if not raw or g >= 1.0:
             return 0
-        cut = min(abs(raw) * (1.0 - max(g, 0.0)), abs(raw))
-        return -int(round(cut)) if raw > 0 else int(round(cut))
+        cut = (1.0 - min(max(g, 0.0), 1.0)) * max(abs(raw) - max(margin, 0.0), 0.0)
+        cut = int(math.floor(cut))
+        return -cut if raw > 0 else cut
