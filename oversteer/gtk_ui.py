@@ -1531,8 +1531,8 @@ class GtkUi:
         receive.add(self._setting_row(
             _("BeamNG.drive force feedback"),
             _("Adds a small mod to BeamNG's mods folder that sends the steering rack force and each tyre's load "
-              "and slip to Oversteer on port 5320 (pick that port above, or leave Auto). Safe to press again: "
-              "it never replaces a newer version."),
+              "and slip to Oversteer on port 5320 (a side stream for force feedback; the telemetry above keeps using OutGauge). "
+              "Safe to press again: it never replaces a newer version."),
             controls=(install_beamng,)))
         self.telemetry_forward = Gtk.Entry(width_chars=34, placeholder_text="192.168.1.20:20777, localhost:9996")
         self.telemetry_forward.connect('activate', self._forward_commit)

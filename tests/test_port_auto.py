@@ -72,7 +72,7 @@ def _fds():
 
 
 def test_auto_holds_the_presets_and_never_forza_horizon_6s_range():
-    assert module.auto_ports() == [5310, 20777, 4444, 6776, 5320]
+    assert module.auto_ports() == [5310, 20777, 4444, 6776]
     assert module.LEGACY_PORT in module.FORZA_OWN and 5200 in module.FORZA_OWN
     assert not any(p in module.FORZA_OWN for p in module.auto_ports())
 

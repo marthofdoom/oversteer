@@ -8,8 +8,9 @@ The user folders it looks for, each only where BeamNG has made it (`current` exi
   BeamNG.drive/current/mods` (the Windows build's %LOCALAPPDATA% folder; not checked against a Proton install).
 
 The mod's version is the `MOD_VERSION` number in its Lua file; an installed zip with a newer one is never
-overwritten (a zip that cannot be read is replaced). In the Flatpak the home folder is not visible: the install
-then reports what is needed instead of widening the sandbox.
+overwritten (a zip that cannot be read is replaced). In the Flatpak the home folder is not visible: everything
+(folders, the installed zip's version, the write) then goes through `flatpak-spawn --host` with argv only (test,
+cat, mkdir, tee, mv), as steam_build reads files; when that itself fails the zip can be saved by hand instead.
 """
 
 import io
@@ -17,6 +18,7 @@ import logging
 import os
 import pwd
 import re
+import subprocess
 import sys
 import zipfile
 
@@ -27,6 +29,8 @@ ZIP_NAME = MOD_NAME + '.zip'
 LUA_PATH = 'lua/vehicle/extensions/auto/countersteer_ffb.lua'
 APPID = 284160                                       # BeamNG.drive on Steam
 DATADIR = None                                       # the installed data folder (share/oversteer), set by the application
+HOST_TIMEOUT = 10.0                                 # s for one flatpak-spawn call
+MAX_ZIP = 1 << 20                                    # bytes read of an installed zip
 _VERSION = re.compile(rb'^\s*local\s+MOD_VERSION\s*=\s*(\d+)', re.M)
 _ZIP_TIME = (2026, 1, 1, 0, 0, 0)                    # fixed, so the same files always make the same zip
 _PROTON_USER = ('pfx/drive_c/users/steamuser/AppData/Local/BeamNG.drive/current',
@@ -34,6 +38,89 @@ _PROTON_USER = ('pfx/drive_c/users/steamuser/AppData/Local/BeamNG.drive/current'
 
 # install() statuses
 INSTALLED, UPDATED, CURRENT, NEWER, FAILED = 'installed', 'updated', 'current', 'newer', 'failed'
+
+
+class HostError(OSError):
+    """flatpak-spawn --host itself failed (not a file the host lacks)."""
+
+
+class LocalFs:
+    host = False
+
+    @staticmethod
+    def isdir(path):
+        return os.path.isdir(path)
+
+    @staticmethod
+    def read(path):
+        """The file's bytes, or None if there is none."""
+        try:
+            with open(path, 'rb') as f:
+                return f.read(MAX_ZIP)
+        except OSError:
+            return None
+
+    @staticmethod
+    def write(path, data):
+        tmp = path + '.tmp'
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp, 'wb') as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+
+class HostFs:
+    """The host's files through `flatpak-spawn --host`, one program per call and no shell."""
+    host = True
+
+    @staticmethod
+    def _run(argv, data=None):
+        try:
+            return subprocess.run(['flatpak-spawn', '--host'] + argv, input=data, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, timeout=HOST_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise HostError("flatpak-spawn failed: {}".format(e))
+
+    @classmethod
+    def _ok(cls, argv, data=None):
+        """True/False for a test's answer (exit 0/1); anything else is flatpak-spawn or the program failing."""
+        done = cls._run(argv, data)
+        if done.returncode not in (0, 1):
+            raise HostError("flatpak-spawn --host {}: {}".format(argv[0], done.stderr.decode('utf-8', 'replace')[:200].strip()
+                                                                or 'exit {}'.format(done.returncode)))
+        return done.returncode == 0
+
+    @classmethod
+    def isdir(cls, path):
+        return cls._ok(['test', '-d', path])
+
+    @classmethod
+    def read(cls, path):
+        if not cls._ok(['test', '-f', path]):
+            return None
+        done = cls._run(['head', '-c', str(MAX_ZIP), '--', path])
+        if done.returncode != 0:
+            raise HostError("flatpak-spawn --host head: {}".format(done.stderr.decode('utf-8', 'replace')[:200].strip()))
+        return done.stdout
+
+    @classmethod
+    def write(cls, path, data):
+        tmp = path + '.tmp'
+        for argv, stdin in ((['mkdir', '-p', '--', os.path.dirname(path)], None), (['tee', '--', tmp], data),
+                            (['mv', '-f', '--', tmp, path], None)):
+            done = cls._run(argv, stdin)
+            if done.returncode != 0:
+                if argv[0] != 'mkdir':
+                    cls._run(['rm', '-f', '--', tmp])
+                raise OSError("{}: {}".format(argv[0], done.stderr.decode('utf-8', 'replace')[:200].strip()
+                                              or 'exit {}'.format(done.returncode)))
 
 
 def find_source(datadir=None):
@@ -101,7 +188,7 @@ def real_home():
         return os.path.expanduser('~')
 
 
-def user_folders(home=None, environ=None, libraries=None):
+def user_folders(home=None, environ=None, libraries=None, fs=LocalFs):
     """[(label, mods folder)] of the BeamNG user folders that exist: native first, then Proton. `libraries`:
     the Steam libraries (paths) to look in for the Proton prefix; None asks steam_build."""
     home = home or real_home()
@@ -109,13 +196,13 @@ def user_folders(home=None, environ=None, libraries=None):
     found, seen = [], set()
 
     def add(label, user_folder):
-        if os.path.isdir(user_folder):
+        if fs.isdir(user_folder):
             mods = os.path.join(user_folder, 'mods')
-            key = os.path.realpath(mods)
+            key = os.path.realpath(mods) if not fs.host else mods
             if key not in seen:
                 seen.add(key)
                 found.append((label, mods))
-    data_homes = [environ.get('XDG_DATA_HOME') or '', os.path.join(home, '.local', 'share')]
+    data_homes = [environ.get('XDG_DATA_HOME') or '' if not fs.host else '', os.path.join(home, '.local', 'share')]
     for base in data_homes:
         if base:
             add('native', os.path.join(base, 'BeamNG', 'BeamNG.drive', 'current'))
@@ -132,52 +219,44 @@ def user_folders(home=None, environ=None, libraries=None):
     return found
 
 
-def install_one(mods_dir, zip_bytes, version):
+def install_one(mods_dir, zip_bytes, version, fs=LocalFs):
     """Write the zip into `mods_dir` unless the one there is as new or newer. Returns (status, detail)."""
     dest = os.path.join(mods_dir, ZIP_NAME)
     status = INSTALLED
-    if os.path.exists(dest):
-        have = zip_version(dest)
-        if have is not None and have > version:
-            return NEWER, have
-        if have == version:
-            return CURRENT, have
-        status = UPDATED
-    tmp = dest + '.tmp'
     try:
-        os.makedirs(mods_dir, exist_ok=True)
-        with open(tmp, 'wb') as f:
-            f.write(zip_bytes)
-        os.replace(tmp, dest)
+        old = fs.read(dest)
+        if old is not None:
+            have = zip_version(old)
+            if have is not None and have > version:
+                return NEWER, have
+            if have == version:
+                return CURRENT, have
+            status = UPDATED
+        fs.write(dest, zip_bytes)
     except OSError as e:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
         return FAILED, str(e)
     return status, version
 
 
-def install(datadir=None, home=None, environ=None, libraries=None):
-    """Build the zip and install it in every BeamNG user folder found. Returns a dict: `results`
-    [(label, mods folder, status, detail)], `version`, and `error` (a sentence, or None) for the cases with
-    nothing to install: the source missing, no BeamNG folder found, or the Flatpak not seeing it."""
+def install(datadir=None, home=None, environ=None, libraries=None, host=None):
+    """Build the zip and install it in every BeamNG user folder found (through the host inside the Flatpak).
+    Returns a dict: `results` [(label, mods folder, status, detail)], `version`, and `error` (a sentence, or
+    None) for the cases with nothing to install: the source missing, flatpak-spawn failing, or no BeamNG folder."""
     source = find_source(datadir)
     version = source_version(source) if source else None
     if version is None:
         return {'results': [], 'version': None, 'error': 'The mod files are missing from this installation.'}
-    folders = user_folders(home, environ, libraries)
+    fs = HostFs if (steam_build.in_flatpak() if host is None else host) else LocalFs
+    try:
+        folders = user_folders(home, environ, libraries, fs)
+    except HostError as e:
+        return {'results': [], 'version': version, 'error': "Can't reach the computer outside the Flatpak ({}). "
+                "Save the zip and copy it to BeamNG's mods folder yourself.".format(e)}
     if not folders:
-        if steam_build.in_flatpak():
-            error = ("The Flatpak can't see BeamNG's folder. Allow it with: flatpak override --user "
-                     "--filesystem=~/.local/share/BeamNG io.github.berarma.Oversteer (for a Proton install, the "
-                     "Steam library's compatdata folder too), or save the zip and copy it to the mods folder yourself.")
-        else:
-            error = ("BeamNG.drive's user folder was not found. Start the game once so it creates it, or save the "
-                     "zip and copy it to the mods folder yourself.")
-        return {'results': [], 'version': version, 'error': error}
+        return {'results': [], 'version': version, 'error': "BeamNG.drive's user folder was not found. Start the game "
+                "once so it creates it, or save the zip and copy it to the mods folder yourself."}
     data = build_zip(source)
-    results = [(label, mods) + install_one(mods, data, version) for label, mods in folders]
+    results = [(label, mods) + install_one(mods, data, version, fs) for label, mods in folders]
     return {'results': results, 'version': version, 'error': None}
 
 

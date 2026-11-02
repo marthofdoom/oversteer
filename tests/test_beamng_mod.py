@@ -41,10 +41,10 @@ def test_csb1_is_not_mistaken_for_outgauge():
     assert decode_sample(bytes(data)).game == 'beamng-ffb'
 
 
-def test_port_is_a_preset_and_unique():
-    ports = [p for p, _label in telemetry.PORT_PRESETS]
-    assert 5320 in ports and len(set(ports)) == len(ports)
-    assert 5320 in telemetry.held_ports(True, None)
+def test_port_is_a_side_stream_not_a_preset():
+    from oversteer import ffb_sources
+    assert ffb_sources.PORT == 5320
+    assert 5320 not in telemetry.own_ports() and 5320 not in telemetry.held_ports(True, None)
 
 
 def _source(tmp_path, version):
@@ -113,9 +113,48 @@ def test_install_never_overwrites_newer(tmp_path, monkeypatch):
 
 def test_install_without_a_game_folder_says_so(tmp_path, monkeypatch):
     monkeypatch.setattr(beamng_mod, 'find_source', lambda datadir=None, src=_source(tmp_path, 1): src)
-    monkeypatch.setattr(beamng_mod.steam_build, 'in_flatpak', lambda: False)
-    report = beamng_mod.install(home=str(tmp_path / 'none'), environ={}, libraries=[])
+    report = beamng_mod.install(home=str(tmp_path / 'none'), environ={}, libraries=[], host=False)
     assert report['results'] == [] and 'user folder' in report['error']
-    monkeypatch.setattr(beamng_mod.steam_build, 'in_flatpak', lambda: True)
-    report = beamng_mod.install(home=str(tmp_path / 'none'), environ={}, libraries=[])
-    assert 'Flatpak' in report['error'] and 'override' in beamng_mod.summary(report)
+
+
+def _fake_host(monkeypatch, calls, fail=False):
+    """flatpak-spawn --host replaced by running the same argv here (no shell), recording it."""
+    import subprocess
+    real = subprocess.run
+
+    def run(argv, **kw):
+        assert argv[:2] == ['flatpak-spawn', '--host'] and 'shell' not in kw
+        calls.append(argv[2:])
+        if fail:
+            raise FileNotFoundError('flatpak-spawn')
+        return real(argv[2:], **kw)
+    monkeypatch.setattr(beamng_mod.subprocess, 'run', run)
+
+
+def test_install_through_the_host(tmp_path, monkeypatch):
+    home, lib = _fake_home(tmp_path)
+    monkeypatch.setattr(beamng_mod, 'find_source', lambda datadir=None, src=_source(tmp_path, 4): src)
+    calls = []
+    _fake_host(monkeypatch, calls)
+    run = lambda: beamng_mod.install(home=home, environ={}, libraries=[lib], host=True)
+    assert [r[2] for r in run()['results']] == [beamng_mod.INSTALLED] * 2
+    dest = os.path.join(home, '.local/share/BeamNG/BeamNG.drive/current/mods', beamng_mod.ZIP_NAME)
+    assert beamng_mod.zip_version(dest) == 4 and not os.path.exists(dest + '.tmp')
+    assert [r[2] for r in run()['results']] == [beamng_mod.CURRENT] * 2
+    with open(dest, 'wb') as f:
+        f.write(beamng_mod.build_zip(_source(tmp_path / 'n', 8)))
+    assert run()['results'][0][2:] == (beamng_mod.NEWER, 8)
+    with open(dest, 'wb') as f:
+        f.write(b'junk')
+    assert run()['results'][0][2] == beamng_mod.UPDATED and beamng_mod.zip_version(dest) == 4
+    assert {c[0] for c in calls} == {'test', 'head', 'mkdir', 'tee', 'mv'}      # argv only, no shell
+    assert not any(c[0] in ('sh', 'bash') for c in calls)
+
+
+def test_host_failure_is_a_clear_error(tmp_path, monkeypatch):
+    home, lib = _fake_home(tmp_path)
+    monkeypatch.setattr(beamng_mod, 'find_source', lambda datadir=None, src=_source(tmp_path, 1): src)
+    _fake_host(monkeypatch, [], fail=True)
+    report = beamng_mod.install(home=home, environ={}, libraries=[lib], host=True)
+    assert report['results'] == [] and report['version'] == 1
+    assert 'flatpak-spawn' in report['error'] and 'override' not in report['error']

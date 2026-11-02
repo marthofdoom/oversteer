@@ -46,8 +46,6 @@ def N_(text):
 #  - 4444: BeamNG.drive's default outgaugePort (OutGauge is decoded). Live for
 #    Speed has no default port (set OutGauge Port in its cfg.txt) and WRC
 #    Generations' stock port is not documented, so neither gets a row.
-#  - 5320: Countersteer's own BeamNG mod (data/beamng/countersteer_ffb: the rack force and tyre forces, "CSB1"
-#    packets). Free of every game's default and of Forza's 5200-5300; the mod's optional settings file can move it.
 #  - 6776: the port nearly every Richard Burns Rally (RallySimFans) guide and
 #    tool uses for the NGP plugin's telemetry (docs/richard-burns-rally.md,
 #    section 1). The RSF launcher takes several destinations, so
@@ -57,7 +55,6 @@ PORT_PRESETS = [
     (20777, N_("DiRT Rally 2.0, DiRT Rally, DiRT 4, EA SPORTS WRC")),
     (4444, N_("BeamNG.drive OutGauge")),
     (6776, N_("Richard Burns Rally (RSF / NGP)")),
-    (5320, N_("BeamNG.drive Countersteer mod (force feedback)")),
 ]
 PORT_MIN = 1024
 PORT_MAX = 65535
