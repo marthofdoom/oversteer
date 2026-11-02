@@ -1,5 +1,5 @@
 """Repairs of the stored telemetry data that older code worked out wrong (data version 1, Oversteer 0.16; data version
-2, Oversteer 0.17: Richard Burns Rally, below).
+2, Oversteer 0.17: Richard Burns Rally; data version 3, Oversteer 0.18: corners stored back to front; below).
 
 Since 0.15.4 the runs are analysed differently: the finish and its time (ACR's coarse clock, DiRT's and WRC
 Generations' official time, no post-finish phantom runs), the PB (any finished run, offs too), DiRT's plan (it was
@@ -16,6 +16,8 @@ lag before the yaw). What was stored before is stale. Two parts mend it:
   keeps its class until it is rewritten, so no PB leaves the PB lookups meanwhile, and no trace is pruned while the
   queue holds runs (Store.prune_traces). A crash before the commit leaves the file as it was, to be repaired on the
   next start; the queue is worked a few runs at a time from drive_log.backfill_step and survives a restart.
+  A file already repaired gets only the later steps: data version 2 queues the Richard Burns Rally runs again
+  (repair_rbr), data version 3 only the runs with a corner stored back to front (repair_corners).
 
 - `retime_from_captures(path)`: the result times. A trace does not hold the finish exactly (DiRT's traces end up to
   0.1 s before the official time or run on 30 s past it; ACR's run 170 stops 360 m before the line), so the times
@@ -52,9 +54,11 @@ T = {name: i for i, name in enumerate(TRACE_CHANNELS)}
 
 REPAIR = 'repair-0.16'          # store_meta: what migrate() did (JSON)
 REPAIR_RBR = 'repair-0.17'      # store_meta: what the data version 2 step did (JSON)
+REPAIR_CORNERS = 'repair-0.18'  # store_meta: what the data version 3 step did (JSON)
 RETIMED = 'retime-0.16'         # store_meta: the runs retime_from_captures() re-timed, {run: [old, new, capture]}
 BACKUP_TAG = 'pre-0.16'
-BACKUP_TAG_RBR = 'pre-0.17'     # the backup of a file at data version 1 (repaired by 0.16) brought to 2
+BACKUP_TAG_RBR = 'pre-0.17'     # the backup of a file at data version 1 (repaired by 0.16) brought to 2 or later
+BACKUP_TAG_CORNERS = 'pre-0.18' # the backup of a file at data version 2 (repaired by 0.17) brought to 3
 RETIME_BACKUP_TAG = 'pre-retime'
 
 # A DiRT run that began where the finished run before it in the session ended (the game resets its clock on the
@@ -268,6 +272,29 @@ def repair_rbr(store):
     return potentials, envelopes, queued
 
 
+def inverted_corner_runs(store):
+    """The runs with a stored corner whose window ends before it starts (d1 < d0): the corner detection of before
+    0.18 took a window's ends from its first and last rows, so a car that reversed (or spun back) in a corner got one
+    back to front. Ascending ids."""
+    return [r[0] for r in store._do('SELECT DISTINCT run FROM corners WHERE d0 IS NOT NULL AND d1 IS NOT NULL '
+                                    'AND d1 < d0 ORDER BY run')]
+
+
+def repair_corners(store):
+    """Data version 3 (0.18): a corner the car reversed in spans the least to the most distance it covered
+    (drive_log._corner), but the corners are worked out at a run's end, so a run stored before keeps its corner back
+    to front. Only the runs with such a corner (inverted_corner_runs) are queued to be worked over again (requeue: each
+    keeps its class, so a PB stays one, and no trace is pruned while the queue holds runs); nothing is deleted or
+    changed here. A run without a trace cannot be worked over and keeps its corners. Returns (corner rows, [runs with
+    one], [those queued])."""
+    rows = store._do('SELECT COUNT(*) FROM corners WHERE d0 IS NOT NULL AND d1 IS NOT NULL AND d1 < d0').fetchone()[0]
+    runs = inverted_corner_runs(store)
+    if runs:
+        requeue(store, runs)
+    queued = set(r[0] for r in store._do('SELECT run FROM reanalyse').fetchall())
+    return rows, runs, [r for r in runs if r in queued]
+
+
 def queue_order(store, runs=None):
     """The runs with a trace (all, or those in `runs`) in the order to work them over: first the reference runs (each
     finished run of a class that ranks quicker than every earlier one of its car on its stage, overall or in its
@@ -345,7 +372,7 @@ def migrate(store):
         # One backup per repair (per transition and time: a file repaired, then merged with an older one, is
         # repaired again after a backup of its own); recorded, so a repair that crashed part way reuses its own
         store.commit()
-        tag = BACKUP_TAG if version < 1 else BACKUP_TAG_RBR
+        tag = BACKUP_TAG if version < 1 else BACKUP_TAG_RBR if version < 2 else BACKUP_TAG_CORNERS
         dest = '{}.{}-v{}-v{}-{}.bak'.format(path, tag, version, DATA_VERSION, time.strftime('%Y%m%d-%H%M%S'))
         try:
             _backup(store.db, dest)
@@ -368,6 +395,7 @@ def migrate(store):
         summary = None
         phantoms, moved, deleted, cars, order, suspects = [], {}, [], {}, [], []
         potentials = envelopes = 0
+        rbr = None
         if version < 1:
             phantoms = delete_phantoms(store)
             moved, deleted = rekey_dirt_stages(store)
@@ -383,11 +411,17 @@ def migrate(store):
                        'envelopes_dropped': envelopes, 'queued': len(order),
                        'times_not_fixed': [list(s) for s in suspects], 'backup': dest}
             store.set_meta(REPAIR, json.dumps(summary))
-        rbr_potentials, rbr_envelopes, rbr_queued = repair_rbr(store)
-        rbr = {'at': time.time(), 'from': version, 'potentials_dropped': rbr_potentials,
-               'envelopes_dropped': rbr_envelopes, 'rbr_runs_queued': rbr_queued, 'backup': dest}
-        store.set_meta(REPAIR_RBR, json.dumps(rbr))
-        summary = dict(summary or {}, rbr=rbr)
+        if version < 2:
+            rbr_potentials, rbr_envelopes, rbr_queued = repair_rbr(store)
+            rbr = {'at': time.time(), 'from': version, 'potentials_dropped': rbr_potentials,
+                   'envelopes_dropped': rbr_envelopes, 'rbr_runs_queued': rbr_queued, 'backup': dest}
+            store.set_meta(REPAIR_RBR, json.dumps(rbr))
+            summary = dict(summary or {}, rbr=rbr)
+        corner_rows, corner_runs, corner_queued = repair_corners(store)
+        corners = {'at': time.time(), 'from': version, 'inverted_corners': corner_rows, 'runs': corner_runs,
+                   'runs_queued': corner_queued, 'backup': dest}
+        store.set_meta(REPAIR_CORNERS, json.dumps(corners))
+        summary = dict(summary or {}, corners=corners)
         store.set_meta(BACKUP_META, None)
         store.set_meta('data_version', DATA_VERSION)
         store.release_savepoint('data_repair')
@@ -402,9 +436,15 @@ def migrate(store):
                      "to be worked over again", len(phantoms), ', '.join(map(str, phantoms)) or '-', len(moved),
                      ', '.join('{} -> {}'.format(a, b) for a, b in moved.items()) or '-', len(deleted), len(cars),
                      potentials, envelopes, len(order))
-    logging.info("data repair to data version %d done in %.1f s; Richard Burns Rally: %d potentials and %d envelopes "
-                 "dropped, %d runs queued to be worked over again", DATA_VERSION, time.monotonic() - started,
-                 rbr_potentials, rbr_envelopes, rbr_queued)
+    if rbr is not None:
+        logging.info("data repair to data version 2: Richard Burns Rally: %d potentials and %d envelopes dropped, %d "
+                     "runs queued to be worked over again", rbr['potentials_dropped'], rbr['envelopes_dropped'],
+                     rbr['rbr_runs_queued'])
+    kept = [r for r in corner_runs if r not in corner_queued]
+    logging.info("data repair to data version %d done in %.1f s; corners stored back to front: %d in %d runs, %d runs "
+                 "queued to be worked over again (%s)%s", DATA_VERSION, time.monotonic() - started, corner_rows,
+                 len(corner_runs), len(corner_queued), ', '.join(map(str, corner_queued)) or '-',
+                 '; no trace, kept as they are: {}'.format(', '.join(map(str, kept))) if kept else '')
     for run, stage, result, why in suspects:
         logging.warning("data repair: run %s on %s keeps its time %s (%s): run 'oversteer --retime-from-captures' "
                         "(Flatpak: 'flatpak run io.github.berarma.Oversteer --retime-from-captures') with Oversteer closed "
