@@ -416,6 +416,14 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
 .pairok button { margin-left: auto; color: var(--accent); min-height: 32px; font-size: 12.5px; }
 .profile-row { display: flex; gap: 8px; align-items: center; }
 .profile-row select { flex: 1 1 140px; }
+.cs-light { display: flex; align-items: flex-start; gap: 10px; }
+.cs-light .lamp { flex: none; width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; border: 1.5px solid var(--faint); box-sizing: border-box; }
+.cs-light .lamp.green { background: var(--good); border-color: var(--good); }
+.cs-light .lamp.amber { background: var(--warn); border-color: var(--warn); }
+.cs-light .lamp.grey { background: var(--ref); border-color: var(--ref); }
+.cs-light .why { min-width: 0; font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.cs-info { color: var(--dim); font-size: 12.5px; line-height: 1.35; margin-top: 6px; overflow-wrap: anywhere; }
+.cs-info:empty { display: none; }
 .dirty { color: var(--warn); font-size: 12.5px; margin: 6px 0 0; }
 .clean { color: var(--dim); font-size: 12.5px; margin: 6px 0 0; }
 .toast { position: fixed; z-index: 9; left: 12px; right: 12px; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px); margin: 0 auto; max-width: 480px;
@@ -2717,6 +2725,16 @@ function buildFfb() {
   main.appendChild(reg(T("Let games adjust FFB strength", "Off: the game's own strength setting is ignored.", "app_gain")));
   main.appendChild(reg(T("True inertia effects", "Off plays inertia as a damper, like the Windows driver.", "inertia_mode")));
   main.appendChild(reg(mkEffects()));
+  const cs = mkPanel(a, "Countersteer FFB");
+  cs.appendChild(reg(mkCsStatus()));
+  cs.appendChild(reg(T("Countersteer FFB", "Our own steering force from the game's telemetry; it takes over only while the light is green.", "countersteer_ffb")));
+  cs.appendChild(reg(S("Steering strength", percent, "Lower it if the wheel feels heavy or runs warm.", "countersteer_strength")));
+  cs.appendChild(reg(S("Texture", percent, "Small vibrations on top of the steering force.", "countersteer_texture")));
+  for (const [part, label] of [["road", "Road"], ["impact", "Landings"], ["lock", "Front lock"], ["engine", "Engine"]])
+    cs.appendChild(reg(T("Texture: " + label, null, "countersteer_texture_" + part)));
+  const game = mkPanel(a, "Countersteer, game-specific");
+  game.appendChild(reg(S("RBR linearity", percent, "Richard Burns Rally only: how much of the game's force curve is undone.", "countersteer_linearity")));
+  game.appendChild(reg(S("Forza understeer lightness", percent, "Forza Horizon only: how much lighter the wheel gets as the front tyres run out of grip.", "countersteer_lightness")));
   const effects = mkPanel(a, "Effect strength");
   effects.appendChild(reg(S("Spring effect gain", percent, "How hard the game's springs can pull.", "spring_level")));
   effects.appendChild(reg(S("Damper effect gain", percent, "Resistance that grows with how fast the wheel turns.", "damper_level")));
@@ -2732,6 +2750,24 @@ function buildFfb() {
     [["auto", "Auto"], ["percent", "% of limiter"], ["rpm", "RPM"]], (v) => change("rev_leds_mode", v)), {key: "rev_leds_mode"})));
   leds.appendChild(reg(S("Shift point", (v, spec) => v + (spec && spec.unit === "rpm" ? " rpm" : " %"), null, "rev_leds_shift")));
   leds.appendChild(reg(T("Learn the limiter at each launch", "Clutch in, handbrake up, throttle floored at the start.", "rev_leds_launch")));
+}
+
+// Countersteer FFB: the light with its reason, then the learnt car, the wheel's motor heat and the calibration
+function mkCsStatus() {
+  const root = el("div", null, "row"), line = el("div", null, "cs-light"), lamp = el("span", null, "lamp"), why = el("div", null, "why");
+  const car = el("div", null, "cs-info"), wheel = el("div", null, "cs-info"), cal = el("div", null, "cs-info");
+  line.append(lamp, why);
+  root.append(line, car, wheel, cal);
+  const row = {root};
+  row.update = (spec, can, state) => {
+    const cs = state && state.countersteer;
+    root.hidden = !cs;
+    if (!cs) return;
+    lamp.className = "lamp " + cs.light;
+    why.textContent = cs.text;
+    car.textContent = cs.car; wheel.textContent = cs.wheel; cal.textContent = cs.calibration;
+  };
+  return row;
 }
 
 // Try-effect buttons and the reset

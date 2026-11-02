@@ -110,12 +110,36 @@ class FakeUi:
         self.controller.load_profile(name)
 
 
+class FakeEngine:
+    """The Countersteer engine as the Gui methods drive it: records what it is told."""
+
+    def __init__(self):
+        self.calls = []
+        self.status = SimpleNamespace(device=None, available=False, last_stop=None)
+
+    def __getattr__(self, name):
+        if name.startswith('set_'):
+            return lambda *a: self.calls.append((name,) + a)
+        raise AttributeError(name)
+
+    def car_properties(self):
+        return ('car', 0.03, 0.01)
+
+
 class FakeController:
     """The parts of Gui the bridge uses; the settings logic is the real Model and the real Gui methods."""
     reset_ffb_defaults = Gui.reset_ffb_defaults
     change_rev_leds_shift_unit = Gui.change_rev_leds_shift_unit
     try_effect = Gui.try_effect
     save_profile = Gui.save_profile
+    apply_countersteer_ffb = Gui.apply_countersteer_ffb
+    apply_countersteer_texture = Gui.apply_countersteer_texture
+    apply_countersteer_strength = Gui.apply_countersteer_strength
+    apply_countersteer_linearity = Gui.apply_countersteer_linearity
+    apply_countersteer_lightness = Gui.apply_countersteer_lightness
+    countersteer_view = Gui.countersteer_view
+    countersteer_info = Gui.countersteer_info
+    _countersteer_wanted = Gui._countersteer_wanted
 
     def __init__(self, profile_path, device=None, enabled=True, token='pair-me-1234'):
         self.device = device if device is not None else FakeDevice()
@@ -128,6 +152,17 @@ class FakeController:
         self.web_token = token
         self.loaded = []
         self.revs = 0
+        self.ffb_engine = FakeEngine()
+        self.calibration = None
+
+    def wheel_calibration_text(self):
+        return Gui.wheel_calibration_text(self)
+
+    def _wheel_supported(self):
+        return False
+
+    def _wheel_entry(self):
+        return None
 
     def update_pedals(self, mask=None):
         pass
