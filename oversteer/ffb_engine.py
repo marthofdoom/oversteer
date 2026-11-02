@@ -9,10 +9,16 @@ Three parts:
   the fields it carries), what Countersteer can do for the game, as a
   state and a reason. 'replace' (green): AC, ACC or ACR through the
   bridge's version 5 at 250 packets a second or more, no gap over 20 ms,
-  the front tyres' Mz there and not flat, and a driver with game_ffb_raw. 'model' (amber): a game whose
-  force could be modelled (Richard Burns Rally once the driver exposes the
-  game's raw force, game_ffb_raw; Forza Horizon at 200 a second or more);
-  nothing is played for it yet. 'add-on' (grey): every other game heard,
+  the front tyres' Mz there and not flat, and a driver with game_ffb_raw.
+  Richard Burns Rally: 'replace' when the game's own force reaches
+  game_ffb_raw at RBR_RAW_RATE uploads a second or more and RbrForce's checks
+  pass (ffb_rbr), 'model' (amber) with the reason otherwise. BeamNG: from
+  the Countersteer mod's CSB1 (BeamNGForceSource: started when BeamNG's
+  OutGauge is heard with a wheel set, kept while OutGauge or CSB1 is; CSB1
+  alone cannot start it, OutGauge must be on): 'replace' at CSB_RATE packets per second of game time
+  with its clock moving and a rack force, grey otherwise. 'model' (amber)
+  also: Forza Horizon at 200 a second or more, whose force could be
+  modelled; nothing is played for it yet. 'add-on' (grey): every other game heard,
   and AC games that fail a 'replace' rule: the game keeps its own force.
   'none': no telemetry. Measured live over a sliding second, not taken
   from a list: Forza's rate follows its frame rate, and ACC or AC go
@@ -38,6 +44,12 @@ Three parts:
   game gets game_ffb_level 100 at once: it is never left muted. The driver
   restores the game by itself after 1 s without writes, should this
   process die.
+- RbrForce (ffb_rbr): RBR's own force with NGP's saturating curve undone and
+  played through a knee (the linearity setting), only while that keeps
+  more detail than the game's curve. BeamNGRack: BeamNG's rack force from
+  the mod, fitted to the game's own force like RackForce, with a soft lock.
+  Both are read each pass (FAST_POLL, 1 ms) while they may play, not per
+  telemetry sample: the telemetry only names the game and the car.
 - Texture (ffb_texture): small vibrations from the same samples (road,
   landings, front lock), added on top of RackForce's force before the
   clamp and the fade gain, very low by default. ACR only for now.
@@ -54,6 +66,8 @@ import time
 from locale import gettext as _
 
 from . import wheel_owner
+from .ffb_rbr import RbrForce
+from .ffb_sources import BeamNGForceSource
 from .ffb_texture import Texture
 
 AC_GAMES = ('acr', 'acc', 'ac')          # the bridge's games (OVST version 3 on names them)
@@ -70,6 +84,10 @@ HOLD_GAP = 0.050
 STALL = 0.050                            # s without a sample while replacing: stop
 NONE_AFTER = 1.0                         # s without a sample: no telemetry
 MODEL_RATE = 200.0                       # packets/s for a model-based force (Forza Horizon)
+RBR_RAW_RATE = 200.0                     # the game's constant uploads a second for RBR to go green (NGP: ~810)
+RBR_HOLD_RATE = 150.0                    # ... and to stay
+CSB_RATE = 200.0                         # BeamNG: CSB1 packets per second of the game's clock to go green (the mod: 500)
+CSB_HOLD_RATE = 150.0
 MZ_FLAT = 1.0                            # Nm: front Mz spanning less over the moving window is flat
 MZ_MOVING_MIN = 50                       # moving samples in the window to judge Mz on
 MZ_MISSING_RUN = 10                      # samples in a row without Mz (30 ms at 333/s) before it counts as gone
@@ -112,7 +130,8 @@ class SupportClassifier:
     skipped some); verdict() at any time."""
 
     def __init__(self):
-        self.has_game_ffb_raw = False    # the driver exposes the game's raw force (RBR's model hook)
+        self.has_game_ffb_raw = False    # the driver exposes the game's raw force
+        self.raw_rate = None             # the game's constant uploads a second (the engine measures it): RBR's force
         self.reset()
 
     def reset(self, game=None):
@@ -184,9 +203,12 @@ class SupportClassifier:
         if game in AC_GAMES:
             return self._ac(game, rate, gap, gap_ms, holding)
         if game == 'rbr':
-            if self.has_game_ffb_raw:
-                return Verdict('model', 'rbr-model', game, rate, gap_ms)
-            return Verdict('add-on', 'rbr-no-raw', game, rate, gap_ms)
+            # The force is the game's own (game_ffb_raw), not the telemetry's: its upload rate decides
+            if not self.has_game_ffb_raw:
+                return Verdict('add-on', 'rbr-no-raw', game, rate, gap_ms)
+            if self.raw_rate is None or self.raw_rate < (RBR_HOLD_RATE if holding else RBR_RAW_RATE):
+                return Verdict('model', 'rbr-raw', game, rate, gap_ms)
+            return Verdict('replace', 'ok', game, rate, gap_ms)
         if game == 'forza-fh' and rate >= MODEL_RATE:
             return Verdict('model', 'fh-model', game, rate, gap_ms)
         return Verdict('add-on', 'no-forces', game, rate, gap_ms)
@@ -440,6 +462,250 @@ class RackForce:
         return min(max(self.scale * mz, -FULL), FULL)
 
 
+class BeamNGRack(RackForce):
+    """BeamNG's rack force (the Countersteer mod's CSB1: the steering hydros' beam stress in N, the mean over the
+    physics steps since the last packet, up to 500 a second), fitted to the game's own force on the wheel
+    (game_ffb_raw) the way RackForce fits ACR's Mz. BeamNG's own force is this rack force smoothed, limited to
+    400 Hz, with damping and its soft lock added: ours is the rack force itself.
+
+    Differences from ACR: the input is the rack force; there is no finalFF cross-check; and the sign between the
+    beam stress and the wheel's force is learnt, not assumed (the stress's sign convention is the hydro's,
+    unconfirmed on a capture): ready needs |r| >= READY_FIT, and the sign of r is then kept (a fit whose sign
+    turns is a mismatch). It is the game's own force that sets it, so ours never pushes the other way. The engine
+    resets it all (scale, sign, centring) when CSB1's seq or game time goes back: a new vehicle or a reset.
+
+    The soft lock: muting the game drops BeamNG's soft lock with its force, so ours keeps one (`softlock`). The
+    packet's steering input reaches +-1 at the car's lock; from SOFTLOCK_FROM a push grows (smoothstep) to SOFTLOCK
+    of full scale at 1 and is held there (the input stops at 1), with damping from the input's rate (per second of
+    game time) while it moves outward, faded in with speed up to SOFTLOCK_SPEED. Its direction is the game's
+    centring: the sign of r(game force, steering input) over samples with little front side slip only (in a drift
+    the force rightly pulls toward the countersteer, against that relation), latched once (`centre_sign`) from
+    CENTRE_MIN_TIME s of such samples at |r| >= CENTRE_LATCH, never flipped while it holds. Ready needs it, so the
+    soft lock never plays before that agreement. The same relation turning round on low-slip samples over the
+    short window (r * centre_sign <= -CENTRE_FLIP for MISMATCH_FOR s) is a mismatch: the force stops and both
+    are learnt again."""
+
+    FF_SCALE = FULL / 4000.0             # ext_force per N until the fit has any (a guess: the fit replaces it)
+    SCALE_RANGE = (FULL / 200000.0, FULL / 20.0)
+    MIN_SPREAD = 150.0                   # N
+    SHORT_SPREAD = 80.0
+    RAW_STALE_DMZ = 150.0
+    SIDE_SLIP_LOW = 1.5                  # front |side slip| (the game's unit, a slip speed in m/s?) under: low slip
+    CENTRE_LATCH = 0.6
+    CENTRE_FLIP = 0.5                    # r * centre_sign at or under -this over the short window: turned round
+    CENTRE_MIN_TIME = 3.0                # s of moving low-slip samples
+    CENTRE_SPREAD = 0.05                 # steering input standard deviation that counts as evidence
+    SOFTLOCK_FROM = 0.94                 # |steering input| where the soft lock starts
+    SOFTLOCK = 0.3                       # its push at the lock, share of full scale
+    SOFTLOCK_DAMP = 0.1                  # share of full scale per (steering input / s) moving outward, in the zone
+    SOFTLOCK_MAX = 0.5                   # the push and the damping together
+    SOFTLOCK_SPEED = 2.0                 # m/s: the soft lock fades in up to this
+    RATE_TAU = 0.04                      # s of game time: the steering rate's low-pass (the input steps per frame)
+    RATE_GAP = 0.1                       # s of game time between samples past which the rate starts again at 0
+    CENTRE_NOTE = 30.0                   # s of moving samples without a centring latched: said in the status
+
+    def reset(self, car=None):
+        self._clear_centre()
+        self._steer_at = None            # (steering input, game time) of the last sample
+        self.steer_rate = 0.0            # its rate per second of game time (smoothed)
+        self._steer_smooth = None        # the input low-passed (the rate's first stage)
+        if not hasattr(self, '_held'):
+            self._held = None            # (sign, scale, centre_sign) playing: kept through a fade out (hold())
+        super().reset(car)
+
+    def hold(self):
+        """The engine plays this fit: should it be dropped (a mismatch, a new vehicle), the fade out goes on
+        with it rather than stepping to nothing."""
+        self._held = (self.sign, self.scale, self.centre_sign)
+
+    def release(self):
+        self._held = None
+
+    def _playing(self):
+        """(sign, scale, centre_sign) to play: the fit's, or the one held while it fades out."""
+        if self.sign is None and self._held is not None:
+            return self._held
+        return self.sign, self.scale, self.centre_sign
+
+    def _clear_centre(self):
+        self.centre_sign = None
+        self._centre_long = _Moments(self.TAU)
+        self._centre_short = _Moments(self.SHORT_TAU)
+        self.centre_time = 0.0
+        self._flip_since = None
+
+    def _restart(self):
+        super()._restart()
+        self.sign = None
+
+    def feed(self, t, sample, raw, new=True):
+        if sample.car != self.car:
+            self.reset(sample.car)
+        dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
+        self._last = t
+        steer = getattr(sample, 'steer_input', None)
+        self._rate(steer, sample.game_time)
+        x = sample.rack_force
+        if raw is not None and new:
+            self._raw_at = t
+            if x is not None:
+                self._mz_at_raw = x
+        if x is None or not (sample.speed or 0.0) > MIN_SPEED:
+            return
+        if raw is None:
+            self._check_raw(t, x)
+            return
+        if steer is not None and self._low_slip(sample):
+            self._centre_long.add(steer, raw, dt)
+            self._centre_short.add(steer, raw, dt)
+            self.centre_time += dt
+        self.moving_time += dt
+        self._long.add(x, raw, dt, abs(raw) < self.RAW_CLIPPED)
+        self._short.add(x, raw, dt)
+        self._judge(t)
+
+    def _rate(self, steer, game_time):
+        last = self._steer_at
+        self._steer_at = None if steer is None or game_time is None else (steer, game_time)
+        if last is None or self._steer_at is None:
+            return
+        dgt = game_time - last[1]
+        if dgt <= 0.0:
+            return
+        if dgt > self.RATE_GAP or self._steer_smooth is None:
+            self.steer_rate, self._steer_smooth = 0.0, steer
+            return
+        # Two low-passes over RATE_TAU s of game time, on the input and on its rate: the input moves in steps once
+        # a frame (7 packets flat, then a step 2 ms wide), whose raw derivative would buzz at the frame rate
+        alpha = dgt / (self.RATE_TAU + dgt)
+        smooth = self._steer_smooth + alpha * (steer - self._steer_smooth)
+        self.steer_rate += alpha * ((smooth - self._steer_smooth) / dgt - self.steer_rate)
+        self._steer_smooth = smooth
+
+    def _low_slip(self, sample):
+        slip = sample.tyre_side_slip
+        if slip is None or len(slip) < 2 or not all(math.isfinite(v) for v in slip[:2]):
+            return False
+        return max(abs(slip[0]), abs(slip[1])) < self.SIDE_SLIP_LOW
+
+    def _centring(self, t):
+        """Latch the centring sign; True when the low-slip relation has turned against it (a mismatch)."""
+        self.centring = r = self._centre_long.r()
+        if self.centre_sign is None:
+            if (r is not None and abs(r) >= self.CENTRE_LATCH and self.centre_time >= self.CENTRE_MIN_TIME
+                    and self._centre_long.spread() >= self.CENTRE_SPREAD):
+                self.centre_sign = 1.0 if r > 0 else -1.0
+            return False
+        now = self._centre_short.r()
+        flipped = (now is not None and now * self.centre_sign <= -self.CENTRE_FLIP
+                   and self._centre_short.spread() >= self.CENTRE_SPREAD)
+        if not flipped:
+            self._flip_since = None
+            return False
+        if self._flip_since is None:
+            self._flip_since = t
+        return t - self._flip_since >= self.MISMATCH_FOR
+
+    def _judge(self, t):
+        long = self._long
+        ratio = long.ratio()
+        if ratio is not None:
+            low, high = self.SCALE_RANGE
+            self.scale = min(max(ratio, low), high)
+        self.fit, self.fit_now = long.r(), self._short.r()
+        if self._centring(t):
+            logging.info("Countersteer FFB: BeamNG: the game's centring turned against the learnt one at low slip "
+                         "(r %.2f): learning again", self._centre_short.r() or 0.0)
+            self._restart()
+            self._clear_centre()
+            self.waiting = 'mismatch'
+            return
+        if self.moving_time < self.MIN_TIME or long.spread() < self.MIN_SPREAD or self.fit is None:
+            if not self.ready and self.waiting != 'mismatch':
+                self.waiting = 'corners'
+            return
+        if self.ready:
+            now = None if self.fit_now is None else self.fit_now * self.sign
+            bad = self._short.spread() >= self.SHORT_SPREAD and (now is None or now < self.KEEP_FIT)
+            if not bad:
+                self._bad_since = None
+            elif self._bad_since is None:
+                self._bad_since = t
+            elif t - self._bad_since >= self.MISMATCH_FOR:
+                logging.info("Countersteer FFB: BeamNG: the game's force stopped following the rack (r %.2f)",
+                             self.fit_now or 0.0)
+                self._restart()
+                self.waiting = 'mismatch'
+        elif abs(self.fit) >= self.READY_FIT and self.centre_sign is not None:
+            self.sign = 1.0 if self.fit > 0 else -1.0
+            self.ready, self.waiting, self._bad_since = True, None, None
+        elif self.waiting != 'mismatch' or abs(self.fit) >= self.READY_FIT:
+            if abs(self.fit) < self.READY_FIT:
+                self.waiting = 'fit'
+            else:
+                self.waiting = 'no-centring' if self.moving_time >= self.CENTRE_NOTE else 'centring'
+
+    def force(self, sample):
+        x = sample.rack_force if sample is not None else None
+        sign, scale, _centre = self._playing()
+        if x is None or sign is None:
+            return 0
+        return min(max(sign * scale * x, -FULL), FULL)
+
+    def softlock(self, sample):
+        """The soft lock's push (ext_force units; 0 inside SOFTLOCK_FROM, standing, or before the centring is
+        latched)."""
+        steer = getattr(sample, 'steer_input', None) if sample is not None else None
+        centre = self._playing()[2]
+        if steer is None or centre is None:
+            return 0.0
+        depth = (abs(steer) - self.SOFTLOCK_FROM) / (1.0 - self.SOFTLOCK_FROM)
+        if depth <= 0.0:
+            return 0.0
+        depth = min(depth, 1.0)
+        side = math.copysign(1.0, steer)
+        push = depth * depth * (3.0 - 2.0 * depth) * self.SOFTLOCK
+        outward = max(self.steer_rate * side, 0.0)          # moving further into the lock
+        push += min(self.SOFTLOCK_DAMP * outward, self.SOFTLOCK) * depth
+        gate = min(abs(sample.speed or 0.0) / self.SOFTLOCK_SPEED, 1.0)
+        return centre * side * min(push, self.SOFTLOCK_MAX) * gate * FULL
+
+
+class _CsbRate:
+    """CSB1's rate in packets per second of the game's clock (its seq over its game_time, so the bursts of a
+    frame do not count against it) and whether that clock is moving."""
+
+    MOVING = 0.1                         # s: the game's clock moved within this, or it is paused
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self._items = collections.deque()    # (t, seq, game_time)
+        self._moved_at = None
+        self.rate = None
+        self.rack = False
+
+    def feed(self, t, sample):
+        items = self._items
+        gt, seq = sample.game_time, sample.packet_id
+        if gt is None or seq is None:
+            return
+        if items and (gt < items[-1][2] or seq < items[-1][1]):
+            items.clear()                    # a reset, a new vehicle (the mod's seq starts again)
+        if items and gt > items[-1][2]:
+            self._moved_at = t
+        items.append((t, seq, gt))
+        while items and items[0][0] < t - WINDOW:
+            items.popleft()
+        self.rack = sample.rack_force is not None
+        span = items[-1][2] - items[0][2]
+        self.rate = (items[-1][1] - items[0][1]) / span if span >= 0.2 else None
+
+    def advancing(self, now):
+        return self._moved_at is not None and now - self._moved_at <= self.MOVING
+
+
 class DriverReplace:
     """The driver's replace-mode attributes of one wheel (its sysfs
     directory): ext_force through one file kept open and written at offset
@@ -519,7 +785,8 @@ class DriverReplace:
 
 
 Status = collections.namedtuple('Status', 'state reason game rate gap_ms enabled available active ready '
-                                          'refused last_stop device waiting held_by raw_rate app_gain clipping')
+                                          'refused last_stop device waiting held_by raw_rate app_gain clipping '
+                                          'gain', defaults=(None,))
 IDLE_STATUS = Status('none', 'no-telemetry', None, 0.0, None, False, False, False, False, None, None, False,
                      None, None, None, False, False)
 
@@ -531,6 +798,15 @@ RAW_TWO_EFFECTS = 1.0                    # s: a change of effect id within this:
 QUICK_FADE = 0.1                         # s: the last value faded out when the wheel is wanted elsewhere or at quit
 IDLE_POLL = 0.5                          # s: the wait while off or with no wheel (samples still wake it)
 CLIP_NOTE = 0.05                         # share of ext_force writes past the driver's cap that the status mentions
+FAST_POLL = 0.001                        # s: the pass while RBR or BeamNG plays (their force is not the telemetry's)
+KEEP_WRITE = 0.010                       # s: ext_force is written at least this often while playing (the driver
+                                         # holds a value 30 ms)
+MIN_WRITE = 0.001 - 1e-6                 # s: and never more often than this (RBR, BeamNG)
+SOURCE_RETRY = 5.0                       # s before binding BeamNG's port again after it failed
+REGAINS = 1.0                            # s between reads of app_gain while RBR or BeamNG may play
+RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
+CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time at most (one per physics step) ...
+CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ahead is another vehicle's
 
 
 class FfbEngine:
@@ -550,9 +826,10 @@ class FfbEngine:
     POLL = 0.01                          # s: the longest wait for a sample (bounds the stall check)
     STATUS_EVERY = 0.1                   # s between status updates while nothing changes
 
-    def __init__(self, clock=time.monotonic, driver=DriverReplace):
+    def __init__(self, clock=time.monotonic, driver=DriverReplace, beamng_source=BeamNGForceSource):
         self._clock = clock
         self._driver_type = driver
+        self._source_type = beamng_source
         self._slot = None                # (seq, arrival time, sample): the newest, written by the listener only
         self._seq = 0
         self._wake = threading.Event()
@@ -566,8 +843,26 @@ class FfbEngine:
         self._thread = None
         self._stop_lock = threading.Lock()
         self.classifier = SupportClassifier()
-        self.model = RackForce()
+        self.model = RackForce()         # ACR (and AC, ACC): from the front tyres' Mz
+        self.rbr = RbrForce()            # Richard Burns Rally: the game's own force, NGP's curve undone
+        self.beamng = BeamNGRack()       # BeamNG: the mod's rack force
         self.texture = Texture()
+        self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng' (each pass)
+        self._played_mode = None         # the mode of the force playing
+        self._mode_at = None             # when the mode's game was last heard
+        self._linearity_req = None       # RBR's linearity from the GUI
+        self._source = None              # BeamNGForceSource while BeamNG may be on
+        self._source_failed_at = None
+        self._beamng_at = None           # when BeamNG was last heard (OutGauge or CSB1)
+        self._csb = _CsbRate()
+        self._csb_seq = 0                # the source's last packet taken
+        self._csb_sample = None
+        self._rbr_level = None           # the last fresh raw level (played while fading out)
+        self._rbr_new_at = None          # when the last new upload came
+        self._rbr_sample = None          # the last RBR telemetry sample (its stage and clock)
+        self._gains_at = None            # when app_gain was last read
+        self._write_pending = False      # a new value not yet written (MIN_WRITE)
+        self._written_at = None
         self._enabled = False
         self._path = None
         self._driver = None
@@ -625,6 +920,11 @@ class FfbEngine:
         self._texture_req = (self._texture_seq, level, dict(parts))
         self._wake.set()
 
+    def set_linearity(self, value):
+        """RBR: how much of NGP's curve to undo, 0 (the game's curve) .. 100 (linear); ffb_rbr."""
+        self._linearity_req = value
+        self._wake.set()
+
     def set_device(self, path):
         """The wheel's sysfs directory, None for none. The old one's game
         force is restored by the engine thread."""
@@ -663,11 +963,12 @@ class FfbEngine:
             self._quick_release('quit', self._clock())
             if self._driver is not None:
                 self._driver.close()
+            self._stop_source()
 
     def _run(self):
         while self._running:
             busy = self._phase != 'idle' or (self._enabled and self._path is not None)
-            self._wake.wait(self.POLL if busy else IDLE_POLL)
+            self._wake.wait(FAST_POLL if self._fast() else self.POLL if busy else IDLE_POLL)
             self._wake.clear()           # before the slot is read: an offer after this wakes the next wait
             if not self._running:
                 break
@@ -694,12 +995,27 @@ class FfbEngine:
             if slot is not None:
                 self._seen = slot[0]     # latched off (an error, a failed write): samples are not looked at
             self._publish(now)
-        elif slot is not None and slot[0] != self._seen:
+            return
+        if slot is not None and slot[0] != self._seen:
             self._sample(slot)
         else:
             self._idle(now)
+        self._sources(now)
+        if self._mode == 'rbr':
+            self._rbr_tick(now)
+        elif self._mode == 'beamng':
+            self._beamng_tick(now)
+
+    def _fast(self):
+        """RBR or BeamNG playing or about to: their force is read each FAST_POLL, not per telemetry sample."""
+        heard = self._mode_at is not None and self._clock() - self._mode_at <= NONE_AFTER
+        return (self._mode in ('rbr', 'beamng') and self._enabled and self._available and not self._broken
+                and self._path is not None and (heard or self._phase != 'idle'))
 
     def _requests(self, now):
+        linearity = self._linearity_req
+        if linearity is not None and linearity != self.rbr.linearity:
+            self.rbr.set_linearity(linearity)
         texture = self._texture_req
         if texture is not None and texture[0] != self._texture_seen:
             self._texture_seen = texture[0]
@@ -716,7 +1032,9 @@ class FfbEngine:
             self._path, self._driver, self._available, self._broken = path, None, False, False
             self._raw_count = self._raw_at = self._raw_id = self._raw_id_at = None
             self._raw_counts.clear()
-            self.raw_rate = None
+            self.raw_rate = self.classifier.raw_rate = self._rbr_level = None
+            self._rbr_new_at = self._rbr_sample = self._gains_at = None
+            self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
             self.classifier.has_game_ffb_raw = False
             if path is not None:
                 self._driver = self._driver_type(path)
@@ -776,6 +1094,22 @@ class FfbEngine:
         self.skipped += arrivals - 1
         self._seen, self._last_t = seq, t
         self.classifier.feed(t, sample, arrivals)
+        self._mode = self._mode_of(sample.game, t)
+        self._mode_at = t
+        if self._mode != 'acr':
+            if self._mode == 'rbr':
+                last = self._rbr_sample
+                if last is not None and (sample.stage != last.stage or (
+                        sample.game_time is not None and last.game_time is not None
+                        and sample.game_time < last.game_time)):
+                    self.rbr.new_stream('a new stage or a restart')
+                self._rbr_sample = sample
+                self.rbr.set_car(sample.car, sample.stage, now=t)
+            if self._phase != 'idle' and self._played_mode != self._mode:
+                self._release('state', t)        # another game's force was playing
+            return                               # its force is taken in step() after this
+        if self._phase != 'idle' and self._played_mode != 'acr':
+            self._release('state', t)
         self.model.feed(t, sample, *self._raw(t))
         playing = self._phase in ('in', 'on')
         verdict = self._verdict = self.classifier.verdict(t, holding=playing)
@@ -801,10 +1135,16 @@ class FfbEngine:
         return 1.0
 
     def _play(self, t, sample):
-        g = self._gain(t)
         rack = self.model.force(sample)
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
-        value = int(round(min(max(rack + self.texture.force(t, sample, rack), -FULL), FULL) * g))
+        self._out(t, rack + self.texture.force(t, sample, rack))
+
+    def _out(self, t, force):
+        """`force` (ext_force units, before the fade) clamped, faded and written."""
+        g = self._gain(t)
+        value = int(round(min(max(force, -FULL), FULL) * g))
+        self._written_at = t
+        self._write_pending = False
         try:
             self._driver.force(value)
             self.writes += 1
@@ -821,10 +1161,178 @@ class FfbEngine:
             self._let_go()
 
     def _idle(self, now):
-        if self._phase != 'idle' and self._last_t is not None and now - self._last_t > STALL:
+        if self._phase != 'idle' and self._played_mode == 'acr' and self._last_t is not None \
+                and now - self._last_t > STALL:
             self._release('stall', now)
-        self._verdict = self.classifier.verdict(now, holding=self._phase in ('in', 'on'))
+        if self._mode == 'acr':
+            self._verdict = self.classifier.verdict(now, holding=self._phase in ('in', 'on'))
+            self._publish(now)
+
+    # -- RBR and BeamNG: their force is read each pass, not per telemetry sample --
+
+    def _mode_of(self, game, t):
+        if game == 'rbr':
+            return 'rbr'
+        if game == 'beamng':
+            self._beamng_at = t
+            return 'beamng'
+        if game not in AC_GAMES and self._source is not None and self._source.latest(t) is not None:
+            return 'beamng'
+        return 'acr'
+
+    def _model(self):
+        return self.rbr if self._mode == 'rbr' else self.beamng if self._mode == 'beamng' else self.model
+
+    def _sources(self, now):
+        """BeamNGForceSource runs while there is a wheel and BeamNG was heard within NONE_AFTER: started by its
+        OutGauge (nothing listens for CSB1 before), then kept by OutGauge or CSB1; stopped otherwise."""
+        src = self._source
+        if src is not None and src.latest(now) is not None:
+            self._beamng_at = now
+            if self._mode == 'acr' and self.classifier.game not in AC_GAMES + ('rbr',):
+                self._mode = 'beamng'            # CSB1 without OutGauge
+            if self._mode == 'beamng':
+                self._mode_at = now
+        heard = self._beamng_at is not None and now - self._beamng_at <= NONE_AFTER
+        want = self._path is not None and not self._closed and heard
+        if want and src is None:
+            if self._source_failed_at is None or now - self._source_failed_at >= SOURCE_RETRY:
+                src = self._source_type()
+                if src.start():
+                    self._source, self._source_failed_at, self._csb_seq = src, None, src.seq
+                    self._csb.clear()
+                    logging.info("Countersteer FFB: listening for the BeamNG mod's rack force")
+                else:
+                    self._source_failed_at = now
+        elif not want and src is not None:
+            self._stop_source()
+
+    def _stop_source(self):
+        src, self._source = self._source, None
+        if src is not None:
+            src.stop()
+            logging.info("Countersteer FFB: stopped listening for the BeamNG mod")
+        self._csb.clear()
+        self._csb_sample = None
+
+    def _decide(self, now, playing, want, reason):
+        if playing and not want:
+            self._fade_out(now, 'off' if not self._enabled else reason)
+        elif self._phase == 'idle' and want and (self._released_at is None or now - self._released_at >= REARM):
+            self._activate(now)
+
+    def _write_due(self, now, new):
+        """RBR and BeamNG write on a new value (kept pending if it came within MIN_WRITE of the last write), every
+        pass of a fade, and every KEEP_WRITE; never twice in MIN_WRITE."""
+        if new:
+            self._write_pending = True
+        if self._written_at is None:
+            return True
+        since = now - self._written_at
+        if since < MIN_WRITE:
+            return False
+        return self._write_pending or self._phase != 'on' or since >= KEEP_WRITE
+
+    def _regains(self, now):
+        """app_gain read again about once a second while RBR or BeamNG may play (it is the driver's setting)."""
+        if self._driver is None or not self._available:
+            return
+        if self._gains_at is None or now - self._gains_at >= REGAINS:
+            self._gains_at = now
+            self._app_gain = bool(self._driver.app_gain())
+
+    def _texture_for(self, mode, t):
+        """The texture on top of RBR's or BeamNG's force: none yet. The hook for RBR's strut forces (the
+        telemetry's per-wheel strut force at the 720 Hz physics step, ffb_texture) and BeamNG's wheels."""
+        return 0.0
+
+    def _rbr_tick(self, now):
+        before, last_new = self._raw_count, self._rbr_new_at
+        level, new = self._raw(now)
+        playing = self._phase in ('in', 'on')
+        if new:
+            self._rbr_new_at = now
+            count = self._raw_count
+            if (before is not None and count is not None and count < before) or \
+                    (last_new is not None and now - last_new > RBR_STREAM_GAP):
+                self.rbr.new_stream('the uploads restarted')      # the wheel bound again, or the game away
+        self._regains(now)
+        if level is not None:
+            self._rbr_level = level
+            if new:
+                self.rbr.feed(now, level, holding=playing)
+        self.classifier.raw_rate = self.raw_rate
+        v = self.classifier.verdict(now, holding=playing)
+        if v.state == 'replace' and self.rbr.refused:
+            v = Verdict('model', 'rbr-' + self.rbr.refused, v.game, v.rate, v.gap_ms)
+        elif v.state == 'replace' and self._app_gain:
+            # The driver would scale the game's force by its FF_GAIN and not ours: the strengths would differ
+            v = Verdict('model', 'rbr-app-gain', v.game, v.rate, v.gap_ms)
+        self._verdict = v
+        want = (self._enabled and self._available and v.state == 'replace' and self.rbr.ready
+                and level is not None)
+        self._decide(now, playing, want, 'raw' if level is None else 'state')
+        if self._phase != 'idle' and self._played_mode == 'rbr':
+            if self._write_due(now, new):
+                self._out(now, self.rbr.force(self._rbr_level or 0) + self._texture_for('rbr', now))
         self._publish(now)
+
+    def _beamng_tick(self, now):
+        src = self._source
+        sample = src.latest(now) if src is not None else None
+        fresh = sample is not None and src.seq != self._csb_seq
+        playing = self._phase in ('in', 'on')
+        if fresh:
+            self._csb_seq = src.seq
+            if self._csb_restarted(self._csb_sample, sample):
+                # The mod's seq or the game's clock went back, or seq ran ahead of the clock: another vehicle,
+                # or this one reset
+                logging.info("Countersteer FFB: BeamNG: a new vehicle or a reset: learning its rack again")
+                self.beamng.reset(self.beamng.car)
+            self._csb.feed(now, sample)
+            self._csb_sample = sample
+            self.beamng.feed(now, sample, *self._raw(now))
+        self._regains(now)
+        v = self._verdict = self._beamng_verdict(now, sample, playing)
+        want = self._enabled and self._available and v.state == 'replace' and self.beamng.ready
+        self._decide(now, playing, want, 'state')
+        if self._phase in ('in', 'on') and self.beamng.ready:
+            self.beamng.hold()                   # what plays: kept through the fade out if the fit is dropped
+        elif self._phase == 'idle':
+            self.beamng.release()
+        if self._phase != 'idle' and self._played_mode == 'beamng':
+            s = self._csb_sample
+            if self._write_due(now, fresh):
+                self._out(now, self.beamng.force(s) + self.beamng.softlock(s) + self._texture_for('beamng', now))
+        self._publish(now)
+
+    @staticmethod
+    def _csb_restarted(last, sample):
+        if last is None or last.packet_id is None or sample.packet_id is None:
+            return False
+        dseq = sample.packet_id - last.packet_id
+        dgt = (sample.game_time or 0.0) - (last.game_time or 0.0)
+        return dseq < 0 or dgt < 0.0 or dseq > CSB_MAX_RATE * dgt + CSB_SEQ_SLACK
+
+    def _beamng_verdict(self, now, sample, holding):
+        tel = self.classifier.verdict(now)
+        game = 'beamng'
+        if sample is None:
+            if self._source is None and self._source_failed_at is not None:
+                return Verdict('add-on', 'beamng-port', game, tel.rate, tel.gap_ms)
+            return Verdict('add-on', 'beamng-no-mod', game, tel.rate, tel.gap_ms)
+        rate = self._csb.rate
+        if not self._csb.advancing(now):
+            return Verdict('add-on', 'beamng-paused', game, rate or 0.0, None)
+        if rate is None:
+            return Verdict('none', 'measuring', game, 0.0, None)
+        if rate < (CSB_HOLD_RATE if holding else CSB_RATE):
+            return Verdict('add-on', 'csb-rate', game, rate, None)
+        if not self._csb.rack:
+            return Verdict('add-on', 'no-rack', game, rate, None)
+        if not self.classifier.has_game_ffb_raw:
+            return Verdict('add-on', 'old-driver', game, rate, None)
+        return Verdict('replace', 'ok', game, rate, None)
 
     def _activate(self, t):
         if self._closed:
@@ -842,7 +1350,21 @@ class FfbEngine:
             return
         self._muted = True
         self._phase, self._fade_at = 'in', t
+        self._played_mode = self._mode
         self._read_gains()
+        if self._mode == 'rbr':
+            logging.info("Countersteer FFB: replacing Richard Burns Rally's force with NGP's curve undone (game "
+                         "uploads %s/s; %s; car %s)", 'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate,
+                         self.rbr.describe(), self.rbr.car)
+            return
+        if self._mode == 'beamng':
+            b = self.beamng
+            logging.info("Countersteer FFB: replacing BeamNG's force with the mod's rack force (%s packets/s of game "
+                         "time, game uploads %s/s, %.3f per N, sign %+.0f, r %.2f, centring %s)",
+                         'unknown' if self._csb.rate is None else '%.0f' % self._csb.rate,
+                         'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, b.scale, b.sign, b.fit,
+                         'none' if b.centring is None else '%.2f' % b.centring)
+            return
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, texture %s%s)", self._verdict.game, self._verdict.rate,
@@ -859,6 +1381,7 @@ class FfbEngine:
         # The driver: min(|ext| * gain / 65535, cap % of full scale)
         self._clip_at = FULL * cap / 100.0 * 65535.0 / gain if gain and cap is not None else None
         self._clipped = 0.0
+        self.rbr.set_ceiling(self._clip_at)      # RBR's knee ends under the driver's cap: it never clips there
 
     def _fade_out(self, t, reason):
         """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out."""
@@ -923,13 +1446,16 @@ class FfbEngine:
         v = self._verdict
         held = wheel_owner.current(self._path) if self._path is not None else None
         held_by = held[0] if held is not None and held[0] != OWNER else None
+        model = self._model()
+        gain = self.rbr.gain if self._mode == 'rbr' else None
         status = Status(v.state, v.reason, v.game, v.rate, v.gap_ms, self._enabled,
-                        self._available and not self._broken, self._phase in ('in', 'on'), self.model.ready,
-                        self.model.refused, self.last_stop, self._path is not None, self.model.waiting, held_by,
-                        None if self.raw_rate is None else round(self.raw_rate), self._app_gain,
-                        self._phase != 'idle' and self._clipped > CLIP_NOTE)
+                        self._available and not self._broken, self._phase in ('in', 'on'), model.ready,
+                        model.refused if self._mode == 'acr' else None, self.last_stop, self._path is not None,
+                        model.waiting, held_by, None if self.raw_rate is None else round(self.raw_rate),
+                        self._app_gain, self._phase != 'idle' and self._clipped > CLIP_NOTE,
+                        None if gain is None else round(gain, 1))
         old = self.status
-        figures = ('rate', 'gap_ms', 'raw_rate')
+        figures = ('rate', 'gap_ms', 'raw_rate', 'gain')
         changed = force or any(getattr(status, f) != getattr(old, f) for f in Status._fields if f not in figures)
         if not changed and now is not None and self._status_at is not None \
                 and now - self._status_at < self.STATUS_EVERY:
@@ -972,22 +1498,38 @@ def status_text(status, listening=True):
         return light, _("No game telemetry")
     rate = int(round(status.rate))
     if status.state == 'replace':
-        supported = _("{}: supported ({} packets/s with tyre forces)").format(game, rate)
+        if status.game == 'rbr':
+            supported = _("{}: supported (its own force, {} a second)").format(game, status.raw_rate or 0)
+        elif status.game == 'beamng':
+            supported = _("{}: supported (the Countersteer mod's rack force, {} a second)").format(game, rate)
+        else:
+            supported = _("{}: supported ({} packets/s with tyre forces)").format(game, rate)
         if status.refused:
             return 'grey', _("{}: the tyre forces run against the game's own force: {}").format(game, keeps)
         if status.held_by:
             return light, _("{}; the wheel is in use ({}): {}").format(supported, status.held_by, keeps)
         if not status.ready:
+            source = _("the rack") if status.game == 'beamng' else _("the tyres")
             waiting = {
                 'raw': _("waiting for the game's own force on the wheel to check against"),
                 'corners': _("learning the game's force, drive a few corners"),
-                'fit': _("the game's force does not follow the tyres yet"),
-                'mismatch': _("the game's force stopped following the tyres, learning again"),
+                'fit': _("the game's force does not follow {} yet").format(source),
+                'mismatch': _("the game's force stopped following {}, learning again").format(source),
+                'centring': _("learning which way the game centres the wheel, drive a few gentle corners"),
+                'no-centring': _("centring not learnt: no gentle corners seen with the tyres gripping"),
             }.get(status.waiting, _("learning the game's force"))
             return light, "{}; {}".format(supported, waiting)
         if status.active:
-            text = _("{}: Countersteer's force from the tyres, {} packets/s").format(game, rate)
-            if status.raw_rate is not None:
+            if status.game == 'rbr':
+                text = _("{}: the game's own force with its curve undone, {} a second").format(
+                    game, status.raw_rate or 0)
+                if status.gain is not None:
+                    text += _("; it follows the torque's changes more closely than the game's curve here")
+            elif status.game == 'beamng':
+                text = _("{}: Countersteer's force from the rack, {} packets/s").format(game, rate)
+            else:
+                text = _("{}: Countersteer's force from the tyres, {} packets/s").format(game, rate)
+            if status.raw_rate is not None and status.game != 'rbr':
                 text += _(" (the game's own: {} a second)").format(status.raw_rate)
             if status.clipping:
                 text += _("; it reaches the driver's ceiling for it (ext_force_cap, 80 % by default) and is "
@@ -999,7 +1541,21 @@ def status_text(status, listening=True):
             return light, supported
         return light, _("{}: turn on to use Countersteer's force").format(supported)
     why = {
-        'rbr-model': _("its force could be modelled (not built yet)"),
+        'rbr-raw': _("waiting for the game's own force on the wheel (game_ffb_raw, {} a second, needs {})").format(
+            status.raw_rate or 0, int(RBR_RAW_RATE)),
+        'rbr-grid': _("its force is not on DirectInput's steps (another program's force on the wheel?)"),
+        'rbr-strength': _("waiting for its force to reach its top once (a big hit) to know its strength; set the "
+                          "game's force feedback strength to 100 % and use the wheel's own"),
+        'rbr-app-gain': _("the driver's app_gain is on: it would scale the game's force but not Countersteer's, "
+                          "turn app_gain off"),
+        'rbr-saturated': _("its force sits at its limit too often to be undone: lower the game's force feedback "
+                           "strength or raise ForceFeedbackSensitivity"),
+        'rbr-no-gain': _("at these forces the game's own curve keeps as much detail"),
+        'beamng-no-mod': _("no rack force from the Countersteer BeamNG mod: install it from the FFB tab"),
+        'beamng-port': _("the port for the Countersteer BeamNG mod (5320) is in use by another program"),
+        'beamng-paused': _("paused"),
+        'csb-rate': _("the mod sends {} a second of game time, needs {}").format(rate, int(CSB_RATE)),
+        'no-rack': _("the mod finds no steering rack on this vehicle"),
         'fh-model': _("{} packets/s: its force could be modelled (not built yet)").format(rate),
         'rbr-no-raw': _("sends no tyre forces"),
         'no-forces': _("{} packets/s, no tyre forces").format(rate),

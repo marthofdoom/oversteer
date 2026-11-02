@@ -229,6 +229,7 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `game_ffb` | sample | game unit |  | packet |  |
 | `tyre_mz` | sample | game unit (Nm) | per wheel, ordered FL, FR, RL, RR | packet |  |
 | `rack_force` | sample | N | BeamNG input space, as the game's own force feedback reads it | packet |  |
+| `steer_input` | sample | -1..1 | BeamNG input space | packet |  |
 | `tyre_side_slip` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
 | `tyre_slip_energy` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
 | `tyre_slip_ratio` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
@@ -390,6 +391,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `game_ffb` | D | D | D | - | - | - | - | - | - | - |
 | `tyre_mz` | D | - | D | - | - | - | - | - | - | - |
 | `rack_force` | - | - | - | - | - | - | - | - | - | - |
+| `steer_input` | - | - | - | - | - | - | - | - | - | - |
 | `tyre_side_slip` | - | - | - | - | - | - | - | - | - | - |
 | `tyre_slip_energy` | - | - | - | - | - | - | - | - | - | - |
 | `tyre_slip_ratio` | D | - | D | - | - | - | - | - | - | - |

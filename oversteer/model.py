@@ -71,6 +71,7 @@ class Model:
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
         'countersteer_texture_lock': None,
+        'countersteer_linearity': None,
     }
 
     types = {
@@ -113,6 +114,7 @@ class Model:
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
         'countersteer_texture_lock': 'boolean',
+        'countersteer_linearity': 'integer',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -211,10 +213,13 @@ class Model:
 
     @classmethod
     def _texture_defaults(cls, supported):
+        from .ffb_rbr import LINEARITY
         from .ffb_texture import LEVEL
         data = {'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
         for part in cls.TEXTURE_PARTS:
             data['countersteer_texture_' + part] = True if supported else None
+        # Richard Burns Rally: how much of NGP's force curve Countersteer undoes (ffb_rbr)
+        data['countersteer_linearity'] = LINEARITY if supported else None
         return data
 
     def pedal_bit(self, name):
@@ -376,6 +381,8 @@ class Model:
                 data[key] = value
         if data['countersteer_texture'] is not None:
             data['countersteer_texture'] = min(max(data['countersteer_texture'], 0), 100)
+        if data['countersteer_linearity'] is not None:
+            data['countersteer_linearity'] = min(max(data['countersteer_linearity'], 0), 100)
 
         self.data = data
         self.save_reference_values()
@@ -646,6 +653,17 @@ class Model:
         if self.set_if_changed('countersteer_texture_' + part, bool(value)) and self.ui is not None:
             self.ui.controller.apply_countersteer_texture()
 
+    def set_countersteer_linearity(self, value):
+        """Richard Burns Rally: how much of the game's force curve Countersteer undoes, 0..100 %."""
+        value = min(max(int(value), 0), 100)
+        if self.set_if_changed('countersteer_linearity', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_linearity()
+
+    def get_countersteer_linearity(self):
+        from .ffb_rbr import LINEARITY
+        value = self.data.get('countersteer_linearity')
+        return LINEARITY if value is None else value
+
     def get_countersteer_texture(self):
         """(level 0..1, {part: on}) for the engine."""
         from .ffb_texture import LEVEL
@@ -897,6 +915,7 @@ class Model:
         self.ui.set_countersteer_ffb(data['countersteer_ffb'])
         self.ui.set_countersteer_texture(data['countersteer_texture'],
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
+        self.ui.set_countersteer_linearity(data['countersteer_linearity'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()
