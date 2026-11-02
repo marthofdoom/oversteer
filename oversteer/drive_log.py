@@ -1900,9 +1900,13 @@ def _corner(trace, yaw, i, j, sign, game=None):
     speeds_in = [(speed[k] / abs(yaw[k]), k) for k in range(i, j + 1) if abs(yaw[k]) >= RADIUS_YAW and speed[k] > RADIUS_SPEED]
     radius = min(speeds_in)[0] if speeds_in else None
     heading_deg = math.degrees(heading)
+    # the span of road the corner covers: a car reversing (or spun back) in it ends at a smaller distance than it
+    # began at, and a window with its end before its start is no window
+    reach = [row[T['distance']] for row in trace[i:j + 1] if not math.isnan(row[T['distance']])]
     return {
         'd': trace[apex][T['distance']], 'direction': sign,
-        'd0': trace[i][T['distance']], 'd1': trace[j][T['distance']], 'radius': radius,
+        'd0': min(reach) if reach else trace[i][T['distance']], 'd1': max(reach) if reach else trace[j][T['distance']],
+        'radius': radius,
         'tightness': coach_context.tightness(radius, heading_deg, speed[apex]),
         '_i0': i, '_i1': j, '_apex': apex,
         'entry_speed': at(-CORNER_SIDE), 'min_speed': speed[apex], 'exit_speed': at(CORNER_SIDE),
