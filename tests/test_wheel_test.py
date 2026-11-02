@@ -158,9 +158,10 @@ def test_end_test_with_no_data_returns_to_idle():
                          switch_test_panel=lambda i: calls.append(('panel', i)))
     gui = SimpleNamespace(ui=ui, test_run=1, test=SimpleNamespace(has_output_data=lambda: False))
     gui.abort_test = lambda m='': Gui.abort_test(gui, m)
+    gui._release_test_wheel = lambda: calls.append(('wheel released',))       # wheel_owner, for Countersteer FFB
     Gui.end_test(gui)
     assert gui.test is None and gui.test_run is None
-    assert calls[-1] == ('panel', None) and calls[0][0] == 'error'
+    assert calls[-1] == ('panel', None) and calls[1][0] == 'error' and calls[0] == ('wheel released',)
 
 
 # Issue 342: only the wheel's own sysfs node is looked at

@@ -69,6 +69,7 @@ class Gui:
         self.ffb_pending = {}       # FFB meter consumer -> highest level not yet handed over
         self.grab_input = False
         self.test = None
+        self._test_wheel = None     # the wheel the test holds with wheel_owner
         self.linear_chart = None
         self.performance_chart = None
         self.combined_chart = None
@@ -921,6 +922,7 @@ class Gui:
                 self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
             except Exception:
                 logging.exception("restoring the wheel at quit")
+            self._release_test_wheel()
         if self.telemetry_web is not None:
             self.telemetry_web.stop()
             self.telemetry_web = None
@@ -2189,7 +2191,19 @@ class Gui:
         else:
             self.ui.safe_call(self.ui.quit)
 
+    TEST_OWNER = 'wheel-test'
+
     def start_test(self):
+        # The test needs the wheel's own forces: Countersteer FFB lets go first (wheel_owner)
+        from . import wheel_owner
+        path = self.device.dev_path if self.device is not None else None
+        if path is not None and not wheel_owner.acquire(path, self.TEST_OWNER, exclusive=True):
+            held = wheel_owner.current(path)
+            self.ui.info_dialog(_("The wheel is in use by {}: try again in a moment.").format(
+                held[0] if held else _("another part of Oversteer")))
+            return
+        self._test_wheel = path
+
         def test_callback(name = 'end', message = ''):
             if name == 'end':
                 self.ui.safe_call(self.end_test)
@@ -2202,8 +2216,15 @@ class Gui:
         self.test_run = 0
         self.ui.switch_test_panel(self.test_run)
 
+    def _release_test_wheel(self):
+        from . import wheel_owner
+        path, self._test_wheel = getattr(self, '_test_wheel', None), None
+        if path is not None:
+            wheel_owner.release(path, self.TEST_OWNER)
+
     def abort_test(self, message = ''):
         """A test that could not run or finish: say why and go back to the idle Test tab."""
+        self._release_test_wheel()
         self.test = None
         self.test_run = None
         self.ui.error_dialog(_('The wheel test could not be completed.'), message)
@@ -2220,6 +2241,7 @@ class Gui:
                     self.device.get_max_range())
             self.linear_chart.set_minimum_level(self.minimum_level)
         elif self.test_run == 2:
+            self._release_test_wheel()          # the last run is over, whatever it found
             self.performance_chart = PerformanceChart(self.test.get_input_values(), self.test.get_output_values(),
                     self.device.get_max_range())
             if self.performance_chart.get_latency() is None:
@@ -2241,6 +2263,7 @@ class Gui:
         self.test_run -= 1
         if self.test_run == -1:
             self.test_run = None
+            self._release_test_wheel()          # backed out of the test
         self.ui.switch_test_panel(self.test_run)
         if self.test_run is None and self.combined_chart is not None:
             self.show_test_results()

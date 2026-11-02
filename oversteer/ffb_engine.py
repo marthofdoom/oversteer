@@ -9,7 +9,7 @@ Three parts:
   the fields it carries), what Countersteer can do for the game, as a
   state and a reason. 'replace' (green): AC, ACC or ACR through the
   bridge's version 5 at 250 packets a second or more, no gap over 20 ms,
-  the front tyres' Mz there and not flat. 'model' (amber): a game whose
+  the front tyres' Mz there and not flat, and a driver with game_ffb_raw. 'model' (amber): a game whose
   force could be modelled (Richard Burns Rally once the driver exposes the
   game's raw force, game_ffb_raw; Forza Horizon at 200 a second or more);
   nothing is played for it yet. 'add-on' (grey): every other game heard,
@@ -18,24 +18,26 @@ Three parts:
   from a list: Forza's rate follows its frame rate, and ACC or AC go
   green only if they really send the forces.
 - RackForce: ACR's rack force from the front tyres' Mz (FL + FR), at the
-  physics rate (333 a second), scaled to the game's own finalFF: finalFF
-  follows front Mz at r +0.92, about Mz / 582 (marth's dump, ffb-research
-  2026-11-01), and the running ratio of |finalFF| to |Mz| keeps the
-  strength at the user's in-game setting. Played only once the fit holds
-  (finalFF and Mz agree, and the force is centring against the steering);
-  anti-correlated, it refuses.
+  physics rate (333 a second), fitted to the force the game itself sends
+  the wheel (the driver's game_ffb_raw: ext_force's units and sign, read
+  the same while the game is muted): played only while the two agree
+  (r >= 0.7 to start, checked all along), at the strength of the game's
+  own (|raw| / |Mz|). finalFF (about Mz / 582 in marth's dump) gives the
+  starting strength and a cross-check. A driver without game_ffb_raw gets
+  no 'replace'.
 - FfbEngine: its own thread. The telemetry listener hands each decoded
   sample over through offer(): a slot holding the newest sample and an
   Event, so the listener never waits for the engine and nothing queues
   (an engine that falls behind skips to the newest sample and counts the
   ones it skipped). For each new sample it classifies, fits and, while
-  Countersteer FFB is on and the state is 'replace' with the fit ready,
-  writes ext_force through one open file. Any other case (switched off,
-  the state drops, telemetry stalls over 50 ms, the device changes, the
-  app quits, a write fails) stops writing ext_force, so the driver's
-  watchdog fades it, and writes game_ffb_level 100 at once: the game is
-  never left muted. The driver restores the game by itself after 1 s
-  without writes, should this process die.
+  Countersteer FFB is on, the state is 'replace' and the fit ready, writes
+  ext_force through one open file, crossfading with the driver's
+  game_ffb_level ramp both ways (FfbEngine's docstring). It holds the
+  wheel through wheel_owner while it plays and lets go at once for an
+  exclusive owner (the wheel test, the calibration). On every way out the
+  game gets game_ffb_level 100 at once: it is never left muted. The driver
+  restores the game by itself after 1 s without writes, should this
+  process die.
 
 Every sysfs write happens on the engine thread; the GUI only sets requests
 (set_enabled, set_device) and reads `status`."""
@@ -47,6 +49,8 @@ import os
 import threading
 import time
 from locale import gettext as _
+
+from . import wheel_owner
 
 AC_GAMES = ('acr', 'acc', 'ac')          # the bridge's games (OVST version 3 on names them)
 
@@ -64,6 +68,7 @@ NONE_AFTER = 1.0                         # s without a sample: no telemetry
 MODEL_RATE = 200.0                       # packets/s for a model-based force (Forza Horizon)
 MZ_FLAT = 1.0                            # Nm: front Mz spanning less over the moving window is flat
 MZ_MOVING_MIN = 50                       # moving samples in the window to judge Mz on
+MZ_MISSING_RUN = 10                      # samples in a row without Mz (30 ms at 333/s) before it counts as gone
 
 FULL = 32767                             # ext_force full scale (an FF_CONSTANT level at 0x4000)
 
@@ -117,7 +122,8 @@ class SupportClassifier:
         self._moving = 0                       # moving entries in the window
         self._first = None                     # when this game's stream started
         self._last = None
-        self._mz_now = False                   # the newest sample has front Mz
+        self._mz_seen = False                  # this stream has sent front Mz
+        self._mz_missing = 0                   # samples in a row without it
         self.mz_live = None                    # Mz judged live (True) or flat (False); None not yet
 
     def feed(self, t, sample, arrivals=1):
@@ -132,7 +138,10 @@ class SupportClassifier:
         v5 = sample.packet_id is not None
         moving = sample.speed is not None and sample.speed > MIN_SPEED
         mz = front_mz(sample)
-        self._mz_now = mz is not None
+        if mz is None:
+            self._mz_missing += arrivals
+        else:
+            self._mz_seen, self._mz_missing = True, 0
         self._entries.append((t, arrivals, v5, moving))
         self._arrivals += arrivals
         self._old += not v5
@@ -185,9 +194,11 @@ class SupportClassifier:
             return Verdict('add-on', 'low-rate', game, rate, gap_ms)
         if gap > (HOLD_GAP if holding else REPLACE_GAP):
             return Verdict('add-on', 'gaps', game, rate, gap_ms)
-        if not self._mz_now:
-            self.mz_live = False
+        if not self._mz_seen or self._mz_missing >= MZ_MISSING_RUN:
             return Verdict('add-on', 'no-mz', game, rate, gap_ms)
+        if not self.has_game_ffb_raw:
+            # The fit and the sign are checked against the force the game sends the wheel: no replace without it
+            return Verdict('add-on', 'old-driver', game, rate, gap_ms)
         if self._moving >= MZ_MOVING_MIN:
             top, bottom = self._mz_max.max(), self._mz_min.max()
             if top is not None:
@@ -209,109 +220,211 @@ def front_mz(sample):
     return total if math.isfinite(total) else None
 
 
-class RackForce:
-    """The steering force from the front tyres' Mz, scaled to the game's own
-    finalFF (see the module's docstring). Moments are exponentially weighted
-    over TAU seconds of moving samples."""
 
-    INITIAL_SCALE = 1.0 / 582.0          # finalFF per Nm of front Mz (marth's ACR dump)
-    SCALE_RANGE = (INITIAL_SCALE / 8.0, INITIAL_SCALE * 3.0)
+
+class _Moments:
+    """Exponentially weighted moments of a pair (x, y) over `tau` seconds:
+    their correlation, x's spread and the ratio of the |y| to the |x| of
+    the pairs marked unclipped."""
+
+    def __init__(self, tau):
+        self.tau = tau
+        self.clear()
+
+    def clear(self):
+        self.s = [0.0] * 8               # w, x, y, xx, yy, xy, |x|, |y|
+
+    def add(self, x, y, dt, unclipped=True):
+        s = self.s
+        decay = math.exp(-dt / self.tau)
+        for i in range(8):
+            s[i] *= decay
+        s[0] += 1.0
+        s[1] += x
+        s[2] += y
+        s[3] += x * x
+        s[4] += y * y
+        s[5] += x * y
+        if unclipped:
+            s[6] += abs(x)
+            s[7] += abs(y)
+
+    def _var(self, sq, mean):
+        return self.s[sq] / self.s[0] - mean * mean if self.s[0] else 0.0
+
+    def spread(self):
+        """x's standard deviation (0 with nothing added)."""
+        if not self.s[0]:
+            return 0.0
+        return math.sqrt(max(self._var(3, self.s[1] / self.s[0]), 0.0))
+
+    def r(self):
+        w = self.s[0]
+        if not w:
+            return None
+        mx, my = self.s[1] / w, self.s[2] / w
+        vx, vy = self._var(3, mx), self._var(4, my)
+        if vx <= 0.0 or vy <= 0.0:
+            return None
+        return (self.s[5] / w - mx * my) / math.sqrt(vx * vy)
+
+    def ratio(self):
+        return self.s[7] / self.s[6] if self.s[6] > 0.0 else None
+
+
+class RackForce:
+    """The steering force from the front tyres' Mz, fitted to the force the
+    game itself sends the wheel: the driver's game_ffb_raw level, in
+    ext_force's own units and sign, read the same with the game muted (it is
+    taken before game_ffb_level), so the check goes on while ours plays.
+
+    - Strength: scale = sum |raw| / sum |Mz| (ext_force units per Nm), over
+      TAU seconds of moving samples; raw near full scale (clipped) is left
+      out. Until there is any, FULL / 582 from finalFF (marth's dump). The
+      same ratio from finalFF is kept as a cross-check (`cross`: the raw
+      scale over finalFF's, 1.0 when the game sends finalFF at FF_GAIN 100 %).
+    - Ready to play: MIN_TIME s of moving samples with raw, front Mz spread
+      over MIN_SPREAD Nm (corners), r(raw, Mz) of READY_FIT or more (positive:
+      the sign matches, since ext_force = scale * Mz with scale > 0).
+    - While ready: r(raw, Mz) over SHORT_TAU s under KEEP_FIT (while Mz
+      moves) for MISMATCH_FOR s, or no fresh raw for RAW_STALE s, drops it
+      ('mismatch' / 'raw'); the fit then starts again from nothing.
+    - r(raw, Mz) at REVERSED_FIT or lower over the long window: refused
+      until the car changes.
+    - `centring`: r(Mz, steering to the right) on samples with little
+      front slip, logged as a hint at activation; it never gates (in a
+      drift the force rightly pulls toward the countersteer)."""
+
+    FF_SCALE = FULL / 582.0              # ext_force per Nm of front Mz from finalFF (finalFF ~ Mz / 582)
+    SCALE_RANGE = (FF_SCALE / 8.0, FF_SCALE * 3.0)
     TAU = 10.0                           # s
-    CLIPPED = 0.98                       # |finalFF| at or above: the game clipped it, not used for the scale
-    MIN_TIME = 3.0                       # s of moving samples before it may play
+    SHORT_TAU = 2.0
+    RAW_CLIPPED = 32000                  # |raw| at or above: the game clipped it, not used for the scale
+    FF_CLIPPED = 0.98
+    MIN_TIME = 3.0                       # s of moving samples with raw before it may play
     MIN_SPREAD = 25.0                    # Nm: front Mz standard deviation that counts as evidence (corners)
-    READY_FIT = 0.7                      # r(finalFF, Mz) to start
-    KEEP_FIT = 0.5                       # and to keep playing
-    READY_CENTRING = 0.15                # r(force, steering to the right) to start: the force centres
-    REVERSED_FIT = -0.3                  # anti-correlated: refuse
-    REVERSED_CENTRING = -0.15
+    SHORT_SPREAD = 15.0                  # Nm: over the short window, for the keep check to judge
+    READY_FIT = 0.7
+    KEEP_FIT = 0.3
+    MISMATCH_FOR = 0.5                   # s
+    REVERSED_FIT = -0.5
+    RAW_STALE = 0.5                      # s without a fresh raw level while ready
+    LOW_SLIP = 0.05                      # rad: front slip angle under this counts for the centring hint
 
     def __init__(self):
         self.reset()
 
     def reset(self, car=None):
         self.car = car
-        self._last = None
-        self.moving_time = 0.0
-        # EW sums: weight; mz, ff, steer; their squares; mz*ff, mz*steer; |ff|, |mz| unclipped
-        self._s = [0.0] * 11
-        self.ready = False
-        self.refused = None              # 'reversed' once the fit is anti-correlated (until the car changes)
-        self.scale = self.INITIAL_SCALE
-        self.fit = self.centring = None
+        self.scale = self.FF_SCALE
+        self.refused = None
+        self.cross = None
+        self.centring = None
+        self._ff = _Moments(self.TAU)
+        self._centre = _Moments(self.TAU)
+        self._restart()
 
-    def feed(self, t, sample):
+    def _restart(self):
+        """Forget the fit (the strength stays as it was)."""
+        self._long = _Moments(self.TAU)
+        self._short = _Moments(self.SHORT_TAU)
+        self._last = None
+        self._raw_at = None
+        self._bad_since = None
+        self.moving_time = 0.0
+        self.ready = False
+        self.waiting = 'raw'             # why not ready: 'raw', 'corners', 'fit', 'mismatch'
+        self.fit = self.fit_now = None
+
+    def feed(self, t, sample, raw):
+        """A sample, with the game's raw level now (None if it sent none lately)."""
         if sample.car != self.car:
             self.reset(sample.car)
-        mz, ff, steer = front_mz(sample), sample.game_ffb, sample.steer
         dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
         self._last = t
-        if mz is None or ff is None or steer is None or not (sample.speed or 0.0) > MIN_SPEED:
+        if raw is not None:
+            self._raw_at = t
+        mz = front_mz(sample)
+        if mz is None or not (sample.speed or 0.0) > MIN_SPEED:
+            return                       # standing: a game may well stop uploading a force that does not change
+        ff = sample.game_ffb
+        if ff is not None:
+            self._ff.add(mz, ff, dt, abs(ff) < self.FF_CLIPPED)
+        angles = sample.tyre_slip_angle
+        if sample.steer is not None and angles is not None and max(abs(angles[0]), abs(angles[1])) < self.LOW_SLIP:
+            self._centre.add(mz, -sample.steer, dt)     # Sample.steer is positive left
+        if raw is None:
+            self._check_raw(t)
             return
         self.moving_time += dt
-        decay = math.exp(-dt / self.TAU)
-        right = -steer                   # Sample.steer is positive left; the driver's position is positive right
-        s = self._s
-        for i in range(11):
-            s[i] *= decay
-        s[0] += 1.0
-        s[1] += mz
-        s[2] += ff
-        s[3] += right
-        s[4] += mz * mz
-        s[5] += ff * ff
-        s[6] += right * right
-        s[7] += mz * ff
-        s[8] += mz * right
-        if abs(ff) < self.CLIPPED:
-            s[9] += abs(ff)
-            s[10] += abs(mz)
-        self._judge()
+        self._long.add(mz, raw, dt, abs(raw) < self.RAW_CLIPPED)
+        self._short.add(mz, raw, dt)
+        self._judge(t)
 
-    def _judge(self):
-        s = self._s
-        w = s[0]
-        mean_mz, mean_ff, mean_st = s[1] / w, s[2] / w, s[3] / w
-        var_mz = s[4] / w - mean_mz * mean_mz
-        var_ff = s[5] / w - mean_ff * mean_ff
-        var_st = s[6] / w - mean_st * mean_st
-        if var_mz <= 0.0 or var_ff <= 0.0 or var_st <= 0.0:
-            return
-        self.fit = (s[7] / w - mean_mz * mean_ff) / math.sqrt(var_mz * var_ff)
-        # The force we would play is scale * Mz with scale > 0: it centres if Mz follows the steering
-        self.centring = (s[8] / w - mean_mz * mean_st) / math.sqrt(var_mz * var_st)
-        if s[10] > 0.0:
+    def _check_raw(self, t):
+        if self.ready and (self._raw_at is None or t - self._raw_at > self.RAW_STALE):
+            logging.info("Countersteer FFB: %s sends the wheel no constant force any more", self.car)
+            self._restart()
+            self.waiting = 'raw'
+        elif not self.ready and (self._raw_at is None or t - self._raw_at > self.RAW_STALE):
+            self.waiting = 'raw'
+
+    def _judge(self, t):
+        long = self._long
+        ratio = long.ratio()
+        ff_ratio = self._ff.ratio()
+        if ratio is not None:
             low, high = self.SCALE_RANGE
-            self.scale = min(max(s[9] / s[10], low), high)
-        if self.moving_time < self.MIN_TIME or math.sqrt(var_mz) < self.MIN_SPREAD:
-            return                       # not enough evidence either way yet
-        if self.fit <= self.REVERSED_FIT or self.centring <= self.REVERSED_CENTRING:
+            self.scale = min(max(ratio, low), high)
+            self.cross = ratio / (FULL * ff_ratio) if ff_ratio else None
+        self.fit, self.fit_now = long.r(), self._short.r()
+        self.centring = self._centre.r()
+        if self.moving_time < self.MIN_TIME or long.spread() < self.MIN_SPREAD or self.fit is None:
+            if not self.ready and self.waiting != 'mismatch':     # 'mismatch' stays said until it fits again
+                self.waiting = 'corners'
+            return
+        if self.fit <= self.REVERSED_FIT:
             if self.refused is None:
-                logging.warning("Countersteer FFB: %s refused (r finalFF~Mz %.2f, r Mz~steering %.2f)",
-                                self.car, self.fit, self.centring)
-            self.refused, self.ready = 'reversed', False
-        elif self.refused is None:
-            if self.ready:
-                self.ready = self.fit >= self.KEEP_FIT and self.centring > 0.0
-            else:
-                self.ready = self.fit >= self.READY_FIT and self.centring >= self.READY_CENTRING
+                logging.warning("Countersteer FFB: %s refused: the game's force runs against the tyres' Mz "
+                                "(r %.2f)", self.car, self.fit)
+            self.refused, self.ready, self.waiting = 'reversed', False, None
+            return
+        if self.refused:
+            return
+        if self.ready:
+            bad = self._short.spread() >= self.SHORT_SPREAD and (self.fit_now is None or self.fit_now < self.KEEP_FIT)
+            if not bad:
+                self._bad_since = None
+            elif self._bad_since is None:
+                self._bad_since = t
+            elif t - self._bad_since >= self.MISMATCH_FOR:
+                logging.info("Countersteer FFB: %s: the game's force stopped following the tyres (r %.2f)",
+                             self.car, self.fit_now)
+                self._restart()
+                self.waiting = 'mismatch'
+        elif self.fit >= self.READY_FIT:
+            self.ready, self.waiting, self._bad_since = True, None, None
+        elif self.waiting != 'mismatch':
+            self.waiting = 'fit'
 
     def force(self, sample):
-        """ext_force for this sample (0 without Mz)."""
+        """ext_force for this sample at full strength (0 without Mz)."""
         mz = front_mz(sample)
         if mz is None:
             return 0
-        return int(round(min(max(FULL * self.scale * mz, -FULL), FULL)))
+        return min(max(self.scale * mz, -FULL), FULL)
 
 
 class DriverReplace:
     """The driver's replace-mode attributes of one wheel (its sysfs
     directory): ext_force through one file kept open and written at offset
-    0, game_ffb_level opened for each (rare) write."""
+    0, game_ffb_raw through one kept open and read at offset 0,
+    game_ffb_level opened for each (rare) write."""
 
     def __init__(self, path):
         self.path = path
         self._fd = None
+        self._raw_fd = None
 
     def _file(self, name):
         return os.path.join(self.path, name)
@@ -337,27 +450,54 @@ class DriverReplace:
         finally:
             os.close(fd)
 
+    def read_raw(self):
+        """game_ffb_raw as (level, count, id)."""
+        if self._raw_fd is None:
+            self._raw_fd = os.open(self._file('game_ffb_raw'), os.O_RDONLY)
+        level, count, effect = os.pread(self._raw_fd, 64, 0).split()[:3]
+        return int(level), int(count), int(effect)
+
     def force(self, value):
         if self._fd is None:
             self._fd = os.open(self._file('ext_force'), os.O_WRONLY)
         os.pwrite(self._fd, b'%d\n' % value, 0)
 
     def close(self):
-        if self._fd is not None:
-            try:
-                os.close(self._fd)
-            except OSError:
-                pass
-            self._fd = None
+        for name in ('_fd', '_raw_fd'):
+            fd = getattr(self, name)
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                setattr(self, name, None)
 
 
 Status = collections.namedtuple('Status', 'state reason game rate gap_ms enabled available active ready '
-                                          'refused last_stop device')
-IDLE_STATUS = Status('none', 'no-telemetry', None, 0.0, None, False, False, False, False, None, None, False)
+                                          'refused last_stop device waiting held_by')
+IDLE_STATUS = Status('none', 'no-telemetry', None, 0.0, None, False, False, False, False, None, None, False,
+                     None, None)
+
+OWNER = 'countersteer-ffb'               # the engine's name with wheel_owner
+FADE = 0.2                               # s: ours fades in and out over the driver's game_ffb_level ramp
+REARM = 2.5                              # s after any release before it may take over again
+RAW_FRESH = 0.1                          # s: a raw level whose count has not moved for longer is not the game's now
+RAW_TWO_EFFECTS = 1.0                    # s: a change of effect id within this: two constant effects, raw unusable
 
 
 class FfbEngine:
-    """The engine thread (see the module's docstring)."""
+    """The engine thread (see the module's docstring).
+
+    Taking over: game_ffb_level 0 (the driver ramps the game out over
+    200 ms) while ours fades in over FADE, so the sum stays the force.
+    Handing back while samples still flow (switched off, the state or the
+    fit dropping): game_ffb_level 100 at once (the game ramps in over
+    200 ms) while ours fades out over the same FADE: a crossfade, never a
+    gap with neither force. Handing back with no samples to play (stall,
+    device change, quit, failed write, an error, another owner taking the
+    wheel): ext_force is no longer written (the driver holds it 30 ms and
+    fades it over 100 ms) and game_ffb_level 100 is written at once. After
+    any release it waits REARM s before it takes over again."""
 
     POLL = 0.01                          # s: the longest wait for a sample (bounds the stall check)
     STATUS_EVERY = 0.1                   # s between status updates while nothing changes
@@ -370,6 +510,7 @@ class FfbEngine:
         self._wake = threading.Event()
         self._enabled_req = False        # GUI requests, applied on the engine thread
         self._path_req = None
+        self._inhibit_req = False        # wheel_owner: an exclusive owner wants the wheel
         self._running = False
         self._thread = None
         self._stop_lock = threading.Lock()
@@ -379,8 +520,18 @@ class FfbEngine:
         self._path = None
         self._driver = None
         self._available = False
-        self._active = False             # writing ext_force
+        self._broken = False             # a write failed or the loop raised: nothing until the device is set again
+        self._phase = 'idle'             # 'idle', 'in' (fading in), 'on', 'out' (fading out)
+        self._fade_at = None
+        self._fade_from = 1.0
         self._muted = False              # game_ffb_level 0 written and not yet 100 again
+        self._owned = False              # holds the wheel with wheel_owner
+        self._released_at = None
+        self._raw_count = None
+        self._raw_at = None              # when game_ffb_raw's count last moved
+        self._raw_id = None
+        self._raw_id_at = None           # when its effect id last changed
+        self._raw_error = False
         self._seen = 0                   # the last slot seq taken
         self._last_t = None              # arrival time of the newest sample taken
         self._verdict = Verdict('none', 'no-telemetry', None, 0.0, None)
@@ -413,6 +564,11 @@ class FfbEngine:
         self._path_req = path
         self._wake.set()
 
+    def _on_inhibit(self):
+        """wheel_owner, from the thread of an exclusive acquire: let go now."""
+        self._inhibit_req = True
+        self._wake.set()
+
     def start(self):
         if self._thread is not None:
             return
@@ -430,9 +586,13 @@ class FfbEngine:
             if thread is not None:
                 thread.join(timeout)
                 if thread.is_alive():
+                    # Stuck: only the level is restored from here (its own file); the thread's open
+                    # ext_force file and its state are left to it
                     logging.warning("Countersteer FFB: the engine thread did not stop; restoring the game's force")
-            # Here as well as on the thread: idempotent, and certain even if the thread is stuck
-            self._release('quit')
+                    self._safe_game_level(100)
+                    self._let_go()
+                    return
+            self._release('quit', self._clock())
             if self._driver is not None:
                 self._driver.close()
 
@@ -445,31 +605,44 @@ class FfbEngine:
             try:
                 self.step()
             except Exception:
-                logging.exception("Countersteer FFB")
-                self._release('error')
-        self._release('quit')
+                logging.exception("Countersteer FFB: stopped until the wheel is set again")
+                self._broken, self._available = True, False
+                try:
+                    self._release('error', self._clock())
+                except Exception:
+                    logging.exception("Countersteer FFB: restoring the game's force")
 
     # -- the engine thread --
 
     def step(self, now=None):
         """One pass: requests, then the newest sample if there is one, else
         the stall check. The thread's loop body (tests call it directly)."""
-        self._requests()
-        slot = self._slot
         if now is None:
             now = self._clock()
-        if slot is not None and slot[0] != self._seen:
+        self._requests(now)
+        slot = self._slot
+        if self._broken:
+            if slot is not None:
+                self._seen = slot[0]     # latched off (an error, a failed write): samples are not looked at
+            self._publish(now)
+        elif slot is not None and slot[0] != self._seen:
             self._sample(slot)
         else:
             self._idle(now)
 
-    def _requests(self):
+    def _requests(self, now):
+        if self._inhibit_req:
+            self._inhibit_req = False
+            self._release('inhibited', now)
         path = self._path_req
         if path != self._path:
-            self._release('device')
+            self._release('device', now)
+            self._muted = False          # the old wheel: restored above, or gone (its watchdog restores it)
             if self._driver is not None:
                 self._driver.close()
-            self._path, self._driver, self._available = path, None, False
+            self._path, self._driver, self._available, self._broken = path, None, False, False
+            self._raw_count = self._raw_at = self._raw_id = self._raw_id_at = None
+            self.classifier.has_game_ffb_raw = False
             if path is not None:
                 self._driver = self._driver_type(path)
                 self._available = self._driver.available()
@@ -483,9 +656,33 @@ class FfbEngine:
         enabled = self._enabled_req
         if enabled != self._enabled:
             self._enabled = enabled
-            if not enabled:
-                self._release('off')
             self._publish(None, force=True)
+
+    def _raw(self, t):
+        """The game's constant force level now, or None (none sent lately, two effects, no attribute)."""
+        driver = self._driver
+        if driver is None or not self.classifier.has_game_ffb_raw:
+            return None
+        try:
+            level, count, effect = driver.read_raw()
+        except (OSError, ValueError) as e:
+            if not self._raw_error:
+                self._raw_error = True
+                logging.warning("Countersteer FFB: game_ffb_raw: %s", e)
+            return None
+        if count == 0:
+            return None
+        if count != self._raw_count:
+            self._raw_count, self._raw_at = count, t
+        if effect != self._raw_id:
+            if self._raw_id is not None:
+                self._raw_id_at = t
+            self._raw_id = effect
+        if t - self._raw_at > RAW_FRESH:
+            return None
+        if self._raw_id_at is not None and t - self._raw_id_at < RAW_TWO_EFFECTS:
+            return None
+        return level
 
     def _sample(self, slot):
         seq, t, sample = slot
@@ -493,52 +690,99 @@ class FfbEngine:
         self.skipped += arrivals - 1
         self._seen, self._last_t = seq, t
         self.classifier.feed(t, sample, arrivals)
-        self.model.feed(t, sample)
-        verdict = self._verdict = self.classifier.verdict(t, holding=self._active)
-        want = (self._enabled and self._available and verdict.state == 'replace' and self.model.ready)
-        if want and not self._active:
-            self._activate()
-        elif not want and self._active:
-            self._release('off' if not self._enabled else 'state')
-        if self._active:
-            try:
-                self._driver.force(self.model.force(sample))
-                self.writes += 1
-            except OSError as e:
-                logging.warning("Countersteer FFB: ext_force: %s", e)
-                self._available = False          # until the device is set again
-                self._release('write')
+        self.model.feed(t, sample, self._raw(t))
+        playing = self._phase in ('in', 'on')
+        verdict = self._verdict = self.classifier.verdict(t, holding=playing)
+        want = (self._enabled and self._available and not self._broken and verdict.state == 'replace'
+                and self.model.ready)
+        if playing and not want:
+            self._fade_out(t, 'off' if not self._enabled else 'state')
+        elif self._phase == 'idle' and want and (self._released_at is None or t - self._released_at >= REARM):
+            self._activate(t)
+        if self._phase != 'idle':
+            self._play(t, sample)
         self._publish(t)
 
+    def _gain(self, t):
+        if self._phase == 'in':
+            g = (t - self._fade_at) / FADE
+            if g >= 1.0:
+                self._phase, g = 'on', 1.0
+            return max(g, 0.0)
+        if self._phase == 'out':
+            return max(self._fade_from * (1.0 - (t - self._fade_at) / FADE), 0.0)
+        return 1.0
+
+    def _play(self, t, sample):
+        g = self._gain(t)
+        value = int(round(self.model.force(sample) * g))
+        try:
+            self._driver.force(value)
+            self.writes += 1
+        except OSError as e:
+            logging.warning("Countersteer FFB: ext_force: %s", e)
+            self._broken, self._available = True, False      # until the device is set again
+            self._release('write', t)
+            return
+        if self._phase == 'out' and g <= 0.0:
+            self._phase = 'idle'         # faded out (0 written last): the game has its force back
+            self._let_go()
+
     def _idle(self, now):
-        if self._active and self._last_t is not None and now - self._last_t > STALL:
-            self._release('stall')
-        self._verdict = self.classifier.verdict(now, holding=self._active)
+        if self._phase != 'idle' and self._last_t is not None and now - self._last_t > STALL:
+            self._release('stall', now)
+        self._verdict = self.classifier.verdict(now, holding=self._phase in ('in', 'on'))
         self._publish(now)
 
-    def _activate(self):
+    def _activate(self, t):
+        if not wheel_owner.acquire(self._path, OWNER, exclusive=False, on_inhibit=self._on_inhibit):
+            return                       # another owner has the wheel (status.held_by says who)
+        self._owned = True
         try:
             self._driver.set_game_level(0)
         except OSError as e:
             logging.warning("Countersteer FFB: game_ffb_level: %s", e)
-            self._available = False
+            self._broken, self._available = True, False
             self._safe_game_level(100)
+            self._let_go()
             return
-        self._muted = self._active = True
-        logging.info("Countersteer FFB: replacing %s's force (%.0f/s, scale 1/%.0f)", self._verdict.game,
-                     self._verdict.rate, 1.0 / self.model.scale)
+        self._muted = True
+        self._phase, self._fade_at = 'in', t
+        m = self.model
+        logging.info("Countersteer FFB: replacing %s's force (%.0f/s, %.1f per Nm, r %.2f, finalFF cross-check "
+                     "%s, centring hint %s)", self._verdict.game, self._verdict.rate, m.scale, m.fit,
+                     'none' if m.cross is None else '%.2f' % m.cross,
+                     'none' if m.centring is None else '%.2f' % m.centring)
 
-    def _release(self, reason):
-        """Stop playing (the driver's watchdog fades the last ext_force) and
-        give the game its force back. Safe to call at any time, twice too."""
-        was = self._active or self._muted
-        self._active = False
-        if self._muted:
-            if self._safe_game_level(100):
-                self._muted = False
+    def _fade_out(self, t, reason):
+        """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out."""
+        self._fade_from = self._gain(t)
+        self._phase, self._fade_at = 'out', t
+        if self._safe_game_level(100):
+            self._muted = False
+        self._released_at = t
+        self.last_stop = reason
+        logging.info("Countersteer FFB: handing the force back (%s)", reason)
+
+    def _release(self, reason, now):
+        """Stop playing at once (the driver's watchdog fades the last
+        ext_force) and give the game its force back. Safe at any time, twice too."""
+        was = self._phase != 'idle' or self._muted
+        playing = self._phase in ('in', 'on')
+        self._phase = 'idle'
+        if self._muted and self._safe_game_level(100):
+            self._muted = False
+        self._let_go()
         if was:
-            self.last_stop = reason
+            self._released_at = now
+            if playing or self.last_stop is None:
+                self.last_stop = reason
             logging.info("Countersteer FFB: the game's force is back (%s)", reason)
+
+    def _let_go(self):
+        if self._owned:
+            self._owned = False
+            wheel_owner.release(self._path, OWNER)
 
     def _safe_game_level(self, level):
         driver = self._driver
@@ -555,10 +799,13 @@ class FfbEngine:
         """A new `status` (one attribute swap, read by the GUI) when
         anything but the figures changed, else every STATUS_EVERY."""
         v = self._verdict
-        status = Status(v.state, v.reason, v.game, v.rate, v.gap_ms, self._enabled, self._available,
-                        self._active, self.model.ready, self.model.refused, self.last_stop, self._path is not None)
+        held = wheel_owner.current(self._path) if self._path is not None else None
+        held_by = held[0] if held is not None and held[0] != OWNER else None
+        status = Status(v.state, v.reason, v.game, v.rate, v.gap_ms, self._enabled,
+                        self._available and not self._broken, self._phase in ('in', 'on'), self.model.ready,
+                        self.model.refused, self.last_stop, self._path is not None, self.model.waiting, held_by)
         old = self.status
-        changed = force or status[:2] != old[:2] or status[5:] != old[5:] or status.game != old.game
+        changed = force or status[:3] != old[:3] or status[5:] != old[5:]
         if not changed and now is not None and self._status_at is not None \
                 and now - self._status_at < self.STATUS_EVERY:
             return
@@ -585,7 +832,7 @@ def status_text(status, listening=True):
     switch is on)."""
     if not status.device:
         return 'off', _("No wheel")
-    if not status.available and status.last_stop == 'write':
+    if not status.available and status.last_stop in ('write', 'error'):
         return 'off', _("The wheel stopped taking the force: plug it in again")
     if not status.available:
         return 'off', _("Needs the new-lg4ff driver with replace mode (ext_force): update the driver")
@@ -600,17 +847,24 @@ def status_text(status, listening=True):
         return light, _("No game telemetry")
     rate = int(round(status.rate))
     if status.state == 'replace':
+        supported = _("{}: supported ({} packets/s with tyre forces)").format(game, rate)
         if status.refused:
-            return 'grey', _("{}: the tyre forces do not match the game's own force: {}").format(game, keeps)
+            return 'grey', _("{}: the tyre forces run against the game's own force: {}").format(game, keeps)
+        if status.held_by:
+            return light, _("{}; the wheel is in use ({}): {}").format(supported, status.held_by, keeps)
         if not status.ready:
-            return light, _("{}: supported ({} packets/s with tyre forces); learning the game's force "
-                            "strength, drive a few corners").format(game, rate)
+            waiting = {
+                'raw': _("waiting for the game's own force on the wheel to check against"),
+                'corners': _("learning the game's force, drive a few corners"),
+                'fit': _("the game's force does not follow the tyres yet"),
+                'mismatch': _("the game's force stopped following the tyres, learning again"),
+            }.get(status.waiting, _("learning the game's force"))
+            return light, "{}; {}".format(supported, waiting)
         if status.active:
             return light, _("{}: Countersteer's force from the tyres, {} packets/s").format(game, rate)
         if status.enabled:
-            return light, _("{}: supported ({} packets/s with tyre forces)").format(game, rate)
-        return light, _("{}: supported ({} packets/s with tyre forces): turn on to use Countersteer's "
-                        "force").format(game, rate)
+            return light, supported
+        return light, _("{}: turn on to use Countersteer's force").format(supported)
     why = {
         'rbr-model': _("its force could be modelled (not built yet)"),
         'fh-model': _("{} packets/s: its force could be modelled (not built yet)").format(rate),
@@ -618,6 +872,8 @@ def status_text(status, listening=True):
         'no-forces': _("{} packets/s, no tyre forces").format(rate),
         'old-bridge': _("the telemetry bridge is too old to send tyre forces: start the game with this "
                         "version's launch options"),
+        'old-driver': _("the wheel driver is too old to check the game's force (game_ffb_raw): update the "
+                        "driver"),
         'low-rate': _("{} packets/s, needs {}").format(rate, int(REPLACE_RATE)),
         'gaps': _("gaps up to {:.0f} ms in the telemetry, needs under {:.0f}").format(
             status.gap_ms or 0.0, REPLACE_GAP * 1000.0),
