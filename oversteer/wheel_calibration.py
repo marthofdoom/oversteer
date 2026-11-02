@@ -134,7 +134,12 @@ class Calibration:
     def run(self):
         _running.add(self)
         gc_was = gc.isenabled()
+        owner = None
         try:
+            # TODO(wheel_owner): acquire the wheel exclusively here (oversteer/wheel_owner.py, branch
+            # ffb-engine), before _check_free: its stale-ext_force clearing may only run once no other owner in
+            # this process (the FFB engine) holds the wheel. Raise Aborted('busy') if it can't be had.
+            owner = self._acquire_owner()
             self._check_free()              # before anything is changed: nothing to put back if it isn't
             # no collector pauses in the middle of a pulse
             gc.collect()
@@ -169,7 +174,15 @@ class Calibration:
         finally:
             if gc_was:
                 gc.enable()
+            self._release_owner(owner)      # TODO(wheel_owner): release the exclusive hold
             _running.discard(self)
+
+    def _acquire_owner(self):
+        """The interlock hook (see run): None until wheel_owner.py is wired in."""
+        return None
+
+    def _release_owner(self, owner):
+        pass
 
     # --- set up and put back ---
 
@@ -747,13 +760,33 @@ def restore_saved(io, saved, asked=None):
 # --- the crash record: what to put back if the process died during a run (SIGKILL, a crash, power) ---
 
 PENDING_NAME = 'wheel_calibration.pending.json'
+BOOT_ID_FILE = '/proc/sys/kernel/random/boot_id'
+
+
+def boot_id():
+    try:
+        with open(BOOT_ID_FILE) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def instance_key(device):
+    """The crash record's key: the model and which one (the serial, else the USB port), so an identical
+    wheel is never given another's record."""
+    which = getattr(device, 'serial', None)
+    if not which:
+        dev_path = getattr(device, 'dev_path', None) or ''
+        # .../usb1/1-3/1-3:1.0/0003:046D:C24F.0005: the interface (port) stays, the HID number does not
+        which = os.path.basename(os.path.dirname(dev_path)) if dev_path else ''
+    return '{}@{}'.format(wheel_key(device), which)
 
 
 def write_pending(path, key, saved):
     try:
         tmp = path + '.tmp'
         with open(tmp, 'w') as f:
-            json.dump({'key': key, 'saved': saved}, f)
+            json.dump({'key': key, 'boot_id': boot_id(), 'time': time.time(), 'saved': saved}, f)
         os.replace(tmp, path)
     except OSError as e:
         logging.warning("calibration crash record: %s", e)
@@ -772,21 +805,37 @@ def clear_pending(path, key):
         pass
 
 
-def take_pending(path, key):
-    """The settings a run that never finished had saved for this wheel, or None. The record stays until the
-    wheel has been put back (clear_pending)."""
+def _read_pending(path):
     try:
         with open(path) as f:
             data = json.load(f)
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or data.get('key') != key or not isinstance(data.get('saved'), dict):
+    if not isinstance(data, dict) or not isinstance(data.get('saved'), dict):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return None
+    return data
+
+
+def take_pending(path, key):
+    """The settings a run that never finished had saved for this wheel, or None. A record from another boot
+    is dropped: the driver started every wheel from its defaults since, and the settings in it are old."""
+    data = _read_pending(path)
+    if data is None or data.get('key') != key:
+        return None
+    if data.get('boot_id') != boot_id():
+        clear_pending(path, key)
         return None
     return data['saved']
 
 
 def recover_pending(path, key, io):
-    """At start or when the wheel comes back: undo a run that never got to put the wheel back. True if there
+    """At start or when the wheel comes back (before any profile is applied to it, so a later choice of the
+    user's always wins): undo a run that never got to put the wheel back. The record is used once: if that
+    attempt fails, only its safe part (ext_force 0, game_ffb_level 100) is tried again later. True if there
     was one and it is undone."""
     saved = take_pending(path, key)
     if saved is None:
@@ -795,6 +844,8 @@ def recover_pending(path, key, io):
     if not restore_saved(io, saved):
         clear_pending(path, key)
         return True
+    if saved:
+        write_pending(path, key, {})            # the next attempt: force 0 and the game's force only
     return False
 
 
@@ -850,10 +901,14 @@ class DeviceIO:
 
     def open(self):
         from evdev import InputDevice, ecodes
-        self._force_fd = os.open(self.device.device_file('ext_force'), os.O_WRONLY)
         node = self.device._input_node()
         if node is None:
             raise PermissionError(errno.EACCES, "the wheel's input device can't be read")
+        if node != self.device.dev_name:
+            # only a proxy's virtual device: what it reports (and its axis value) is the proxy's, so a stall
+            # or a grab there can't be told from the wheel standing still
+            raise PermissionError(errno.EACCES, "only the combined device's virtual input can be read")
+        self._force_fd = os.open(self.device.device_file('ext_force'), os.O_WRONLY)
         self._input = InputDevice(node)
         self._abs_x = ecodes.ABS_X
         self._ev_abs = ecodes.EV_ABS
@@ -994,34 +1049,53 @@ def valid_lut(lut):
     return wc.plausible_lut(lut)
 
 
+def _share(value):
+    """A finite float in (0, 1], or None (NaN, inf, junk, out of range)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value) if 0.0 < value <= 1.0 else None
+
+
 def valid_entry(entry):
     """True for a stored entry whose correction may be written: this version, a plausible LUT (33 points,
-    0 to 32767, strictly increasing, not steeper than 4x identity) and a dead zone within 15 %."""
+    0 to 32767, strictly increasing, not steeper than 4x identity), a dead zone within 15 %, and the friction
+    and breakaway the friction compensation is computed from finite shares of full scale (0 < v <= 1)."""
     if not isinstance(entry, dict) or entry.get('version') != ENTRY_VERSION:
         return False
     result = entry.get('result')
     if not isinstance(result, dict) or not wc.plausible_lut(result.get('lut')):
+        return False
+    if _share(result.get('friction')) is None or _share(result.get('breakaway')) is None:
         return False
     deadband = result.get('deadband')
     return isinstance(deadband, int) and not isinstance(deadband, bool) and \
         0 <= deadband <= wc.MAX_DEAD_ZONE * wc.FULL
 
 
+DEADBAND_CEILING = min(0.2, wc.MAX_DEAD_ZONE + 0.05)    # ffb_deadband never above this share, whatever the inputs
+
+
 def compensated_deadband(result, percent):
     """ffb_deadband with `percent` of the measured Coulomb friction folded in: the lift then starts at the
     command that gives that much torque, so the smallest force just about overcomes the friction. Capped at
-    FRICTION_COMP_CAP of the breakaway force (past that the wheel would move by itself)."""
-    deadband = result['deadband']
+    FRICTION_COMP_CAP of the breakaway force (past that the wheel would move by itself), and in any case at
+    DEADBAND_CEILING of full scale."""
+    ceiling = int(DEADBAND_CEILING * wc.FULL)
+    deadband = result.get('deadband')
+    if isinstance(deadband, bool) or not isinstance(deadband, int):
+        return 0
+    deadband = max(0, min(deadband, ceiling))
     share = _clamped_int(percent, 0, 100) / 100.0
-    friction = result.get('friction')
-    breakaway = result.get('breakaway')
-    if not share or not isinstance(friction, (int, float)) or not isinstance(breakaway, (int, float)) or \
-            friction <= 0 or breakaway <= 0:
+    friction = _share(result.get('friction'))
+    breakaway = _share(result.get('breakaway'))
+    if not share or friction is None or breakaway is None:
         return deadband
-    target = wc.shaped(min(friction, 1.0) * wc.FULL, result['lut'], deadband)
+    target = wc.shaped(friction * wc.FULL, result['lut'], deadband)
+    if not math.isfinite(target):
+        return deadband
     lifted = deadband + share * (target - deadband)
-    cap = min(FRICTION_COMP_CAP * breakaway, 0.2) * wc.FULL
-    return int(round(max(deadband, min(lifted, cap))))
+    cap = min(FRICTION_COMP_CAP * breakaway * wc.FULL, ceiling)
+    return int(round(max(deadband, min(lifted, cap, ceiling))))
 
 
 def correction_values(entry):

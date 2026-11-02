@@ -823,9 +823,100 @@ def test_term_and_hup_quit_through_on_quit():
     from oversteer import gui as gui_module
     text = open(gui_module.__file__).read()
     assert 'GLib.unix_signal_add(GLib.PRIORITY_HIGH, signum, self._quit_on_signal, signum)' in text
+    assert 'for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):' in text
+    assert 'signal.signal(signal.SIGINT' not in text
     g = gui_module.Gui.__new__(gui_module.Gui)
     calls = []
     g.on_quit = lambda: calls.append('on_quit')
     g.ui = SimpleNamespace(quit=lambda: calls.append('quit'))
     assert g._quit_on_signal(15) is False
     assert calls == ['on_quit', 'quit']
+
+
+# --- review round 2 ---
+
+@pytest.mark.parametrize('field, value', [('breakaway', float('nan')), ('breakaway', float('inf')),
+                                          ('friction', float('nan')), ('friction', float('inf')),
+                                          ('breakaway', 0.0), ('friction', 1.5), ('breakaway', True)])
+def test_non_finite_numbers_never_lift_the_deadband(g29_like, field, value):
+    entry = _entry(g29_like[2])
+    entry['result'][field] = value
+    entry['friction_comp'] = 100
+    assert not wcal.valid_entry(entry)
+    values = wcal.correction_values(entry)
+    assert values['ffb_lut'] == 'identity' and values['ffb_deadband'] == '0'
+    # and the function on its own, whatever it is given, stays under the ceiling
+    deadband = wcal.compensated_deadband(entry['result'], 100)
+    assert 0 <= deadband <= wcal.DEADBAND_CEILING * wc.FULL
+
+
+def test_the_deadband_ceiling_holds_for_any_input(g29_like):
+    result = dict(g29_like[2])
+    for deadband in (10 ** 9, -5, 32767):
+        assert 0 <= wcal.compensated_deadband(dict(result, deadband=deadband), 100) <= \
+            wcal.DEADBAND_CEILING * wc.FULL
+    assert wcal.compensated_deadband(dict(result, friction=1.0, breakaway=1.0), 100) <= \
+        wcal.DEADBAND_CEILING * wc.FULL
+
+
+def test_a_crash_record_is_tried_once_then_only_its_safe_part(tmp_path):
+    path = str(tmp_path / wcal.PENDING_NAME)
+    saved = {'game_ffb_level': '100', 'ext_force_cap': '80', 'ffb_lut': 'identity', 'ffb_deadband': '0',
+             'ffb_dither': '0', 'ffb_soft_clip': '0', 'gain': 110, 'autocenter': 30, 'range': 540}
+    wcal.write_pending(path, 'k', saved)
+    sim = SimWheel()
+    sim.set_range = lambda v: (_ for _ in ()).throw(OSError(5, 'I/O error'))     # one write fails
+    assert wcal.recover_pending(path, 'k', sim) is False
+    with open(path) as f:
+        assert json.load(f)['saved'] == {}                       # consumed: only force 0 and the game's force left
+    sim = SimWheel()
+    assert wcal.recover_pending(path, 'k', sim) is True
+    assert [n for _t, n, _v in sim.writes] == ['ext_force', 'game_ffb_level', 'ext_force', 'game_ffb_level']
+    assert not os.path.exists(path)
+
+
+def test_a_crash_record_from_another_boot_is_dropped(tmp_path, monkeypatch):
+    path = str(tmp_path / wcal.PENDING_NAME)
+    wcal.write_pending(path, 'k', {'range': 900})
+    monkeypatch.setattr(wcal, 'boot_id', lambda: 'another-boot')
+    sim = SimWheel()
+    assert wcal.recover_pending(path, 'k', sim) is False
+    assert sim.writes == [] and not os.path.exists(path)
+
+
+def test_a_crash_record_belongs_to_one_wheel():
+    one = SimpleNamespace(usb_id='046d:c24f', serial=None,
+                          dev_path='/sys/devices/pci0000:00/usb1/1-3/1-3:1.0/0003:046D:C24F.0005')
+    same_port_replugged = SimpleNamespace(usb_id='046d:c24f', serial=None,
+                                          dev_path='/sys/devices/pci0000:00/usb1/1-3/1-3:1.0/0003:046D:C24F.0009')
+    other_port = SimpleNamespace(usb_id='046d:c24f', serial=None,
+                                 dev_path='/sys/devices/pci0000:00/usb1/1-4/1-4:1.0/0003:046D:C24F.0006')
+    assert wcal.instance_key(one) == wcal.instance_key(same_port_replugged) == '046d:c24f@1-3:1.0'
+    assert wcal.instance_key(other_port) != wcal.instance_key(one)
+    assert wcal.instance_key(SimpleNamespace(usb_id='046d:c24f', serial='ABC', dev_path='x')) == '046d:c24f@ABC'
+
+
+def test_no_calibration_through_the_combined_device(tmp_path):
+    wheel = _Wheel()
+    wheel.dev_name = '/dev/input/event7'
+    wheel._input_node = lambda: '/dev/input/event21'             # the proxy's virtual device
+    gui = _gui(tmp_path, wheel)
+    gui.start_calibration()
+    assert gui.calibration is None and not any(c[0] == 'confirm' for c in gui.ui.calls)
+    io = wcal.DeviceIO.__new__(wcal.DeviceIO)
+    io.device = SimpleNamespace(device_file=lambda n: os.devnull, _input_node=wheel._input_node,
+                                dev_name=wheel.dev_name)
+    io._force_fd = None
+    with pytest.raises(PermissionError):
+        io.open()
+    assert io._force_fd is None                                  # refused before anything was opened
+
+
+def test_the_owner_hook_is_released(monkeypatch):
+    calls = []
+    monkeypatch.setattr(Calibration, '_acquire_owner', lambda self: calls.append('acquire') or 'token')
+    monkeypatch.setattr(Calibration, '_release_owner', lambda self, owner: calls.append(('release', owner)))
+    monkeypatch.setattr(Calibration, 'TOTAL_S', 1.0)
+    with pytest.raises(Aborted):
+        Calibration(SimWheel()).run()
+    assert calls == ['acquire', ('release', 'token')]

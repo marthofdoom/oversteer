@@ -129,6 +129,7 @@ class DeviceManager:
             'name': bytes(udevice.get('ID_VENDOR_ENC') + ' ' + udevice.get('ID_MODEL_ENC'),
                           'utf-8').decode('unicode_escape'),
             'max_range': self.supported_wheels[usb_id],
+            'serial': udevice.get('ID_SERIAL_SHORT') or None,
             })
 
     def first_device(self):

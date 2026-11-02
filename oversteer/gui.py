@@ -132,9 +132,8 @@ class Gui:
         self.last_profile = ''                  # reopened at start (preferences)
         self.recent_profiles = []               # profile names, most recently selected first (preferences)
 
-        signal.signal(signal.SIGINT, self.sig_int_handler)
-        # A logout or kill: quit through on_quit, so a running wheel calibration puts the wheel back
-        for signum in (signal.SIGTERM, signal.SIGHUP):
+        # Ctrl+C, a logout or a kill: quit through on_quit, so a running wheel calibration puts the wheel back
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             GLib.unix_signal_add(GLib.PRIORITY_HIGH, signum, self._quit_on_signal, signum)
 
         self.config_path = save_config_path('oversteer')
@@ -201,9 +200,6 @@ class Gui:
     def start_app(self):
         self.ui.disable_start_app()
         Thread(target=self.run_command).start() 
-
-    def sig_int_handler(self, signal, frame):
-        sys.exit(0)
 
     def _quit_on_signal(self, signum):
         logging.info("signal %s: quitting", signum)
@@ -478,11 +474,13 @@ class Gui:
                     device_list.append((device.get_id(), device.name))
             self.ui.set_devices(device_list)
         plugged = self.device_manager.take_plugged()
+        current = self.device is not None and self.device.get_id() in plugged
+        if current:
+            self.recover_wheel()        # first: the plug profile (the user's later choice) then wins
         for device_id in dict.fromkeys(plugged):        # each once, the last one stays selected
             self.apply_plug_profile(device_id)
         # the driver starts a wheel it binds with no shaping: a replugged wheel gets its correction back
-        if self.device is not None and self.device.get_id() in plugged:
-            self.recover_wheel()
+        if current:
             self.apply_wheel_correction()
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
@@ -2210,7 +2208,7 @@ class Gui:
         if self.calibration is not None or not self._wheel_supported():
             return
         try:
-            wcal.recover_pending(self._wheel_pending(), wcal.wheel_key(self.device), wcal.DeviceIO(self.device))
+            wcal.recover_pending(self._wheel_pending(), wcal.instance_key(self.device), wcal.DeviceIO(self.device))
         except Exception as e:
             logging.warning("wheel calibration crash record: %s", e)
 
@@ -2273,6 +2271,15 @@ class Gui:
         if self.test is not None and (self.test.is_awaiting_action() or self.test.is_collecting_data()):
             self.ui.info_dialog(_("A wheel test is running."), _("Let it finish first."))
             return
+        try:
+            proxied = self.device._input_node() != self.device.dev_name
+        except Exception:
+            proxied = False
+        if proxied:
+            self.ui.info_dialog(_("The wheel is behind the combined device."),
+                                _("The calibration has to read the wheel itself; switch the combined device off "
+                                  "for it."))
+            return
         if self.grab_input:
             # the overlay holds the wheel's input: the calibration would not see the wheel move
             self.ui.info_dialog(_("The wheel's input is grabbed by the overlay."),
@@ -2291,7 +2298,7 @@ class Gui:
             self.ui.safe_call(self.ui.set_calibration_progress, fraction, text)
 
         cal = wcal.Calibration(wcal.DeviceIO(device), progress, pending_path=self._wheel_pending(),
-                               pending_key=wcal.wheel_key(device))
+                               pending_key=wcal.instance_key(device))
         self.calibration = cal
         self.refresh_wheel_correction()
         self.ui.show_calibration_dialog(cal.cancel)

@@ -33,6 +33,7 @@ class Device:
         self.name = None
         self.ready = True
         self.max_range = None
+        self.serial = None
         self._held = None           # while a wheel calibration runs: the settings asked for meanwhile
 
         self.set(data)
