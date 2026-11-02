@@ -23,6 +23,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
 from . import beamng_mod, diagnostics, hotkeys
+from . import wheel_calibration as wcal
 from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
 from .combined_chart import CombinedChart
@@ -69,6 +70,9 @@ class Gui:
         self.ffb_pending = {}       # FFB meter consumer -> highest level not yet handed over
         self.grab_input = False
         self.test = None
+        self.calibration = None             # the wheel calibration running now (wheel_calibration.Calibration)
+        self.calibration_thread = None
+        self._wheel_retry = None            # a GLib timer waiting for the wheel to be free (wheel_owner)
         self._test_wheel = None     # the wheel the test holds with wheel_owner
         self.linear_chart = None
         self.performance_chart = None
@@ -134,7 +138,9 @@ class Gui:
         self.last_profile = ''                  # reopened at start (preferences)
         self.recent_profiles = []               # profile names, most recently selected first (preferences)
 
-        signal.signal(signal.SIGINT, self.sig_int_handler)
+        # Ctrl+C, a logout or a kill: quit through on_quit, so a running wheel calibration puts the wheel back
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            GLib.unix_signal_add(GLib.PRIORITY_HIGH, signum, self._quit_on_signal, signum)
 
         self.config_path = save_config_path('oversteer')
 
@@ -201,8 +207,13 @@ class Gui:
         self.ui.disable_start_app()
         Thread(target=self.run_command).start() 
 
-    def sig_int_handler(self, signal, frame):
-        sys.exit(0)
+    def _quit_on_signal(self, signum):
+        logging.info("signal %s: quitting", signum)
+        try:
+            self.on_quit()
+        finally:
+            self.ui.quit()
+        return False
 
     def install_udev_files(self):
         while True:
@@ -469,8 +480,17 @@ class Gui:
                     device_list.append((device.get_id(), device.name))
             self.ui.set_devices(device_list)
         plugged = self.device_manager.take_plugged()
+        current = self.device is not None and self.device.get_id() in plugged
+        if current:
+            self.recover_wheel()        # first: the plug profile (the user's later choice) then wins
         for device_id in dict.fromkeys(plugged):        # each once, the last one stays selected
             self.apply_plug_profile(device_id)
+        # the driver starts a wheel it binds with no shaping: a replugged wheel gets its correction back, and
+        # the FFB engine the wheel's new sysfs directory (the old one went with the unplug)
+        if current:
+            if self.device.is_ready():
+                self.ffb_engine.set_device(self.device.dev_path)
+            self.apply_wheel_correction()
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
     # selected in the device list; a profile was applied to it only if its
@@ -516,6 +536,10 @@ class Gui:
         self.populate_profiles()
 
     def change_device(self, device_id):
+        if self.calibration is not None:
+            if self.device is not None and self.device.get_id() == device_id and self.device.is_ready():
+                return          # the device list was refreshed: the run keeps the wheel as it has it
+            self.cancel_calibration()
         self.cancel_hotkey_capture()
         self.hotkey_repeater.stop()
         if self.telemetry is not None:
@@ -532,8 +556,10 @@ class Gui:
             self.handbrake_axis = None
             self.pedal_axes = {}
             self.ui.set_handbrake_visible(False)
+            self.refresh_wheel_correction()
             return
 
+        self.recover_wheel()                # an earlier run that died: put the wheel back before it is read
         if not self.device.check_permissions() and self.check_permissions:
             if self.app.udev_path:
                 self.install_udev_files()
@@ -577,6 +603,8 @@ class Gui:
             self.model.flush_device()
             self.model.flush_ui()
         self.update_pedals()
+        self.apply_wheel_correction()
+        self.refresh_wheel_correction()
         self.apply_countersteer_ffb()
 
     def apply_countersteer_ffb(self):
@@ -917,6 +945,10 @@ class Gui:
     def on_quit(self):
         self._forward_stop.set()
         self.ffb_engine.stop()              # the game's force feedback back before anything else
+        if getattr(self, '_wheel_retry', None) is not None:
+            GLib.source_remove(self._wheel_retry)
+            self._wheel_retry = None
+        self.cancel_calibration(wait=1.5)       # its finally puts the wheel back (force 0, game force on)
         if self.test is not None:
             try:
                 self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
@@ -2197,9 +2229,210 @@ class Gui:
         else:
             self.ui.safe_call(self.ui.quit)
 
+    # --- wheel calibration and correction (wheel_calibration.py, ClickUp 1dfcuabc4pj) ---
+
+    def _wheel_store(self):
+        return os.path.join(self.config_path, wcal.STORE_NAME)
+
+    def _wheel_entry(self, device=None):
+        """The stored entry of a wheel, None if there is none or it is not the shape this version writes."""
+        device = device or self.device
+        if device is None:
+            return None
+        try:
+            entry = wcal.load_store(self._wheel_store()).get(wcal.wheel_key(device))
+        except Exception as e:
+            logging.warning("wheel calibration store: %s", e)
+            return None
+        if not isinstance(entry, dict) or not isinstance(entry.get('result'), dict):
+            return None
+        return entry
+
+    def _wheel_pending(self):
+        return os.path.join(self.config_path, wcal.PENDING_NAME)
+
+    def _wheel_held(self):
+        """Who holds the selected wheel (wheel_owner), or None."""
+        from . import wheel_owner
+        path = getattr(self.device, 'dev_path', None)
+        return wheel_owner.current(path) if path else None
+
+    def _defer_wheel_writes(self):
+        """The wheel is held: a crash record waits for any holder (it writes ext_force, game_ffb_level, gain
+        and range), the correction (ffb_lut, ffb_deadband, ffb_dither, ffb_soft_clip) only for an exclusive
+        one (the test, a demo), whose forces must stay as they are. Retried every second until free."""
+        if getattr(self, '_wheel_retry', None) is None:
+            self._wheel_retry = GLib.timeout_add(1000, self._retry_wheel_writes)
+
+    def _retry_wheel_writes(self):
+        if self._wheel_held() is not None or self.calibration is not None:
+            return True             # recover_wheel waits for any holder
+        self._wheel_retry = None
+        self.recover_wheel()
+        self.apply_wheel_correction()
+        return False
+
+    def recover_wheel(self):
+        """A calibration that never put the wheel back (the process was killed): do it now."""
+        if self.calibration is not None or not self._wheel_supported():
+            return
+        if self._wheel_held() is not None:
+            self._defer_wheel_writes()
+            return
+        try:
+            wcal.recover_pending(self._wheel_pending(), wcal.instance_key(self.device), wcal.DeviceIO(self.device),
+                                 wheel=self.device.dev_path)
+        except Exception as e:
+            logging.warning("wheel calibration crash record: %s", e)
+
+    def _wheel_supported(self):
+        try:
+            return self.device is not None and self.device.is_ready() and self.device.has_wheel_correction()
+        except Exception:
+            return False
+
+    def refresh_wheel_correction(self):
+        supported = self._wheel_supported()
+        self.ui.set_wheel_calibration(supported, self._wheel_entry() if supported else None,
+                                      self.calibration is not None)
+
+    def apply_wheel_correction(self):
+        """Write the selected wheel's stored correction (on device change and at start); nothing if it was never
+        calibrated, the driver lacks the attributes or a calibration is running."""
+        if self.calibration is not None or not self._wheel_supported():
+            return
+        entry = self._wheel_entry()
+        if entry is not None:
+            held = self._wheel_held()
+            # A shared holder (Countersteer FFB) plays through the shaping too: it gets the correction now.
+            # An exclusive one (the test, a demo) keeps the forces as they were until it lets go.
+            if held is not None and held[1]:
+                self._defer_wheel_writes()
+                return
+            try:
+                wcal.apply_correction(self.device.write_attr, entry)
+            except Exception as e:
+                logging.warning("wheel correction: %s", e)
+
+    def _change_wheel_entry(self, **changes):
+        if self.device is None:
+            return
+        path = self._wheel_store()
+        store = wcal.load_store(path)
+        key = wcal.wheel_key(self.device)
+        entry = store.get(key)
+        if entry is None or all(entry.get(k) == v for k, v in changes.items()):
+            return
+        entry.update(changes)
+        store[key] = entry
+        try:
+            wcal.save_store(path, store)
+        except OSError as e:
+            logging.warning("wheel calibration store: %s", e)
+        self.apply_wheel_correction()
+        self.refresh_wheel_correction()
+
+    def set_use_wheel_correction(self, state):
+        self._change_wheel_entry(use=bool(state))
+
+    def set_wheel_dither(self, state):
+        self._change_wheel_entry(dither=bool(state), dither_chosen=True)
+
+    def set_wheel_soft_clip(self, value):
+        self._change_wheel_entry(soft_clip=max(0, min(100, int(value))))
+
+    def set_wheel_friction_comp(self, value):
+        self._change_wheel_entry(friction_comp=max(0, min(100, int(value))))
+
+    def start_calibration(self):
+        if self.calibration is not None or not self._wheel_supported():
+            return
+        if self.test is not None and (self.test.is_awaiting_action() or self.test.is_collecting_data()):
+            self.ui.info_dialog(_("A wheel test is running."), _("Let it finish first."))
+            return
+        try:
+            proxied = self.device._input_node() != self.device.dev_name
+        except Exception:
+            proxied = False
+        if proxied:
+            self.ui.info_dialog(_("The wheel is behind the combined device."),
+                                _("The calibration has to read the wheel itself; switch the combined device off "
+                                  "for it."))
+            return
+        if self.grab_input:
+            # the overlay holds the wheel's input: the calibration would not see the wheel move
+            self.ui.info_dialog(_("The wheel's input is grabbed by the overlay."),
+                                _("Release it with the toggle buttons first."))
+            return
+        if not self.ui.confirmation_dialog(
+                _("Hands off the wheel: it will turn by itself.") + "\n\n" +
+                _("For about two minutes the wheel turns left and right on its own, at times with full force, to "
+                  "measure how it responds. Let go of it completely and keep hands, cables and anything else "
+                  "clear of the rim. The game's force feedback is switched off meanwhile and everything is put "
+                  "back afterwards. Cancel stops it at any time.")):
+            return
+        device = self.device
+
+        def progress(fraction, text):
+            self.ui.safe_call(self.ui.set_calibration_progress, fraction, text)
+
+        cal = wcal.Calibration(wcal.DeviceIO(device), progress, pending_path=self._wheel_pending(),
+                               pending_key=wcal.instance_key(device))
+        self.calibration = cal
+        self.refresh_wheel_correction()
+        self.ui.show_calibration_dialog(cal.cancel)
+        self.calibration_thread = Thread(target=self._calibration_worker, args=(cal, device),
+                                         name='wheel-calibration', daemon=True)
+        self.calibration_thread.start()
+
+    def _calibration_worker(self, cal, device):
+        result = error = None
+        try:
+            result = cal.run()
+        except wcal.Aborted as e:
+            logging.info("wheel calibration stopped (%s): %s", e.reason, e)
+            error = e
+        except Exception as e:
+            logging.exception("wheel calibration")
+            error = e
+        self.ui.safe_call(self._calibration_finished, cal, device, result, error)
+
+    def _calibration_finished(self, cal, device, result, error):
+        if self.calibration is cal:
+            self.calibration = None
+            self.calibration_thread = None
+        self.ui.close_calibration_dialog()
+        if result is not None:
+            path = self._wheel_store()
+            store = wcal.load_store(path)
+            key = wcal.wheel_key(device)
+            store[key] = wcal.new_entry(result, store.get(key))
+            try:
+                wcal.save_store(path, store)
+            except OSError as e:
+                logging.warning("wheel calibration store: %s", e)
+            self.apply_wheel_correction()
+            self.refresh_wheel_correction()
+            self.ui.info_dialog(_("Wheel calibrated."), wcal.summary(result))
+        else:
+            self.apply_wheel_correction()       # the run put back what was there: the correction goes on again
+            self.refresh_wheel_correction()
+            if not (isinstance(error, wcal.Aborted) and error.reason == 'cancelled'):
+                self.ui.error_dialog(_("The wheel calibration did not finish."), str(error))
+        return False
+
+    def cancel_calibration(self, wait=0.0):
+        cal, thread = self.calibration, self.calibration_thread
+        if cal is None:
+            return
+        cal.cancel()
+        if wait and thread is not None:
+            thread.join(wait)
+
     TEST_OWNER = 'wheel-test'
 
     def start_test(self):
+        # (a running calibration holds the wheel exclusively too: the test is refused below)
         # The test needs the wheel's own forces: Countersteer FFB lets go first (wheel_owner)
         from . import wheel_owner
         path = self.device.dev_path if self.device is not None else None

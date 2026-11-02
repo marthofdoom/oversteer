@@ -8,3 +8,4 @@ oversteer/telemetry_view.py
 oversteer/main.ui
 oversteer/combined_chart.py
 data/io.github.berarma.Oversteer.desktop.in
+oversteer/wheel_calibration.py
