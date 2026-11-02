@@ -571,6 +571,7 @@ def test_an_exclusive_owner_gets_the_wheel_within_half_a_second(tmp_path):
         assert time.monotonic() - start < 0.5
         assert levels() == [0, 100] and read(path, 'game_ffb_level') == 100
         assert engine.last_stop == 'inhibited'
+        assert forces()[-1] == 0                     # the last value faded out over 100 ms first
     finally:
         engine.stop()
         wheel_owner.release(path, 'wheel-test')
@@ -583,6 +584,7 @@ def test_the_wheel_test_takes_the_wheel_and_gives_it_back(monkeypatch):
     me.device.dev_path = '/fake/wheel-test'
     me.TEST_OWNER = gui.Gui.TEST_OWNER
     me._release_test_wheel = lambda: gui.Gui._release_test_wheel(me)
+    me._start_test = lambda: gui.Gui._start_test(me)
     monkeypatch.setattr(gui, 'Test', mock.MagicMock())
     gui.Gui.start_test(me)
     assert wheel_owner.current('/fake/wheel-test') == ('wheel-test', True)
@@ -619,13 +621,13 @@ def test_the_driver_files_are_kept_open_and_used_at_offset_0(tmp_path, monkeypat
 def test_raw_from_two_effects_or_gone_quiet_is_not_used(tmp_path):
     engine, path = engine_on(tmp_path)
     FakeDriver.raw = (1000, 5, 0)
-    assert engine._raw(0.0) == 1000
-    assert engine._raw(0.05) == 1000                 # same count, 50 ms: still the game's now
-    assert engine._raw(0.2) is None                  # quiet for 200 ms
+    assert engine._raw(0.0) == (1000, True)
+    assert engine._raw(0.05) == (1000, False)        # same count, 50 ms: still the game's now, held
+    assert engine._raw(0.2) == (None, False)         # quiet for 200 ms
     FakeDriver.raw = (900, 6, 1)                     # another effect id: two constant effects
-    assert engine._raw(0.3) is None
+    assert engine._raw(0.3) == (None, False)
     FakeDriver.raw = (900, 7, 1)
-    assert engine._raw(1.4) == 900                   # a second on the one id: usable again
+    assert engine._raw(1.4) == (900, True)           # a second on the one id: usable again
 
 
 # -- the listener is never held up --
@@ -718,3 +720,115 @@ def test_profiles_keep_the_switch(tmp_path):
     assert fresh.data['countersteer_ffb'] is False
     none = Model(FakeDevice(), None)
     assert none.data['countersteer_ffb'] is None
+
+
+# -- re-review: stale raw on a straight, fades, gains, demos --
+
+def test_a_straight_with_no_new_upload_keeps_ours_playing(tmp_path):
+    """A game that uploads only on change: moving, Mz steady (a few Nm of texture), no new count for 2 s."""
+    engine, path, t = active(tmp_path)
+    t = run(engine, t, 0.3, rate_mz=0.0, texture=3.0)          # onto the straight: the game's force follows
+    n = len(forces())
+    t = run(engine, t, 2.0, raw=False, rate_mz=0.0, texture=3.0)
+    assert levels() == [0] and engine.status.active and engine.model.ready
+    assert len(forces()) - n == int(round(2.0 * HZ))
+    # And when it uploads again, the fit carries on from where it was
+    run(engine, t, 1.0)
+    assert levels() == [0] and engine.status.active
+
+
+def test_a_corner_with_no_new_upload_hands_back(tmp_path):
+    engine, path, t = active(tmp_path)
+    run(engine, t, 1.5, raw=False)
+    assert levels() == [0, 100] and engine.last_stop == 'state' and engine.status.waiting == 'raw'
+
+
+def test_the_upload_rate_is_in_the_status(tmp_path):
+    engine, path, t = active(tmp_path)
+    assert engine.status.raw_rate == pytest.approx(333, abs=5)
+    assert '333 a second' in fe.status_text(engine.status)[1] or 'a second' in fe.status_text(engine.status)[1]
+
+
+def test_switching_off_during_the_fade_in_fades_out_from_there(tmp_path):
+    engine, path = engine_on(tmp_path)
+    t = run(engine, 0.0, 3.0)
+    while not levels():
+        t = run(engine, t, 1 / HZ)
+    t = run(engine, t, 0.05)                         # a quarter of the way in
+    engine.set_enabled(False)
+    n = len(forces())
+    run(engine, t, 0.5)
+    tail = forces()[n:]
+    assert tail[-1] == 0 and len(tail) <= int(0.07 * HZ)    # down at the full rate: about 50 ms, not 200
+
+
+def test_a_wheel_wanted_elsewhere_fades_the_last_value_quickly(tmp_path):
+    engine, path, t = active(tmp_path)
+    last = forces()[-1]
+    engine.stop()                                    # quit: the same quick fade
+    tail = forces()[-10:]
+    assert tail[-1] == 0 and abs(tail[0]) == pytest.approx(abs(last) * 0.9, abs=2)
+    assert levels() == [0, 100]
+
+
+def test_app_gain_and_the_cap_are_said(tmp_path):
+    engine, path = engine_on(tmp_path)
+    with open(path + '/app_gain', 'w') as f:
+        f.write('1\n')
+    with open(path + '/gain', 'w') as f:
+        f.write('65535\n')
+    with open(path + '/ext_force_cap', 'w') as f:
+        f.write('5\n')                               # 5 %: ours clips most of the time
+    run(engine, 0.0, 10.0, game_gain=2.0)
+    status = engine.status
+    assert status.active and status.app_gain and status.clipping
+    text = fe.status_text(status)[1]
+    assert 'ext_force_cap' in text and 'gain setting' in text
+
+
+def test_after_stop_it_never_takes_over(tmp_path):
+    engine, path = engine_on(tmp_path)
+    engine.stop()
+    run(engine, 0.0, 8.0)
+    assert levels() == [] and not engine.status.active
+
+
+def test_demos_never_cut_countersteer_off(tmp_path):
+    engine, path, t = active(tmp_path)
+    assert not wheel_owner.hold_for_demo(path, 0.05)
+    assert 'Countersteer FFB is playing' in wheel_owner.demo_refusal(path)
+    assert engine.status.active                     # not inhibited
+    engine.stop()
+    assert wheel_owner.hold_for_demo(path, 0.05)
+    assert wheel_owner.current(path) == ('demo', True)
+    assert wheel_owner.demo_refusal(path) is None   # another demo may follow
+    deadline = time.monotonic() + 1.0
+    while wheel_owner.current(path) is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert wheel_owner.current(path) is None        # let go after the demo's length
+
+
+def test_try_effect_refuses_while_countersteer_plays(tmp_path):
+    from unittest import mock
+    from oversteer import gui
+    engine, path, t = active(tmp_path)
+    me = mock.MagicMock()
+    me.device.dev_path = path
+    me.model.get_ffb_enabled.return_value = True
+    gui.Gui.try_effect(me, 'constant')
+    me.device.play_demo.assert_not_called()
+    assert 'Countersteer FFB is playing' in me.ui.info_dialog.call_args[0][0]
+    engine.stop()
+
+
+def test_a_test_that_fails_to_start_gives_the_wheel_back(monkeypatch):
+    from unittest import mock
+    from oversteer import gui
+    me = mock.MagicMock()
+    me.device.dev_path = '/fake/wheel-raise'
+    me.TEST_OWNER = gui.Gui.TEST_OWNER
+    me._release_test_wheel = lambda: gui.Gui._release_test_wheel(me)
+    me._start_test = mock.MagicMock(side_effect=OSError('no input device'))
+    with pytest.raises(OSError):
+        gui.Gui.start_test(me)
+    assert wheel_owner.current('/fake/wheel-raise') is None

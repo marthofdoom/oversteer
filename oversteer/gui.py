@@ -1448,6 +1448,12 @@ class Gui:
             self.ui.info_dialog(_("Force feedback is switched off for this device."))
             return
 
+        from . import wheel_owner
+        path = getattr(self.device, 'dev_path', None)
+        if not wheel_owner.hold_for_demo(path, wheel_owner.DEMO_SECONDS):
+            self.ui.info_dialog(_(wheel_owner.demo_refusal(path) or "The wheel is in use"))
+            return
+
         def failed(error):
             self.ui.safe_call(self.ui.info_dialog, _("Could not play the effect."), str(error))
         if not self.device.play_demo(kind, on_error=failed):
@@ -2203,7 +2209,13 @@ class Gui:
                 held[0] if held else _("another part of Oversteer")))
             return
         self._test_wheel = path
+        try:
+            self._start_test()
+        except Exception:
+            self._release_test_wheel()
+            raise
 
+    def _start_test(self):
         def test_callback(name = 'end', message = ''):
             if name == 'end':
                 self.ui.safe_call(self.end_test)
