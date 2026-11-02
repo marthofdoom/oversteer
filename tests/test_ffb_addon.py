@@ -3,7 +3,9 @@ FH6 streams: 324-byte Data Out packets built here and decoded by the real decode
 constant force as game_ffb_raw (a fake driver directory) at its own upload rate. The gain follows the front
 slip, ext_force always takes away from the game's force and never more than it, the clamps, the stops (stale raw,
 a slow upload rate, a spring-only game, no slip channels, app_gain, two effects), mode switches, and that no path
-ever writes game_ffb_level (the game's level stays 100). Nothing here touches a real wheel or /sys."""
+ever writes game_ffb_level (the game's level stays 100). Most of it runs on a driver without game_const_scale
+(the ext_force fallback); the last section on one with it: the scale follows g, ext_force stays 0, every stop
+writes 100, the watchdog is fed. Nothing here touches a real wheel or /sys."""
 import math
 import random
 import struct
@@ -12,7 +14,7 @@ import pytest
 
 from oversteer import ffb_addon as fa, ffb_engine as fe
 from oversteer.telemetry_formats import decode_sample
-from tests.test_ffb_engine import FakeDriver, forces, levels, read, upload, wheel  # noqa: F401
+from tests.test_ffb_engine import FakeDriver, forces, levels, read, scales, upload, wheel  # noqa: F401
 from tests.test_ffb_engine import _clean_log  # noqa: F401 (the autouse fixture)
 
 
@@ -46,12 +48,17 @@ def expected_g(alpha, kappa=0.0, strength=fa.STRENGTH):
 
 
 class RecordingDriver(FakeDriver):
-    """Every ext_force write with the game's raw level at that moment."""
+    """Every ext_force (and game_const_scale) write with the game's raw level at that moment."""
     writes = []
+    scale_writes = []
 
     def force(self, value):
         super().force(value)
         RecordingDriver.writes.append((value, FakeDriver.raw[0] if FakeDriver.raw else 0))
+
+    def set_const_scale(self, value):
+        super().set_const_scale(value)
+        RecordingDriver.scale_writes.append((value, FakeDriver.raw[0] if FakeDriver.raw else 0))
 
 
 class Drive:
@@ -108,12 +115,15 @@ class Drive:
 @pytest.fixture(autouse=True)
 def _clean_writes():
     RecordingDriver.writes = []
+    RecordingDriver.scale_writes = []
     yield
 
 
-def engine_on(tmp_path, enabled=True, raw=True, strength=None, app_gain=False):
+def engine_on(tmp_path, enabled=True, raw=True, strength=None, app_gain=False, scale=False):
+    """scale=False (the tests up to the game_const_scale section): a driver without game_const_scale, the
+    ext_force fallback."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    path = wheel(tmp_path, raw=raw)
+    path = wheel(tmp_path, raw=raw, scale=scale)
     if app_gain:
         with open(path + '/app_gain', 'w') as f:
             f.write('1\n')
@@ -280,8 +290,9 @@ def last_nonzero_after(engine, drive, seconds):
 
 
 def test_an_effect_stopped_with_raw_held_cuts_within_20_ms(tmp_path):
-    """The game stops or erases its effect: no new level is published, the old one stays. Within three upload
-    intervals (60/s: 50 ms) plus 20 ms ext_force is 0: never played, nor faded, against a level that is gone."""
+    """No new level is published and the old one stays (the game gone; a driver from before stops published 0).
+    Within three upload intervals (60/s: 50 ms) plus 20 ms ext_force is 0: never played, nor faded, against a
+    level that is gone."""
     engine, path = engine_on(tmp_path)
     drive = Drive(engine).run(6.0)
     assert engine.status.active and engine.raw_rate == pytest.approx(60, abs=3)
@@ -510,3 +521,170 @@ def test_profiles_keep_the_lightness(tmp_path):
     fresh.load(str(tmp_path / 'old.ini'))
     assert fresh.get_countersteer_lightness() == 60
     assert Model(FakeDevice(), None).data['countersteer_lightness'] is None
+
+
+# -- a driver with game_const_scale: the driver scales the game's constant force, ext_force stays 0 --
+
+def scale_playing(tmp_path, **kw):
+    engine, path = engine_on(tmp_path, scale=True, **kw)
+    drive = Drive(engine).run(6.0)
+    assert engine.status.active and engine._fh_scale
+    return engine, path, drive
+
+
+def restored(path):
+    """ext_force never written, game_ffb_level never written, game_const_scale 100 last (and in the file)."""
+    return (forces() == [] and never_lowered(path) and scales(path)[-1] == 100
+            and read(path, 'game_const_scale') == 100)
+
+
+def test_with_game_const_scale_the_scale_follows_g_and_ext_force_stays_0(tmp_path):
+    engine, path, drive = scale_playing(tmp_path)
+    assert engine.status.reason == 'fh-addon' and fe.status_text(engine.status)[0] == 'amber'
+    # Each write is round(100 g_eff) of the moment (past the fade in), checked pass by pass
+    seen, end = [], drive.t + 5.0
+    while drive.t < end:
+        n = len(RecordingDriver.scale_writes)
+        t = drive.t
+        drive.run(0.001)
+        for value, _raw in RecordingDriver.scale_writes[n:]:
+            seen.append((t, value, engine.addon.g, engine._scale_seen))
+    assert len(seen) > 200
+    for _t, value, g, _seq in seen:
+        assert abs(value - 100 * g) <= 1.0                   # g read after the pass (it may have run two)
+    values = [v for _t, v, _g, _seq in seen]
+    assert min(values) == pytest.approx(100 * expected_g(0.9), abs=3)      # at the top of each weave
+    assert max(values) == 100 and min(values) >= round(100 * (1.0 - fa.STRENGTH * (1.0 - fa.G_MIN)))
+    # At the telemetry rate (60/s): at most one write per Forza sample, none missed while under 100
+    assert len(seen) <= 5.0 * 60 + 2 and len({seq for *_x, seq in seen}) == len(seen)
+    gaps = [b[0] - a[0] for a, b in zip(seen, seen[1:]) if a[1] < 100]
+    assert max(gaps) <= 1 / 60.0 + 0.0015
+    assert forces() == [] and RecordingDriver.writes == [] and engine.writes == 0
+    assert never_lowered(path)
+
+
+def test_the_scale_feeds_the_drivers_watchdog_between_samples(tmp_path):
+    """Under 100, game_const_scale is written at least every FH_SCALE_KEEP s even with no new Forza sample (the
+    driver puts it back to 100 after 500 ms without one)."""
+    engine, path, drive = scale_playing(tmp_path)
+    t, n = drive.t, len(scales())
+    engine._scale_seen = -1                                  # a new sample: written
+    engine._scale_play(t, 0.7)
+    assert scales()[n:] == [70]
+    at = [t]
+    for i in range(1, 700):                                  # 0.7 s of passes with no new sample
+        now = t + i / 1000.0
+        before = len(scales())
+        engine._scale_play(now, 0.7)
+        if len(scales()) > before:
+            at.append(now)
+    assert len(at) >= 4 and max(b - a for a, b in zip(at, at[1:])) <= fe.FH_SCALE_KEEP + 0.0011
+    assert all(v == 70 for v in scales()[n:])
+    # At 100 there is nothing to feed: no keep-alive writes
+    engine._scale_seen = -1
+    engine._scale_play(t + 0.8, 1.0)
+    n = len(scales())
+    for i in range(1, 500):
+        engine._scale_play(t + 0.8 + i / 1000.0, 1.0)
+    assert len(scales()) == n and scales()[-1] == 100
+
+
+def test_the_scale_fades_back_and_switched_off_ends_at_100(tmp_path):
+    engine, path = engine_on(tmp_path, scale=True, strength=100)
+    drive = Drive(engine, peak=2.0).run(6.0)
+    assert engine.status.active
+    engine.addon.target = engine.addon.g = fa.G_MIN          # the lightest when it is switched off
+    drive.run(0.003)
+    engine.set_enabled(False)
+    n = len(scales())
+    drive.run(0.5)
+    out = scales()[n:]
+    assert out and out[-1] == 100 and engine._phase == 'idle' and engine.last_stop == 'off'
+    assert len(out) > 3 and 40 < out[1] < 100                # faded back, not stepped
+    assert restored(path)
+
+
+def test_the_scale_stop_paths_write_100_at_once(tmp_path):
+    # The effect stopped: the driver publishes 0 with a count step, then nothing new
+    engine, path, drive = scale_playing(tmp_path / 'stop')
+    assert min(scales()) < 100
+    drive.uploads = False
+    upload(0.0)
+    stop = drive.t
+    while engine._phase != 'idle' and drive.t < stop + 0.3:
+        drive.run(0.001)
+    assert drive.t - stop <= 3.0 / 60.0 + 0.020 and engine.last_stop == 'raw' and restored(path)
+    drive.uploads = True
+    drive.run(2.0)
+    assert engine.status.active
+
+    for name in ('stall', 'device', 'quit', 'inhibit', 'acr'):
+        FakeDriver.log, FakeDriver.raw = [], None
+        engine, path, drive = scale_playing(tmp_path / name)
+        engine.addon.target = engine.addon.g = 0.5           # under 100 when it stops
+        drive.run(0.02)
+        assert scales()[-1] < 100
+        if name == 'stall':
+            drive.telemetry = False
+            drive.run(0.1)
+            assert engine.last_stop == 'stall'
+        elif name == 'device':
+            engine.set_device(None)
+            engine.step(drive.t)
+        elif name == 'quit':
+            engine.stop()
+        elif name == 'inhibit':
+            engine._on_inhibit()
+            engine.step(drive.t)
+            assert engine.last_stop == 'inhibited'
+        else:
+            from tests.test_ffb_engine import acr
+            for i in range(5):
+                engine.offer(drive.t + i / 333.0, acr(drive.t + i / 333.0))
+                engine.step(drive.t + i / 333.0)
+            assert engine.last_stop == 'state'
+        assert engine._phase == 'idle' and restored(path), name
+
+
+def test_a_failed_scale_write_stops_and_leaves_it_to_the_watchdog(tmp_path):
+    engine, path, drive = scale_playing(tmp_path)
+    FakeDriver.fail_scale = True
+    drive.run(0.05)
+    assert engine._phase == 'idle' and engine.last_stop == 'write' and not engine.status.available
+    assert forces() == [] and never_lowered(path)
+    drive.run(1.0)
+    assert not engine.status.active                          # until the device is set again
+
+
+def test_a_scale_left_under_100_is_restored_when_the_wheel_is_set(tmp_path):
+    path = wheel(tmp_path, scale=True)
+    with open(path + '/game_const_scale', 'w') as f:
+        f.write('40\n')
+    engine = fe.FfbEngine(driver=RecordingDriver, beamng_source=None)
+    engine.set_device(path)
+    engine.step(0.0)
+    assert scales(path) == [100] and read(path, 'game_const_scale') == 100
+
+
+def test_the_scale_keeps_the_gates(tmp_path):
+    # A slow upload rate, a spring-only game, two effects: nothing written at all
+    for name, kw, up, reason in (('slow', {'upload_hz': 10.0}, True, 'fh-raw-rate'),
+                                 ('spring', {}, False, 'fh-no-constant'),
+                                 ('two', {'effects': (0, 1)}, True, 'fh-two-effects')):
+        FakeDriver.log, FakeDriver.raw = [], None
+        engine, path = engine_on(tmp_path / name, scale=True)
+        drive = Drive(engine, **kw)
+        drive.uploads = up
+        drive.run(6.0)
+        assert engine.status.reason == reason and scales() == [] and forces() == [], name
+    # app_gain: the driver's FF_GAIN scales the game's force under the scale alike, so it is not refused
+    FakeDriver.log, FakeDriver.raw = [], None
+    engine, path, drive = scale_playing(tmp_path / 'app_gain', app_gain=True)
+    assert engine.status.reason == 'fh-addon' and forces() == []
+
+
+def test_an_older_driver_falls_back_to_ext_force(tmp_path):
+    engine, path = engine_on(tmp_path)                       # no game_const_scale
+    Drive(engine).run(8.0)
+    assert engine.status.active and not engine._fh_scale
+    assert scales() == [] and any(forces()) and never_lowered(path)
