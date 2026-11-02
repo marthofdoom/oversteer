@@ -487,6 +487,40 @@
                     <property name="position">1</property>
                   </packing>
                 </child>
+                <child>
+                  <object class="GtkCheckButton" id="profile_apply_on_plug">
+                    <property name="label" translatable="yes">Apply on plug-in</property>
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="receives-default">False</property>
+                    <property name="tooltip-text" translatable="yes">Apply when the wheel is plugged in: this profile is applied to a wheel plugged in while Oversteer is running. Ticking it is saved to the profile at once. If several profiles have this, the one selected most recently is used.</property>
+                    <signal name="toggled" handler="on_profile_apply_on_plug_toggled" swapped="no"/>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="pack-type">end</property>
+                    <property name="position">2</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkEntry" id="profile_note">
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="width-chars">14</property>
+                    <property name="hexpand">True</property>
+                    <property name="max-length">200</property>
+                    <property name="placeholder-text" translatable="yes">Note: game, car...</property>
+                    <property name="tooltip-text" translatable="yes">A note on what this profile is for. Saved with the profile.</property>
+                    <signal name="changed" handler="on_profile_note_changed" swapped="no"/>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="pack-type">end</property>
+                    <property name="position">3</property>
+                  </packing>
+                </child>
               </object>
               <packing>
                 <property name="expand">False</property>

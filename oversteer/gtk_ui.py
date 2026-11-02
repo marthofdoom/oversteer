@@ -201,6 +201,9 @@ class GtkUi:
         else:
             self.disable_controls()
 
+    def select_device(self, device_id):
+        self.device_combobox.set_active_id(device_id)
+
     def disable_controls(self):
         self.profile_combobox.set_sensitive(False)
         self.test_start_button.set_sensitive(False)
@@ -942,6 +945,12 @@ class GtkUi:
 
     def disable_start_app(self):
         self.start_app.hide()
+
+    def set_profile_note(self, text):
+        self.profile_note.set_text(text or '')
+
+    def set_apply_on_plug(self, state):
+        self.profile_apply_on_plug.set_active(bool(state))
 
     def set_start_app_manually(self, state):
         self.start_app_manually.set_state(state)
@@ -2229,6 +2238,8 @@ class GtkUi:
         self.main_notebook = self.builder.get_object('main_notebook')
         self.new_profile_name_entry = self.builder.get_object('new_profile_name')
         self.save_profile_button = self.builder.get_object('save_profile')
+        self.profile_note = self.builder.get_object('profile_note')
+        self.profile_apply_on_plug = self.builder.get_object('profile_apply_on_plug')
         self.new_profile_name = self.builder.get_object('new_profile_name')
         self.emulation_mode_combobox = self.builder.get_object('emulation_mode')
         self.change_emulation_mode_button = self.builder.get_object('change_emulation_mode')

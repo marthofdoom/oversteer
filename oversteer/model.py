@@ -6,6 +6,26 @@ def N_(text):
     return text
 
 
+def pick_plug_profile(flagged, recent):
+    """Which profile a newly plugged wheel gets: of the profile names that have
+    "apply when the wheel is plugged in" set, the most recently selected one
+    (`recent` lists names, most recent first); one not in `recent` ranks after
+    all that are, alphabetically among themselves. None when none is flagged."""
+    rank = {name: i for i, name in enumerate(recent)}
+    names = sorted(flagged, key=lambda name: (rank.get(name, len(rank)), name))
+    return names[0] if names else None
+
+
+def read_apply_on_plug(profile_file):
+    """Whether the profile file has the plug flag set (False if unreadable)."""
+    config = configparser.ConfigParser()
+    try:
+        config.read(profile_file)
+        return bool(int(config['DEFAULT'].get('apply_on_plug', '0')))
+    except (configparser.Error, ValueError, OSError):
+        return False
+
+
 class Model:
 
     profile = None
@@ -44,6 +64,8 @@ class Model:
         'hotkeys': None,
         'center_wheel': None,
         'start_app_manually': None,
+        'profile_note': None,
+        'apply_on_plug': None,
     }
 
     types = {
@@ -79,6 +101,8 @@ class Model:
         'hotkeys': 'string',
         'center_wheel': 'boolean',
         'start_app_manually': 'boolean',
+        'profile_note': 'string',
+        'apply_on_plug': 'boolean',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -165,6 +189,8 @@ class Model:
             'hotkeys': self.data.get('hotkeys') or '',
             'center_wheel': False,
             'start_app_manually': False,
+            'profile_note': '',
+            'apply_on_plug': False,
         }
 
     def pedal_bit(self, name):
@@ -232,10 +258,10 @@ class Model:
     def get_profile(self):
         return self.profile
 
-    def load(self, profile_file):
+    def load(self, profile_file, force=False):
         logging.debug('Load')
 
-        if profile_file == self.profile:
+        if profile_file == self.profile and not force:
             return
 
         config = configparser.ConfigParser()
@@ -311,6 +337,12 @@ class Model:
         if data['hotkeys'] is None:
             data['hotkeys'] = self.data.get('hotkeys') or ''
 
+        # A profile from before the note and the plug flag has neither
+        if data['profile_note'] is None:
+            data['profile_note'] = ''
+        if data['apply_on_plug'] is None:
+            data['apply_on_plug'] = False
+
         self.data = data
         self.save_reference_values()
         self.profile = profile_file
@@ -322,7 +354,11 @@ class Model:
         for key, value in self.data.items():
             if value is None:
                 continue
-            if self.types[key] == 'string':
+            if key == 'profile_note':
+                # One line; a % is doubled because the file is read with
+                # interpolation (an older Oversteer too) and a lone one fails.
+                data[key] = ' '.join(str(value).split()).replace('%', '%%')
+            elif self.types[key] == 'string':
                 data[key] = value
             elif self.types[key] == 'integer':
                 data[key] = int(value)
@@ -708,6 +744,18 @@ class Model:
         if self.set_if_changed('center_wheel', value) and value:
             self.device.center_wheel()
 
+    def set_profile_note(self, value):
+        self.set_if_changed('profile_note', ' '.join(str(value or '').split()))
+
+    def get_profile_note(self):
+        return self.data['profile_note']
+
+    def set_apply_on_plug(self, value):
+        self.set_if_changed('apply_on_plug', bool(value))
+
+    def get_apply_on_plug(self):
+        return self.data['apply_on_plug']
+
     def set_start_app_manually(self, value):
         value = bool(value)
         self.set_if_changed('start_app_manually', value)
@@ -785,6 +833,8 @@ class Model:
         self.ui.set_hotkeys(data['hotkeys'])
         self.ui.set_center_wheel(data['center_wheel'])
         self.ui.set_start_app_manually(data['start_app_manually'])
+        self.ui.set_profile_note(data['profile_note'])
+        self.ui.set_apply_on_plug(data['apply_on_plug'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()
