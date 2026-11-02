@@ -26,9 +26,12 @@ None. The formats:
   (Assetto Corsa, Assetto Corsa Competizione, Assetto Corsa Rally): rpm,
   max rpm (0 = unknown), gear, speed (v1, 24 bytes); pedals and names (v2,
   96); wheels, suspension and the stage (v3, 324); the game's clock (v4,
-  328). Versions 1 to 3 have one length each; from version 4 on a version
-  only appends, so a longer packet of version 4 or later is read as far as
-  this decoder knows it.
+  328); for force feedback the physics step, the game's own FFB, the
+  tyres' self-aligning torque, slip ratio and angle, the contact normals,
+  the vibrations and the ABS/TC flags (v5, 456: OVST5_TAIL). Versions 1 to
+  3 have one length each; from version 4 on a version only appends, so a
+  longer packet of version 4 or later is read as far as this decoder
+  knows it. The bridge sends one per physics step (333 a second in ACR).
 - Richard Burns Rally (RallySimFans) through the NGP plugin's UDP telemetry:
   664 bytes, little-endian, no header (docs/richard-burns-rally.md). No
   capture existed when it was written: what the packet does not settle is
@@ -54,8 +57,13 @@ OVST2_SIZE = 96                                      # + throttle, brake, car an
 OVST3_FORMAT = '<BBH' + 'f' * 2 + 'f' * 9 + 'f' * 16 + 'f' * 2 + 'f' * 16 + 'f' * 2 + 'f' * 4 + 'ii' + 'fff'
 OVST3_SIZE = OVST2_SIZE + struct.calcsize(OVST3_FORMAT)   # + wheels, suspension, the stage (324)
 OVST3_GAMES = {1: 'ac', 2: 'acc', 3: 'acr'}
-OVST_LATEST = 4                                      # the newest version decoded in full
+OVST_LATEST = 5                                      # the newest version decoded in full
 OVST4_SIZE = OVST3_SIZE + 4                          # + the graphics page's clock, in seconds (328)
+# Version 5's tail at OVST4_SIZE (oversteer-shm-bridge.c, header comment), from the physics page: packetId,
+# finalFF, mz[4], slipRatio[4], slipAngle[4], tyreContactNormal[4][3], the kerb/slip/g/abs vibrations,
+# tcinAction, absInAction (NaN, ints -1, where the page or the game does not have them)
+OVST5_TAIL = struct.Struct('<if' + 'f' * 4 * 3 + 'f' * 12 + 'f' * 4 + 'ii')
+OVST5_SIZE = OVST4_SIZE + OVST5_TAIL.size            # 456
 
 # Richard Burns Rally, NGP's rbr::telemetry::data::TelemetryData (#pragma pack 1): totalSteps, stage (index,
 # progress, raceTime, driveLineLocation, distanceToEnd), control (steering, throttle, brake, handbrake, clutch,
@@ -203,7 +211,13 @@ class Sample:
       in m/s: the speed the wheels read, wheelspin included, which with the
       rpm gives the gearing), and from rbr_fingerprint car_epoch (numbers the
       stretches in which the car cannot have changed) and car_provisional
-      (the car is the last one's, not confirmed yet: nothing is learnt)."""
+      (the car is the last one's, not confirmed yet: nothing is learnt).
+    - For force feedback, the AC games through the bridge's version 5 (None
+      elsewhere; as the game writes them, per wheel FL, FR, RL, RR):
+      packet_id (the physics step), game_ffb (finalFF, the game's own
+      force), tyre_mz (self-aligning torque), tyre_slip_ratio,
+      tyre_slip_angle, contact_normal (per wheel a world-frame (x, y, z)),
+      vibrations (kerb, slip, g, abs), abs_active and tc_active (bools)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -220,7 +234,9 @@ class Sample:
                  'steps', 'dist_to_end', 'drive_progress', 'radiator_temp', 'block_temp', 'pedal_pressure',
                  'susp_forces', 'helper_spring', 'damper_damage', 'brake_layer_temp', 'brake_wear',
                  'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel',
-                 'car_slot', 'wheels_speed', 'car_epoch', 'car_provisional')
+                 'car_slot', 'wheels_speed', 'car_epoch', 'car_provisional',
+                 'packet_id', 'game_ffb', 'tyre_mz', 'tyre_slip_ratio', 'tyre_slip_angle', 'contact_normal',
+                 'vibrations', 'abs_active', 'tc_active')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -250,6 +266,8 @@ class Sample:
         self.tyre_seg_temp = self.tyre_seg_wear = self.tyre_contact = self.ang_accel = None
         self.car_slot = self.wheels_speed = self.car_epoch = None
         self.car_provisional = False
+        self.packet_id = self.game_ffb = self.tyre_mz = self.tyre_slip_ratio = self.tyre_slip_angle = None
+        self.contact_normal = self.vibrations = self.abs_active = self.tc_active = None
 
 
 RAD_S = 30.0 / math.pi                               # rpm per rad/s
@@ -370,7 +388,7 @@ def _ovst(data, n):
     """Oversteer's own datagram from oversteer-shm-bridge (AC, ACC, ACR)."""
     version, source, flags, rpm, max_rpm, gear, speed = struct.unpack_from('<BBHffif', data, 4)
     exact = {1: OVST_SIZE, 2: OVST2_SIZE, 3: OVST3_SIZE}
-    if not (exact.get(version) == n or (version >= 4 and n >= OVST4_SIZE)):
+    if not (exact.get(version) == n or (version == 4 and n >= OVST4_SIZE) or (version >= 5 and n >= OVST5_SIZE)):
         return None
     if version > OVST_LATEST and version not in _ovst_future_said:
         _ovst_future_said.add(version)
@@ -399,7 +417,30 @@ def _ovst(data, n):
         # restart, so it is not their stage_time.
         clock = struct.unpack_from('<f', data, OVST3_SIZE)[0]
         sample.stage_time = clock if math.isfinite(clock) and clock >= 0.0 else None
+    if version >= 5:
+        _ovst5(sample, OVST5_TAIL.unpack_from(data, OVST4_SIZE))
     return sample
+
+
+def _ovst5(sample, v):
+    """The bridge's version 5 fields, as the game writes them (for force
+    feedback). marth's ACR dump (ffb-research, 2026-11-01) has all of them
+    filled but the kerb and ABS vibrations (always 0); finalFF follows the
+    front tyres' Mz (r +0.92, about Mz / 582). AC has only finalFF and the
+    contact normals: the rest arrive as NaN and stay None."""
+    packet_id, ffb = v[0], v[1]
+    mz, ratio, angle, normal, vib = v[2:6], v[6:10], v[10:14], v[14:26], v[26:30]
+    tc, abs_ = v[30], v[31]
+    sample.packet_id = packet_id
+    sample.game_ffb = _finite(ffb)
+    sample.tyre_mz = _vector(mz)
+    sample.tyre_slip_ratio = _vector(ratio)
+    sample.tyre_slip_angle = _vector(angle)
+    normals = tuple(_vector(normal[i:i + 3]) for i in range(0, 12, 3))
+    sample.contact_normal = normals if None not in normals else None
+    sample.vibrations = _vector(vib)
+    sample.tc_active = bool(tc) if tc >= 0 else None
+    sample.abs_active = bool(abs_) if abs_ >= 0 else None
 
 
 def _ovst3(sample, v):

@@ -225,6 +225,15 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `wheels_speed` | sample | m/s |  | packet |  |
 | `car_epoch` | sample | int |  | packet |  |
 | `car_provisional` | sample | bool |  | packet |  |
+| `packet_id` | sample | int |  | packet |  |
+| `game_ffb` | sample | game unit |  | packet |  |
+| `tyre_mz` | sample | game unit (Nm) | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_slip_ratio` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_slip_angle` | sample | game unit (rad) | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `contact_normal` | sample | unit vector | per wheel, ordered FL, FR, RL, RR; each (x, y, z) | packet |  |
+| `vibrations` | sample | game unit |  | packet |  |
+| `abs_active` | sample | bool |  | packet |  |
+| `tc_active` | sample | bool |  | packet |  |
 
 ### Games
 
@@ -374,6 +383,15 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `wheels_speed` | - | - | - | - | - | - | - | - | - | - |
 | `car_epoch` | - | - | - | - | - | - | - | - | - | - |
 | `car_provisional` | - | - | - | - | - | - | - | - | - | - |
+| `packet_id` | D | D | D | - | - | - | - | - | - | - |
+| `game_ffb` | D | D | D | - | - | - | - | - | - | - |
+| `tyre_mz` | D | - | D | - | - | - | - | - | - | - |
+| `tyre_slip_ratio` | D | - | D | - | - | - | - | - | - | - |
+| `tyre_slip_angle` | D | - | D | - | - | - | - | - | - | - |
+| `contact_normal` | D | D | D | - | - | - | - | - | - | - |
+| `vibrations` | D | - | D | - | - | - | - | - | - | - |
+| `abs_active` | D | - | D | - | - | - | - | - | - | - |
+| `tc_active` | D | - | D | - | - | - | - | - | - | - |
 
 ### Games: static data
 

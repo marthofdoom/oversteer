@@ -7,18 +7,45 @@
  * that lives inside the game's Wine prefix, so this small Windows program
  * runs there alongside the game (see oversteer-run) and sends what the rev
  * lights (and the coach) need to Oversteer on the host as an "OVST"
- * datagram (struct ovst_packet: 328 bytes in version 4).
+ * datagram (struct ovst_packet: 456 bytes in version 5).
  *
  * All three games share the same prefix of the physics and static structs
  * (packetId, gas, brake, fuel, gear, rpms / ... sectorCount, maxTorque,
- * maxPower, maxRpm), which is all that is read here.
+ * maxPower, maxRpm). The physics page is SPageFilePhysics: AC's ends at
+ * 580 bytes (localVelocity), ACC and ACR go on to 800 (currentMaxRpm, mz,
+ * fx, fy, slipRatio, slipAngle, tcinAction, absInAction, ... the
+ * vibrations). Fields past the mapped size are sent as NaN (or -1), and
+ * the ACC/ACR-only ones only when the game is known to be ACC or ACR.
+ *
+ * Version 5 (for force feedback computed from the tyres) appends, at 328:
+ *   off  type       field            physics page
+ *   328  int32      packet_id        packetId@0 (the physics step)
+ *   332  float      final_ff         finalFF@308, the game's own FFB
+ *   336  float[4]   mz               mz@592 (ACC/ACR), self-aligning torque
+ *   352  float[4]   slip_ratio       slipRatio@640 (ACC/ACR)
+ *   368  float[4]   slip_angle       slipAngle@656 (ACC/ACR)
+ *   384  float[4][3] contact_normal  tyreContactNormal@468 (world frame)
+ *   432  float      kerb_vibration   kerbVibration@784 (ACC/ACR)
+ *   436  float      slip_vibration   slipVibrations@788 (ACC/ACR)
+ *   440  float      g_vibration      gVibrations@792 (ACC/ACR)
+ *   444  float      abs_vibration    absVibrations@796 (ACC/ACR)
+ *   448  int32      tc_in_action     tcinAction@672 (ACC/ACR), -1 unknown
+ *   452  int32      abs_in_action    absInAction@676 (ACC/ACR), -1 unknown
+ *   456  (end)
+ * Wheels FL, FR, RL, RR as in the page; values as the game writes them.
+ *
+ * Rate: a datagram per new packetId (physics step: 333 a second in ACR),
+ * polled every millisecond (timeBeginPeriod(1)); --rate caps it (default
+ * 1000: every step). Between steps the loop only sleeps.
  *
  * Built for the Windows (GUI) subsystem so no console window appears when it
  * runs next to the game; all output goes to the --log file.
- * Build (any mingw): x86_64-w64-mingw32-gcc -O2 -s -mwindows -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
- *   or: zig cc -target x86_64-windows-gnu -O2 -s -Wl,--subsystem,windows -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32
+ * Build (scripts/build-shm-bridge.sh; any mingw): x86_64-w64-mingw32-gcc -O2 -s -mwindows -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32 -lwinmm
+ *   or: zig cc -target x86_64-windows-gnu -O2 -s -Wl,--subsystem,windows -o oversteer-shm-bridge.exe oversteer-shm-bridge.c -lws2_32 -lwinmm
  *
- * Usage: oversteer-shm-bridge.exe [--host 127.0.0.1] [--port 5300] [--rate 60] [--verbose] [--exit-when-gone] [--log FILE]
+ * Usage: oversteer-shm-bridge.exe [--host 127.0.0.1] [--port 5300] [--rate 1000] [--verbose] [--exit-when-gone] [--log FILE]
+ *   --rate HZ: at most this many datagrams a second (default 1000, which
+ *   sends every physics step).
  *   --log FILE: also append messages to FILE (Proton doesn't pass a console
  *   program's stderr through, so this is how oversteer-run keeps a log).
  *   --exit-when-gone: once telemetry has been seen, exit when it is gone
@@ -28,13 +55,17 @@
  */
 #include <winsock2.h>
 #include <windows.h>
+#include <mmsystem.h>
 #include <tlhelp32.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdarg.h>
 
+/* native: begin (tests/test_shm_bridge.py compiles the parts between the
+ * native markers on the host, to check the packet against the decoder) */
 
 /* Offsets into the shared structs (4-byte packing, identical in AC/ACC/ACR) */
 #define PHYS_PACKET_ID   0     /* int */
@@ -52,12 +83,20 @@
 #define PHYS_AUTO_SHIFT  264   /* int */
 #define PHYS_RIDE_HEIGHT 268   /* float[2] */
 #define PHYS_LOCAL_ANG   296   /* float[3] */
+#define PHYS_FINAL_FF    308   /* float */
 #define PHYS_CLUTCH      364   /* float */
+#define PHYS_CONTACT_NORMAL 468 /* float[4][3] */
 #define PHYS_BRAKE_BIAS  564   /* float */
 #define PHYS_LOCAL_VEL   568   /* float[3] */
 #define PHYS_MAX_RPM_NOW 588   /* int, ACC/ACR */
 #define PHYS_FX          608   /* float[4], ACC/ACR */
+#define PHYS_MZ          592   /* float[4], ACC/ACR */
 #define PHYS_FY          624   /* float[4], ACC/ACR */
+#define PHYS_SLIP_RATIO  640   /* float[4], ACC/ACR */
+#define PHYS_SLIP_ANGLE  656   /* float[4], ACC/ACR */
+#define PHYS_TC_ACTION   672   /* int, ACC/ACR */
+#define PHYS_ABS_ACTION  676   /* int, ACC/ACR */
+#define PHYS_VIBRATIONS  784   /* float kerb, slip, g, abs; ACC/ACR */
 /* The physics page is 800 bytes in ACC/ACR and 580 in AC; map the most
  * the section allows (a view larger than the section fails). */
 static const size_t phys_sizes[] = { 800, 580, 64, 0 };
@@ -90,7 +129,7 @@ static const size_t static_sizes[] = { 820, 684, 524, 416, 0 };
 #define GRAPH_ACC_GRIP   1240  /* float */
 static const size_t graph_sizes[] = { 1588, 1316, 300, 0 };
 
-#define OVST_VERSION 4
+#define OVST_VERSION 5
 #define GAME_AC  1
 #define GAME_ACC 2
 #define GAME_ACR 3
@@ -140,10 +179,22 @@ struct ovst_packet {
      * flying finish, back to 0 on a restart. In AC and ACC it is the
      * current lap's time. */
     float stage_clock;
+    /* version 5 (328 bytes before it), the layout in the header comment:
+     * NaN (ints -1) where the page is shorter or the game doesn't fill it */
+    int32_t packet_id;
+    float final_ff;
+    float mz[4];
+    float slip_ratio[4];
+    float slip_angle[4];
+    float contact_normal[12];
+    float vibrations[4];     /* kerb, slip, g, abs */
+    int32_t tc_in_action, abs_in_action;
 };
 #pragma pack(pop)
-/* The size Oversteer's decoder takes for version 4 (OVST4_SIZE) */
-typedef char ovst_packet_is_328_bytes[sizeof(struct ovst_packet) == 328 ? 1 : -1];
+/* The sizes Oversteer's decoder takes for version 4 and 5 (OVST4_SIZE, OVST5_SIZE) */
+typedef char ovst_v4_part_is_328_bytes[offsetof(struct ovst_packet, packet_id) == 328 ? 1 : -1];
+typedef char ovst_packet_is_456_bytes[sizeof(struct ovst_packet) == 456 ? 1 : -1];
+/* native: end */
 
 static int verbose = 0;
 static int exit_when_gone = 0;
@@ -276,6 +327,7 @@ static void close_view(const void *view, HANDLE *handle)
     }
 }
 
+/* native: begin */
 static int32_t rd_i32(const void *base, size_t off)
 {
     int32_t v;
@@ -462,11 +514,76 @@ static void fill_v3(struct ovst_packet *pkt, uint8_t game, const void *phys, siz
     }
 }
 
+/* An int of the page, or -1 past the part that is mapped. */
+static int32_t rd_i32_or(const void *base, size_t size, size_t off)
+{
+    return (base && off + 4 <= size) ? rd_i32(base, off) : -1;
+}
+
+/* The version 5 fields (for force feedback). finalFF and the contact
+ * normals are in every AC game's page; the rest only in ACC's and ACR's,
+ * so they are read only when the game is known to be one of those. */
+static void fill_v5(struct ovst_packet *pkt, uint8_t game, int32_t packet_id, const void *phys, size_t phys_size)
+{
+    int acc = game == GAME_ACC || game == GAME_ACR;
+    const void *ext = acc ? phys : NULL;
+
+    pkt->packet_id = packet_id;
+    rd_floats(phys, phys_size, PHYS_FINAL_FF, &pkt->final_ff, 1);
+    rd_floats(phys, phys_size, PHYS_CONTACT_NORMAL, pkt->contact_normal, 12);
+    rd_floats(ext, phys_size, PHYS_MZ, pkt->mz, 4);
+    rd_floats(ext, phys_size, PHYS_SLIP_RATIO, pkt->slip_ratio, 4);
+    rd_floats(ext, phys_size, PHYS_SLIP_ANGLE, pkt->slip_angle, 4);
+    rd_floats(ext, phys_size, PHYS_VIBRATIONS, pkt->vibrations, 4);
+    pkt->tc_in_action = rd_i32_or(ext, phys_size, PHYS_TC_ACTION);
+    pkt->abs_in_action = rd_i32_or(ext, phys_size, PHYS_ABS_ACTION);
+}
+
+/* The whole datagram from the pages (stat and graph may be NULL). */
+static void fill_packet(struct ovst_packet *pkt, uint8_t game, int32_t packet_id, const void *phys, size_t phys_size,
+                        const void *stat, size_t stat_size, const void *graph, size_t graph_size)
+{
+    memset(pkt, 0, sizeof(*pkt));
+    memcpy(pkt->magic, "OVST", 4);
+    pkt->version = OVST_VERSION;
+    pkt->source = OVST_SOURCE_ACPMF;
+    pkt->rpm = (float)rd_i32(phys, PHYS_RPMS);
+    pkt->max_rpm = stat ? (float)rd_i32(stat, STATIC_MAX_RPM) : 0.0f;
+    pkt->gear = rd_i32(phys, PHYS_GEAR) - 1;
+    pkt->speed_kmh = rd_f32(phys, PHYS_SPEED_KMH);
+    pkt->gas = rd_f32(phys, PHYS_GAS);
+    pkt->brake = rd_f32(phys, PHYS_BRAKE);
+    if (stat) {
+        rd_name(stat, STATIC_CAR_MODEL, pkt->car, sizeof(pkt->car));
+        rd_name(stat, STATIC_TRACK, pkt->track, sizeof(pkt->track));
+    }
+    fill_v3(pkt, game, phys, phys_size, stat, stat_size, graph, graph_size);
+    fill_v5(pkt, game, packet_id, phys, phys_size);
+}
+/* native: end */
+
+/* Milliseconds on the performance counter (GetTickCount steps in 10-16 ms
+ * on Windows: too coarse for a 3 ms physics step). */
+static double now_ms(void)
+{
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER t;
+    if (freq.QuadPart == 0)
+        QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t);
+    return (double)t.QuadPart * 1000.0 / (double)freq.QuadPart;
+}
+
+static void end_timer_period(void)
+{
+    timeEndPeriod(1);
+}
+
 int main(int argc, char **argv)
 {
     const char *host = "127.0.0.1";
     const char *watch = NULL;
-    int port = 5300, rate = 60;
+    int port = 5300, rate = 1000;
     WSADATA wsa;
     SOCKET sock;
     struct sockaddr_in dest;
@@ -475,9 +592,10 @@ int main(int argc, char **argv)
     size_t phys_size = 0, stat_size = 0, graph_size = 0;
     DWORD last_detail = 0;
     uint8_t game = 0;
-    int32_t last_packet = -1;
+    int32_t last_packet = -1, last_sent = -1;
     DWORD last_change = 0, last_report = 0, last_watch = 0;
-    unsigned long sent = 0;
+    unsigned long sent = 0, skipped = 0;
+    double period, next_send = 0.0;
     const char *name_used = "?";
     int seen = 0, announced = 0, i;
 
@@ -507,6 +625,11 @@ int main(int argc, char **argv)
         logmsg("bad port or rate");
         return 2;
     }
+    period = 1000.0 / rate;
+    /* Sleep(1) sleeps 1 ms rather than a 15.6 ms scheduler tick: the poll
+     * sees a new physics step (3 ms in ACR) within about a millisecond */
+    if (timeBeginPeriod(1) == TIMERR_NOERROR)
+        atexit(end_timer_period);
 
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         logmsg("WSAStartup failed");
@@ -534,13 +657,16 @@ int main(int argc, char **argv)
         else if (!_stricmp(watch, "acs.exe") || !_stricmp(watch, "acs_x86.exe"))
             game = GAME_AC;
     }
-    logmsg("sending to %s:%d at %d Hz; waiting for %s%s%s", host, port, rate, physics_names[0],
+    logmsg("sending v%d to %s:%d, every physics step up to %d a second; waiting for %s%s%s", OVST_VERSION, host,
+           port, rate, physics_names[0],
            watch ? ", watching " : "", watch ? watch : "");
 
     for (;;) {
         struct ovst_packet pkt;
         int32_t packet_id;
         DWORD now = GetTickCount();
+        DWORD wait = 1;
+        double t_ms = 0.0;
 
         if (watch && now - last_watch > 3000) {
             last_watch = now;
@@ -581,31 +707,35 @@ int main(int argc, char **argv)
         }
 
         packet_id = rd_i32(phys, PHYS_PACKET_ID);
-        if (packet_id != last_packet) {
+        if (packet_id != last_packet)
+            t_ms = now_ms();
+        if (packet_id != last_packet && t_ms < next_send) {
+            /* A new step over the --rate cap: sent when it is due, with
+             * the page as it is then */
+            last_change = now;
+            wait = next_send - t_ms >= 1.0 ? (DWORD)(next_send - t_ms) : 1;
+        } else if (packet_id != last_packet) {
+            /* At most `rate` a second on average: a datagram sent late
+             * doesn't push the next one back, one more than a period
+             * late starts the count again */
+            next_send = t_ms - next_send < period ? next_send + period : t_ms + period;
+            if (last_sent >= 0) {
+                int64_t steps = (int64_t)packet_id - last_sent;     /* a new session starts the ids again */
+                if (steps > 1 && steps < 1000)
+                    skipped += (unsigned long)(steps - 1);
+            }
+            last_sent = packet_id;
             last_packet = packet_id;
             last_change = now;
-            memset(&pkt, 0, sizeof(pkt));
-            memcpy(pkt.magic, "OVST", 4);
-            pkt.version = OVST_VERSION;
-            pkt.source = OVST_SOURCE_ACPMF;
-            pkt.rpm = (float)rd_i32(phys, PHYS_RPMS);
-            pkt.max_rpm = stat ? (float)rd_i32(stat, STATIC_MAX_RPM) : 0.0f;
-            pkt.gear = rd_i32(phys, PHYS_GEAR) - 1;
-            pkt.speed_kmh = rd_f32(phys, PHYS_SPEED_KMH);
-            pkt.gas = rd_f32(phys, PHYS_GAS);
-            pkt.brake = rd_f32(phys, PHYS_BRAKE);
-            if (stat) {
-                rd_name(stat, STATIC_CAR_MODEL, pkt.car, sizeof(pkt.car));
-                rd_name(stat, STATIC_TRACK, pkt.track, sizeof(pkt.track));
-            }
-            fill_v3(&pkt, game, phys, phys_size, stat, stat_size, graph, graph_size);
+            fill_packet(&pkt, game, packet_id, phys, phys_size, stat, stat_size, graph, graph_size);
             dump_pages(now, phys, phys_size, graph, graph_size);
             if (verbose && now - last_detail >= 1000) {
                 /* For confirming the offsets and signs on a real capture */
                 last_detail = now;
-                logmsg("v4 clock %.3f len %.1f pos %.4f dist %.1f grip %.3f laps %d session %d xyz %.1f %.1f %.1f | "
+                logmsg("v5 rpm %.0f / %.0f gear %d ff %.3f mz %.1f %.1f | clock %.3f len %.1f pos %.4f dist %.1f grip %.3f laps %d session %d xyz %.1f %.1f %.1f | "
                        "steer %.3f clutch %.2f accg %.2f %.2f %.2f vel %.2f %.2f %.2f angvel %.2f %.2f %.2f | "
                        "susp %.3f %.3f %.3f %.3f of %.3f | ride %.3f %.3f | bias %.3f",
+                       pkt.rpm, pkt.max_rpm, pkt.gear, pkt.final_ff, pkt.mz[0], pkt.mz[1],
                        pkt.stage_clock, pkt.track_length, pkt.spline_pos, pkt.distance, pkt.surface_grip, pkt.laps,
                        pkt.session_type, pkt.world_pos[0], pkt.world_pos[1], pkt.world_pos[2],
                        pkt.steer, pkt.clutch, pkt.accg[0], pkt.accg[1], pkt.accg[2],
@@ -619,8 +749,6 @@ int main(int argc, char **argv)
                     logmsg("sendto failed: %d", WSAGetLastError());
             } else {
                 sent++;
-                if (verbose)
-                    logmsg("rpm %.0f / %.0f gear %d", pkt.rpm, pkt.max_rpm, pkt.gear);
             }
         } else if (now - last_change > 2000) {
             /* Nothing written for two seconds: paused, in a menu, or quit.
@@ -638,8 +766,9 @@ int main(int argc, char **argv)
         }
         if (now - last_report > 10000) {
             last_report = now;
-            logmsg("packetId %d, rpm %d, %lu datagrams sent", packet_id, rd_i32(phys, PHYS_RPMS), sent);
+            logmsg("packetId %d, rpm %d, %lu datagrams sent, %lu physics steps between them not sent", packet_id,
+                   rd_i32(phys, PHYS_RPMS), sent, skipped);
         }
-        Sleep(1000 / rate);
+        Sleep(wait);
     }
 }
