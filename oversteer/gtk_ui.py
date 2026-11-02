@@ -1617,6 +1617,16 @@ class GtkUi:
               "sessions are kept for it to learn to tell surfaces apart from. Off by default."),
             lambda state: self.controller.set_telemetry_capture(on=state), status=self.telemetry_capture_status)
         record.add(row)
+        row, self.telemetry_ffb_tuning = self._switch_row(
+            _("Record for FFB tuning"),
+            _("Save everything at the full rate the game sends it (several times the usual size), for tuning the "
+              "force feedback. It stops by itself after 20 minutes or 250 MB, then recording goes back to the "
+              "usual rate; those captures are never deleted for space. Works only while recording is on, and "
+              "starts off every time Oversteer starts."),
+            lambda state: self._ffb_syncing or self.controller.set_ffb_tuning(state))
+        self._ffb_syncing = False
+        self.telemetry_ffb_tuning.set_sensitive(False)
+        record.add(row)
         self.telemetry_capture_cap = Gtk.SpinButton.new_with_range(1, 100, 1)
         self.telemetry_capture_cap.connect('value-changed', lambda w: self.controller.set_telemetry_capture(
             cap=w.get_value_as_int()))
@@ -1754,6 +1764,16 @@ class GtkUi:
 
     def set_telemetry_capture_status(self, text):
         self.telemetry_capture_status.set_text(text)
+
+    def set_ffb_tuning_switch(self, active, sensitive):
+        """The "Record for FFB tuning" switch: shown on or off, usable while recording is on."""
+        self.telemetry_ffb_tuning.set_sensitive(sensitive)
+        if self.telemetry_ffb_tuning.get_active() != active:
+            self._ffb_syncing = True          # not the user's doing: the controller is not told
+            try:
+                self.telemetry_ffb_tuning.set_active(active)
+            finally:
+                self._ffb_syncing = False
 
     @staticmethod
     def _clear_rows(listbox, keep=0):
