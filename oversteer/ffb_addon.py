@@ -62,8 +62,10 @@ import logging
 import math
 
 A = 0.7                                  # Forza-normalised slip angle at which the trail has gone (report: 0.6-0.8)
-K = 0.35                                 # ... slip ratio: ~2x the weight of the angle (the report's ACR fit); its
-                                         # Forza scale is unconfirmed: calibrate A and K on an FH6 capture
+K = 0.7                                  # ... slip ratio. FH6 drive (34 min, 4 cars): the front tyres' lateral grip falls only
+                                         # from a slip ratio of ~0.5 (median lateral g 1.51 / 1.29 / 1.24 / 0.93 for
+                                         # ratio <0.05 / 0.05-0.2 / 0.2-0.5 / >0.5); 0.35 lightened AWD straights under
+                                         # power (front ratio p90 0.27) and hard braking. scripts/ffb-addon-replay.py
 Q = 3.0                                  # exp(-s^Q)'s shape (report: 2-4)
 G_MIN = 0.4                              # the lightest: 40 % of the game's force
 STRENGTH = 0.6                           # "Understeer lightness" default
