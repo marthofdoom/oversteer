@@ -942,19 +942,19 @@ class Gui:
             self._forward_done(generation, text, targets, error, save)
         else:
             def work():
+                shown = False
                 while True:
                     targets, error = resolve_forward(items, listening)
                     if not error or not retry or generation != self._forward_gen:
                         break
                     logging.warning("telemetry: forwarding: %s (trying again in 60 s)", error)
+                    if not shown:                 # the box shows why, once the window exists
+                        shown = True
+                        GLib.idle_add(self._forward_done, generation, text, [], error, save)
                     self._forward_stop.wait(60.0)
                     if generation != self._forward_gen or self._forward_stop.is_set():
                         return
-                ui = getattr(self, 'ui', None)
-                if ui is not None:
-                    ui.safe_call(self._forward_done, generation, text, targets, error, save)
-                else:
-                    self._forward_done(generation, text, targets, error, save)
+                GLib.idle_add(self._forward_done, generation, text, targets, error, save)   # GUI thread only
             threading.Thread(target=work, name='forward-resolve', daemon=True).start()
         return None
 
@@ -989,6 +989,10 @@ class Gui:
         from .telemetry import forward_items
         text = (text or '').strip()
         if text == self._forward_resolved:
+            self._forward_gen += 1                # the live targets stand: a lookup of another text still in flight is dropped
+            ui = getattr(self, 'ui', None)
+            if ui is not None:
+                ui.show_forward_error(None)
             return None
         items, error = forward_items(text)
         if error:

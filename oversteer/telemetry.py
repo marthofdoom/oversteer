@@ -650,9 +650,10 @@ class Telemetry:
                             logging.warning("telemetry: UDP %s stops: %s", port, e)
                             self._close_port(port, selector)
                         break
-                    # Not the datagram that came back from our own send socket; in Auto, only the locked port's
-                    if forwarder.targets and addr[1] != forwarder.port and \
-                            (self._source is None or self._source[0] == port):
+                    if addr[1] == forwarder.port:
+                        continue          # came back from our own send socket (a target that loops): never twice
+                    # In Auto only the locked port's datagrams go on; before the first lock every held port's do
+                    if forwarder.targets and (self._source is None or self._source[0] == port):
                         forwarder.send(data)
                     self.handle(time.monotonic(), data, addr, port)
             if not self.running:

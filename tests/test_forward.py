@@ -180,7 +180,8 @@ def test_older_slow_lookup_cannot_overwrite_a_newer_entry(no_dns):
         if host == 'mypc':
             gate.wait(5)
         return real(host, port, *a)
-    with mock.patch.object(module.socket, 'getaddrinfo', slow):
+    with mock.patch.object(module.socket, 'getaddrinfo', slow), \
+            mock.patch('oversteer.gui.GLib.idle_add', lambda f, *a: f(*a)):
         Gui._forward_start(me, 'mypc:1234', [('mypc', 1234)], save=True)        # slow hostname, thread
         Gui._forward_start(me, '10.0.0.2:9996', [('10.0.0.2', 9996)], save=True)   # newer, literal, at once
         assert me._forward_targets == [('10.0.0.2', 9996)]
@@ -218,3 +219,27 @@ def test_forwarding_alone_starts_the_listener():
     me.telemetry = None
     Gui.apply_rev_leds(me)
     assert me.telemetry is None                       # nothing to do: no listener
+
+
+def test_typing_the_live_text_back_cancels_the_lookup_in_flight(no_dns):
+    from oversteer.gui import Gui
+    me = _gui()
+    gate = threading.Event()
+    real = module.socket.getaddrinfo
+
+    def slow(host, port, *a):
+        if host == 'mypc':
+            gate.wait(5)
+        return real(host, port, *a)
+    with mock.patch.object(module.socket, 'getaddrinfo', slow), \
+            mock.patch('oversteer.gui.GLib.idle_add', lambda f, *a: f(*a)):
+        Gui._forward_start(me, '10.0.0.2:9996', [('10.0.0.2', 9996)], save=True)      # A is live
+        assert Gui.set_telemetry_forward.__get__(me)('10.0.0.2:9996') is None         # unchanged: no lookup
+        Gui._forward_start(me, 'mypc:1234', [('mypc', 1234)], save=True)              # B, in flight
+        Gui.set_telemetry_forward(me, '10.0.0.2:9996')                                # A typed back
+        gate.set()
+        for t in threading.enumerate():
+            if t.name == 'forward-resolve':
+                t.join(2)
+    assert me._forward_targets == [('10.0.0.2', 9996)]
+    assert me.telemetry_forward == '10.0.0.2:9996'
