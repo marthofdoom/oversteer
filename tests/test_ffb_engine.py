@@ -205,7 +205,9 @@ def test_other_games_are_model_add_on_or_none():
     c.has_game_ffb_raw = True                 # the hook for the driver's game_ffb_raw
     for t, s in rbr:
         c.feed(t, s)
-    assert c.verdict(t)[:2] == ('model', 'rbr-model')
+    assert c.verdict(t)[:2] == ('model', 'rbr-raw')        # no uploads measured yet
+    c.raw_rate = 810.0
+    assert c.verdict(t)[:2] == ('replace', 'ok')
     assert classify(stream(1.5, hz=60.0, game='forza-fh', v5=False))[1][:2] == ('add-on', 'no-forces')
     assert classify(stream(1.5, hz=240.0, game='forza-fh', v5=False))[1][:2] == ('model', 'fh-model')
     assert classify(stream(1.5, hz=60.0, game='dirt', v5=False))[1][:2] == ('add-on', 'no-forces')
@@ -481,7 +483,7 @@ def test_not_replace_does_nothing_but_says_why(tmp_path):
         engine.step(t)
         t += 1 / 236.0
     assert FakeDriver.log == []
-    assert engine.status[:2] == ('model', 'rbr-model')
+    assert engine.status[:2] == ('model', 'rbr-raw')
     light, text = fe.status_text(engine.status)
     assert light == 'amber' and 'force feedback' in text
 

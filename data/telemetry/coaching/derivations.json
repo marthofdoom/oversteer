@@ -1099,6 +1099,13 @@
    "convention": "BeamNG input space, as the game's own force feedback reads it",
    "rate": "packet"
   },
+  "steer_input": {
+   "kind": "sample",
+   "unit": "-1..1",
+   "description": "BeamNG's steering input (electrics steering_input) from the Countersteer mod (CSB1): +-1 at the car's lock. Its sign is the game's own, unconfirmed on a capture, so it is not `steer`; the FFB engine learns its sign against the game's own force (the soft lock).",
+   "convention": "BeamNG input space",
+   "rate": "packet"
+  },
   "tyre_side_slip": {
    "kind": "sample",
    "unit": "game unit",

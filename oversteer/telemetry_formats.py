@@ -223,7 +223,8 @@ class Sample:
     - For force feedback, BeamNG through the Countersteer mod ('beamng-ffb'; None elsewhere): rack_force (N, the
       sum of the steering hydros' beam stress times their input factor: the game's own rack force;
       positive = it pushes steering_input positive, hydros.lua:324-327, to confirm on a capture), tyre_load (N), tyre_slip, tyre_side_slip (the game's units) and tyre_slip_energy per wheel
-      FL, FR, RL, RR, and packet_id (the packet's sequence number); the packet's steering input is left unread until its sign is confirmed."""
+      FL, FR, RL, RR, packet_id (the packet's sequence number) and steer_input (electrics steering_input, -1..1 at
+      the car's lock, in the game's own sign, unconfirmed: so not `steer`; the FFB engine learns its sign)."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -242,7 +243,8 @@ class Sample:
                  'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel',
                  'car_slot', 'wheels_speed', 'car_epoch', 'car_provisional',
                  'packet_id', 'game_ffb', 'tyre_mz', 'tyre_slip_ratio', 'tyre_slip_angle', 'contact_normal',
-                 'vibrations', 'abs_active', 'tc_active', 'rack_force', 'tyre_side_slip', 'tyre_slip_energy')
+                 'vibrations', 'abs_active', 'tc_active', 'rack_force', 'tyre_side_slip', 'tyre_slip_energy',
+                 'steer_input')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -272,7 +274,7 @@ class Sample:
         self.tyre_seg_temp = self.tyre_seg_wear = self.tyre_contact = self.ang_accel = None
         self.car_slot = self.wheels_speed = self.car_epoch = None
         self.car_provisional = False
-        self.rack_force = self.tyre_side_slip = self.tyre_slip_energy = None
+        self.rack_force = self.tyre_side_slip = self.tyre_slip_energy = self.steer_input = None
         self.packet_id = self.game_ffb = self.tyre_mz = self.tyre_slip_ratio = self.tyre_slip_angle = None
         self.contact_normal = self.vibrations = self.abs_active = self.tc_active = None
 
@@ -958,13 +960,14 @@ def csb1_packet(seq, game_time, rack, steer, speed, wheels, rate=500.0, mask=15)
 
 def _csb1(data):
     """Countersteer's BeamNG mod: no rpm, so rpm is 0 and nothing here reads it as an engine."""
-    magic, seq, game_time, rack, _steer, speed, mask, _rate, *w = struct.unpack(CSB_FORMAT, data)
+    magic, seq, game_time, rack, steer, speed, mask, _rate, *w = struct.unpack(CSB_FORMAT, data)
     if not math.isfinite(game_time):
         return None
     sample = Sample(0.0, speed=_finite(speed), car='beamng/unknown', game='beamng-ffb')
     sample.game_time = game_time
     sample.packet_id = seq
     sample.rack_force = _finite(rack)
+    sample.steer_input = _finite(steer)
     if mask & 15 == 15:                          # all four wheels found by the mod, in FL FR RL RR order
         wheels = [w[i:i + 4] for i in range(0, 16, 4)]
         sample.tyre_load = _vector(x[0] for x in wheels)

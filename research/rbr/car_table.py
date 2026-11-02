@@ -13,7 +13,7 @@ car_data's format where its physics are on disk, from the first of:
   slots have no such file and are not shipped: no stock car can be told from RSF's by a slot's name).
 
 An entry is read from common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Drive
-DriveType and NumberOfGears, Car InverseMass and EffWheelRadius, Drive DriveTrainLoss_NGP from r_<surface>.lsp), the
+DriveType and NumberOfGears, Car InverseMass, EffWheelRadius and ForceFeedbackSensitivity_NGP, Drive DriveTrainLoss_NGP from r_<surface>.lsp), the
 options file r_<surface>.lsp (GearListNNPinion/Gear) and the default setup setups/d_<surface>.lsp (GearId0..,
 FinalDriveId, DropGearId). Torque in Nm is the normalised curve times the peak torque cars_data.json lists. A car
 that an earlier run read and this install no longer holds keeps its entry from the existing file, which is why the file
@@ -204,6 +204,7 @@ def build_car(row, data, source):
         'steering_rack_ratio': common.get('SteeringRackRatio') or None,
         'rack_travel_m': (round(common['MaxSteeringLock'] * common['SteeringRackRatio'], 4)
                           if common.get('MaxSteeringLock') and common.get('SteeringRackRatio') else None),
+        'ffb_sensitivity': common.get('ForceFeedbackSensitivity_NGP'),
         'limiter_rpm': int(limiter),
         'torque_curve': curve,
         'gear_sets': gear_sets,
@@ -214,7 +215,7 @@ def build_car(row, data, source):
         'turbo': True if common.get('Turbo') == 1 else None,          # NGP's Turbo 0 is the stock flag: boost is in the curve
         'auto_upshift_rpm': [int(u) for u in uppers] if all(uppers) else None,
         'sources': ['%s: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car '
-                    'InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp '
+                    'InverseMass, EffWheelRadius, MaxSteeringLock, SteeringRackRatio and ForceFeedbackSensitivity_NGP), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp '
                     '(GearId, FinalDriveId, DropGearId); revision %s' % (source.label, _revision(source, row)),
                     'rsfdata/cache/cars_data.json: peak torque %s Nm at %s rpm' % (peak.group(1), peak.group(2))],
     }
@@ -290,6 +291,9 @@ def main():
 "overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: "
                  "1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: "
                  "ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. "
+                 "ffb_sensitivity: Car ForceFeedbackSensitivity_NGP, NGP's S in its force-feedback curve "
+                 "x = sign(T) (1 - 0.975^(|T| 100 / S)) before the ini's surface %% (RichardBurnsRally.ini [NGP] "
+                 "ForceFeedbackSensitivity<Surface>; oversteer/ffb_rbr.py). "
                  "steering_wheel_lock_deg: Car MaxSteeringLock x 360, the STEERING-WHEEL angle from centre to full lock in degrees "
                  "(MaxSteeringLock is in wheel turns: x 720 is the steering_wheel degrees lock to lock cars_data.json lists, "
                  "540 on the Fiesta); steering_rack_ratio: Car SteeringRackRatio, rack travel in metres per steering-wheel "

@@ -624,6 +624,11 @@ class Gui:
     def apply_countersteer_texture(self):
         """The texture's level and parts (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_texture(*self.model.get_countersteer_texture())
+        self.apply_countersteer_linearity()
+
+    def apply_countersteer_linearity(self):
+        """Richard Burns Rally's linearity (FFB tab, under the Countersteer switch) to the engine."""
+        self.ffb_engine.set_linearity(self.model.get_countersteer_linearity())
 
     def _countersteer_wanted(self):
         return self.device is not None and self.model.get_device() is self.device \

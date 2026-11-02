@@ -1206,6 +1206,11 @@ class GtkUi:
                                     "100 % they still stay under 8 % of the wheel's full force. Assetto Corsa Rally "
                                     "only for now. Saved with the profile.")
     COUNTERSTEER_TEXTURE_PARTS = (('road', "Road"), ('impact', "Landings"), ('lock', "Front lock"))
+    COUNTERSTEER_LINEARITY_TOOLTIP = ("Richard Burns Rally only. The game squeezes its steering force through a curve "
+                                      "that flattens it as it grows; Countersteer undoes it. 0 % plays the game's "
+                                      "curve as it is; 100 % plays the steering torque straight, clipped at full "
+                                      "force. In between the force is exact up to that share of full force and "
+                                      "rounds off smoothly above it. 70 % by default. Saved with the profile.")
 
     def _build_countersteer_texture(self, anchor):
         """The texture's rows under the Countersteer FFB row (shown while it is on):
@@ -1225,8 +1230,15 @@ class GtkUi:
             self.countersteer_texture_parts[part] = box
             boxes.append(box)
         parts = self._setting_row(_("Texture parts"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP), tuple(boxes))
+        linear = self._response_scale(0, 100, 10)
+        linear.set_size_request(160, -1)
+        linear.connect('value-changed',
+                       lambda w: self.controller.model.set_countersteer_linearity(int(w.get_value())))
+        self.countersteer_linearity = linear
+        linearity = self._setting_row(_("RBR linearity"), None, _(self.COUNTERSTEER_LINEARITY_TOOLTIP),
+                                      (self._response_row(linear),))
         parent = anchor.get_parent()
-        self.countersteer_texture_rows = (level, parts)
+        self.countersteer_texture_rows = (level, parts, linearity)
         for i, row in enumerate(self.countersteer_texture_rows):
             parent.insert(row, anchor.get_index() + 1 + i)
             row.show_all()
@@ -1247,6 +1259,13 @@ class GtkUi:
             value = parts.get(part)
             if value is not None and box.get_active() != bool(value):
                 box.set_active(bool(value))
+
+    def set_countersteer_linearity(self, value):
+        """Richard Burns Rally's linearity, 0..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_linearity') or value is None:
+            return
+        if int(self.countersteer_linearity.get_value()) != int(value):
+            self.countersteer_linearity.set_value(int(value))
 
     def set_countersteer_ffb(self, value):
         """The switch: None where the driver has no replace mode (insensitive, the tooltip says why)."""

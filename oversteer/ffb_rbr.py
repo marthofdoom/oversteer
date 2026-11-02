@@ -1,0 +1,353 @@
+"""Countersteer FFB for Richard Burns Rally (NGP): the game's own force with
+NGP's saturating curve taken out.
+
+What the game sends (rerbr, a bit-exact NGP reimplementation: ngp::ffb::curve,
+rbr_gameplay::ffb::magnitude; ~/.cache/ffb-routes/report.md):
+
+    x = sign(T) * (1 - 0.975 ** (|T| * 100 / S))      NGP's curve, -1..1
+    m = floor(-10000 * x * strength)                  the DirectInput magnitude (STRENGTH 0..1, negated if INVERSE)
+
+one constant force about every 1.15 ms (Sleep(1) under Wine, ~810 a second,
+the same value again 78 % of the time). T is the steered wheels' kingpin
+torque times the rack ratio through a one-pole filter; S is the car's
+ForceFeedbackSensitivity_NGP (common.lsp) times the ini's surface % (NGP's
+sensitivity(): a % above 0 other than 100 scales it, then S >= 1). Wine turns
+m into an FF_CONSTANT level (direction 0x4000: as sent) of about m * 32767 /
+10000, which the driver's game_ffb_raw shows before any gain.
+
+The curve is a soft limiter: its slope at a level is (1 - |x|) of its slope
+at the centre, so at half force the torque's changes already reach the wheel
+at half strength, and at 80 % at a fifth: the grip building up and the
+torque falling away at the front's limit are flattened exactly where they
+matter. Taking the logarithm undoes it:
+
+    u = -ln(1 - |x|)  =  |T| * 100 * (-ln 0.975) / S             (linear in T)
+
+and v = C * u, in ext_force units (C the game's full-scale level), is the
+rack torque at the same strength as the game's at small forces (the curve's
+slope at 0 is 1 in these units). S cancels: the force needs neither the car
+nor the ini; they only turn u into NGP's torque units (`torque`, for the
+log and the texture to come).
+
+v grows without bound, so it goes through a knee instead of the game's curve
+(`shape`): linear up to K = linearity of the ceiling A (the game's full scale,
+or the driver's ext_force cap if that is lower), then an exponential knee
+with the slope carried on, saturating at A:
+
+    out = v                                     v <= K*A
+    out = K*A + W * (1 - exp(-(v - K*A) / W))   above, W = (1 - K) * A
+
+At linearity 0 that is A * (1 - exp(-v / A)): the game's own curve exactly
+(with A = C). At 100 it is min(v, A): fully linear, then clipped.
+
+Is it an improvement? At the same small-force strength and the same
+ceiling, any curve that is more linear reaches the ceiling sooner. Ours has
+more slope than the game's at every torque below u = 1 (the game's force
+under 63 %), whatever the linearity (the curves' slopes cross there), and
+less above. So it is measured, not assumed (`gain`): the mean of our slope
+over the game's, over the uploads where the game's force is over FORCE_MIN
+(on a straight both are 1). It plays only while that is GAIN_GO or more
+(GAIN_HOLD to keep playing).
+
+The default linearity, 70: torque is reproduced exactly up to 70 % of the
+ceiling (u = 0.7, where the game's curve is at 50 % and already 28 %
+compressed, its slope halved), the top 30 % is a smooth knee (slope
+continuous, no clip, so a big hit is not flat-topped and there is no jolt
+at the end of the linear part), and the slope above the knee is still
+1 / (1 - 0.7) = 3.3 times the game's at the same output level. 90 gains
+little linear range and turns the knee into nearly a clip; 50 keeps the
+mid-range compressed. Above u = 1 every setting is less sensitive than the
+game; the gain check stops it where a car or a sensitivity setting keeps
+the force up there.
+
+Checks on the raw (`refused`):
+
+- 'curve': the levels are not on Wine's grid of DirectInput magnitudes
+  (m * DI_LEVEL, within 1). An upload from another program, or a game not
+  sending its force this way, lands on it about 60 % of the time; NGP's on
+  every upload. Taking a level to m, x, T and back through the curve and
+  the floor (`round_trip`) gives the level again only on that grid.
+- 'saturated': the game's force is over SAT_X of full scale more than
+  SAT_SHARE of the time: the inversion is ill-conditioned there (one
+  magnitude step is a large torque step) and the knee would hold ours at
+  the ceiling anyway.
+- 'no-gain': the gain above.
+
+The full scale C is 32767 times the game's STRENGTH, assumed 1.0 (it lives
+in the profile, a binary file not read here): a raw level above it raises
+it. A strength under 1 leaves C too high: the curve is then under-undone
+(ours closer to the game's), never over-undone.
+"""
+import logging
+import math
+import os
+
+FULL = 32767                             # ext_force full scale (ffb_engine.FULL)
+DI_MAX = 10000                           # DirectInput's magnitude range
+DI_LEVEL = 32767.0 / DI_MAX              # Wine: FF_CONSTANT level per DirectInput magnitude (calibrated by the grid check)
+BASE = 0.975
+K_LN = -math.log(BASE)                   # 0.025318: u = |T| * 100 * K_LN / S
+X_MAX = 0.995                            # |x| past this is not inverted further (u <= 5.3)
+
+LINEARITY = 70                           # % (see the docstring)
+FORCE_MIN = 0.10                         # |x| under which an upload says nothing about the curve (straights)
+GRID_TOL = 1.0                           # level units: on the grid of m * DI_LEVEL
+GRID_GO, GRID_HOLD = 0.90, 0.80          # share of changed levels on the grid
+SAT_X = 0.98
+SAT_SHARE, SAT_HOLD = 0.05, 0.10         # share of the time over SAT_X
+GAIN_GO, GAIN_HOLD = 1.10, 1.00          # our mean slope over the game's (forces over FORCE_MIN)
+MIN_CHANGES = 200                        # changed levels before the grid is judged
+MIN_FORCE_TIME = 2.0                     # s of uploads over FORCE_MIN before the gain is judged
+GRID_EVENTS = 500                        # changed levels the grid share is weighted over
+TAU_SAT, TAU_GAIN = 5.0, 10.0              # s
+MAX_DT = 0.05                            # s: one upload never counts for more than this (a pause)
+
+
+def ngp_curve(torque, sensitivity):
+    """NGP's x for a torque T and sensitivity S (rerbr ngp::ffb::curve)."""
+    if torque == 0.0:
+        return 0.0
+    return math.copysign(1.0 - BASE ** (abs(torque) * 100.0 / sensitivity), torque)
+
+
+def ngp_inverse(x, sensitivity):
+    """T for NGP's x (|x| capped at X_MAX)."""
+    return math.copysign(linear(abs(x)) * sensitivity / (100.0 * K_LN), x) if x else 0.0
+
+
+def linear(x):
+    """u = -ln(1 - |x|): NGP's curve undone, in units where its slope at 0 is 1."""
+    return -math.log(1.0 - min(abs(x), X_MAX))
+
+
+def magnitude(x, strength=1.0):
+    """The DirectInput magnitude NGP sends for x (rbr_gameplay::ffb::magnitude)."""
+    return max(-DI_MAX, min(DI_MAX, math.floor(-DI_MAX * x * strength)))
+
+
+def level_of(m):
+    """The FF_CONSTANT level Wine makes of a magnitude (game_ffb_raw's units and sign: m's)."""
+    return int(m * DI_LEVEL)
+
+
+def round_trip(level, sensitivity=100.0, strength=1.0):
+    """A raw level taken to NGP's magnitude, x, T and back through the curve, the floor and Wine. NGP's own levels
+    come back as they went (`on_grid`); the curve leg is skipped past X_MAX, where it is not inverted."""
+    m = round(abs(level) / DI_LEVEL)
+    x = m / DI_MAX / strength
+    back = m
+    if x < X_MAX:
+        back = abs(magnitude(ngp_curve(ngp_inverse(x, sensitivity), sensitivity), strength))
+        if abs(back - m) <= 1:               # the floor of a float product: one step either way
+            back = m
+    return int(math.copysign(level_of(back), level)) if level else 0
+
+
+def on_grid(level):
+    """The level is one Wine makes of a DirectInput magnitude: int(m * DI_LEVEL), or one more (rounded)."""
+    return 0 <= abs(level) - abs(round_trip(level)) <= GRID_TOL
+
+
+def shape(v, knee, ceiling):
+    """The knee on a linear level v >= 0 (`knee` 0..1 of `ceiling`)."""
+    k = knee * ceiling
+    if v <= k:
+        return v
+    w = ceiling - k
+    if w <= 0.0:
+        return ceiling
+    return k + w * (1.0 - math.exp(-(v - k) / w))
+
+
+def shape_slope(v, knee, ceiling):
+    """d shape / dv."""
+    k = knee * ceiling
+    if v <= k:
+        return 1.0
+    w = ceiling - k
+    return 0.0 if w <= 0.0 else math.exp(-(v - k) / w)
+
+
+def sensitivity(base, percent):
+    """NGP's S for the car's ForceFeedbackSensitivity_NGP and the ini's % for the surface (rerbr ngp::ffb::sensitivity)."""
+    s = base * percent / 100.0 if percent and percent > 0 and percent != 100 else base
+    return max(s, 1.0)
+
+
+def ngp_percents(root):
+    """{surface: %} of RichardBurnsRally.ini [NGP] ForceFeedbackSensitivity<Surface> (read-only), or None."""
+    from . import rbr_install
+    path = rbr_install.resolve(root, 'RichardBurnsRally.ini') if root else None
+    if not path:
+        return None
+    try:
+        ngp = rbr_install.read_ini(path).get('NGP', {})
+    except OSError:
+        return None
+    out = {}
+    for surface in ('gravel', 'tarmac', 'snow'):
+        value = rbr_install._int(ngp.get('ForceFeedbackSensitivity' + surface.capitalize()))
+        if value is not None:
+            out[surface] = value
+    return out or None
+
+
+class _Share:
+    """Exponentially weighted share of True over time (or over events with dt 1)."""
+
+    def __init__(self, tau):
+        self.tau = tau
+        self.w = self.on = 0.0
+
+    def add(self, flag, dt):
+        decay = math.exp(-dt / self.tau)
+        self.w = self.w * decay + dt
+        self.on = self.on * decay + (dt if flag else 0.0)
+
+    def share(self):
+        return self.on / self.w if self.w > 0.0 else None
+
+
+class RbrForce:
+    """Undoes NGP's curve on the game's raw level and plays it through the knee (module docstring).
+    feed() every new upload; force() the ext_force for a level."""
+
+    def __init__(self, linearity=LINEARITY):
+        self.linearity = linearity
+        self._percents = None            # (ini path, mtime, {surface: %})
+        self.reset()
+
+    def reset(self, car=None):
+        self.car = car
+        self.full = float(FULL)          # C: the game's full-scale level (STRENGTH 1.0 assumed)
+        self.base_s = None               # the car's ForceFeedbackSensitivity_NGP (None: not in the car table)
+        self.s = None                    # S with the surface's %
+        self.s_note = None
+        self.surface = None
+        self.torque = None               # NGP's T of the last upload (None without S): the texture's hook
+        self._last_level = None
+        self._last_t = None
+        self._grid = _Share(GRID_EVENTS)
+        self._sat = _Share(TAU_SAT)
+        self._ours = self._game = 0.0    # EW sums of our slope and the game's over forces past FORCE_MIN
+        self.changes = 0
+        self.force_time = 0.0
+        self.ready = False
+        self.refused = None
+        self.waiting = 'raw'
+        self.gain = None
+        self.ceiling = float(FULL)
+
+    def set_linearity(self, value):
+        self.linearity = min(max(int(value), 0), 100)
+
+    def set_car(self, car, stage=None, root=None):
+        """A telemetry sample's car and stage: S from the car table and the ini (only for `torque`)."""
+        if car != self.car:
+            self.reset(car)
+        if self.base_s is None and car:
+            from . import car_data
+            self.base_s = (car_data.entry(car) or {}).get('ffb_sensitivity')
+        if self.base_s is None or (self.surface is not None and self.surface[0] == stage):
+            return
+        percents = self._ini(root)
+        surface = None
+        if percents and len(set(percents.values())) > 1 and stage:
+            from . import stage_tables
+            surface = stage_tables.surface_of(stage_tables.entry(stage) or {})[0]
+        if not percents:
+            percent, self.s_note = 100, "RichardBurnsRally.ini unreadable: surface sensitivity taken as 100 %"
+        elif len(set(percents.values())) == 1:
+            percent, self.s_note = next(iter(percents.values())), None
+        else:
+            percent = percents.get(surface or 'gravel', 100)
+            self.s_note = None if surface else "stage surface unknown: gravel's sensitivity used"
+        self.surface = (stage, surface)
+        self.s = sensitivity(self.base_s, percent)
+
+    def _ini(self, root):
+        from . import rbr_install
+        root = root or rbr_install.current_root()
+        path = rbr_install.resolve(root, 'RichardBurnsRally.ini') if root else None
+        if not path:
+            return None
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            return None
+        cached = self._percents
+        if cached is None or cached[:2] != (path, mtime):
+            self._percents = cached = (path, mtime, ngp_percents(root))
+        return cached[2]
+
+    def _x(self, level):
+        return min(abs(level) / self.full, 1.0)
+
+    def feed(self, t, level, holding=False):
+        """A new upload (game_ffb_raw's level, its count moved) at t."""
+        dt = 0.0 if self._last_t is None else min(max(t - self._last_t, 0.0), MAX_DT)
+        self._last_t = t
+        if abs(level) > self.full:
+            self.full = float(abs(level))     # the game's STRENGTH is above the assumed: follow it
+        x = self._x(level)
+        if level != self._last_level:
+            if level:
+                self._grid.add(on_grid(level), 1.0)
+                self.changes += 1
+            self._last_level = level
+        self._sat.add(x > SAT_X, dt)
+        if x > FORCE_MIN and dt:
+            v = self.full * linear(x)
+            decay = math.exp(-dt / TAU_GAIN)
+            self._ours = self._ours * decay + dt * shape_slope(v, self.linearity / 100.0, self.ceiling)
+            self._game = self._game * decay + dt * (1.0 - min(x, X_MAX))
+            self.force_time += dt
+        # m = floor(-10000 x): the level's sign is -T's (with the game's DIRECTION normal, not INVERSE)
+        self.torque = None if self.s is None else ngp_inverse(math.copysign(x, -level), self.s)
+        self._judge(holding)
+
+    def _judge(self, holding):
+        grid, sat = self._grid.share(), self._sat.share()
+        self.gain = self._ours / self._game if self._game > 0.0 else None
+        if self.changes < MIN_CHANGES or grid is None:
+            self._set(None, 'raw')
+            return
+        if grid < (GRID_HOLD if holding else GRID_GO):
+            self._set('curve')
+            return
+        if sat is not None and sat > (SAT_HOLD if holding else SAT_SHARE):
+            self._set('saturated')
+            return
+        if self.force_time < MIN_FORCE_TIME or self.gain is None:
+            self._set(None, 'corners')
+            return
+        if self.gain < (GAIN_HOLD if holding else GAIN_GO):
+            self._set('no-gain')
+            return
+        self._set(None, None)
+
+    def _set(self, refused, waiting=None):
+        if refused != self.refused and refused:
+            logging.info("Countersteer FFB: RBR %s: %s (grid %.2f, over %.0f %% %.3f, gain %s)", self.car, refused,
+                         self._grid.share() or 0.0, SAT_X * 100, self._sat.share() or 0.0,
+                         'none' if self.gain is None else '%.2f' % self.gain)
+        self.refused, self.waiting = refused, waiting
+        self.ready = refused is None and waiting is None
+
+    def set_ceiling(self, clip_at):
+        """A: the game's full scale, or the driver's ext_force cap if lower."""
+        self.ceiling = min(self.full, clip_at) if clip_at else self.full
+
+    def force(self, level):
+        """ext_force for the game's raw level (0 for 0)."""
+        if not level:
+            return 0
+        v = self.full * linear(self._x(level))
+        out = shape(v, self.linearity / 100.0, self.ceiling)
+        return int(round(math.copysign(min(out, FULL), level)))
+
+    def describe(self):
+        return ("linearity %d %%, full scale %.0f, ceiling %.0f, gain %s, S %s%s" % (
+            self.linearity, self.full, self.ceiling, 'none' if self.gain is None else '%.2f' % self.gain,
+            'unknown (not in the car table)' if self.s is None else '%.1f' % self.s,
+            '; ' + self.s_note if self.s_note else ''))
