@@ -132,9 +132,65 @@ def test_starting_close_to_the_lock_centres_the_wheel_first():
     sim = SimWheel(start_deg=435.0, game_spring=0.0, autocenter=0)
     cal = Calibration(sim)
     result = cal.run()
-    assert result['near_lock_events'] == 1
+    assert result['near_lock_events'] == 0          # centred at the start, under the hard margin only
     assert linearity_error(sim, result) < 0.03
     assert sim.max_abs_theta < cal.lock - Calibration.HARD_MARGIN_DEG
+    assert_put_back(sim, autocenter=0)
+
+
+@pytest.mark.parametrize('start', [200.0, -200.0])
+def test_a_run_starts_and_ends_in_the_centre(start):
+    sim = SimWheel(start_deg=start, game_spring=0.0, autocenter=0)
+    cal = Calibration(sim)
+    at_pulses = []
+    real = Calibration._passes
+
+    def passes(self):
+        at_pulses.append(sim.theta)
+        return real(self)
+
+    Calibration._passes = passes
+    try:
+        result = cal.run()
+    finally:
+        Calibration._passes = real
+    assert result['lut']
+    assert abs(sim.theta) < 6.0                                  # the finish move's tolerance is 3
+    # everything after the first push (the ramps move a fraction of a degree) was measured from the centre
+    assert abs(at_pulses[0]) < 15.0
+    assert_safe_run(sim, cal)
+    assert_put_back(sim, autocenter=0)
+
+
+@pytest.mark.parametrize('fraction', [0.25, 0.55, 0.8])
+def test_cancel_mid_run_ends_in_the_centre(fraction):
+    sim = SimWheel(start_deg=150.0, game_spring=0.0, autocenter=0)
+    cal = Calibration(sim, lambda f, text: cal.cancel() if f > fraction else None)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'cancelled'
+    assert abs(sim.theta) < 20.0
+    assert_safe_run(sim, cal)
+    assert_put_back(sim, autocenter=0)
+
+
+def test_a_grabbed_abort_does_not_move_the_wheel_afterwards(monkeypatch):
+    sim = SimWheel(start_deg=150.0, game_spring=0.0, autocenter=0)
+    sim.grab(30.0)
+    at = []
+    real = Calibration._grabbed
+
+    def grabbed(self, why):
+        at.append(sim.t)
+        return real(self, why)
+
+    monkeypatch.setattr(Calibration, '_grabbed', grabbed)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason in ('grabbed', 'stalled')
+    forces = [v for t, n, v in sim.writes if n == 'ext_force' and t >= at[0]]
+    assert forces and set(forces) == {'0'}
     assert_put_back(sim, autocenter=0)
 
 

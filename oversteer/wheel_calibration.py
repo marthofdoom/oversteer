@@ -99,6 +99,9 @@ class Calibration:
     PUSH_STALL_S = 0.5          # a push of the breakaway force and more that turns nothing for this long stops the run...
     RECOVER_STALL_S = 1.5       # ...in this long while centring after a near-lock (nothing else watches it)
     RESTORE_CENTRE_S = 2.0      # centring before the user's smaller range is put back: at most this long
+    # centring when a run ends early, per the reason: only where no hand and no fault is behind the end. A cancel
+    # is the user's wish to stop, so it gets the shorter time; a time-out is slow-wheel trouble, not a fault.
+    END_CENTRE_S = {'cancelled': 2.0, 'timeout': 3.0}
     MOVE_MAX = 0.35             # largest force while moving between positions
     MOVE_SPEEDS = (1.0, 0.55, 1.25, 0.8)     # shares of V_MOVE the moves take turns at
     MOVE_BOOST_RATE = 0.5       # full scale per second the push grows by while the wheel is slower than asked...
@@ -174,6 +177,7 @@ class Calibration:
         self.move_skips = 0
         self.first_pass_done = False    # every level both ways measured once: enough to keep if time runs out
         self.winding_down = False
+        self.ending = False             # centring after an early end: a pending cancel no longer stops the writes
         self.timed_out_in = None        # the step the time limit ended a kept run in
 
     # --- the public side ---
@@ -198,6 +202,9 @@ class Calibration:
             try:
                 self._prepare()
                 self._measure()
+            except Aborted as e:
+                self._end_centre(e.reason)
+                raise
             except ProxyLost as e:
                 self._zero()
                 raise Aborted('proxy', str(e)) from e
@@ -468,7 +475,7 @@ class Calibration:
 
     def _tick(self, w):
         """Write one force, wait for the next tick, read the wheel and check it. Returns the new reports."""
-        if self.cancel_event.is_set():
+        if self.cancel_event.is_set() and not self.ending:
             self._zero()
             raise Aborted('cancelled', _("Calibration cancelled."))
         now = self.io.now()
@@ -1019,24 +1026,28 @@ class Calibration:
             self.breakaway_max = max(self.breakaway_max, w)
             self._settle(0.15, check=False)
             self._unit(_("Breakaway"))
-            self._enter('breakaway')
-            # the other way: away from the nearer lock
-            towards_centre = -_sign(self.theta) or -self.sign
-            self._breakaway(towards_centre)
-            self._unit(_("Breakaway"))
             self.kick = max(self.KICK, min(self.SWEEP_MAX, 2.0 * self.breakaway_max))
             self._enter('strength')
-            # One push towards the centre for the wheel's strength: the movement loops are tuned from it
+            # One push towards the centre for the wheel's strength: the movement loops are tuned from it, and
+            # then the wheel is centred (the only move before that was the ramp's fraction of a degree)
+            towards_centre = -_sign(self.theta) or -self.sign
             self._settle(0.15, check=False)
             self._learn_strength(self._kick(towards_centre))
             self._brake()
             self._settle(0.1, check=False)
+            self._enter('centre')
+            self._move_to(0.0, timeout=8.0)
+            self._settle(0.2, check=False)
         finally:
             self.recovering = False
-        self._unit(_("Measuring the wheel's strength"))
-        # From the centre, a push each way (the other's reference)
+        # From the centre on: the breakaway the other way (the ramp at the start was one way, off-centre), then a
+        # push each way (the other's reference)
+        self._enter('breakaway')
+        self._step(self._breakaway, -1.0)
+        self._unit(_("Breakaway"))
+        self._enter('strength')
         accels = []
-        for d in (-towards_centre, towards_centre):
+        for d in (1.0, -1.0):
             self._step(self._move_to, 0.0)
             self._step(self._settle, 0.15)
             a = self._step(self._kick, d)
@@ -1046,6 +1057,7 @@ class Calibration:
                 accels.append(a)
         if accels:
             self._learn_strength(sorted(accels)[len(accels) // 2])
+        self._unit(_("Measuring the wheel's strength"))
         self._unit(_("Measuring the wheel's strength"))
 
         # Breakaway around the rim
@@ -1093,6 +1105,31 @@ class Calibration:
                 raise
             logging.info("calibration: not centred after the time limit (%s)", e)
         finally:
+            self.winding_down = False
+            self.recovering = False
+            self._zero()
+
+    def _end_centre(self, reason):
+        """An early end (an Aborted out of the measurement): turn the wheel to the centre, gently, when nothing
+        argues against moving it. Only a cancel (END_CENTRE_S: 2 s, the user wants it over) and a time-out (3 s)
+        do; a hand ('grabbed', 'stalled'), a fault ('unplugged', 'proxy', 'permission', 'stall', 'overspeed',
+        'near_lock') or an unknown direction get force 0 and nothing else. The same low force and guards as any
+        move (MOVE_MAX, recovering margins); whatever goes wrong here is swallowed, the end stays as it was."""
+        seconds = self.END_CENTRE_S.get(reason)
+        if not seconds or not self.sign_known or abs(self.theta) < 5.0:
+            self._zero()
+            return
+        self.ending = True
+        self.winding_down = True            # the time limit has a few seconds of grace for this
+        self.recovering = True
+        try:
+            self._zero()
+            self._move_to(0.0, tol=10.0, timeout=seconds)
+            self._settle(0.1, check=False)
+        except Exception as e:
+            logging.info("calibration: not centred after the early end (%s)", e)
+        finally:
+            self.ending = False
             self.winding_down = False
             self.recovering = False
             self._zero()
