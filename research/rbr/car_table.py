@@ -200,8 +200,10 @@ def build_car(row, data, source):
         'screen_name': row['name'],
         'drivetrain': data.get('drivetrain'),
         'mass_kg': round(1.0 / common['InverseMass'], 1),
-        'steer_lock_deg': round(common['MaxSteeringLock'] * 360.0, 1) if common.get('MaxSteeringLock') else None,
+        'steering_wheel_lock_deg': round(common['MaxSteeringLock'] * 360.0, 1) if common.get('MaxSteeringLock') else None,
         'steering_rack_ratio': common.get('SteeringRackRatio') or None,
+        'rack_travel_m': (round(common['MaxSteeringLock'] * common['SteeringRackRatio'], 4)
+                          if common.get('MaxSteeringLock') and common.get('SteeringRackRatio') else None),
         'limiter_rpm': int(limiter),
         'torque_curve': curve,
         'gear_sets': gear_sets,
@@ -288,10 +290,10 @@ def main():
 "overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: "
                  "1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: "
                  "ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. "
-                 "steer_lock_deg: Car MaxSteeringLock x 360, the STEERING-WHEEL angle from centre to full lock in degrees "
+                 "steering_wheel_lock_deg: Car MaxSteeringLock x 360, the STEERING-WHEEL angle from centre to full lock in degrees "
                  "(MaxSteeringLock is in wheel turns: x 720 is the steering_wheel degrees lock to lock cars_data.json lists, "
                  "540 on the Fiesta); steering_rack_ratio: Car SteeringRackRatio, rack travel in metres per steering-wheel "
-                 "turn (0.056 x 0.75 = 0.042 m, the lateral move of the tie-rod mount the r_tarmac.lsp 'lock' comment gives). A slot folder "
+                 "turn (rack_travel_m = MaxSteeringLock x SteeringRackRatio, centre to full lock: 0.056 x 0.75 = 0.042 m, the lateral move of the tie-rod mount the r_tarmac.lsp 'lock' comment gives). A slot folder "
                  "of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard "
                  "Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of "
                  "2026-10-26 (docs/richard-burns-rally.md)." % datetime.date.today().isoformat(),

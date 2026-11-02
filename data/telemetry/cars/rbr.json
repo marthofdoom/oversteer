@@ -2,15 +2,16 @@
  "game": "rbr",
  "title": "Richard Burns Rally (RallySimFans) car names, engines and gearing",
  "keys": "name is the RSFCarID as a string: the car key is rbr/<RSFCarID>, the one Oversteer makes from the install's Cars/Cars.ini [Car05] (rbr_install.car_in_slot). screen_name is RSF's name of the car. `names` lists every car RSF's car list (rsfdata/cache/cars.json) has, with the facts cars_data.json holds (path, year, drivetrain, gear count); `cars` only those whose NGP physics have been on the install.",
- "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-11-01; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm seen reached is up to 0.6 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. steer_lock_deg: Car MaxSteeringLock x 360, the STEERING-WHEEL angle from centre to full lock in degrees (MaxSteeringLock is in wheel turns: x 720 is the steering_wheel degrees lock to lock cars_data.json lists, 540 on the Fiesta); steering_rack_ratio: Car SteeringRackRatio, rack travel in metres per steering-wheel turn (0.056 x 0.75 = 0.042 m, the lateral move of the tie-rod mount the r_tarmac.lsp 'lock' comment gives). A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
+ "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-11-01; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm seen reached is up to 0.6 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. steering_wheel_lock_deg: Car MaxSteeringLock x 360, the STEERING-WHEEL angle from centre to full lock in degrees (MaxSteeringLock is in wheel turns: x 720 is the steering_wheel degrees lock to lock cars_data.json lists, 540 on the Fiesta); steering_rack_ratio: Car SteeringRackRatio, rack travel in metres per steering-wheel turn (rack_travel_m = MaxSteeringLock x SteeringRackRatio, centre to full lock: 0.056 x 0.75 = 0.042 m, the lateral move of the tie-rod mount the r_tarmac.lsp 'lock' comment gives). A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
  "cars": [
   {
    "name": "11",
    "screen_name": "Ford Fiesta WRC 2019",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
-   "steer_lock_deg": 270.0,
+   "steering_wheel_lock_deg": 270.0,
    "steering_rack_ratio": 0.056,
+   "rack_travel_m": 0.042,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -120,8 +121,9 @@
    "screen_name": "Citroen C3 WRC 2017",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
-   "steer_lock_deg": 270.0,
+   "steering_wheel_lock_deg": 270.0,
    "steering_rack_ratio": 0.056,
+   "rack_travel_m": 0.042,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -227,8 +229,9 @@
    "screen_name": "Toyota Yaris WRC 2018",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
-   "steer_lock_deg": 270.0,
+   "steering_wheel_lock_deg": 270.0,
    "steering_rack_ratio": 0.056,
+   "rack_travel_m": 0.042,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -338,8 +341,9 @@
    "screen_name": "Hyundai i20 Coupe WRC 2020",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
-   "steer_lock_deg": 270.0,
+   "steering_wheel_lock_deg": 270.0,
    "steering_rack_ratio": 0.056,
+   "rack_travel_m": 0.042,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -453,8 +457,9 @@
    "screen_name": "Hyundai i20 Coupe WRC 2021",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
-   "steer_lock_deg": 270.0,
+   "steering_wheel_lock_deg": 270.0,
    "steering_rack_ratio": 0.056,
+   "rack_travel_m": 0.042,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -568,8 +573,9 @@
    "screen_name": "Skoda Fabia RS Rally2",
    "drivetrain": "awd",
    "mass_kg": 1430.6,
-   "steer_lock_deg": 214.2,
+   "steering_wheel_lock_deg": 214.2,
    "steering_rack_ratio": 0.0756,
+   "rack_travel_m": 0.045,
    "limiter_rpm": 7500,
    "torque_curve": [
     [
@@ -678,8 +684,9 @@
    "screen_name": "Toyota GR Yaris Rally2",
    "drivetrain": "awd",
    "mass_kg": 1430.6,
-   "steer_lock_deg": 239.8,
+   "steering_wheel_lock_deg": 239.8,
    "steering_rack_ratio": 0.0675,
+   "rack_travel_m": 0.045,
    "limiter_rpm": 7500,
    "torque_curve": [
     [

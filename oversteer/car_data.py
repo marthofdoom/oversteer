@@ -9,8 +9,9 @@ the game sends it: the car key is '<game>/<name>'), `limiter_rpm`,
 `torque_curve` ([[rpm, Nm], ...], linear between points), `gear_sets`
 ([{id, gears: [1st, 2nd, ...], primary, reverse, default}]),
 `final_drive`, `gearbox_efficiency`, `tyre_radius_m` ({surface: [front,
-rear]}), `mass_kg`, `steer_lock_deg` (steering wheel, centre to full lock) and
-`steering_rack_ratio` (rack travel in m per wheel turn; both RBR only, absent
+rear]}), `mass_kg`, `steering_wheel_lock_deg` (steering wheel, centre to full lock) and
+`steering_rack_ratio` (rack travel in m per wheel turn) and `rack_travel_m` (centre to
+full lock; all three RBR only, absent
 elsewhere: read with .get), `drivetrain`, `shift_lights_rpm` (the game's own)
 and `sources`.
 """
