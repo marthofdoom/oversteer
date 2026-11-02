@@ -673,10 +673,18 @@ ADDED_COLUMNS = (
 
 
 def _add_columns(db):
-    for table, column in ADDED_COLUMNS:
-        names = {r[1] for r in db.execute('PRAGMA table_info({})'.format(table))}
-        if column.split()[0] not in names:
+    missing = [(table, column) for table, column in ADDED_COLUMNS
+               if column.split()[0] not in {r[1] for r in db.execute('PRAGMA table_info({})'.format(table))}]
+    if not missing:
+        return
+    db.execute('BEGIN')
+    try:
+        for table, column in missing:
             db.execute('ALTER TABLE {} ADD COLUMN {}'.format(table, column))
+        db.execute('COMMIT')
+    except sqlite3.Error:
+        db.execute('ROLLBACK')
+        raise
 
 
 def _connect(path):
@@ -1055,23 +1063,30 @@ class Reader:
     def stage_pb_builds(self, stage, car, build=None):
         """The car's PB on the stage over all builds of the game and on `build` (a sessions.game_build):
         {'pb': {'run', 'time', 'build'} or None, 'build': {'run', 'time'} or None ('build' is None for a `build` of
-        None)}. Ranked as the PB is (coach_context.stage_pb_id: a finished run of a class that can be a PB, on the
-        game's clock once the car has one there; of equal times the newer), over every run of the car there."""
-        sql = ('SELECT r.id, r.result_time, s.game_build FROM runs r JOIN sessions s ON r.session = s.id '
-               'WHERE r.stage = ? AND s.car = ? AND r.ended IS NOT NULL AND r.finished = 1 AND r.result_time > 0 '
-               'AND ' + self.PB_RANKED + ' AND ' + self.ON_CLOCK + '{} ORDER BY r.result_time, r.started DESC, '
-               'r.id DESC LIMIT 1')
-        out = {'pb': None, 'build': None}
+        None)}. The PB (coach_context.stage_pb_id reads it here): the quickest finished run of the car there of a
+        class that can be a PB, over every run it has there (PBs are never deleted), on the game's clock once the car
+        has one there; of equal times the newer. A file the writer has not opened since the build column (or
+        run_clock) gives builds of None (every run ranked)."""
         try:
-            rows = self._rows(sql.format(''), (stage, car))
-            if rows:
-                out['pb'] = {'run': rows[0][0], 'time': rows[0][1], 'build': rows[0][2]}
-            if build is not None:
-                rows = self._rows(sql.format(' AND s.game_build = ?'), (stage, car, build))
-                if rows:
-                    out['build'] = {'run': rows[0][0], 'time': rows[0][1]}
-        except sqlite3.OperationalError:                      # a file the writer has not opened since the column
+            has_build = any(r[1] == 'game_build' for r in self._rows('PRAGMA table_info(sessions)'))
+            has_clock = bool(self._rows("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'run_clock'"))
+        except sqlite3.OperationalError:
             return {'pb': None, 'build': None}
+        sql = ('SELECT r.id, r.result_time, {} FROM runs r JOIN sessions s ON r.session = s.id '
+               'WHERE r.stage = ? AND s.car = ? AND r.ended IS NOT NULL AND r.finished = 1 AND r.result_time > 0 '
+               'AND {}{}{{}} ORDER BY r.result_time, r.started DESC, r.id DESC LIMIT 1').format(
+                   's.game_build' if has_build else 'NULL', self.PB_RANKED,
+                   ' AND ' + self.ON_CLOCK if has_clock else '')
+        out = {'pb': None, 'build': None}
+        if car is None:                                       # any car's
+            sql = sql.replace('s.car = ?', '? IS NULL')
+        rows = self._rows(sql.format(''), (stage, car))
+        if rows:
+            out['pb'] = {'run': rows[0][0], 'time': rows[0][1], 'build': rows[0][2]}
+        if build is not None and has_build:
+            rows = self._rows(sql.format(' AND s.game_build = ?'), (stage, car, build))
+            if rows:
+                out['build'] = {'run': rows[0][0], 'time': rows[0][1]}
         return out
 
     def runs_to_backfill(self, limit=3):

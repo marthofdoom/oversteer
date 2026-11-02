@@ -2,6 +2,7 @@
 found, the build stored with the session, carried through the migration and the merge tool, and the PB on a build
 told from the all-time PB."""
 import importlib.util
+import json
 import os
 import shutil
 import sqlite3
@@ -115,6 +116,22 @@ def test_a_listed_library_without_the_manifest_or_with_a_broken_one_is_skipped(t
     assert 'appmanifest_1551360.acf' in seen and seen.count('appmanifest_2483190.acf') == 1
 
 
+def test_a_root_seen_under_two_names_is_read_once(tmp_path):
+    roots, games = steam(tmp_path)
+    link = tmp_path / 'home' / '.steam'
+    link.mkdir()
+    (link / 'steam').symlink_to(roots[0])
+    reads = []
+
+    def read(path):                             # the sandbox resolves no symlink of the host's: realpath cannot help
+        reads.append(path)
+        return steam_build.read_text(path, host=False)
+    libs = steam_build.libraries([roots[0], str(link / 'steam')], read)
+    assert [p for p, _ in libs] == [roots[0], games] and len(reads) == 2
+    steam_build.find('acr', [roots[0], str(link / 'steam')], read)
+    assert sum(p.endswith('appmanifest_3917090.acf') for p in reads) == 1
+
+
 def test_unreadable_files_mean_an_unknown_build(tmp_path):
     roots, _ = steam(tmp_path)
     assert steam_build.find('acr', roots, read=lambda path: None) is None
@@ -126,8 +143,8 @@ def test_inside_the_flatpak_the_host_reads_what_the_sandbox_cannot(tmp_path, mon
     def run(cmd, **kw):
         calls.append(cmd)
         if cmd[-1].endswith('present.vdf'):
-            return subprocess.CompletedProcess(cmd, 0, stdout=b'"x" { "y" "1" }')
-        return subprocess.CompletedProcess(cmd, 1, stdout=b'')
+            return subprocess.CompletedProcess(cmd, 0, stdout=b'"x" { "y" "1" }', stderr=b'')
+        return subprocess.CompletedProcess(cmd, 1, stdout=b'', stderr=b"head: cannot open 'x' for reading\n")
     monkeypatch.setattr(steam_build.subprocess, 'run', run)
     assert steam_build.read_text(str(tmp_path / 'present.vdf'), host=True) == '"x" { "y" "1" }'
     assert calls[0][:2] == ['flatpak-spawn', '--host'] and calls[0][-1] == str(tmp_path / 'present.vdf')
@@ -144,6 +161,15 @@ def test_inside_the_flatpak_the_host_reads_what_the_sandbox_cannot(tmp_path, mon
     monkeypatch.setattr(steam_build.subprocess, 'run', broken)
     assert steam_build.read_text(str(tmp_path / 'present.vdf'), host=True) is None
     assert steam_build.read_text(str(tmp_path / 'present.vdf'), host=True) is None and len(calls) == 3
+    # and so is flatpak-spawn exiting with an error of its own (the portal refused); head's own is a missing file
+    steam_build.clear_cache()
+
+    def refused(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, stdout=b'', stderr=b'Portal call failed: access denied\n')
+    monkeypatch.setattr(steam_build.subprocess, 'run', refused)
+    assert steam_build.read_text(str(tmp_path / 'present.vdf'), host=True) is None
+    assert steam_build.read_text(str(tmp_path / 'present.vdf'), host=True) is None and len(calls) == 4
 
 
 def test_lookup_reads_once_per_cache_period(monkeypatch):
@@ -256,8 +282,8 @@ def test_the_pb_on_a_build_beside_the_all_time_pb(tmp_path):
     assert store.stage_pb_builds('acr:nowhere', car, '200') == {'pb': None, 'build': None}
     assert store.run_build(on_200) == '200' and store.run_build(old) is None and store.run_build(999) is None
     # the Run view's header: shown where the run's build is known and the all-time PB was set on another
-    assert run_analysis.build_pb(store, store.run(on_200)) == {'pb': 141.6, 'pb_build': None, 'build': '200',
-                                                               'time': 143.0, 'run': on_200}
+    # an all-time PB of no known build (set before builds were kept) is not another build: nothing to say
+    assert run_analysis.build_pb(store, store.run(on_200)) is None
     assert run_analysis.build_pb(store, store.run(old)) is None              # its build is unknown
     quickest = drive(store, car, 9000.0, 140.0, '200')
     store.commit()
@@ -314,3 +340,46 @@ def test_the_merge_tool_carries_the_build(tmp_path):
     lines = []
     merge_db.run_merge(target, old, dry_run=True, workdir=str(tmp_path / 'work2'), out=lines.append)
     assert any('nothing to merge' in line for line in lines)    # brought to this schema, nothing lost or added
+
+
+def test_the_pb_is_ranked_over_every_run_however_many(tmp_path):
+    """coach_context.stage_pb_id and the PB on a build are one definition, over all of the car's runs (an old PB is
+    never hidden by newer runs)."""
+    from oversteer import coach_context
+    store = open_store(str(tmp_path / 'telemetry.db'))
+    car = store.car_id('p', 'acr/car', 'acr', 'Car', {})
+    pb = drive(store, car, 1000.0, 130.0, '100')
+    for i in range(80):
+        drive(store, car, 2000.0 + i * 300, 140.0 + i % 7, '200')
+    tie = drive(store, car, 50000.0, 140.0, '200')                       # of equal times, the newer
+    store.commit()
+    assert coach_context.stage_pb_id(store, STAGE, car) == pb == store.stage_pb_builds(STAGE, car)['pb']['run']
+    assert store.stage_pb_builds(STAGE, car, '200')['build'] == {'run': tie, 'time': 140.0}
+    assert coach_context.stage_pb_id(store, STAGE, None) == pb                # any car's
+    assert coach_context.stage_pb_id(store, 'acr:nowhere', car) is None
+    plan = ' '.join(r[-1] for r in store.db.execute(
+        'EXPLAIN QUERY PLAN SELECT r.id FROM runs r JOIN sessions s ON r.session = s.id WHERE r.stage = ? '
+        'AND s.car = ?', (STAGE, car)).fetchall())
+    assert 'runs_stage' in plan                                         # by the stage's index, not a scan
+
+
+def test_the_header_text_of_the_pb_on_a_build():
+    from oversteer.gtk_run_view import _build_pb
+    head = {'build_pb': {'pb': 141.6, 'time': 143.0}}
+    assert _build_pb(head, {'role': 'pb', 'time': 141.6}) == 'on this build 2:23.0'
+    assert _build_pb(head, {'role': 'best', 'time': 150.0}) == 'PB 2:21.6 · on this build 2:23.0'
+    assert _build_pb(head, None) == 'PB 2:21.6 · on this build 2:23.0' and _build_pb({'build_pb': None}, None) == ''
+
+
+@pytest.mark.skipif(shutil.which('node') is None, reason='no node')
+def test_the_web_header_says_the_same():
+    page = open(os.path.join(HERE, '..', 'data', 'telemetry', 'web', 'index.html')).read()
+    start = page.index('function rvBuildPb(H, ref) {')
+    body = page[start:page.index('\n}\n', start) + 3]
+    script = ('const clock = (t) => Math.floor(t / 60) + ":" + (t % 60).toFixed(1).padStart(4, "0");\n' + body +
+              'const H = {build_pb: {pb: 141.6, time: 143.0}};\n'
+              'console.log(JSON.stringify([rvBuildPb(H, {role: "pb", time: 141.6}), rvBuildPb(H, {role: "best", '
+              'time: 150}), rvBuildPb(H, null), rvBuildPb({build_pb: null}, null)]));')
+    out = subprocess.run(['node', '-e', script], stdout=subprocess.PIPE, check=True).stdout.decode()
+    assert json.loads(out) == [' · on this build 2:23.0', ' · PB 2:21.6 · on this build 2:23.0',
+                               ' · PB 2:21.6 · on this build 2:23.0', '']

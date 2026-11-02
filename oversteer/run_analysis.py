@@ -194,8 +194,9 @@ def head(reader, run_id, tips=None, namespace=None):
 
 def build_pb(reader, run):
     """The PB on the game build `run` was driven on, beside the all-time PB, where the two differ: {'pb': the all-time
-    PB's time, 'pb_build': its build (None unknown), 'build': the run's build, 'time': the PB on it, 'run': that run's
-    id}. None where the run's build is unknown, the all-time PB was set on it, or it has no PB yet."""
+    PB's time, 'pb_build': its build, 'build': the run's build, 'time': the PB on it, 'run': that run's id}. None where
+    either build is unknown (unknown is not another build: every session from before builds were kept), the all-time
+    PB was set on the run's build, or that build has no PB yet."""
     if not run.get('stage') or run.get('car') is None or not hasattr(reader, 'stage_pb_builds'):
         return None
     build = reader.run_build(run['id'])
@@ -203,7 +204,7 @@ def build_pb(reader, run):
         return None
     found = reader.stage_pb_builds(run['stage'], run['car'], build)
     pb, mine = found['pb'], found['build']
-    if pb is None or mine is None or pb['build'] == build:
+    if pb is None or mine is None or pb['build'] is None or pb['build'] == build:
         return None
     return {'pb': pb['time'], 'pb_build': pb['build'], 'build': build, 'time': mine['time'], 'run': mine['run']}
 

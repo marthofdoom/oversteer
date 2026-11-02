@@ -94,13 +94,18 @@ def _read_host(path):
         return None
     try:
         done = subprocess.run(['flatpak-spawn', '--host', 'head', '-c', str(MAX_BYTES), '--', path],
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=HOST_TIMEOUT)
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=HOST_TIMEOUT)
     except (OSError, subprocess.SubprocessError) as e:
         _host_failed_at = time.monotonic()
         logging.debug("steam build: flatpak-spawn failed: %s", e)
         return None
     if done.returncode != 0:
-        return None                     # no such file on the host
+        # head's own complaint (its name first, in any language) is a file the host lacks; anything else is
+        # flatpak-spawn failing to run it (the portal or the bus refused): not tried again for a while
+        if not done.stderr.lstrip().startswith(b'head:'):
+            _host_failed_at = time.monotonic()
+            logging.debug("steam build: flatpak-spawn failed: %s", done.stderr[:200])
+        return None
     return done.stdout.decode('utf-8', 'replace')
 
 
@@ -119,7 +124,7 @@ def read_text(path, host=None):
 def libraries(roots=STEAM_ROOTS, read=read_text):
     """[(library path, set of the app ids its entry in libraryfolders.vdf lists, or None where none is listed)]:
     every library each Steam root's libraryfolders.vdf names, and the root itself, once each."""
-    found, index = [], {}
+    found, index, texts = [], {}, set()
 
     def add(path, apps):
         key = os.path.realpath(path)
@@ -133,8 +138,9 @@ def libraries(roots=STEAM_ROOTS, read=read_text):
     for root in roots:
         root = os.path.expanduser(root)
         text = read(os.path.join(root, 'steamapps', 'libraryfolders.vdf'))
-        if text is None:
-            continue
+        if text is None or text in texts:
+            continue                # none, or a root seen under another name (a symlink the sandbox cannot resolve)
+        texts.add(text)
         for name, entry in (parse_vdf(text).get('libraryfolders') or {}).items():
             if not name.isdigit():
                 continue
