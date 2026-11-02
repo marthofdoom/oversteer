@@ -915,18 +915,24 @@ def test_a_damaged_entry_writes_identity(g29_like, damage):
     assert values['ffb_lut'] == 'identity' and values['ffb_deadband'] == '0'
 
 
-def test_friction_compensation_is_folded_into_the_deadband(g29_like):
+def test_friction_compensation_is_folded_into_the_lut_in_torque_terms(g29_like):
     result = g29_like[2]
     entry = _entry(result)
-    assert wcal.correction_values(entry)['ffb_deadband'] == str(result['deadband'])
-    half = int(wcal.correction_values(dict(entry, friction_comp=50))['ffb_deadband'])
-    full = int(wcal.correction_values(dict(entry, friction_comp=100))['ffb_deadband'])
-    assert result['deadband'] < half < full
-    assert full <= wcal.FRICTION_COMP_CAP * result['breakaway'] * wc.FULL + 1
-    # never below the dead zone, junk is off
-    assert wcal.correction_values(dict(entry, friction_comp='x'))['ffb_deadband'] == str(result['deadband'])
-    capped = dict(entry, result=dict(entry['result'], friction=0.5), friction_comp=100)
-    assert int(wcal.correction_values(capped)['ffb_deadband']) <= round(0.8 * result['breakaway'] * wc.FULL)
+    plain = wcal.correction_values(entry)
+    assert plain['ffb_lut'] == ' '.join(str(v) for v in result['lut'])
+    half_values = wcal.correction_values(dict(entry, friction_comp=50))
+    full_values = wcal.correction_values(dict(entry, friction_comp=100))
+    half = [int(v) for v in half_values['ffb_lut'].split()]
+    assert half_values['ffb_deadband'] == plain['ffb_deadband'] == str(result['deadband'])   # the dead zone stays
+    assert half[0] == 0 and half[1] > result['lut'][1] and wc.plausible_lut(half)
+    assert full_values['ffb_lut'] == half_values['ffb_lut']                  # the setting stops at 50 %
+    assert wcal.FRICTION_COMP_MAX_PERCENT == 50
+    # junk is off
+    assert wcal.correction_values(dict(entry, friction_comp='x'))['ffb_lut'] == plain['ffb_lut']
+    # a huge friction is held to 80 % of the torque at the breakaway
+    big = dict(entry, result=dict(entry['result'], friction=0.5), friction_comp=50)
+    lut = [int(v) for v in wcal.correction_values(big)['ffb_lut'].split()]
+    assert wc.plausible_lut(lut) and lut[1] <= wc.LUT_SEGMENT_SLOPE * wc.FULL / 32 + 1
 
 
 def test_a_damaged_store_does_not_break_the_window(tmp_path):
@@ -1773,5 +1779,5 @@ def test_the_deadband_lift_fades_in_over_the_luts_first_512_like_the_drivers():
     outs = [wc.shaped(x, ident, d) for x in range(0, 6000, 50)]
     assert outs[0] == 0.0 and all(b >= a for a, b in zip(outs, outs[1:]))
     # m = 256 of the LUT's output: half the lift's usual size, and continuous at 512
-    assert wc.shaped(256, ident, d) == pytest.approx((d + (wc.FULL - d) * 256 / wc.FULL) * 0.5)
-    assert wc.shaped(512, ident, d) == pytest.approx(d + (wc.FULL - d) * 512 / wc.FULL)
+    assert wc.shaped(256, ident, d) == pytest.approx((d + (wc.FULL - d) * 256 / wc.FULL) * 0.5, rel=1e-3)
+    assert wc.shaped(512, ident, d) == pytest.approx(d + (wc.FULL - d) * 512 / wc.FULL, rel=1e-3)

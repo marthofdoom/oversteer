@@ -407,14 +407,19 @@ def inverse_pl(xs, ys, y):
     return float(xs[-1])
 
 
-def build_lut(knots, r, d, points=LUT_POINTS):
+def build_lut(knots, r, d, points=LUT_POINTS, comp=0.0):
     """The ffb_lut values (input i * 32767 / (points - 1)) and ffb_deadband value that make the torque
-    linear in the requested force, for the relative curve r over the knots and the dead zone d."""
+    linear in the requested force, for the relative curve r over the knots and the dead zone d. With
+    `comp` (a share of the full-scale torque, the friction to cancel) the torque follows comp + (1 - comp) * x
+    instead of x for any request above zero: the lift is made in torque space, so it is the same size
+    wherever the motor's curve is steep or flat. The first LUT point is the ramp up from 0, so the step at
+    the bottom is spread over the first segment."""
     xs, ys = torque_model(knots, r, d)
     top = ys[-1]
     lut = []
     for i in range(points):
-        target = top * i / (points - 1)
+        x = i / (points - 1)
+        target = top * (comp + (1.0 - comp) * x) if i else 0.0
         u = inverse_pl(xs, ys, target)                 # motor command giving that torque
         v = 0.0 if d >= 1 else (u - d) / (1.0 - d)     # LUT output before the driver's deadband lift
         lut.append(int(round(min(max(v, 0.0), 1.0) * FULL)))

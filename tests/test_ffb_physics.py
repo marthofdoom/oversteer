@@ -137,10 +137,6 @@ def test_friction_compensation_never_lifts_past_the_breakaway(g29):
         assert tau(dead / FULL) < tau(g29['breakaway'])           # standing, it cannot start the wheel by itself
 
 
-@pytest.mark.xfail(strict=True, reason="defect: friction compensation is a deadband lift in motor-command units "
-                   "(wheel_calibration.compensated_deadband); through the G29's steep curve (0.24 -> 0.67 torque over "
-                   "command 0.30 -> 0.40) it adds up to +0.14 of full torque at a 25 % request, twice the friction it "
-                   "is meant to cancel")
 @pytest.mark.parametrize('comp', [50, 100])
 def test_friction_compensation_adds_no_more_than_the_friction(g29, comp):
     rs, out, _dead = R.linearity(g29, comp)
@@ -156,11 +152,9 @@ def test_a_hands_off_wheel_settles_at_acr_like_centring(g29, comp):
         assert crossings == 0 and amp < 25.0
 
 
-@pytest.mark.xfail(strict=True, reason="defect: with the wheel's friction lower than measured (warm: x0.5), friction "
-                   "compensation 100 % turns a stable hands-off wheel (k 0.012/deg, 34 ms) into a +-29 deg limit cycle")
 def test_friction_compensation_does_not_destabilise_a_warm_wheel(g29):
     stable = R.hands_off(g29, 0.012, 0, friction_scale=0.5)
-    comp = R.hands_off(g29, 0.012, 100, friction_scale=0.5)
+    comp = R.hands_off(g29, 0.012, 100, friction_scale=0.5)          # (100 is held to the 50 % maximum)
     assert stable[1] == 0
     assert comp[1] == 0
 

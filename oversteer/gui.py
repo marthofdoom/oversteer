@@ -2403,7 +2403,7 @@ class Gui:
         self._change_wheel_entry(soft_clip=max(0, min(100, int(value))))
 
     def set_wheel_friction_comp(self, value):
-        self._change_wheel_entry(friction_comp=max(0, min(100, int(value))))
+        self._change_wheel_entry(friction_comp=max(0, min(wcal.FRICTION_COMP_MAX_PERCENT, int(value))))
 
     def start_calibration(self):
         if self.calibration is not None or not self._wheel_supported():

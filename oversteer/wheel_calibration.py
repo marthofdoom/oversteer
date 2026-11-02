@@ -29,6 +29,8 @@ import gzip
 import json
 import logging
 import math
+
+import numpy as np
 import os
 import threading
 import time
@@ -1577,13 +1579,13 @@ def new_entry(result, old=None):
         'dither': old['dither'] if old.get('dither_chosen') else bool(result.get('dither')),
         'dither_chosen': bool(old.get('dither_chosen')),
         'soft_clip': _clamped_int(old.get('soft_clip'), 0, 100),
-        'friction_comp': _clamped_int(old.get('friction_comp'), 0, 100),
+        'friction_comp': _clamped_int(old.get('friction_comp'), 0, FRICTION_COMP_MAX_PERCENT),
     }
     return entry
 
 
 ENTRY_VERSION = 1
-FRICTION_COMP_CAP = 0.8         # friction compensation lifts the force at most to this share of the breakaway
+FRICTION_COMP_CAP = 0.8         # friction compensation cancels at most this share of the torque at the breakaway
 
 
 def _clamped_int(value, low, high, default=0):
@@ -1623,27 +1625,49 @@ def valid_entry(entry):
 DEADBAND_CEILING = min(0.2, wc.MAX_DEAD_ZONE + 0.05)    # ffb_deadband never above this share, whatever the inputs
 
 
-def compensated_deadband(result, percent):
-    """ffb_deadband with `percent` of the measured Coulomb friction folded in: the lift then starts at the
-    command that gives that much torque, so the smallest force just about overcomes the friction. Capped at
-    FRICTION_COMP_CAP of the breakaway force (past that the wheel would move by itself), and in any case at
+FRICTION_COMP_MAX_PERCENT = 50  # (the UI and the stored value stop here) the force that cancels the friction as measured
+                                # pushes a wheel whose friction has dropped (warm) past what it needs, and at 100 % that
+                                # turned a stable centring into a limit cycle of +-29 degrees in the physics check
+
+
+def compensated_deadband(result, percent=0):
+    """ffb_deadband: the measured dead zone, whatever the friction compensation (that is in the LUT, in torque
+    terms: a lift in motor-command units would be 3-4 times too big where the motor's curve is steep), at most
     DEADBAND_CEILING of full scale."""
     ceiling = int(DEADBAND_CEILING * wc.FULL)
     deadband = result.get('deadband')
     if isinstance(deadband, bool) or not isinstance(deadband, int):
         return 0
-    deadband = max(0, min(deadband, ceiling))
-    share = _clamped_int(percent, 0, 100) / 100.0
+    return max(0, min(deadband, ceiling))
+
+
+def compensated_lut(result, percent):
+    """The ffb_lut for a stored result with `percent` of the measured Coulomb friction cancelled: the torque is
+    built for the request x as c + (1 - c) * x (c = share * friction, a share of the full-scale torque), so the
+    smallest force just about overcomes the friction and full scale stays full scale. c is at most
+    FRICTION_COMP_CAP of the torque at the breakaway command (past that the wheel would move by itself) and
+    the share at most FRICTION_COMP_MAX_PERCENT. Without a usable curve or friction, the plain LUT."""
+    lut = result['lut']
+    share = _clamped_int(percent, 0, FRICTION_COMP_MAX_PERCENT) / 100.0
     friction = _share(result.get('friction'))
     breakaway = _share(result.get('breakaway'))
     if not share or friction is None or breakaway is None:
-        return deadband
-    target = wc.shaped(friction * wc.FULL, result['lut'], deadband)
-    if not math.isfinite(target):
-        return deadband
-    lifted = deadband + share * (target - deadband)
-    cap = min(FRICTION_COMP_CAP * breakaway * wc.FULL, ceiling)
-    return int(round(max(deadband, min(lifted, cap, ceiling))))
+        return list(lut)
+    try:
+        knots = [float(k) for k in result['knots']]
+        curve = np.asarray([float(v) for v in result['curve']])
+        d = compensated_deadband(result) / wc.FULL
+        if len(knots) != len(curve) or len(knots) < 3 or not np.all(np.isfinite(curve)):
+            return list(lut)
+        xs, ys = wc.torque_model(knots, curve, d)
+        stick = float(np.interp(breakaway, xs, ys) / ys[-1])
+        comp = min(share * friction, FRICTION_COMP_CAP * stick)
+        if not math.isfinite(comp) or comp <= 0:
+            return list(lut)
+        new, _db = wc.build_lut(knots, curve, d, len(lut), comp)
+    except (KeyError, TypeError, ValueError, IndexError):
+        return list(lut)
+    return new if wc.plausible_lut(new) else list(lut)
 
 
 def correction_values(entry):
@@ -1654,7 +1678,7 @@ def correction_values(entry):
     use = bool(entry.get('use')) and valid_entry(entry)
     result = entry.get('result') if use else None
     return {
-        'ffb_lut': ' '.join(str(v) for v in result['lut']) if use else 'identity',
+        'ffb_lut': ' '.join(str(v) for v in compensated_lut(result, entry.get('friction_comp'))) if use else 'identity',
         'ffb_deadband': str(compensated_deadband(result, entry.get('friction_comp'))) if use else '0',
         'ffb_dither': '1' if entry.get('dither') is True else '0',
         'ffb_soft_clip': str(_clamped_int(entry.get('soft_clip'), 0, 100)),
