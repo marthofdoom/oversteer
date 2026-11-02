@@ -155,19 +155,19 @@ class TorqueLearner:
 
     def _solve(self, a_hint):
         a_prior = self._a if self._a else a_hint
-        # normal equations in the features' own units: a ridge on b and c only, toward -a t0 and -a s0
+        # normal equations in the features' own units: a ridge on a, b and c toward one point (a, -a t0, -a s0); a ridge
+        # on b and c alone drags a negative when Mz and Fy are collinear, every later solve is then rejected
         lam = PRIOR_W * 0.3
         t0, s0 = self.prior
         m = [row[:] for row in self._s]
         rhs = self._v[:]
-        for i, target in ((1, -a_prior * t0 * SIGMA[1]), (2, -a_prior * s0 * SIGMA[2])):
+        for i, target in ((0, a_prior * SIGMA[0]), (1, -a_prior * t0 * SIGMA[1]), (2, -a_prior * s0 * SIGMA[2])):
             m[i][i] += lam
             rhs[i] += lam * target
         theta = _solve3(m, rhs)
-        if theta is None:
-            return
-        a = theta[0] / SIGMA[0]
-        if not a > MIN_A * a_hint:
+        a = None if theta is None else theta[0] / SIGMA[0]
+        if a is None or not a > MIN_A * a_hint:
+            self.fit_trail = self.fit_scrub = None       # nothing slews toward a stale fit
             return
         self._a = a
         self.fit_trail = -theta[1] / SIGMA[1] / a

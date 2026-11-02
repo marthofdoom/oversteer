@@ -17,7 +17,7 @@ So it scales the game's force by that and nothing else:
   Forza's normalised slip channels (|1| about the grip limit). Forza's own
   TireCombinedSlip weighs the two alike; the trail wants slip ratio
   weighed more, so s is computed here.
-- g = exp(-s^Q), clamped to [G_MIN, 1]: never stronger than the game, never
+- g = G_MIN + (1 - G_MIN) exp(-s^Q), in [G_MIN, 1] (only the pneumatic share fades): never stronger than the game, never
   lighter than a real steering with only its caster left (G_MIN, below). The user's "Understeer lightness" (0..1, default STRENGTH)
   scales how much of the drop is played: g_eff = 1 - strength x (1 - g).
 - Only above MIN_SPEED and with both front slip channels there: g_eff 1
@@ -95,14 +95,15 @@ KEEP = 0.2                               # |r| to stay ready
 
 
 def lightness(sample, a=A, k=K, q=Q):
-    """exp(-s^q) for the sample's front tyres, clamped to [G_MIN, 1]; None without the channels."""
+    """G_MIN + (1 - G_MIN) exp(-s^q) for the sample's front tyres (only the pneumatic share fades; the caster share
+    stays), in [G_MIN, 1]; None without the channels."""
     angles, ratios = sample.slip_angle, sample.slip_ratio
     if angles is None or ratios is None or len(angles) < 2 or len(ratios) < 2:
         return None
     s = 0.5 * (math.hypot(angles[0] / a, ratios[0] / k) + math.hypot(angles[1] / a, ratios[1] / k))
     if not math.isfinite(s):
         return None
-    return min(max(math.exp(-s ** q), G_MIN), 1.0)
+    return G_MIN + (1.0 - G_MIN) * math.exp(-s ** q)
 
 
 class _Corr:

@@ -42,8 +42,12 @@ def fh6(**kw):
     return s
 
 
+def pneumatic(s):
+    return fa.G_MIN + (1.0 - fa.G_MIN) * math.exp(-s ** fa.Q)      # only the pneumatic share fades
+
+
 def expected_g(alpha, kappa=0.0, strength=fa.STRENGTH):
-    g = min(max(math.exp(-math.hypot(alpha / fa.A, kappa / fa.K) ** fa.Q), fa.G_MIN), 1.0)
+    g = pneumatic(math.hypot(alpha / fa.A, kappa / fa.K))
     return 1.0 - strength * (1.0 - g)
 
 
@@ -147,8 +151,8 @@ def test_the_gain_follows_the_combined_front_slip():
     assert fa.lightness(fh6()) == 1.0
     gs = [fa.lightness(fh6(slip_angle=(a, a, 0.0, 0.0))) for a in (0.1, 0.3, 0.5, 0.6)]
     assert all(x > y for x, y in zip(gs, gs[1:]))
-    assert gs[0] > 0.99 and gs[3] == pytest.approx(math.exp(-(0.6 / fa.A) ** fa.Q), rel=1e-5)
-    assert fa.lightness(fh6(slip_angle=(0.7, 0.7, 0, 0))) == fa.G_MIN          # exp(-1) is under the clamp
+    assert gs[0] > 0.99 and gs[3] == pytest.approx(pneumatic(0.6 / fa.A), rel=1e-5)
+    assert fa.lightness(fh6(slip_angle=(0.7, 0.7, 0, 0))) == pytest.approx(pneumatic(1.0))          # the caster share stays, no clamp
     # The sign of the slip does not matter, the slip ratio counts (weighted by K against the angle's A)
     assert fa.lightness(fh6(slip_angle=(-0.5, -0.5, 0, 0))) == gs[2]
     assert fa.lightness(fh6(slip_angle=(0.3, 0.3, 0, 0), slip_ratio=(0.1, 0.1, 0, 0))) < gs[1]
@@ -158,7 +162,7 @@ def test_the_gain_follows_the_combined_front_slip():
     # The mean of the two fronts; the rears do not count
     assert fa.lightness(fh6(slip_angle=(0.0, 0.0, 2.0, 2.0))) == 1.0
     one = fa.lightness(fh6(slip_angle=(0.6, 0.0, 0, 0)))
-    assert one == pytest.approx(math.exp(-(0.5 * 0.6 / fa.A) ** fa.Q))
+    assert one == pytest.approx(pneumatic(0.5 * 0.6 / fa.A))
     # Clamped: never fully dead
     assert fa.lightness(fh6(slip_angle=(5.0, 5.0, 0, 0), slip_ratio=(1.0, 1.0, 0, 0))) == fa.G_MIN
     s = fh6()

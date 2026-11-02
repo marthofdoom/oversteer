@@ -22,6 +22,7 @@ import argparse
 import gzip
 import json
 import math
+import types
 import os
 import random
 import sys
@@ -485,10 +486,12 @@ def caster_kept_lightness(sample, a=fa.A, k=fa.K, q=fa.Q):
 def lightness_gap(points=101, q=fa.Q):
     """(largest shortfall of the shipped g below the caster-kept one, the pneumatic share where it is)."""
     worst = (-1.0, 0.0)
-    for i in range(points):
+    for i in range(1, points):
         x = i / (points - 1)                     # exp(-s^q): the pneumatic trail left
-        gap = (fa.G_MIN + (1 - fa.G_MIN) * x) - min(max(x, fa.G_MIN), 1.0)
-        worst = max(worst, (gap, x))
+        s = (-math.log(x)) ** (1.0 / q)
+        smp = types.SimpleNamespace(slip_angle=(s * fa.A, s * fa.A), slip_ratio=(0.0, 0.0))
+        gap = (fa.G_MIN + (1 - fa.G_MIN) * x) - fa.lightness(smp, q=q)
+        worst = max(worst, (abs(gap), x))
     return worst
 
 
