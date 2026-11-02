@@ -10,6 +10,7 @@ for both. The fit is a ridge regression over TAU seconds of unclipped moving sam
 it is driven; the learnt trail and scrub are bounded to physical ranges and slew-limited, so the force never
 jumps. Nothing here is on the force's timing: add() is a few multiplies per sample and the 3x3 solve runs
 every SOLVE_EVERY seconds of sample time. The file is written from a thread of its own."""
+import configparser
 import json
 import logging
 import math
@@ -37,6 +38,24 @@ FY_MIN = 800.0                           # N: a sample with less front side forc
 DFX_MIN = 300.0                          # N: ... less left-right difference of Fx says nothing about either
                                          # (a straight): it is not added and does not age the window, so the
                                          # learnt values hold through a long straight instead of eroding to the prior
+# The steering model: rack (kingpin) torque -> column torque -> the driver's torque at the rim.
+# Column torque T_c = front torque / STEER_RATIO (the overall ratio steering wheel : road wheel; a rally car's
+# typical 12-15, 13 as the default; where a game gives lock and wheel rotation the ratio is their quotient).
+# Power assist is a boost curve: the driver's torque T_d and the column torque are related by
+#     T_c = T_d + A(T_d, v),   A = k(v) * T_d^2 / (T0 + T_d)          (T_d >= 0, odd in the sign)
+# The assist share of the column torque grows with T_d (a hydraulic valve / EPS map is near-zero boost around the
+# centre, then ramps up with the torsion-bar torque), so the driver feels a stiffness of about 1 / (1 + k) of the
+# rack's: the usual "boost curve" shape of HPS / EPS (e.g. Bosch / ZF EPS characteristic maps, parametrised by
+# driver torque and vehicle speed; here a smooth analytic form, assumed - no car's real map is known). k(v) falls
+# with speed (heavy assist parked, light on the road). Parameters are fitted so that marth's ACR dump (front
+# torque / 13: p50 6.5 Nm, p90 22 Nm, p99 43 Nm at speed) gives about 0.5-1 Nm at the rim for an easy corner and
+# 2-3 Nm near the grip limit, the range a driver reports from a real power-steered car.
+# The map T_d -> T_c is monotone, so it inverts exactly (a quadratic in T_d, solved in closed form).
+STEER_RATIO = 13.0
+BOOST_T0 = 0.5                           # Nm: the driver torque where the boost reaches half of its slope
+BOOST_K_PARK = 40.0                      # boost slope k when parked ...
+BOOST_K_ROAD = 15.0                      # ... falling to this at speed
+BOOST_V0 = 8.0                           # m/s: the speed scale of that fall: k = ROAD + (PARK - ROAD) / (1 + (v/V0)^2)
 P99_RANGE = (5.0, 4000.0)                # Nm: the front steering torque's p99 kept per car
 SAVE_P99_STEP = 0.03                     # a p99 moved this share from what was saved is worth saving
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
@@ -44,8 +63,9 @@ MIN_A = 0.05                             # share of the strength hint: a fit wit
 
 class Store:
     """{car: (trail, scrub)} in a JSON file in the data folder; read once, written atomically. Per car it also keeps
-    the learnt p99 of the front steering torque (Nm, `p99`) and the steering ratio and assist share the rim
-    torque is worked out with (`ratio`, `assist`; absent = RackForce's defaults, set_rack() for a refined one)."""
+    the learnt p99 of the front steering torque (Nm, `p99`, a diagnostic) and the steering ratio and power-assist
+    class the rim torque is worked out with (`ratio`, `assist`: 1.0 = a road / rally car's power steering, 0.0 =
+    unassisted; absent = the defaults below, set_rack() for a refined one)."""
 
     def __init__(self):
         self.path = None                 # None: the data folder's file
@@ -77,7 +97,7 @@ class Store:
                             self._p99[car] = float(p99)
                         ratio, assist = v.get('ratio'), v.get('assist')
                         if isinstance(ratio, (int, float)) and isinstance(assist, (int, float)) \
-                                and 3.0 <= ratio <= 40.0 and 0.0 <= assist < 1.0:
+                                and 3.0 <= ratio <= 40.0 and 0.0 <= assist <= 2.0:
                             self._rack[car] = (float(ratio), float(assist))
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 pass
@@ -102,7 +122,7 @@ class Store:
             return self._p99.get(car)
 
     def get_rack(self, car):
-        """(steering ratio, assist share) kept for the car, None for the defaults."""
+        """(steering ratio, assist class) kept for the car, None for the defaults."""
         with self._lock:
             self._load()
             return self._rack.get(car)
@@ -164,6 +184,28 @@ class Store:
 
 
 STORE = Store()
+
+
+def boost_k(speed, assist=1.0):
+    """The boost curve's slope k at `speed` (m/s) for an assist class (1.0 road / rally, 0.0 unassisted)."""
+    v = abs(speed) if speed is not None and math.isfinite(speed) else 0.0
+    return assist * (BOOST_K_ROAD + (BOOST_K_PARK - BOOST_K_ROAD) / (1.0 + (v / BOOST_V0) ** 2))
+
+
+def column_from_driver(driver, speed, assist=1.0):
+    """The column torque (signed, Nm) that a driver torque `driver` balances: T_d + k T_d^2 / (T0 + |T_d|)."""
+    mag = abs(driver)
+    return math.copysign(mag + boost_k(speed, assist) * mag * mag / (BOOST_T0 + mag), driver)
+
+
+def driver_from_column(column, speed, assist=1.0):
+    """The driver's torque at the rim (signed, Nm) for a column torque, the exact inverse of column_from_driver:
+    (1 + k) T_d^2 + (T0 - T_c) T_d - T_c T0 = 0, the positive root. Unassisted (k = 0): the column torque."""
+    mag = abs(column)
+    k = boost_k(speed, assist)
+    b = mag - BOOST_T0
+    d = (b + math.sqrt(b * b + 4.0 * (1.0 + k) * mag * BOOST_T0)) / (2.0 * (1.0 + k))
+    return math.copysign(d, column)
 
 
 class Quantile:
@@ -295,3 +337,146 @@ def _solve3(m, b):
     for i in (2, 1, 0):
         x[i] = (a[i][3] - sum(a[i][j] * x[j] for j in range(i + 1, 3))) / a[i][i]
     return x
+
+
+# -- power steering: does the game already model it? And the INI settings --
+
+class AssistDetector:
+    """Whether the game's own steering force already includes power assist, from the game's force against the
+    front steering torque of the same samples. Without assist the game's force is linear in the torque (a constant
+    ratio over the load range; ACR's dump: the gain at 0.75-1.5 x p99 is 0.83-0.98 of the gain at 0.05-0.25 x p99
+    on every car, speed or not). A boost curve is compressive: the gain falls with load (a typical car: to about
+    0.07 at its p99, but the curve flattens to 1 / (1 + k) past a few Nm, so the full-range ratio is only about
+    0.5-0.7). Torque is binned by its share of the car's p99 (EDGES); `ratio()` is the gain over the top two
+    bins (>= 0.5 p99) over the gain in the bottom one (0.05-0.15 p99). It needs MIN_W seconds in each group before it
+    says anything. `state`: None undecided (taken as absent), False / True; it flips only after the other side's
+    threshold has held DWELL s (hysteresis: between ABSENT_ABOVE and ASSIST_BELOW it keeps what it had)."""
+    EDGES = (0.05, 0.15, 0.3, 0.5, 0.75, 1.5)        # of the car's p99
+    TAU = 300.0                                      # s of moving samples the sums remember
+    MIN_W = 10.0                                     # s of weight in the low and in the high group
+    ASSIST_BELOW = 0.7
+    ABSENT_ABOVE = 0.8
+    DWELL = 3.0
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        n = len(self.EDGES) - 1
+        self.w, self.t, self.r = [0.0] * n, [0.0] * n, [0.0] * n
+        self.state = None
+        self._since = 0.0
+
+    def _bin(self, x):
+        for i in range(len(self.EDGES) - 1):
+            if x < self.EDGES[i + 1]:
+                return i if x >= self.EDGES[i] else None
+        return None
+
+    def add(self, torque, raw, p99, dt):
+        """A moving, unclipped sample: front torque (Nm), the game's force level, the car's p99 (Nm), seconds."""
+        if not (dt > 0.0 and p99 > 0.0 and math.isfinite(torque) and math.isfinite(raw)):
+            return
+        decay = math.exp(-dt / self.TAU)
+        for i in range(len(self.w)):
+            self.w[i] *= decay
+            self.t[i] *= decay
+            self.r[i] *= decay
+        b = self._bin(abs(torque) / p99)
+        if b is not None:
+            self.w[b] += dt
+            self.t[b] += dt * abs(torque)
+            self.r[b] += dt * abs(raw)
+        self._judge(dt)
+
+    def _gain(self, bins):
+        w = sum(self.w[i] for i in bins)
+        t = sum(self.t[i] for i in bins)
+        return None if w < self.MIN_W or t <= 0.0 else sum(self.r[i] for i in bins) / t
+
+    def ratio(self):
+        """Gain at high load over gain at low load, None until both have enough."""
+        lo, hi = self._gain((0,)), self._gain((3, 4))
+        return None if lo is None or hi is None or lo <= 0.0 else hi / lo
+
+    def _judge(self, dt):
+        ratio = self.ratio()
+        if ratio is None:
+            return
+        want = True if ratio < self.ASSIST_BELOW else False if ratio > self.ABSENT_ABOVE else self.state
+        if want is None or want == self.state:
+            self._since = 0.0
+            return
+        self._since += dt
+        if self._since >= self.DWELL:
+            self.state, self._since = want, 0.0
+
+    def curve(self, p99):
+        """The game's gain against load, [(torque Nm, gain relative to the lowest bins)], non-increasing; the
+        bins with too little weight are left out. [] before there is any."""
+        lo = self._gain((0,))
+        if lo is None or lo <= 0.0:
+            return []
+        pts, last = [], 1.0
+        for i in range(len(self.w)):
+            if self.w[i] < self.MIN_W / 3.0 or self.t[i] <= 0.0:
+                continue
+            c = min(self.r[i] / self.t[i] / lo, last)
+            last = c
+            pts.append((p99 * math.sqrt(self.EDGES[i] * self.EDGES[i + 1]), max(c, 0.02)))
+        return pts
+
+
+def game_shape(torque, curve):
+    """The game's gain at |torque| from `curve` (piecewise linear in log torque, flat beyond the ends)."""
+    x = abs(torque)
+    if not curve:
+        return 1.0
+    if x <= curve[0][0]:
+        return curve[0][1]
+    for (x0, c0), (x1, c1) in zip(curve, curve[1:]):
+        if x <= x1:
+            return c0 + (c1 - c0) * math.log(x / x0) / math.log(x1 / x0)
+    return curve[-1][1]
+
+
+CONFIG_PATH = None                       # None: the user's config.ini (tests set a file)
+POWER_MODES = ('auto', 'on', 'off')
+ASSIST_STRENGTH_RANGE = (0.0, 2.0)
+_ini = {'stamp': None, 'value': ('auto', 1.0)}
+
+
+def power_settings():
+    """(countersteer_power_steering, countersteer_assist_strength) from config.ini's DEFAULT section: INI only, no
+    GUI. 'auto' (default): our power-steering model where the game's force has no assist, the game's own curve
+    where it has; 'on': always ours; 'off': never (the column torque is played). The strength multiplies the
+    car class's assist (1.0 default, 0..2). A missing file or a bad value gives the default."""
+    path = CONFIG_PATH
+    if path is None:
+        try:
+            from xdg.BaseDirectory import xdg_config_home
+            path = os.path.join(xdg_config_home, 'oversteer', 'config.ini')
+        except ImportError:
+            return ('auto', 1.0)
+    try:
+        st = os.stat(path)
+        stamp = (path, st.st_mtime_ns, st.st_size)
+    except OSError:
+        stamp = (path, None, None)
+    if _ini['stamp'] == stamp:
+        return _ini['value']
+    mode, strength = 'auto', 1.0
+    if stamp[1] is not None:
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(path)
+            section = parser['DEFAULT']
+            m = section.get('countersteer_power_steering', 'auto').strip().lower()
+            mode = m if m in POWER_MODES else 'auto'
+            v = float(section.get('countersteer_assist_strength', '1.0'))
+            if math.isfinite(v):
+                strength = min(max(v, ASSIST_STRENGTH_RANGE[0]), ASSIST_STRENGTH_RANGE[1])
+        except (configparser.Error, OSError, ValueError):
+            pass
+    _ini['stamp'], _ini['value'] = stamp, (mode, strength)
+    return _ini['value']

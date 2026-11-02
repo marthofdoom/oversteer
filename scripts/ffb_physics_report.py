@@ -36,6 +36,7 @@ from oversteer import ffb_carprops as cp  # noqa: E402
 from oversteer import ffb_engine as fe  # noqa: E402
 from oversteer import ffb_rbr as fr  # noqa: E402
 from oversteer import ffb_texture as ft  # noqa: E402
+from oversteer import wheel_torque  # noqa: E402
 from oversteer import wheel_calib as wc  # noqa: E402
 from oversteer import wheel_calibration as wcal  # noqa: E402
 from oversteer.telemetry_formats import Sample  # noqa: E402
@@ -85,15 +86,15 @@ def acr_sample(d, i, car, interp=None):
 def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     """Feed the dump through RackForce at `hz` (linear interpolation between the ~4 Hz snapshots, so the learner's
     sample-count prior weighs as it does live), the game's raw level = finalFF x FULL (ACR's FF gain 100 %).
-    Returns per snapshot: our force (ext_force units, full strength; its level is the physical target's, not
-    finalFF's), ready flag, trail, scrub, the learnt p99 of |front torque| (Nm)."""
+    Returns per snapshot: our force (ext_force units, full strength; its level is the rim-torque model's, not
+    finalFF's), the driver's rim torque (Nm), ready flag, trail, scrub, the learnt p99 of |front torque| (Nm)."""
     tmp = tempfile.mkdtemp(prefix='ffb-verify-')
     kept = (cp.STORE.path, cp.ASYNC)
     cp.STORE.use(os.path.join(tmp, 'props.json'))
     cp.ASYNC = False
     rack = fe.RackForce()
     rack.LEARNS = learn
-    rack.wheel_peak = wheel_peak          # Nm; None: the relative target (p99 at TARGET_P99)
+    rack.wheel_peak = wheel_peak          # Nm; None: the 2.1 Nm class
     n = len(d['t'])
     out = np.zeros(n)
     ready = np.zeros(n, dtype=bool)
@@ -101,6 +102,10 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     scrub = np.zeros(n)
     p99 = np.zeros(n)
     torque = np.zeros(n)
+    rim = np.zeros(n)
+    assist_ratio = np.full(n, np.nan)
+    assist_state = np.zeros(n)
+    al = {k: np.full(n, np.nan) for k in ('theta_a_deg', 'theta_deg', 'k', 'model')}
     t0 = d['t'][0]
     for i in range(n):
         car = 'acr/seg%d' % d['seg'][i]
@@ -112,6 +117,14 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
         trail[i], scrub[i] = rack.trail, rack.scrub
         p99[i] = rack.p99
         torque[i] = fe.front_torque(s, rack.trail, rack.scrub) or 0.0
+        rim[i] = rack.rim_torque(s) or 0.0
+        r_ = rack._assist.ratio()
+        assist_ratio[i] = np.nan if r_ is None else r_
+        assist_state[i] = {None: 0, False: -1, True: 1}[rack._assist.state]
+        split = rack.align(s)
+        if split is not None:
+            for key in al:
+                al[key][i] = split[key]
         if i + 1 < n and d['seg'][i + 1] == d['seg'][i] and hz:
             gap = d['t'][i + 1] - d['t'][i]
             k = int(gap * hz)
@@ -122,7 +135,45 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     rack.reset(None)
     cp.STORE.use(kept[0])
     cp.ASYNC = kept[1]
-    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque}
+    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque, 'rim': rim, 'align': al, 'assist_ratio': assist_ratio, 'assist_state': assist_state}
+
+
+def align_report(d, rep):
+    """The aligning split on the dump: theta_a's distribution, its side in drifts, and how well the spring
+    k (theta_a - theta) rebuilds the rim torque (R^2 against rack.rim_torque; residual in Nm)."""
+    al = rep['align']
+    sp = d['speed'] / 3.6
+    ok = (sp > fe.MIN_SPEED) & np.isfinite(al['k'])
+    steer_left = -d['steer']
+    yaw = d['angvel'][:, 1]
+    sa_f = np.max(np.abs(d['sa'][:, :2]), axis=1)
+    sa_r = np.max(np.abs(d['sa'][:, 2:]), axis=1)
+    rim = rep['rim']
+    spring = al['k'] * (al['theta_a_deg'] - al['theta_deg'])
+    cases = {
+        'moving': ok,
+        'normal cornering (|accG| > 0.3, low slip)': ok & (np.abs(d['accG'][:, 0]) > 0.3) & (sa_f < 0.1),
+        'drift (rear slip > 0.15 rad, countersteer)': ok & (sa_r > 0.15) & (np.sign(steer_left) == -np.sign(yaw))
+        & (np.abs(yaw) > 0.2) & (np.abs(steer_left) > 0.05),
+        'front past peak (front slip > 0.3 rad)': ok & (sa_f > 0.3),
+    }
+    out = {'theta_a_deg_abs_p50_p90_p99': [round(float(v), 1) for v in np.percentile(np.abs(al['theta_a_deg'][ok]), [50, 90, 99])],
+           'theta_deg_abs_p50_p90_p99': [round(float(v), 1) for v in np.percentile(np.abs(al['theta_deg'][ok]), [50, 90, 99])],
+           'k_nm_per_deg_p10_p50_p90': [round(float(v), 4) for v in np.percentile(al['k'][ok], [10, 50, 90])]}
+    for name, m in cases.items():
+        if not m.any():
+            continue
+        res = rim[m] - spring[m]
+        out[name] = {'n': int(m.sum()), 'r2_spring_vs_rim': round(r2(rim[m], spring[m]), 3),
+                     'residual_abs_nm_p50_p90_p99': [round(float(v), 2) for v in np.percentile(np.abs(res), [50, 90, 99])],
+                     'rim_abs_nm_p50_p90_p99': [round(float(v), 2) for v in np.percentile(np.abs(rim[m]), [50, 90, 99])]}
+    m = cases['drift (rear slip > 0.15 rad, countersteer)']
+    if m.any():
+        out['drift: theta_a on the countersteer side (sign = -yaw)'] = round(float(np.mean(np.sign(al['theta_a_deg'][m]) == -np.sign(yaw[m]))), 3)
+        out['drift: the wheel is on that side (theta)'] = round(float(np.mean(np.sign(al['theta_deg'][m]) == -np.sign(yaw[m]))), 3)
+        out['drift: theta_a beyond theta (more countersteer needed to zero the slip)'] = round(float(np.mean(
+            np.sign(al['theta_a_deg'][m] - al['theta_deg'][m]) == -np.sign(yaw[m]))), 3)
+    return out
 
 
 def r2(y, x):
@@ -574,7 +625,7 @@ def texture_synthetic(seconds=60.0, steering_force=0.3 * FULL, seed=7, game='acr
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--peak-nm', type=float, default=None, help='the wheel peak torque (Nm) for the physical target; default: unknown wheel')
+    ap.add_argument('--peak-nm', type=float, default=None, help='the wheel peak torque (Nm); default: unknown wheel (2.1 Nm class)')
     ap.add_argument('--dump', default=DUMP)
     ap.add_argument('--hz', type=float, default=100.0)
     ap.add_argument('--fh6', default=FH6)
@@ -603,6 +654,11 @@ def main():
         for name, c in acr_cases(d, rep).items():
             print('  %-50s %s' % (name, json.dumps({k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items()})))
         fit = acr_fit(d, rep)
+        for seg in np.unique(d['seg']):
+            last = np.flatnonzero(d['seg'] == seg)[-1]
+            print('  game power assist detector, stretch %d: gain ratio high/low load %.2f, state %s (decided at end; 0 = undecided, -1 absent, 1 present); decisions made: any present %s' % (
+                seg, rep['assist_ratio'][last], rep['assist_state'][last], bool((rep['assist_state'][d['seg'] == seg] == 1).any())))
+        print('  aligning split (ffb_align, off in the app):', json.dumps(align_report(d, rep), indent=1))
         print('  fit:', json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in fit.items()}))
         # Thermal: our force through the G29 correction, mean square over 90 s
         res = load_wheel(args.wheel) if os.path.exists(args.wheel) else None
@@ -619,6 +675,15 @@ def main():
                 line += ', %.3f through the G29 LUT + deadband (derate from %.3f, limit %.2f)' % (
                     th.max(), THERMAL_LIMIT * (1 - THERMAL_BAND), THERMAL_LIMIT)
             print(line)
+        rim = np.abs(rep['rim'])
+        peak = args.peak_nm or wheel_torque.DEFAULT_PEAK_NM
+        spd = d['speed'] / 3.6
+        print('  rim torque T_d (Nm) p50/p90/p99, moving: %s; at speed > 15 m/s: %s; of full scale on a %.1f Nm wheel (after the knee): %s' % (
+            np.percentile(rim[moving], [50, 90, 99]).round(2), np.percentile(rim[spd > 15], [50, 90, 99]).round(2), peak,
+            np.percentile(np.abs(ours[moving]) / FULL, [50, 90, 99]).round(3)))
+        print('  share of moving time past the knee start (%.2f of full scale, unlimited) %.3f; output above 70 %% %.4f; max %.3f' % (
+            wheel_torque.KNEE_FROM, float(np.mean(rim[moving] / peak > wheel_torque.KNEE_FROM)),
+            float(np.mean(np.abs(ours[moving]) / FULL > 0.70)), float(np.abs(ours[moving]).max() / FULL)))
         print('  ours above 50 / 80 / 98 %% of full scale: %.4f / %.4f / %.4f of moving time' % tuple(
             float(np.mean(np.abs(ours[moving]) / FULL > x)) for x in (0.5, 0.8, 0.98)))
     else:

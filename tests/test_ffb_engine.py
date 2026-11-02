@@ -268,8 +268,8 @@ def test_it_starts_at_finalff_scale_and_fits_the_games_force_but_plays_its_own_l
     assert model.scale == pytest.approx(0.5 * 32767 / 582, rel=0.05)         # the fit (the game's units per Nm)
     assert model.cross == pytest.approx(1.0, abs=0.05)       # finalFF agrees
     s = acr(1.0, game_gain=0.5)
-    # the magnitude is the physical target's (the car's p99 torque), not the game's: its FFB setting does not move it
-    assert model.force(s) == pytest.approx(model.play_scale * fe.front_torque(s, model.trail, model.scrub))
+    # the magnitude is the rim-torque model's, not the game's: its FFB setting does not move it
+    assert model.force(s) == pytest.approx(fe.FULL * fe.wheel_torque.rim_share(model.rim_torque(s)))
     assert fitted(game_gain=2.0).force(s) == pytest.approx(model.force(s), rel=1e-6)
     strong = fitted(game_gain=2.0)
     assert strong.scale == pytest.approx(2.0 * 32767 / 582, rel=0.1)           # clipped raw left out
@@ -893,11 +893,10 @@ def test_front_torque_adds_the_caster_arm_and_falls_back_to_mz():
 
 def test_in_a_drift_the_force_pulls_toward_the_direction_of_travel_when_mz_has_gone():
     model = fe.RackForce()
-    model.scale = model.play_scale = 10.0
     cornering = tyre_sample(-120.0, 3500.0)                  # same sign as Mz alone, a little bigger
-    mz_only = model.play_scale * -120.0
+    mz_only = model.force(tyre_sample(-120.0, 0.0))
     assert model.force(cornering) * mz_only > 0
-    assert 1.0 < model.force(cornering) / mz_only < 2.5
+    assert 1.0 < model.force(cornering) / mz_only
     # a left slide (car turning left, Fy left-positive, past the peak: Mz ~ 0): the wheel is pulled the way
     # the grip-cornering torque would pull, the self-steer into countersteer, not left slack
     drift = tyre_sample(0.0, 4500.0)
