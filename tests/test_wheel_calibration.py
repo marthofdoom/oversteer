@@ -528,6 +528,7 @@ def _gui(tmp_path, wheel, confirm=True):
     gui.test = None
     gui.grab_input = False
     gui._wheel_retry = None
+    gui.ffb_engine = SimpleNamespace(set_device=lambda path: None)
     return gui
 
 
@@ -921,7 +922,8 @@ def test_the_owner_hook_is_released(monkeypatch):
     monkeypatch.setattr(Calibration, 'TOTAL_S', 1.0)
     with pytest.raises(Aborted):
         Calibration(SimWheel()).run()
-    assert calls == ['acquire', ('release', 'token')]
+    # released right after the restore; the outer finally's call is the no-op safety net
+    assert calls == ['acquire', ('release', 'token'), ('release', None)]
 
 
 # --- wheel_owner: one owner of the wheel's replace-mode attributes at a time ---
@@ -978,7 +980,9 @@ def test_the_wheel_is_released_after_every_ending(monkeypatch):
     assert wheel_owner.current(sim.wheel_id) is None
 
 
-def test_nothing_is_written_while_the_wheel_is_held(tmp_path, g29_like, monkeypatch):
+def test_writes_while_the_wheel_is_held(tmp_path, g29_like, monkeypatch):
+    """A crash record waits for any holder; the correction (shaping only) waits for an exclusive one, but
+    goes in at once under Countersteer FFB (shared), whose force is shaped too."""
     from oversteer import wheel_owner
     from oversteer import gui as gui_module
     timers = []
@@ -987,21 +991,89 @@ def test_nothing_is_written_while_the_wheel_is_held(tmp_path, g29_like, monkeypa
     gui = _gui(tmp_path, wheel)
     wcal.save_store(str(tmp_path / wcal.STORE_NAME), {'046d:c24f': _entry(g29_like[2])})
     path = str(tmp_path / wcal.PENDING_NAME)
-    assert wheel_owner.acquire(wheel.dev_path, 'countersteer-ffb', on_inhibit=lambda: None)
+    key = wcal.instance_key(wheel)
+    recovered = []
+    monkeypatch.setattr(wcal, 'DeviceIO', lambda device: recovered.append(device) or SimWheel())
+
+    # exclusive (the test): nothing at all
+    assert wheel_owner.acquire(wheel.dev_path, 'wheel-test', exclusive=True)
     try:
+        wcal.write_pending(path, key, {'range': 900})
         sim = SimWheel()
-        wcal.write_pending(path, wcal.instance_key(wheel), {'range': 900})
-        assert wcal.recover_pending(path, wcal.instance_key(wheel), sim, wheel=wheel.dev_path) is False
+        assert wcal.recover_pending(path, key, sim, wheel=wheel.dev_path) is False
         assert sim.writes == [] and os.path.exists(path)
         gui.apply_wheel_correction()
         gui.recover_wheel()
-        assert wheel.attrs == {}
+        assert wheel.attrs == {} and not recovered
         assert len(timers) == 1                                  # one retry timer, not one per call
         assert timers[0]() is True                               # still held: keeps waiting
         assert wheel.attrs == {}
     finally:
+        wheel_owner.release(wheel.dev_path, 'wheel-test')
+
+    # shared (Countersteer FFB): the correction now, the crash record still waits
+    assert wheel_owner.acquire(wheel.dev_path, 'countersteer-ffb', on_inhibit=lambda: None)
+    try:
+        gui.apply_wheel_correction()
+        assert wheel.attrs['ffb_lut'] != 'identity'
+        assert set(wheel.attrs) == {'ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip'}
+        gui.recover_wheel()
+        assert not recovered and os.path.exists(path)
+        assert timers[0]() is True
+    finally:
         wheel_owner.release(wheel.dev_path, 'countersteer-ffb')
-    monkeypatch.setattr(wcal, 'DeviceIO', lambda device: SimWheel())
-    assert timers[0]() is False                                  # free: written now
-    assert wheel.attrs['ffb_lut'] != 'identity'
+    wheel.attrs = {}
+    assert timers[0]() is False                                  # free: both written now
+    assert recovered and wheel.attrs['ffb_lut'] != 'identity'
     assert not os.path.exists(path)
+
+
+def test_the_wheel_is_free_while_the_fit_runs(monkeypatch):
+    from oversteer import wheel_owner
+    sim = SimWheel()
+    seen = []
+
+    def analyse(rec, knots=wc.KNOTS):
+        seen.append(wheel_owner.current(sim.wheel_id))
+        raise wc.FitError('stop here')
+    monkeypatch.setattr(wc, 'analyse', analyse)
+    monkeypatch.setattr(Calibration, '_measure', lambda self: None)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'fit' and seen == [None]
+
+
+def test_a_replugged_wheel_gives_the_engine_its_new_path(tmp_path):
+    wheel = _Wheel()
+    wheel.dev_path = '/sys/devices/usb1/1-3/1-3:1.0/0003:046D:C24F.0009'     # bound again under a new number
+    gui = _gui(tmp_path, wheel)
+    paths = []
+    gui.ffb_engine = SimpleNamespace(set_device=paths.append)
+    gui.device_manager = SimpleNamespace(is_changed=lambda: False, take_plugged=lambda: ['/sys/fake'])
+    gui.apply_plug_profile = lambda device_id: None
+    gui.populate_devices()
+    assert paths == [wheel.dev_path]
+    gui.device_manager = SimpleNamespace(is_changed=lambda: False, take_plugged=lambda: [])
+    gui.populate_devices()
+    assert paths == [wheel.dev_path]                             # nothing plugged: left alone
+
+
+def test_quitting_drops_the_retry_timer(tmp_path, monkeypatch):
+    from oversteer import gui as gui_module
+    removed = []
+    monkeypatch.setattr(gui_module.GLib, 'source_remove', removed.append)
+    g = gui_module.Gui.__new__(gui_module.Gui)
+    g._wheel_retry = 42
+    g.calibration = None
+    g.calibration_thread = None
+    g.test = None
+    g._forward_stop = SimpleNamespace(set=lambda: None)
+    g.ffb_engine = SimpleNamespace(stop=lambda: None)
+    g.telemetry_web = g.telemetry_recorder = None
+    g.shift_learner = SimpleNamespace(save=lambda: None)
+    try:
+        g.on_quit()
+    except AttributeError:
+        pass                                                     # later parts need a full window
+    assert removed == [42] and g._wheel_retry is None

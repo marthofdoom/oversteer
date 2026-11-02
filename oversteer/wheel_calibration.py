@@ -158,6 +158,8 @@ class Calibration:
                                              "and try again.")) from e
             finally:
                 self._restore()
+                self._release_owner(owner)  # the wheel is back: free for others while the fit runs
+                owner = None
                 gc.unfreeze()
                 if gc_was:
                     gc.enable()
@@ -174,7 +176,7 @@ class Calibration:
         finally:
             if gc_was:
                 gc.enable()
-            self._release_owner(owner)      # after the restore (the inner finally)
+            self._release_owner(owner)      # a safety net: normally released after the restore above
             _running.discard(self)
 
     OWNER = 'calibration'

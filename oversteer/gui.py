@@ -485,8 +485,11 @@ class Gui:
             self.recover_wheel()        # first: the plug profile (the user's later choice) then wins
         for device_id in dict.fromkeys(plugged):        # each once, the last one stays selected
             self.apply_plug_profile(device_id)
-        # the driver starts a wheel it binds with no shaping: a replugged wheel gets its correction back
+        # the driver starts a wheel it binds with no shaping: a replugged wheel gets its correction back, and
+        # the FFB engine the wheel's new sysfs directory (the old one went with the unplug)
         if current:
+            if self.device.is_ready():
+                self.ffb_engine.set_device(self.device.dev_path)
             self.apply_wheel_correction()
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
@@ -942,6 +945,9 @@ class Gui:
     def on_quit(self):
         self._forward_stop.set()
         self.ffb_engine.stop()              # the game's force feedback back before anything else
+        if getattr(self, '_wheel_retry', None) is not None:
+            GLib.source_remove(self._wheel_retry)
+            self._wheel_retry = None
         self.cancel_calibration(wait=1.5)       # its finally puts the wheel back (force 0, game force on)
         if self.test is not None:
             try:
@@ -2252,14 +2258,15 @@ class Gui:
         return wheel_owner.current(path) if path else None
 
     def _defer_wheel_writes(self):
-        """The wheel is held (Countersteer FFB playing, the test): its correction and any crash record wait,
-        since changing the shaping or the game's level under a playing force would make it jump."""
+        """The wheel is held: a crash record waits for any holder (it writes ext_force, game_ffb_level, gain
+        and range), the correction (ffb_lut, ffb_deadband, ffb_dither, ffb_soft_clip) only for an exclusive
+        one (the test, a demo), whose forces must stay as they are. Retried every second until free."""
         if getattr(self, '_wheel_retry', None) is None:
             self._wheel_retry = GLib.timeout_add(1000, self._retry_wheel_writes)
 
     def _retry_wheel_writes(self):
         if self._wheel_held() is not None or self.calibration is not None:
-            return True
+            return True             # recover_wheel waits for any holder
         self._wheel_retry = None
         self.recover_wheel()
         self.apply_wheel_correction()
@@ -2296,7 +2303,10 @@ class Gui:
             return
         entry = self._wheel_entry()
         if entry is not None:
-            if self._wheel_held() is not None:
+            held = self._wheel_held()
+            # A shared holder (Countersteer FFB) plays through the shaping too: it gets the correction now.
+            # An exclusive one (the test, a demo) keeps the forces as they were until it lets go.
+            if held is not None and held[1]:
                 self._defer_wheel_writes()
                 return
             try:

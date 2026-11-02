@@ -51,8 +51,8 @@ def acquire(wheel, owner, exclusive=False, on_inhibit=None, timeout=0.5, inhibit
             return True
         if not exclusive or not inhibit or held[1] or held[2] is None:
             return False
-        holder, inhibit = held[0], held[2]
-    inhibit()                                   # outside the lock: the holder may release() from here
+        holder, ask_to_let_go = held[0], held[2]
+    ask_to_let_go()                             # outside the lock: the holder may release() from here
     with _cond:
         _cond.wait_for(lambda: _held.get(wheel, (None,))[0] != holder, timeout)
         if wheel in _held and _held[wheel][0] == holder:
