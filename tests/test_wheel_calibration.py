@@ -1177,7 +1177,10 @@ def test_the_correction_follows_the_active_device(tmp_path):
     gui._wheel_held = lambda: ('test', True)
     gui.check_active_device()
     assert calls == ['apply', 'refresh'] and wheel.attrs == {}   # nothing written, tried again later
-    gui._wheel_held = lambda: ('countersteer-ffb', False)        # a shared one does not stop it
+    gui._wheel_held = lambda: ('countersteer-ffb', False)        # a shared one (Countersteer FFB) stops it too
+    gui.check_active_device()
+    assert calls == ['apply', 'refresh'] and wheel.attrs == {}
+    gui._wheel_held = lambda: None                               # free: the next tick puts it on
     gui.check_active_device()
     assert calls == ['apply', 'refresh', 'apply', 'refresh'] and wheel.attrs['ffb_lut'] == 'identity'
     del calls[:]
@@ -1284,12 +1287,11 @@ def test_writes_while_the_wheel_is_held(tmp_path, g29_like, monkeypatch):
     finally:
         wheel_owner.release(wheel.dev_path, 'wheel-test')
 
-    # shared (Countersteer FFB): the correction now, the crash record still waits
+    # shared (Countersteer FFB): nothing either, the correction and the crash record wait
     assert wheel_owner.acquire(wheel.dev_path, 'countersteer-ffb', on_inhibit=lambda: None)
     try:
         gui.apply_wheel_correction()
-        assert wheel.attrs['ffb_lut'] != 'identity'
-        assert set(wheel.attrs) == {'ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip'}
+        assert wheel.attrs == {}
         gui.recover_wheel()
         assert not recovered and os.path.exists(path)
         assert timers[0]() is True
