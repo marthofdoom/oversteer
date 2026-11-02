@@ -38,6 +38,9 @@ Three parts:
   game gets game_ffb_level 100 at once: it is never left muted. The driver
   restores the game by itself after 1 s without writes, should this
   process die.
+- Texture (ffb_texture): small vibrations from the same samples (road,
+  landings, front lock), added on top of RackForce's force before the
+  clamp and the fade gain, very low by default. ACR only for now.
 
 Every sysfs write happens on the engine thread; the GUI only sets requests
 (set_enabled, set_device) and reads `status`."""
@@ -51,6 +54,7 @@ import time
 from locale import gettext as _
 
 from . import wheel_owner
+from .ffb_texture import Texture
 
 AC_GAMES = ('acr', 'acc', 'ac')          # the bridge's games (OVST version 3 on names them)
 
@@ -555,11 +559,13 @@ class FfbEngine:
         self._enabled_req = False        # GUI requests, applied on the engine thread
         self._path_req = None
         self._inhibit_req = False        # wheel_owner: an exclusive owner wants the wheel
+        self._texture_req = None         # (level 0..1, {part: on}) from the GUI, applied on the engine thread
         self._running = False
         self._thread = None
         self._stop_lock = threading.Lock()
         self.classifier = SupportClassifier()
         self.model = RackForce()
+        self.texture = Texture()
         self._enabled = False
         self._path = None
         self._driver = None
@@ -607,6 +613,11 @@ class FfbEngine:
     def set_enabled(self, on):
         """The "Countersteer FFB" switch."""
         self._enabled_req = bool(on)
+        self._wake.set()
+
+    def set_texture(self, level, parts):
+        """The texture's master level (0..1) and its parts' switches ({'road': bool, ...})."""
+        self._texture_req = (level, dict(parts))
         self._wake.set()
 
     def set_device(self, path):
@@ -684,6 +695,9 @@ class FfbEngine:
             self._idle(now)
 
     def _requests(self, now):
+        texture, self._texture_req = self._texture_req, None
+        if texture is not None:
+            self.texture.set(*texture)
         if self._inhibit_req:
             self._inhibit_req = False
             self._quick_release('inhibited', now)
@@ -782,7 +796,9 @@ class FfbEngine:
 
     def _play(self, t, sample):
         g = self._gain(t)
-        value = int(round(self.model.force(sample) * g))
+        rack = self.model.force(sample)
+        # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
+        value = int(round(min(max(rack + self.texture.force(t, sample, rack), -FULL), FULL) * g))
         try:
             self._driver.force(value)
             self.writes += 1
@@ -823,10 +839,11 @@ class FfbEngine:
         self._read_gains()
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
-                     "finalFF cross-check %s, centring hint %s%s)", self._verdict.game, self._verdict.rate,
+                     "finalFF cross-check %s, centring hint %s, texture %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,
+                     self.texture.describe(),
                      "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '')
 
     def _read_gains(self):
