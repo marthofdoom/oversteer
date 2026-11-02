@@ -1298,7 +1298,14 @@ class ShiftLearner:
         with self.lock:
             data = car.to_dict()
         car_id = store.car_id(profile, car.key, car.game or 'unknown', car.name, data)
-        self._session_rows[number] = (store.start_session(profile, car_id, car.game, started, track, stage), car_id)
+        build = None
+        if self.log.game_build is not None and car.game:
+            try:
+                build = self.log.game_build(car.game)
+            except Exception:                             # unknown, never a lost session
+                logging.exception("game build")
+        self._session_rows[number] = (store.start_session(profile, car_id, car.game, started, track, stage,
+                                                          game_build=build), car_id)
         self._session_batch[number] = self.log.batch
         self._session_ids[number] = self._session_rows[number][0]
         for old in [n for n in self._session_ids if n < number - 64]:

@@ -1,0 +1,46 @@
+"AppState"
+{
+	"appid"		"2483190"
+	"universe"		"1"
+	"name"		"Forza Horizon 6"
+	"StateFlags"		"4"
+	"installdir"		"Forza Horizon 6"
+	"LastUpdated"		"1791264724"
+	"LastPlayed"		"1793420991"
+	"SizeOnDisk"		"25605434980"
+	"StagingSize"		"0"
+	"buildid"		"25588841"
+	"LastOwner"		"76561190000000000"
+	"DownloadType"		"3"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"15430688"
+	"BytesDownloaded"		"15430688"
+	"BytesToStage"		"15989390"
+	"BytesStaged"		"15989390"
+	"TargetBuildID"		"0"
+	"AutoUpdateBehavior"		"0"
+	"AllowOtherDownloadsWhileRunning"		"0"
+	"ScheduledAutoUpdate"		"0"
+	"InstalledDepots"
+	{
+		"2483191"
+		{
+			"manifest"		"1234567890123456789"
+			"size"		"25605434980"
+		}
+	}
+	"SharedDepots"
+	{
+		"228989"		"228980"
+		"228990"		"228980"
+		"229000"		"228980"
+	}
+	"UserConfig"
+	{
+		"language"		"english"
+	}
+	"MountedConfig"
+	{
+		"language"		"english"
+	}
+}
