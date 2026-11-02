@@ -65,6 +65,7 @@ class GtkUi:
         self._build_telemetry_page()
         self._build_wheel_launch_options()
         self._build_ffb_meter()
+        self._build_wheel_calibration()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -1029,6 +1030,126 @@ class GtkUi:
                 (bar, self.ffb_clip_label, reset))
         anchor.get_parent().insert(row, anchor.get_index() + 1)
         row.show_all()
+
+    @staticmethod
+    def _calibrate_tooltip(supported):
+        if not supported:
+            return _("Needs a newer new-lg4ff driver (with ext_force, game_ffb_level and ffb_lut) and permission "
+                     "to write its settings.")
+        return _("Measures your wheel, hands off, in about two minutes: where its motor starts to push (dead "
+                 "zone), how its force grows with the command, its friction, inertia and latency. The result "
+                 "corrects the force in every game so it grows evenly from the lightest to the strongest effect. "
+                 "The wheel turns by itself while it runs.")
+
+    def _build_wheel_calibration(self):
+        """Rows under the centring spring in the Force Feedback tab: the calibration button and its result,
+        the correction switch, dither and soft clip (wheel_calibration.py)."""
+        anchor = self._row_of(self.autocenter_persistent)
+        if anchor is None or anchor.get_parent() is None:
+            return
+        listbox = anchor.get_parent()
+        self.calibrate_button = Gtk.Button(label=_("Calibrate wheel"))
+        self.calibrate_button.connect('clicked', lambda w: self.controller.start_calibration())
+        self.calibration_status = self._status_label()
+        self.calibration_status.set_text(_("Not calibrated"))
+        self.updating_calibration = False
+        rows = [self._setting_row(_("Wheel calibration"), controls=(self.calibrate_button,),
+                                  status=self.calibration_status)]
+        row, self.wheel_correction_switch = self._switch_row(
+            _("Use wheel correction"),
+            _("Applies the measured correction (force curve and dead zone) in the driver, for every game. Off: "
+              "the wheel's own response."),
+            lambda state: None if self.updating_calibration else self.controller.set_use_wheel_correction(state))
+        rows.append(row)
+        row, self.wheel_dither_switch = self._switch_row(
+            _("Smooth small forces (dither)"),
+            _("The wheel takes its force in 256 steps. Dither alternates between neighbouring steps so their "
+              "average is the exact force, which keeps light forces smooth. Turned on by the calibration when "
+              "the correction makes the steps coarse at the bottom; it sends a new command to the wheel most "
+              "ticks."),
+            lambda state: None if self.updating_calibration else self.controller.set_wheel_dither(state))
+        rows.append(row)
+        self.wheel_soft_clip = Gtk.SpinButton.new_with_range(0, 100, 5)
+        self.wheel_soft_clip.set_value(0)
+        self.wheel_soft_clip.connect('value-changed', lambda w: None if self.updating_calibration else
+                                     self.controller.set_wheel_soft_clip(w.get_value_as_int()))
+        rows.append(self._setting_row(
+            _("Soft clip from (%)"), tooltip=_("Forces past this share of full scale are rounded off towards the "
+                                               "maximum instead of being cut flat, so a request past 100 % is "
+                                               "still felt as stronger. 0: off (hard limit)."),
+            controls=(self.wheel_soft_clip,)))
+        index = anchor.get_index() + 1
+        for row in rows:
+            listbox.insert(row, index)
+            index += 1
+            row.show_all()
+        self.calibration_dialog = None
+        self.set_wheel_calibration(False, None, False)
+
+    def set_wheel_calibration(self, supported, entry, running):
+        if not hasattr(self, 'calibrate_button'):
+            return
+        from .wheel_calibration import summary
+        self.updating_calibration = True
+        try:
+            self.calibrate_button.set_sensitive(bool(supported) and not running)
+            self.calibrate_button.set_tooltip_text(self._calibrate_tooltip(supported))
+            result = (entry or {}).get('result') or {}
+            if running:
+                self.calibration_status.set_text(_("Calibrating..."))
+            elif not supported:
+                self.calibration_status.set_text(_("Not available with this driver"))
+            elif result:
+                date = str(result.get('date', ''))[:10]
+                self.calibration_status.set_text(_("Calibrated {}: {}").format(date, summary(result)))
+            else:
+                self.calibration_status.set_text(_("Not calibrated"))
+            have = bool(supported and result)
+            for widget in (self.wheel_correction_switch, self.wheel_dither_switch, self.wheel_soft_clip):
+                widget.set_sensitive(have and not running)
+            self.wheel_correction_switch.set_active(bool(have and entry.get('use')))
+            self.wheel_dither_switch.set_active(bool(have and entry.get('dither')))
+            self.wheel_soft_clip.set_value(int(entry.get('soft_clip') or 0) if have else 0)
+        finally:
+            self.updating_calibration = False
+
+    def show_calibration_dialog(self, on_cancel):
+        """A modal window while the calibration runs: what it is doing, how far, and Cancel. Closing it
+        cancels too."""
+        dialog = Gtk.Dialog(title=_("Calibrating the wheel"), transient_for=self.window, modal=True)
+        dialog.add_button(_("Cancel"), Gtk.ResponseType.CANCEL)
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(14)
+        warning = Gtk.Label(xalign=0)
+        warning.set_markup('<b>{}</b>'.format(GLib.markup_escape_text(_("Hands off: the wheel turns by itself."))))
+        box.pack_start(warning, False, False, 0)
+        self.calibration_label = Gtk.Label(label=_("Starting"), xalign=0)
+        box.pack_start(self.calibration_label, False, False, 0)
+        self.calibration_bar = Gtk.ProgressBar()
+        self.calibration_bar.set_size_request(360, -1)
+        box.pack_start(self.calibration_bar, False, False, 0)
+
+        def cancel(*args):
+            self.calibration_label.set_text(_("Stopping..."))
+            on_cancel()
+            return True             # the window stays until the wheel has been put back
+
+        dialog.connect('response', cancel)
+        dialog.connect('delete-event', cancel)
+        dialog.show_all()
+        self.calibration_dialog = dialog
+
+    def set_calibration_progress(self, fraction, text):
+        if getattr(self, 'calibration_dialog', None) is not None:
+            self.calibration_bar.set_fraction(max(0.0, min(1.0, fraction)))
+            self.calibration_label.set_text(text)
+        return False
+
+    def close_calibration_dialog(self):
+        dialog, self.calibration_dialog = getattr(self, 'calibration_dialog', None), None
+        if dialog is not None:
+            dialog.destroy()
 
     def reset_ffb_meter(self):
         if hasattr(self, 'ffb_meter'):

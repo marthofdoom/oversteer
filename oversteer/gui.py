@@ -23,6 +23,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
 from . import diagnostics, hotkeys
+from . import wheel_calibration as wcal
 from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
 from .combined_chart import CombinedChart
@@ -69,6 +70,8 @@ class Gui:
         self.ffb_pending = {}       # FFB meter consumer -> highest level not yet handed over
         self.grab_input = False
         self.test = None
+        self.calibration = None             # the wheel calibration running now (wheel_calibration.Calibration)
+        self.calibration_thread = None
         self.linear_chart = None
         self.performance_chart = None
         self.combined_chart = None
@@ -509,6 +512,10 @@ class Gui:
         self.populate_profiles()
 
     def change_device(self, device_id):
+        if self.calibration is not None:
+            if self.device is not None and self.device.get_id() == device_id and self.device.is_ready():
+                return          # the device list was refreshed: the run keeps the wheel as it has it
+            self.cancel_calibration()
         self.cancel_hotkey_capture()
         self.hotkey_repeater.stop()
         if self.telemetry is not None:
@@ -522,6 +529,7 @@ class Gui:
             self.handbrake_axis = None
             self.pedal_axes = {}
             self.ui.set_handbrake_visible(False)
+            self.refresh_wheel_correction()
             return
 
         if not self.device.check_permissions() and self.check_permissions:
@@ -567,6 +575,8 @@ class Gui:
             self.model.flush_device()
             self.model.flush_ui()
         self.update_pedals()
+        self.apply_wheel_correction()
+        self.refresh_wheel_correction()
 
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory
@@ -882,6 +892,7 @@ class Gui:
 
     def on_quit(self):
         self._forward_stop.set()
+        self.cancel_calibration(wait=1.5)       # its finally puts the wheel back (force 0, game force on)
         if self.test is not None:
             try:
                 self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
@@ -2103,7 +2114,137 @@ class Gui:
         else:
             self.ui.safe_call(self.ui.quit)
 
+    # --- wheel calibration and correction (wheel_calibration.py, ClickUp 1dfcuabc4pj) ---
+
+    def _wheel_store(self):
+        return os.path.join(self.config_path, wcal.STORE_NAME)
+
+    def _wheel_entry(self, device=None):
+        device = device or self.device
+        if device is None:
+            return None
+        return wcal.load_store(self._wheel_store()).get(wcal.wheel_key(device))
+
+    def _wheel_supported(self):
+        try:
+            return self.device is not None and self.device.is_ready() and self.device.has_wheel_correction()
+        except Exception:
+            return False
+
+    def refresh_wheel_correction(self):
+        supported = self._wheel_supported()
+        self.ui.set_wheel_calibration(supported, self._wheel_entry() if supported else None,
+                                      self.calibration is not None)
+
+    def apply_wheel_correction(self):
+        """Write the selected wheel's stored correction (on device change and at start); nothing if it was never
+        calibrated, the driver lacks the attributes or a calibration is running."""
+        if self.calibration is not None or not self._wheel_supported():
+            return
+        entry = self._wheel_entry()
+        if entry is not None:
+            wcal.apply_correction(self.device.write_attr, entry)
+
+    def _change_wheel_entry(self, **changes):
+        if self.device is None:
+            return
+        path = self._wheel_store()
+        store = wcal.load_store(path)
+        key = wcal.wheel_key(self.device)
+        entry = store.get(key)
+        if entry is None or all(entry.get(k) == v for k, v in changes.items()):
+            return
+        entry.update(changes)
+        store[key] = entry
+        try:
+            wcal.save_store(path, store)
+        except OSError as e:
+            logging.warning("wheel calibration store: %s", e)
+        self.apply_wheel_correction()
+        self.refresh_wheel_correction()
+
+    def set_use_wheel_correction(self, state):
+        self._change_wheel_entry(use=bool(state))
+
+    def set_wheel_dither(self, state):
+        self._change_wheel_entry(dither=bool(state), dither_chosen=True)
+
+    def set_wheel_soft_clip(self, value):
+        self._change_wheel_entry(soft_clip=max(0, min(100, int(value))))
+
+    def start_calibration(self):
+        if self.calibration is not None or not self._wheel_supported():
+            return
+        if self.test is not None and (self.test.is_awaiting_action() or self.test.is_collecting_data()):
+            self.ui.info_dialog(_("A wheel test is running."), _("Let it finish first."))
+            return
+        if not self.ui.confirmation_dialog(
+                _("Hands off the wheel: it will turn by itself.") + "\n\n" +
+                _("For about two minutes the wheel turns left and right on its own, at times with full force, to "
+                  "measure how it responds. Let go of it completely and keep hands, cables and anything else "
+                  "clear of the rim. The game's force feedback is switched off meanwhile and everything is put "
+                  "back afterwards. Cancel stops it at any time.")):
+            return
+        device = self.device
+
+        def progress(fraction, text):
+            self.ui.safe_call(self.ui.set_calibration_progress, fraction, text)
+
+        cal = wcal.Calibration(wcal.DeviceIO(device), progress)
+        self.calibration = cal
+        self.refresh_wheel_correction()
+        self.ui.show_calibration_dialog(cal.cancel)
+        self.calibration_thread = Thread(target=self._calibration_worker, args=(cal, device),
+                                         name='wheel-calibration', daemon=True)
+        self.calibration_thread.start()
+
+    def _calibration_worker(self, cal, device):
+        result = error = None
+        try:
+            result = cal.run()
+        except wcal.Aborted as e:
+            logging.info("wheel calibration stopped (%s): %s", e.reason, e)
+            error = e
+        except Exception as e:
+            logging.exception("wheel calibration")
+            error = e
+        self.ui.safe_call(self._calibration_finished, cal, device, result, error)
+
+    def _calibration_finished(self, cal, device, result, error):
+        if self.calibration is cal:
+            self.calibration = None
+            self.calibration_thread = None
+        self.ui.close_calibration_dialog()
+        if result is not None:
+            path = self._wheel_store()
+            store = wcal.load_store(path)
+            key = wcal.wheel_key(device)
+            store[key] = wcal.new_entry(result, store.get(key))
+            try:
+                wcal.save_store(path, store)
+            except OSError as e:
+                logging.warning("wheel calibration store: %s", e)
+            if self.device is device:
+                self.apply_wheel_correction()
+            self.refresh_wheel_correction()
+            self.ui.info_dialog(_("Wheel calibrated."), wcal.summary(result))
+        else:
+            self.refresh_wheel_correction()
+            if not (isinstance(error, wcal.Aborted) and error.reason == 'cancelled'):
+                self.ui.error_dialog(_("The wheel calibration did not finish."), str(error))
+        return False
+
+    def cancel_calibration(self, wait=0.0):
+        cal, thread = self.calibration, self.calibration_thread
+        if cal is None:
+            return
+        cal.cancel()
+        if wait and thread is not None:
+            thread.join(wait)
+
     def start_test(self):
+        if self.calibration is not None:
+            return
         def test_callback(name = 'end', message = ''):
             if name == 'end':
                 self.ui.safe_call(self.end_test)

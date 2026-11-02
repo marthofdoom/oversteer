@@ -1,4 +1,5 @@
 from evdev import ecodes, InputDevice, InputEvent, ff
+import errno
 import threading
 import grp
 import logging
@@ -32,6 +33,7 @@ class Device:
         self.name = None
         self.ready = True
         self.max_range = None
+        self._held = None           # while a wheel calibration runs: the settings asked for meanwhile
 
         self.set(data)
 
@@ -163,7 +165,29 @@ class Device:
         wrange = data.strip()
         return int(wrange)
 
+    # While a wheel calibration (wheel_calibration.py) drives the wheel, the settings it fixed for the run
+    # (range, gain, centring spring) are written by nobody else: a request is kept and is the value put back
+    # when the run ends.
+    def hold_settings(self):
+        self._held = {}
+
+    def release_settings(self):
+        held, self._held = self._held, None
+        return held or {}
+
+    def _hold(self, name, value):
+        if self._held is None:
+            return False
+        logging.debug("calibration running: %s %s kept for afterwards", name, value)
+        self._held[name] = value
+        return True
+
     def set_range(self, wrange):
+        if self._hold('range', wrange):
+            return True
+        return self._set_range(wrange)
+
+    def _set_range(self, wrange):
         path = self.checked_device_file("range")
         if not path:
             return False
@@ -317,6 +341,11 @@ class Device:
         return int(round((int(autocenter) * 100) / 65535))
 
     def set_autocenter(self, autocenter):
+        if self._hold('autocenter', autocenter):
+            return True
+        return self._set_autocenter(autocenter)
+
+    def _set_autocenter(self, autocenter):
         if autocenter > 100:
             autocenter = 100
         autocenter = str(int(autocenter / 100.0 * 65535))
@@ -349,6 +378,11 @@ class Device:
         return 100
 
     def set_ff_gain(self, gain):
+        if self._hold('ff_gain', gain):
+            return
+        self._set_ff_gain(gain)
+
+    def _set_ff_gain(self, gain):
         path = self.checked_device_file("gain")
         # Only new-lg4ff >= 0.6 (which also has app_gain) accepts up to 150 %
         gain = min(int(gain), self.get_max_ff_gain())
@@ -492,6 +526,20 @@ class Device:
                 return max(int(file.read().strip()), 1)
         except (OSError, ValueError):
             return 2
+
+    def has_wheel_correction(self):
+        """True when the driver has the attributes the wheel calibration and correction need (new-lg4ff with
+        ext_force, game_ffb_level and the ffb_lut shaping) and they can be written."""
+        from .wheel_calibration import DeviceIO
+        return DeviceIO.supported(self)
+
+    def write_attr(self, name, value):
+        """Write one of the wheel's sysfs attributes."""
+        path = self.checked_device_file(name)
+        if not path:
+            raise OSError(errno.ENOENT, "{} can't be written".format(name))
+        with open(path, "w") as file:
+            file.write(str(value))
 
     def center_wheel(self):
         self.set_autocenter(100)
