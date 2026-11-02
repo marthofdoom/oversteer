@@ -510,6 +510,7 @@ class Gui:
         # the FFB engine the wheel's new sysfs directory (the old one went with the unplug)
         if current:
             if self.device.is_ready():
+                self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
                 self.ffb_engine.set_device(self.device.dev_path)
             self.apply_wheel_correction()
 
@@ -569,6 +570,7 @@ class Gui:
         self.device = self.device_manager.get_device(device_id)
         ready = self.device is not None and self.device.is_ready()
         # The old wheel's game force is restored by the engine before it takes the new one
+        self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
         self.ffb_engine.set_device(self.device.dev_path if ready else None)
         self.ffb_pending = {}
         self.ui.safe_call(self.ui.reset_ffb_meter)

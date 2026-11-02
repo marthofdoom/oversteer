@@ -1202,10 +1202,11 @@ class GtkUi:
         self._countersteer_polling = False
         self._build_countersteer_texture(row)
 
-    COUNTERSTEER_STRENGTH_TOOLTIP = ("How strong Countersteer's own steering force is, as a share of the force the "
-                                     "tyre model gives, which already fills your calibrated wheel's range the way "
-                                     "the game's own force would. Like a car with a lighter or heavier steering "
-                                     "rack. Lower it if the wheel feels heavy or runs warm. 100 % by default. "
+    COUNTERSTEER_STRENGTH_TOOLTIP = ("How strong Countersteer's own steering force is, as a share of the car's real "
+                                     "steering torque, limited by your wheel: at 100 % the hardest cornering plays "
+                                     "at about 70 % of the wheel (less on a strong wheel, whose safe limit comes "
+                                     "first). It does not depend on the global gain or on the game's own FFB "
+                                     "setting. Lower it if the wheel feels heavy or runs warm. 100 % by default. "
                                      "Saved with the profile.")
     COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
                                  "in the others.")

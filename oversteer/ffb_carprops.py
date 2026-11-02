@@ -37,17 +37,24 @@ FY_MIN = 800.0                           # N: a sample with less front side forc
 DFX_MIN = 300.0                          # N: ... less left-right difference of Fx says nothing about either
                                          # (a straight): it is not added and does not age the window, so the
                                          # learnt values hold through a long straight instead of eroding to the prior
+P99_RANGE = (5.0, 4000.0)                # Nm: the front steering torque's p99 kept per car
+SAVE_P99_STEP = 0.03                     # a p99 moved this share from what was saved is worth saving
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
 
 
 class Store:
-    """{car: (trail, scrub)} in a JSON file in the data folder; read once, written atomically."""
+    """{car: (trail, scrub)} in a JSON file in the data folder; read once, written atomically. Per car it also keeps
+    the learnt p99 of the front steering torque (Nm, `p99`) and the steering ratio and assist share the rim
+    torque is worked out with (`ratio`, `assist`; absent = RackForce's defaults, set_rack() for a refined one)."""
 
     def __init__(self):
         self.path = None                 # None: the data folder's file
         self._cars = None
+        self._p99 = {}
+        self._rack = {}
         self._lock = threading.Lock()
         self._saved = {}                 # what the file holds, to tell what changed
+        self._saved_p99 = {}
         self._last_save = 0.0
 
     def _file(self):
@@ -56,6 +63,7 @@ class Store:
     def _load(self):
         if self._cars is None:
             self._cars = {}
+            self._p99, self._rack = {}, {}
             try:
                 with open(self._file()) as f:
                     for car, v in json.load(f).items():
@@ -64,21 +72,47 @@ class Store:
                             continue         # a damaged file must not put NaN or inf into the force
                         self._cars[car] = (min(max(trail, TRAIL_RANGE[0]), TRAIL_RANGE[1]),
                                            min(max(scrub, SCRUB_RANGE[0]), SCRUB_RANGE[1]))
+                        p99 = v.get('p99')
+                        if isinstance(p99, (int, float)) and math.isfinite(p99) and P99_RANGE[0] <= p99 <= P99_RANGE[1]:
+                            self._p99[car] = float(p99)
+                        ratio, assist = v.get('ratio'), v.get('assist')
+                        if isinstance(ratio, (int, float)) and isinstance(assist, (int, float)) \
+                                and 3.0 <= ratio <= 40.0 and 0.0 <= assist < 1.0:
+                            self._rack[car] = (float(ratio), float(assist))
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 pass
             self._saved = dict(self._cars)
+            self._saved_p99 = dict(self._p99)
 
     def use(self, path):
         """A file of its own (tests); forgets what was read."""
         with self._lock:
             self.path, self._cars, self._saved, self._last_save = path, None, {}, 0.0
+            self._saved_p99 = {}
 
     def get(self, car):
         with self._lock:
             self._load()
             return self._cars.get(car)
 
-    def put(self, car, trail, scrub, force=False):
+    def get_p99(self, car):
+        """The car's learnt p99 of |front steering torque| (Nm), None if not learnt."""
+        with self._lock:
+            self._load()
+            return self._p99.get(car)
+
+    def get_rack(self, car):
+        """(steering ratio, assist share) kept for the car, None for the defaults."""
+        with self._lock:
+            self._load()
+            return self._rack.get(car)
+
+    def set_rack(self, car, ratio, assist):
+        with self._lock:
+            self._load()
+            self._rack[car] = (float(ratio), float(assist))
+
+    def put(self, car, trail, scrub, force=False, p99=None):
         """The car's learnt values; written when they moved enough and SAVE_EVERY s have passed (or `force`)."""
         if car is None:
             return
@@ -87,12 +121,23 @@ class Store:
             self._cars[car] = (trail, scrub)
             old = self._saved.get(car)
             moved = old is None or abs(old[0] - trail) >= SAVE_STEP[0] or abs(old[1] - scrub) >= SAVE_STEP[1]
+            if p99 is not None:
+                old99 = self._saved_p99.get(car)
+                self._p99[car] = p99
+                moved = moved or old99 is None or abs(old99 - p99) >= SAVE_P99_STEP * old99
             now = time.monotonic()
             if not moved or (not force and now - self._last_save < SAVE_EVERY):
                 return
             self._last_save = now
             self._saved[car] = (trail, scrub)
-            data = {c: {'trail': round(v[0], 5), 'scrub': round(v[1], 5)} for c, v in self._cars.items()}
+            self._saved_p99 = dict(self._p99)
+            data = {}
+            for c, v in self._cars.items():
+                data[c] = {'trail': round(v[0], 5), 'scrub': round(v[1], 5)}
+                if c in self._p99:
+                    data[c]['p99'] = round(self._p99[c], 1)
+                if c in self._rack:
+                    data[c]['ratio'], data[c]['assist'] = self._rack[c]
         if ASYNC:
             threading.Thread(target=self._write, args=(data,), daemon=True).start()
         else:
@@ -119,6 +164,53 @@ class Store:
 
 
 STORE = Store()
+
+
+class Quantile:
+    """A running quantile of positive values over about TAU seconds (a time-weighted, exponentially forgetting
+    histogram on log-spaced bins: 5 % wide, so the answer is good to a few per cent). add() is O(1): the weights
+    are not decayed, new ones grow by exp(t / TAU) and everything is renormalised now and then. `seed` puts a prior
+    (a car's last value, or the pooled one) in as `seconds` of weight with its P at `prior`."""
+    LO, HI, N = 1.0, 4000.0, 160
+    TAU = 300.0                          # s of driving
+
+    def __init__(self, tau=None):
+        self.tau = tau or self.TAU
+        self.w = [0.0] * self.N
+        self.boost = 1.0
+        self._k = self.N / math.log(self.HI / self.LO)
+
+    def _bin(self, x):
+        if not x > self.LO:
+            return 0
+        return min(int(math.log(x / self.LO) * self._k), self.N - 1)
+
+    def add(self, x, dt):
+        if not (dt > 0.0 and math.isfinite(x)):
+            return
+        self.boost *= math.exp(dt / self.tau)
+        self.w[self._bin(x)] += dt * self.boost
+        if self.boost > 1e9:
+            self.w = [v / self.boost for v in self.w]
+            self.boost = 1.0
+
+    def seed(self, prior, seconds, p=0.99):
+        """`seconds` of weight shaped so that the p-quantile is `prior`."""
+        low = self._bin(prior / 4.0)
+        high = self._bin(prior)
+        self.w[low] += seconds * (p - 0.005) * self.boost
+        self.w[high] += seconds * (1.0 - p + 0.005) * self.boost
+
+    def value(self, p=0.99):
+        total = sum(self.w)
+        if total <= 0.0:
+            return None
+        need, acc = p * total, 0.0
+        for i, v in enumerate(self.w):
+            acc += v
+            if acc >= need:
+                return self.LO * math.exp((i + 0.5) / self._k)
+        return self.HI
 
 
 class TorqueLearner:

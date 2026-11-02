@@ -84,6 +84,7 @@ from locale import gettext as _
 
 from . import wheel_owner
 from . import ffb_carprops
+from . import wheel_torque
 from .ffb_addon import ForzaLightness
 from .ffb_rbr import RbrForce
 from .ffb_sources import BeamNGForceSource
@@ -387,6 +388,14 @@ class RackForce:
       freezes the fit and keeps it playing.
     - r(raw, Mz) at REVERSED_FIT or lower over the long window: refused
       until the car changes.
+    - Magnitude (the physical target; the game's raw force does not set it, it only gates): the played scale
+      maps the car's own steering torque to the wheel. Rim torque = front torque / STEER_RATIO x (1 - ASSIST)
+      (rally-car defaults: ~13:1 overall, hydraulic assist carrying ~60 %; per car in ffb_carprops.STORE, for a
+      later refinement). On a wheel with a known peak (wheel_peak, Nm) the full-scale share is rim torque / peak,
+      with the car's learnt p99 of |front torque| (ffb_carprops.Quantile, kept per car, prior the pooled dump
+      value) held to TARGET_P99 of the wheel and to RIM_SAFE_NM (a weak wheel such as the G29 always ends in the
+      first: p99 at 0.70); the output never passes RIM_SAFE_NM at the rim. An unknown wheel: p99 at TARGET_P99.
+      Steering strength scales on top. The played scale slews to its target (SCALE_SLEW per second).
     - `centring`: r(Mz, steering to the right) on samples with little
       front slip, logged as a hint at activation; it never gates (in a
       drift the force rightly pulls toward the countersteer)."""
@@ -409,6 +418,15 @@ class RackForce:
     RAW_STALE_DMZ = 20.0                 # ... and front Mz this far (Nm) from where it was then: dropped
     LOW_SLIP = 0.05                      # rad: front slip angle under this counts for the centring hint
     LEARNS = True                        # the car's trail and scrub are learnt from the game's force (ffb_carprops)
+    TARGET_P99 = 0.70                    # share of the wheel's full scale the car's p99 steering torque plays at
+    POOLED_P99 = 540.0                   # Nm: p99 of |front torque| over marth's dump (per car 233-857), the prior
+    PRIOR_S = 120.0                      # s of weight the prior counts for
+    P99_EVERY = 0.25                     # s of sample time between p99 / target updates
+    SCALE_SLEW = 0.08                    # played scale: at most this share (e-fold rate) per second
+    STEER_RATIO = 13.0                   # steering wheel : road wheel, overall, a rally car's typical 12-15
+    ASSIST = 0.6                         # share of the rack torque the power assist takes (assumed, not measured)
+    RIM_SAFE_NM = 10.0                   # hard ceiling on the torque at the rim whatever the car and the wheel
+    wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the relative rule
 
     def __init__(self):
         self.learner = None
@@ -417,7 +435,7 @@ class RackForce:
 
     def reset(self, car=None):
         if self.learner is not None and self.car is not None:
-            ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True)
+            ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True, p99=self.p99)
         self.car = car
         self.trail, self.scrub = CASTER_TRAIL, SCRUB
         self.learner = None
@@ -426,12 +444,51 @@ class RackForce:
             self.trail, self.scrub = kept or (CASTER_TRAIL, SCRUB)
             self.learner = ffb_carprops.TorqueLearner(self.trail, self.scrub)
         self.scale = self.FF_SCALE
+        stored = ffb_carprops.STORE.get_p99(car) if car is not None and self.LEARNS else None
+        self._q = ffb_carprops.Quantile()
+        self.p99 = stored or self.POOLED_P99
+        self._q.seed(self.p99, self.PRIOR_S)
+        self._q_since = 0.0
+        self.ratio, self.assist = (ffb_carprops.STORE.get_rack(car) if car is not None else None) \
+            or (self.STEER_RATIO, self.ASSIST)
+        self.target_scale = self.play_scale = self._target(self.p99)
         self.refused = None
         self.cross = None
         self.centring = None
         self._ff = _Moments(self.TAU)
         self._centre = _Moments(self.TAU)
         self._restart()
+
+    def _target(self, p99):
+        """ext_force per Nm of front torque that maps the car's p99 to its place on the wheel (see the class)."""
+        p99 = min(max(p99, ffb_carprops.P99_RANGE[0]), ffb_carprops.P99_RANGE[1])
+        peak = self.wheel_peak
+        share = self.TARGET_P99
+        if peak:
+            rim99 = p99 * (1.0 - self.assist) / self.ratio
+            share = min(rim99, self.TARGET_P99 * peak, self.RIM_SAFE_NM) / peak
+        return share * FULL / p99
+
+    def _ceiling(self):
+        """The most of full scale the output may be: RIM_SAFE_NM at the rim on a wheel with a known peak."""
+        peak = self.wheel_peak
+        return min(1.0, self.RIM_SAFE_NM / peak) if peak else 1.0
+
+    def _track(self, mz, dt):
+        """The p99 of |front torque| (moving samples) and the played scale slewing toward its target."""
+        self._q.add(abs(mz), dt)
+        self._q_since += dt
+        if self._q_since >= self.P99_EVERY:
+            self._q_since = 0.0
+            p99 = self._q.value()
+            if p99 is not None:
+                self.p99 = p99
+                self.target_scale = self._target(p99)
+                if self.LEARNS and self.car is not None:
+                    ffb_carprops.STORE.put(self.car, self.trail, self.scrub, p99=p99)
+        if dt > 0.0:
+            r = math.exp(self.SCALE_SLEW * dt)
+            self.play_scale = min(max(self.target_scale, self.play_scale / r), self.play_scale * r)
 
     def _restart(self):
         """Forget the fit (the strength stays as it was)."""
@@ -464,6 +521,7 @@ class RackForce:
                 self._mz_at_raw = mz
         if mz is None or not (sample.speed or 0.0) > MIN_SPEED:
             return                       # standing: a game may well stop uploading a force that does not change
+        self._track(mz, dt)
         ff = sample.game_ffb
         if ff is not None:
             self._ff.add(mz, ff, dt, abs(ff) < self.FF_CLIPPED)
@@ -554,7 +612,7 @@ class RackForce:
     def hold(self):
         """The engine plays this fit: should a new car reset it, the fade out goes on with its strength, trail and
         scrub rather than stepping to the defaults (up to 8x)."""
-        self._held_fit = (self.scale, self.trail, self.scrub)
+        self._held_fit = (self.play_scale, self.trail, self.scrub)
 
     def release(self):
         self._held_fit = None
@@ -564,16 +622,16 @@ class RackForce:
         REVERSE_SPEED) keeps the game's own sign of Mz and Fy, which turn with the travel (the caster trail is
         negative to it: the wheel swings to the lock, and a driver holds it); the force is not faded, only
         bounded to REVERSE_MAX of full scale, so a spin never holds the wheel at the stop with the whole of it."""
-        scale, trail, scrub = self.scale, self.trail, self.scrub
+        scale, trail, scrub = self.play_scale, self.trail, self.scrub
         if not self.ready and self._held_fit is not None:
             scale, trail, scrub = self._held_fit
         mz = front_torque(sample, trail, scrub)
         if mz is None:
             return 0
-        limit = FULL
+        limit = FULL * self._ceiling()
         vel = getattr(sample, 'vel', None)
         if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:
-            limit = FULL * REVERSE_MAX
+            limit = min(limit, FULL * REVERSE_MAX)
         return min(max(scale * mz, -limit), limit)
 
 
@@ -943,6 +1001,8 @@ SLEW = FULL / 0.010                      # ext_force units/s: the most the writt
 REVERSE_SPEED = 1.5                      # m/s backwards: the car is reversing
 REVERSE_MAX = 0.6                        # share of full scale: the most a reversing car's rack force pushes
 SOURCE_RETRY = 5.0                       # s before binding BeamNG's port again after it failed
+GAIN_POLL = 0.1                          # s between reads of the driver's master gain while playing
+GAIN_TAU = 0.15                          # s: the gain we divide by follows the driver's (no step in what is written)
 REGAINS = 1.0                            # s between reads of app_gain while RBR or BeamNG may play
 RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
 CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time at most (one per physics step) ...
@@ -982,6 +1042,7 @@ class FfbEngine:
         self._wake = threading.Event()
         self._enabled_req = False        # GUI requests, applied on the engine thread
         self._path_req = None
+        self._usb_id = None
         self._inhibit_req = False        # wheel_owner: an exclusive owner wants the wheel
         self._texture_req = None         # (seq, level 0..1, {part: on}) from the GUI, applied on the engine thread
         self._texture_seq = 0            # the GUI's last request number
@@ -1046,6 +1107,11 @@ class FfbEngine:
         self.raw_rate = None             # constant uploads a second (diagnosis: logged at activation, in the status)
         self._app_gain = False           # the driver applies the game's FF_GAIN to its force, not to ours
         self._clip_at = None             # |ext_force| past which the driver's cap flattens it
+        self._cap_level = None           # the cap in the master gain's own frame (what is meant to be delivered)
+        self._gain_at = None             # when the master gain was last read
+        self._gain_seen = None           # master gain, share of 100 % (None unknown)
+        self._comp = 1.0                 # the gain we divide by (smoothed)
+        self._comp_at = None
         self._clipped = 0.0              # EW share of writes past it
         self._last_value = 0             # the last ext_force written
         self._closed = False             # stop() has begun: never take over again
@@ -1102,6 +1168,17 @@ class FfbEngine:
         """(car, caster trail m, scrub radius m) as the ACR model holds them for the current car, None before one."""
         model = self.model
         return None if model.car is None else (model.car, model.trail, model.scrub)
+
+    @property
+    def usb_id(self):
+        return self._usb_id
+
+    @usb_id.setter
+    def usb_id(self, usb_id):
+        """The wheel's model (USB vendor:product), for the peak torque the steering force is mapped to
+        (wheel_torque; unknown: the relative target). Set before set_device."""
+        self._usb_id = usb_id
+        self.model.wheel_peak = wheel_torque.peak_nm(usb_id)      # one attribute swap, read by the engine thread
 
     def set_device(self, path):
         """The wheel's sysfs directory, None for none. The old one's game
@@ -1389,17 +1466,25 @@ class FfbEngine:
         """`force` (ext_force units, before the fade) clamped, faded and written."""
         g = self._gain(t)
         force = min(max(force, -FULL), FULL)
-        if self._played_mode != 'forza':     # the add-on's is added to the game's own force, which steps: it must too
+        compensate = self._played_mode != 'forza'
+        if compensate:                       # the add-on's is added to the game's own force, which steps: it must too
             force = self._shape(t, force)
-        value = int(round(force * g))
+        # What is meant to be delivered; the driver multiplies ext_force by the user's master gain, so the value
+        # written is divided by it (Countersteer's strength is the same at any gain; the game's own force is not)
+        level = force * g
+        comp = self._master(t) if compensate else 1.0
+        value = int(round(level / comp))
+        saturated = abs(value) > FULL
+        value = min(max(value, -FULL), FULL)
         self._written_at = t
         self._write_pending = False
         try:
             self._driver.force(value)
             self.writes += 1
             self._last_value = value
-            if self._clip_at is not None:
-                self._clipped += ((abs(value) > self._clip_at) - self._clipped) / 333.0   # about a second
+            if self._cap_level is not None:
+                over = saturated or abs(level) > self._cap_level or (not compensate and self._clip_at is not None and abs(value) > self._clip_at)
+                self._clipped += (over - self._clipped) / 333.0       # about a second
         except OSError as e:
             logging.warning("Countersteer FFB: ext_force: %s", e)
             self._broken, self._available = True, False      # until the device is set again
@@ -1408,6 +1493,27 @@ class FfbEngine:
         if self._phase == 'out' and g <= 0.0:
             self._phase = 'idle'         # faded out (0 written last): the game has its force back
             self._let_go()
+
+    def _master(self, t):
+        """The driver's master gain as a share of 100 %, read every GAIN_POLL s and followed with GAIN_TAU (1.0
+        when unreadable or 0)."""
+        if self._gain_at is None or t < self._gain_at or t - self._gain_at >= GAIN_POLL:
+            self._gain_at = t
+            try:
+                raw = self._driver.master_gain()
+            except OSError:
+                raw = None
+            self._gain_seen = raw / 65535.0 if raw else None
+        want = self._gain_seen or 1.0
+        last = self._comp_at
+        self._comp_at = t
+        if last is None or not 0.0 < t - last <= 1.0:
+            if last is None:
+                self._comp = want
+            return self._comp
+        dt = t - last
+        self._comp += (want - self._comp) * dt / (GAIN_TAU + dt)
+        return self._comp
 
     def _rewrite(self, now):
         """The last value again (a gap between ACR samples; STALL ends it)."""
@@ -1784,8 +1890,12 @@ class FfbEngine:
         gain, cap = driver.master_gain(), driver.ext_force_cap()
         # The driver: min(|ext| * gain / 65535, cap % of full scale)
         self._clip_at = FULL * cap / 100.0 * 65535.0 / gain if gain and cap is not None else None
+        self._cap_level = FULL * cap / 100.0 if cap is not None else None
+        self._gain_seen = gain / 65535.0 if gain else None
+        self._gain_at = None
+        self._comp, self._comp_at = self._gain_seen or 1.0, None
         self._clipped = 0.0
-        self.rbr.set_ceiling(self._clip_at)      # RBR's knee ends under the driver's cap: it never clips there
+        self.rbr.set_ceiling(self._cap_level)    # RBR's knee ends under the driver's cap: it never clips there
 
     def _fade_out(self, t, reason):
         """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out."""

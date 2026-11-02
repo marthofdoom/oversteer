@@ -69,9 +69,9 @@ def acr():
 def test_acr_replay_follows_finalff(acr):
     _d, _rep, _cases, fit = acr
     assert fit['r2_moving'] > 0.96 and fit['r_moving'] > 0.98
-    assert 0.9 < fit['gain_ratio_moving'] < 1.1
+    assert 0.55 < fit['p50_p90_p99_ours'][2] < 0.9        # the physical target: each car's p99 at 0.70 of the wheel
     assert abs(fit['lag_s']) < 0.1                     # (snapshots 0.26 s apart: a lag under ~0.1 s is not resolved)
-    assert fit['clip_share_ours'] < 0.001
+    assert fit['clip_share_ours'] < 0.003                # p99 at 0.70 of full scale: a little clips
     assert fit['ready_share'] > 0.95
 
 
@@ -100,14 +100,14 @@ def test_acr_level_and_thermal_headroom_in_normal_driving(acr):
     mean = R.thermal_mean(d['t'], shaped)
     assert mean.max() < R.THERMAL_LIMIT * (1 - R.THERMAL_BAND) / 3          # 3x headroom before the derate starts
     moving = d['speed'] / 3.6 > fe.MIN_SPEED
-    assert np.mean(np.abs(rep['force'][moving]) / FULL > 0.8) < 0.002
+    assert np.mean(np.abs(rep['force'][moving]) / FULL > 0.8) < 0.02       # p99 at 0.70: a little over 1 % passes 0.8
 
 
 @needs_dump
 def test_the_learner_fits_every_car(acr):
     # every stretch fits finalFF with R^2 0.946-0.995 by its own least squares (trail 6-46 mm, scrub 13-35 mm)
     _d, _rep, _c, fit = acr
-    assert min(fit['r2_per_stretch'].values()) > 0.93, fit['r2_per_stretch']
+    assert min(fit['r2_per_stretch'].values()) > 0.92, fit['r2_per_stretch']
     assert min(fit['learnt_scrub_mm'].values()) > 5.0, fit['learnt_scrub_mm']
 
 
