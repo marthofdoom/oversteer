@@ -209,6 +209,7 @@ def test_forwarding_alone_starts_the_listener():
     me.model.get_rev_leds_port_auto.return_value = False
     me.model.get_rev_leds_port.return_value = port
     me._shift_kwargs.return_value = {}
+    me._countersteer_wanted.return_value = False      # Countersteer FFB off: it would run the listener too
     Gui.apply_rev_leds(me)
     try:
         assert me.telemetry is not None and me.telemetry.forwarder.targets == (('127.0.0.1', 9),)

@@ -336,6 +336,10 @@ class Bridge:
                 raise Rejected(400, "unknown effect")
             if not model.get_ffb_enabled():
                 raise Rejected(409, "Force feedback is off")
+            from . import wheel_owner
+            path = getattr(controller.device, 'dev_path', None)
+            if not wheel_owner.hold_for_demo(path, wheel_owner.DEMO_SECONDS):
+                raise Rejected(409, wheel_owner.demo_refusal(path) or "The wheel is in use")
             # The device directly: the window's try_effect answers a failure with a dialog on the desktop
             if not controller.device.play_demo(arg, on_error=lambda e: logging.warning("web effect: %s", e)):
                 raise Rejected(409, "This device has no force feedback")

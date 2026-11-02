@@ -430,6 +430,7 @@ class Telemetry:
         self.use_learnt = use_learnt
         self.rbr_car = rbr_car            # a replay: the Richard Burns Rally car the capture's header recorded (never set live)
         self.recorder = None              # a telemetry_capture.Recorder while "Record raw telemetry" is on
+        self.ffb = None                   # an ffb_engine.FfbEngine: handed every sample of the locked source
         self.live = None                  # the last Sample, for the GUI
         self.using_learnt = None          # the learnt shift point in use, or None
         self.launch_max = 0.0             # limiter from the last launch; 0 = none yet
@@ -946,6 +947,9 @@ class Telemetry:
                     logging.exception("rbr car recognition")
         rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
         self.live = sample
+        ffb = self.ffb
+        if ffb is not None:
+            ffb.offer(now, sample)        # O(1): the engine runs on its own thread
         self.last_packet = now
         if not self.heard:
             self.heard = True
