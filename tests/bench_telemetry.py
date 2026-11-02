@@ -3,7 +3,9 @@ through Telemetry.handle with a null LED object, the shift learner and
 the run tracker, writing through the drive-log thread as the app does.
 The design's budget is a mean of 0.3 ms and a 99th percentile of 2 ms
 per packet (docs/telemetry-coaching.md, section 4). Not part of pytest
-(timing depends on the machine): python3 tests/bench_telemetry.py"""
+(timing depends on the machine): python3 tests/bench_telemetry.py
+[rbr | acr]: Richard Burns Rally at 720 packets a second, or ACR through
+the bridge's version 5 at 333 (one per physics step)."""
 import os
 import statistics
 import sys
@@ -43,12 +45,17 @@ def rbr_packets(seconds=100.0):
 
 
 def main():
-    if 'rbr' in sys.argv[1:]:
-        packets = rbr_packets()
+    if 'rbr' in sys.argv[1:] or 'acr' in sys.argv[1:]:
+        name = 'RBR' if 'rbr' in sys.argv[1:] else 'ACR v5'
+        if name == 'RBR':
+            packets = rbr_packets()
+        else:
+            from tests.sim import acr_packets
+            packets = acr_packets()
         mean, p99, worst, dropped = measure(packets)
         seconds = packets[-1][0] - packets[0][0]
-        print("RBR %d packets (%.0f/s): mean %.3f ms, p99 %.3f ms, worst %.1f ms, %d events dropped; "
-              "CPU %.1f %% of one core" % (len(packets), len(packets) / seconds, mean, p99, worst, dropped,
+        print("%s %d packets (%.0f/s): mean %.3f ms, p99 %.3f ms, worst %.1f ms, %d events dropped; "
+              "CPU %.1f %% of one core" % (name, len(packets), len(packets) / seconds, mean, p99, worst, dropped,
                                            mean * len(packets) / 1000 / seconds * 100))
         return
     packets = stage_packets(10.0)

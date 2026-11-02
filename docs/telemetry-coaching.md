@@ -438,6 +438,44 @@ bridge is started from the app's tree when the game launches).
   (`mu_wheel`, brake bias, suspension travel) depends on v3, v3 sits in
   Step D next to the measured detectors that use it.
 
+**OVST (bridge) v5.** For force feedback computed from the tyres
+(research of 2026-11-01): v4's 328 bytes unchanged, then 128 bytes (456 in
+all; the table is in the bridge's header comment and `OVST5_TAIL`):
+`packet_id` (int, the physics step), `final_ff`, `mz[4]`, `slip_ratio[4]`,
+`slip_angle[4]`, `contact_normal[4][3]`, the kerb/slip/g/abs vibrations,
+`tc_in_action` and `abs_in_action` (ints, -1 unknown). NaN past the mapped
+physics page (800 bytes in ACC/ACR, 580 in AC), and the ACC/ACR-only
+fields only when the game is named ACC or ACR. The decoder sets
+`packet_id`, `game_ffb`, `tyre_mz`, `tyre_slip_ratio`, `tyre_slip_angle`,
+`contact_normal`, `vibrations`, `tc_active`, `abs_active` (None for v4).
+- **Rate.** A datagram per new packetId (333 a second in ACR), polled every
+  1 ms under `timeBeginPeriod(1)`; `--rate` caps it (default 1000, so every
+  step). The listener and the learner get every packet (bench: 0.07 ms a
+  packet, 2.4 % of a core, `tests/bench_telemetry.py acr`); captures save
+  v5 at 60 a second on the arrival clock plus every packet where the
+  session's state changes (`OVST_THIN_RATE`), v1 to v4 as they come.
+- **Build.** `scripts/build-shm-bridge.sh` (now with `-lwinmm`), zig from
+  `pip install ziglang` in a scratch venv as for v3/v4.
+- **Native check.** The packet-building part of the bridge (between the
+  `native` markers) is compiled on the host by `tests/test_shm_bridge.py`
+  and its output decoded, for every game and mapped size.
+- **Torn reads.** The pages have no seqlock: after building a packet the
+  bridge reads packetId again and, if the game wrote a step meanwhile,
+  builds it once more from the newer step (counted in the 10 s log line as
+  "read twice").
+- **Live and replayed alike.** `tests/test_bridge_v5_replay.py` drives an
+  Afon Bidno stage at 333/s through the drive log live and from its 60 Hz
+  capture: the same result (the game's clock) and sector times within
+  0.02 s (5 ms apart on the test).
+- **To check on the first v5 capture** (not changed yet): drive_log's
+  `frozen` test (stage clock equal to the last packet's with the car under
+  0.1 m/s). At 333/s the graphics page's clock is rewritten only once per
+  rendered frame, so several physics packets in a row repeat it while the
+  clock runs; at speed that is never `frozen`, but at a crawl (a launch, a
+  hairpin at walking pace) packets between frames would read as the car at
+  rest. Check on the capture that moving time, stops and rows near 0 m/s
+  match the v4 60 Hz behaviour.
+
 ### 5.4 Identity: game, car, stage
 
 - `Sample.game` ∈ `forza-fh, forza-fm, forza, dirt, wrcg, eawrc, ac, acc,
