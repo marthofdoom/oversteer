@@ -162,6 +162,14 @@ def _counter(run, i0, i1):
     return float(np.mean((s[ok] * y[ok]) < 0))
 
 
+def _yaw_peak(run, i0, i1):
+    """The peak |yaw rate| over grid indices i0..i1; None where the window is empty (a stored corner whose end lies
+    before its start) or has no yaw."""
+    y = np.abs(run.YAW[i0:i1 + 1])
+    y = y[np.isfinite(y)]
+    return float(y.max()) if y.size else None
+
+
 def _lateral(run, ref, i, direction):
     """Signed metres run's position is from the reference's path at grid index i: positive to the inside of the
     corner (direction 1 left, -1 right). None without positions."""
@@ -198,6 +206,8 @@ def measures(run_arr, ref_arr, sec, env=None):
     m = {}
     # the slowest point: in the key corner's window (a little either side), each run's own
     win0, win1 = R.idx(key['d0'] - 30), R.idx(min(key['d1'] + 30, b))
+    if win1 < win0:                                         # a corner reversed past the window's margins: nothing to measure
+        return None
     ri = win0 + int(np.nanargmin(R.V[win0:win1 + 1]))
     x0, x1 = max(win0, ri - int(APEX_REACH)), min(win1, ri + int(APEX_REACH))
     xi = x0 + int(np.nanargmin(X.V[x0:x1 + 1]))
@@ -275,8 +285,8 @@ def measures(run_arr, ref_arr, sec, env=None):
     cx, cr = _counter(X, k0, k1), _counter(R, k0, k1)
     m['counter_x'], m['counter_r'] = cx, cr
     m['counter_d'] = cx - cr if cx is not None and cr is not None else None
-    yx, yr = np.nanmax(np.abs(X.YAW[k0:k1 + 1])), np.nanmax(np.abs(R.YAW[k0:k1 + 1]))
-    m['yaw_d'] = float(yx - yr) if np.isfinite(yx) and np.isfinite(yr) else None
+    yx, yr = _yaw_peak(X, k0, k1), _yaw_peak(R, k0, k1)
+    m['yaw_d'] = yx - yr if yx is not None and yr is not None else None
     # the line: lateral offset from the reference's path at its turn-in and slowest point (positive: inside)
     m['line_turnin'] = _lateral(X, R, ti, key.get('direction'))
     m['line_apex'] = _lateral(X, R, ri, key.get('direction'))
@@ -310,6 +320,8 @@ def measures_section(run_arr, ref_arr, sec, env=None):
     mins = []
     for k in cs:
         i0, i1 = R.idx(k['d0'] - 30), R.idx(min(k['d1'] + 30, sec['b']))
+        if i1 < i0:
+            return []
         mins.append(i0 + int(np.nanargmin(R.V[i0:i1 + 1])))
     edges = [sec['a']]
     for n in range(1, len(cs)):

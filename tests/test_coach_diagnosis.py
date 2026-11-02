@@ -515,3 +515,16 @@ def test_the_patterns_count_only_the_sections_diagnosed_as_such(tmp_path):
     assert 200.0 not in claimed
     [coast] = [t for t in cands if t.id.startswith('coast.entry')]
     assert coast.count == 1 and 'COASTING' in claimed[400.0]
+
+
+def test_a_stored_corner_whose_end_lies_before_its_start_has_no_yaw_peak_instead_of_crashing():
+    # marth's run 81: a corner with d1 < d0 (and d0 past the section's end) gave an empty yaw window (np.nanmax raised)
+    inverted = dict(SEC, b=700.0, key=dict(KEY, d0=690.0, d1=640.0))
+    m = dg.measures(REF, REF, inverted, ENV)
+    assert m is not None and m['yaw_d'] is None and m['counter_d'] is None
+    # one reversed by more than the window's margins has no slowest-point window: nothing to measure
+    bad = dict(KEY, d=650.0, d0=690.0, d1=600.0)
+    assert dg.measures(REF, REF, dict(SEC, key=bad), ENV) is None
+    # in a complex, an unmeasurable corner leaves the section out
+    sec = dict(SEC, corners=[KEY, bad])
+    assert dg.measures_section(REF, REF, sec, ENV) == []
