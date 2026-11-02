@@ -1,6 +1,8 @@
 """The hands-off wheel calibration (oversteer/wheel_calibration.py, oversteer/wheel_calib.py) against a simulated
 wheel (tests/wheel_sim.py): nothing here opens a real device, sysfs or evdev."""
+import gzip
 import json
+import math
 import os
 import threading
 from types import SimpleNamespace
@@ -1348,3 +1350,184 @@ def test_quitting_drops_the_retry_timer(tmp_path, monkeypatch):
     except AttributeError:
         pass                                                     # later parts need a full window
     assert removed == [42] and g._wheel_retry is None
+
+
+# --- moving between positions, the push's strength, the recording of each run ---
+
+# A strong motor with a steep torque curve behind a dead zone near the breakaway force: the old move loop (a
+# feed-forward below the dead zone, a 12/s velocity loop sized from a full-scale figure three times too high)
+# crept at 20..30 deg/s and stopped short of nearly every target (39 time-outs, 36 pulses dropped, no fit)
+STEEP = dict(inertia=1 / 12000.0, dead_zone=0.135, static=0.03, coulomb=0.02, latency=0.03, curve=6.0)
+
+
+def _prepared(**kw):
+    """A Calibration on a simulated wheel, set up the way _measure leaves it before the pushes."""
+    sim = SimWheel(**kw)
+    cal = Calibration(sim)
+    cal._prepare()
+    cal.sign = 1.0 if sim.ext_sign > 0 else -1.0
+    cal.sign_known = True
+    cal.breakaway_max = sim.dead_zone + sim.static            # about what the slow ramps measure
+    return sim, cal
+
+
+@pytest.mark.parametrize('kw', [
+    STEEP,
+    dict(STEEP, curve=0.0, inertia=1 / 9000.0, read_delay=0.015, read_batch=0.004),
+    dict(inertia=1 / 9000.0, dead_zone=0.135, static=0.03, coulomb=0.02, latency=0.03, rim_zone=(60.0, 0.03)),
+], ids=['steep', 'linear-proxied', 'heavy-rim'])
+def test_a_wheel_that_crept_and_stopped_short_now_reaches_every_position(kw):
+    """No move time-outs, no pulses dropped, a fit and a run well inside the time limit."""
+    sim = SimWheel(**kw)
+    cal = Calibration(sim)
+    result = cal.run()
+    assert cal.move_timeouts == 0 and cal.move_skips == 0
+    assert result['lut'] and not result.get('partial')
+    assert result['duration_s'] < 200
+    assert result['fit_uncertainty'] < wc.MAX_UNCERTAINTY
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_a_move_reaches_plus_and_minus_90_degrees_from_the_far_side():
+    sim, cal = _prepared(**STEEP)
+    try:
+        cal.kick = 0.35
+        cal._learn_strength(cal._kick(1.0))          # a push, as the procedure does before moving about
+        cal._brake()
+        for target in (-90.0, 90.0, -90.0, 90.0, 0.0):
+            t = sim.t
+            assert cal._move_to(target, timeout=3.0), 'stopped at {:.1f} for {}'.format(cal.theta, target)
+            assert abs(cal.theta - target) < 3.5 and sim.t - t < 2.5
+    finally:
+        cal._restore()
+
+
+@pytest.mark.parametrize('kw', [
+    dict(),
+    dict(latency=0.03),
+    dict(latency=0.03, read_delay=0.015, read_batch=0.004),
+    dict(inertia=1 / 9000.0, dead_zone=0.11, static=0.07, coulomb=0.05, latency=0.03),
+    dict(inertia=1 / 9000.0, dead_zone=0.11, static=0.07, coulomb=0.05, latency=0.03, curve=0.0, read_delay=0.03),
+    dict(inertia=1 / 9000.0, dead_zone=0.11, static=0.07, coulomb=0.05, latency=0.05, curve=0.0, read_delay=0.03,
+         read_batch=0.008),
+    STEEP,
+])
+def test_the_pushs_acceleration_matches_the_simulated_wheels(kw):
+    """a_kick from the first movement to V_KICK, with the wheel's latency and a proxy's delay and bunching,
+    stays within 30 % of what the simulated motor gives."""
+    sim, cal = _prepared(**kw)
+    try:
+        cal.kick = 0.35
+        truth = (sim.torque_of(cal.kick) - sim.coulomb) / sim.J
+        for d in (1.0, -1.0, 1.0):
+            accel = cal._kick(d)
+            assert 0.7 * truth < accel < 1.3 * truth, (accel, truth)
+            cal._learn_strength(accel)
+            cal._brake()
+            cal._settle(0.2, check=False)
+    finally:
+        cal._restore()
+
+
+@pytest.fixture(scope='module')
+def recorded_run(tmp_path_factory):
+    directory = tmp_path_factory.mktemp('calibration-runs')
+    sim = SimWheel(dead_zone=0.11, static=0.07, coulomb=0.05, latency=0.03)
+    cal = Calibration(sim, record_dir=str(directory))
+    result = cal.run()
+    return directory, cal, result
+
+
+def test_every_run_leaves_its_recording_which_loads_and_analyses(recorded_run):
+    directory, cal, result = recorded_run
+    files = sorted(directory.iterdir())
+    assert len(files) == 1 and files[0].name.startswith('calibration-') and files[0].name.endswith('-ok.json.gz')
+    data = wcal.load_run(str(files[0]))
+    assert data['outcome'] == 'ok' and data['proxied'] is False and data['format'] == wcal.RUN_FORMAT
+    assert data['summary']['a_kick'] == cal.a_kick and data['constants']['MOVE_MAX'] == Calibration.MOVE_MAX
+    assert data['log'] and data['summary']['result']['lut'] == result['lut']
+    rec = data['rec']
+    assert isinstance(rec, wc.Recording) and len(rec.cmd_t) == len(cal.rec.cmd_t)
+    assert len(rec.pos_t) == len(cal.rec.pos_t) and len(rec.onsets) == len(cal.rec.onsets)
+    assert rec.breakaway == [tuple(b) for b in cal.rec.breakaway] and rec.counts_per_deg == cal.rec.counts_per_deg
+    again = wc.analyse(rec)                                  # offline, from the file alone
+    assert again['deadband'] == pytest.approx(result['deadband'], abs=300)
+    assert again['a_fs'] == pytest.approx(result['a_fs'], rel=0.02)
+    assert again['fit_r2'] == pytest.approx(result['fit_r2'], abs=0.01)
+
+
+def test_an_aborted_run_leaves_its_recording_too(tmp_path):
+    sim = SimWheel()
+    sim.unplug(20.0)
+    cal = Calibration(sim, record_dir=str(tmp_path / 'runs'))
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'unplugged'
+    (path,) = list((tmp_path / 'runs').iterdir())
+    data = wcal.load_run(str(path))
+    assert data['outcome'] == 'unplugged' and 'unplugged' in data['message']
+    assert data['rec'].pos_t and data['summary']['result'] is None
+
+
+def test_the_recordings_are_rotated_to_the_newest_five(tmp_path):
+    paths = []
+    for i in range(8):
+        paths.append(wcal.write_run(str(tmp_path), {'outcome': 'ok', 'n': i}, 5))
+        os.utime(paths[-1], (1000 + i, 1000 + i))
+    left = sorted(tmp_path.iterdir())
+    assert len(left) == 5 and {str(p) for p in left} == set(paths[3:])
+    # the same second twice does not overwrite
+    assert len(list(tmp_path.iterdir())) == 5 and wcal.write_run(str(tmp_path), {'outcome': 'ok'}, 5) not in left
+
+
+def test_a_recording_that_cannot_be_written_does_not_change_the_outcome(tmp_path, caplog):
+    blocked = tmp_path / 'file'
+    blocked.write_text('x')
+    sim = SimWheel()
+    sim.unplug(5.0)
+    cal = Calibration(sim, record_dir=str(blocked / 'runs'))
+    with caplog.at_level('WARNING'):
+        with pytest.raises(Aborted) as e:
+            cal.run()
+    assert e.value.reason == 'unplugged'
+    assert any('recording not kept' in r.getMessage() for r in caplog.records)
+
+
+def test_a_file_that_is_not_a_recording_is_refused(tmp_path):
+    path = tmp_path / 'x.json.gz'
+    with gzip.open(path, 'wt') as f:
+        json.dump({'format': 99}, f)
+    with pytest.raises(ValueError):
+        wcal.load_run(str(path))
+
+
+def test_the_window_keeps_its_recordings_next_to_the_store(tmp_path, monkeypatch):
+    made = []
+    monkeypatch.setattr(wcal.Calibration, 'run', lambda self: made.append(self))
+    gui = _gui(tmp_path, _Wheel())
+    gui.start_calibration()
+    cal = gui.calibration
+    assert cal.record_dir == os.path.join(str(tmp_path), 'calibration-runs')
+    gui.cancel_calibration(wait=1.0)
+
+
+def test_pulses_starting_fifteen_degrees_short_of_the_start_still_fit(monkeypatch):
+    """The field wheel stopped about 15 degrees short of +-90 before every pulse: within SHOT_START_TOL_DEG
+    the pulse is played from there, and neither the fit nor the run is worse for it."""
+    real = Calibration._move_to
+
+    def short(self, target, tol=3.0, timeout=3.0, fatal=False):
+        if self.phase == 'force response' and abs(abs(target) - 90.0) < 1.0:
+            real(self, target - math.copysign(15.0, target), tol, timeout, fatal)
+            return False
+        return real(self, target, tol, timeout, fatal)
+
+    monkeypatch.setattr(Calibration, '_move_to', short)
+    sim = SimWheel(dead_zone=0.11, static=0.07, coulomb=0.05, latency=0.03)
+    cal = Calibration(sim)
+    result = cal.run()
+    assert cal.move_skips == 0 and result['lut'] and result['fit_uncertainty'] < wc.MAX_UNCERTAINTY
+    assert result['duration_s'] < 200
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)

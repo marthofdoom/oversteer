@@ -23,7 +23,9 @@ Safety (all enforced here, whatever the step asks for):
 import atexit
 import datetime
 import errno
+import glob
 import gc
+import gzip
 import json
 import logging
 import math
@@ -85,6 +87,11 @@ class Calibration:
     KICK_START_S = 0.200        # a push that moves nothing in this long: held
     KICK_MAX_S = 0.500
     MOVE_MAX = 0.35             # largest force while moving between positions
+    MOVE_SPEEDS = (1.0, 0.55, 1.25, 0.8)     # shares of V_MOVE the moves take turns at
+    MOVE_BOOST_RATE = 0.5       # full scale per second the push grows by while the wheel is slower than asked...
+    BOOST_MAX = 0.2             # ...up to this much over the breakaway
+    NEAR_DEG = 12.0             # the move's feed-forward fades out over the last degrees to the target
+    ACCEL_SPAN_S = 0.020        # the span of speeds the acceleration (alpha) is taken over
     RAMP_RATE = 0.15            # full scale per second, the slow breakaway ramps
     RAMP_MOVE_DEG = 0.2         # movement that counts as breaking away
     SETTLE_TOL_DEG = 2.0        # a still wheel with no force must not move more than this
@@ -93,6 +100,7 @@ class Calibration:
     VEL_WINDOW_S = 0.010
     VEL_HOLD_S = 0.020          # no report for this long (2 windows): the wheel is taken to be slowing, not mid-bunch
     VEL_MIN_DT_S = 0.002        # the shortest span a speed is taken over
+    RECORD_KEEP = 5             # recordings of runs kept in record_dir
     TOTAL_S = 480.0             # a hard stop (a real wheel behind a proxy takes about twice the simulator's 170 s)
     WIND_DOWN_S = 4.0           # past TOTAL_S, a run that keeps its data may take this long to stop and centre
     PREP_S = 0.35               # game force ramps to 0 over 200 ms
@@ -105,11 +113,14 @@ class Calibration:
     EMERGENCY_BRAKE_S = 0.200   # stopping at the hard margin: brake this long at most, then force 0
     STALE_SAMPLES = 3           # ext_force reads taken (50 ms apart) to tell a stale value from a live writer
 
-    def __init__(self, io, progress=None, pending_path=None, pending_key=None):
+    def __init__(self, io, progress=None, pending_path=None, pending_key=None, record_dir=None):
         self.io = io
         self.progress = progress
         self.pending_path = pending_path    # crash record: what to put back if this process dies mid-run
         self.pending_key = pending_key
+        self.record_dir = record_dir        # where every run's raw recording is kept (the newest RECORD_KEEP)
+        self.outcome_text = ''
+        self.result = None
         self.cancel_event = threading.Event()
         self.rec = wc.Recording()
         self.saved = {}
@@ -120,6 +131,8 @@ class Calibration:
         self.omega = 0.0
         self.hist = deque()
         self.last_raw = None
+        self._speeds = deque()          # (time, speed) of recent ticks, for alpha
+        self.alpha = 0.0                # deg/s^2 the speed is changing at now
         self.near_lock_events = 0
         self.recovering = False
         self.breakaway_max = 0.05
@@ -142,6 +155,7 @@ class Calibration:
         self.phase = 'start'            # the phase of the procedure, and when each began (for the summary)
         self.phase_marks = []           # (phase, time)
         self.move_timeouts = 0
+        self.moves_made = 0
         self.move_skips = 0
         self.first_pass_done = False    # every level both ways measured once: enough to keep if time runs out
         self.winding_down = False
@@ -200,19 +214,59 @@ class Calibration:
                 result['partial'] = True
                 result['timed_out_in'] = self.timed_out_in
                 outcome = 'ok (partial: time limit)'
+            self.result = result
             return result
         except Aborted as e:
             outcome = e.reason
+            self.outcome_text = str(e)
             raise
-        except BaseException:
+        except BaseException as e:
             outcome = 'error'
+            self.outcome_text = '{}: {}'.format(type(e).__name__, e)
             raise
         finally:
             self._log_summary(outcome)
+            self._dump(outcome)
             if gc_was:
                 gc.enable()
             self._release_owner(owner)      # a safety net: normally released after the restore above
             _running.discard(self)
+
+    def _dump(self, outcome):
+        """Keep the raw recording of this run (every ending) in record_dir, for offline analysis (load_run).
+        Never raises: a failed write must not hide how the run went."""
+        if not self.record_dir:
+            return
+        try:
+            write_run(self.record_dir, self._run_data(outcome), self.RECORD_KEEP)
+        except Exception as e:
+            logging.warning("calibration recording not kept: %s", e)
+
+    def _run_data(self, outcome):
+        rec = self.rec
+        constants = {k: v for k, v in vars(type(self)).items()
+                     if k.isupper() and isinstance(v, (int, float)) and not isinstance(v, bool)}
+        return {
+            'format': RUN_FORMAT,
+            'date': datetime.datetime.now().isoformat(timespec='seconds'),
+            'outcome': outcome,
+            'message': self.outcome_text,
+            'proxied': getattr(self.io, '_proxy_id', None) is not None,
+            't0': self.t0,
+            'lock': self.lock,
+            'summary': {
+                'a_kick': self.a_kick, 'a_fs': self.a_fs, 'breakaway_max': self.breakaway_max,
+                'latency_s': self._latency, 'sign': self.sign, 'kick': self.kick,
+                'kick_accels': {str(int(k)): v for k, v in self.kick_accels.items()},
+                'move_timeouts': self.move_timeouts, 'move_skips': self.move_skips,
+                'near_lock_events': self.near_lock_events, 'phase_marks': self.phase_marks,
+                'step': self.step_text, 'timed_out_in': self.timed_out_in,
+                'result': self.result,
+            },
+            'constants': constants,
+            'log': self.log,
+            'rec': rec.to_dict(),
+        }
 
     OWNER = 'calibration'
 
@@ -405,6 +459,7 @@ class Calibration:
         while len(self.hist) > 2 and self.hist[1][0] < now - 0.1:
             self.hist.popleft()
         self.omega = self._velocity(now)
+        self._accel_update()
         # The reports can stop while the wheel turns (another program grabbed the input node): the axis's
         # current value, which a grab doesn't stop, must agree with them
         self.theta_now = self._deg(current)
@@ -413,6 +468,18 @@ class Calibration:
             raise Aborted('blind', _("The wheel's position stopped arriving (another program may have taken the "
                                      "wheel's input); the calibration stopped."))
         return events
+
+    def _accel_update(self):
+        """The acceleration (deg/s^2) over the last ACCEL_SPAN_S of speeds, each at the time of the newest report
+        it came from."""
+        t = self.hist[-1][0] if self.hist else 0.0
+        if not self._speeds or t > self._speeds[-1][0]:
+            self._speeds.append((t, self.omega))
+        while len(self._speeds) > 2 and self._speeds[1][0] < t - self.ACCEL_SPAN_S:
+            self._speeds.popleft()
+        t0, v0 = self._speeds[0]
+        t1, v1 = self._speeds[-1]
+        self.alpha = (v1 - v0) / (t1 - t0) if t1 - t0 > 0.01 else 0.0
 
     def _velocity(self, now):
         """Speed from the reports' own times: the newest sample against the newest one at least VEL_WINDOW_S
@@ -523,8 +590,9 @@ class Calibration:
     @property
     def kv(self):
         """Velocity feedback (full scale per deg/s): a 12/s velocity loop for this wheel, slow enough for 40 ms
-        of latency and a strength estimate three times too low."""
-        return 12.0 / self.a_fs
+        of latency and a strength estimate three times too low; slower for a longer latency (a proxy hop adds
+        to the wheel's)."""
+        return min(12.0, 0.5 / max(self._latency, 0.01)) / self.a_fs
 
     def _brake(self):
         """Stop the wheel: velocity feedback over a floor just under the breakaway force (which brakes even
@@ -539,13 +607,28 @@ class Calibration:
                 continue
             still = 0
             floor = 0.8 * self.breakaway_max if abs(self.omega) > 2 * self.STILL_DEG_S else 0.0
-            w = -_sign(self.omega) * min(self.SWEEP_MAX, floor + self.kv * abs(self.omega))
+            # what the speed will be when this force acts: one that will have stopped by then gets none (a
+            # strong wheel behind a latency was thrown back the other way by the force still on its way)
+            ahead = self.omega + self.alpha * min(self._latency, 0.1)
+            if ahead * self.omega <= 0:
+                w = 0.0
+            else:
+                w = -_sign(self.omega) * min(self._brake_cap(), floor + self.kv * abs(ahead))
             self._tick(w)
             elapsed = self._now() - start
             if elapsed > 0.4 and w0 > 100 and abs(self.omega) > 0.7 * w0:
                 raise self._grabbed(_("it did not slow down when braked"))
             if elapsed > 1.2:
                 raise self._grabbed(_("it kept turning when braked"))
+
+    def _brake_cap(self):
+        """The strongest brake worth applying at this speed: the force that stops the wheel in half of what
+        the forces already on their way (one latency) will have turned it, so a strong wheel is not thrown back
+        the other way when the brake only acts after it has stopped. a_kick is the push's acceleration at KICK,
+        taken to fall to nothing at the breakaway force."""
+        stop_in = self.a_kick * min(self._latency, 0.1)
+        share = min(1.0, 0.5 * abs(self.omega) / max(stop_in, 1.0))
+        return min(self.SWEEP_MAX, self.breakaway_max + share * max(self.kick - self.breakaway_max, 0.05))
 
     def _settle(self, seconds, check=True):
         if abs(self.omega) >= self.STILL_DEG_S:
@@ -556,7 +639,7 @@ class Calibration:
         while self._now() < end:
             self._tick(0.0)
             if start is None:
-                if self._now() - begin >= 0.04:            # what was left of the movement has stopped
+                if self._now() - begin >= max(0.04, 1.5 * self._latency):    # what was left of the movement has stopped
                     start = self.theta
             elif check and abs(self.theta - start) > self.SETTLE_TOL_DEG:
                 raise self._grabbed(_("it moved with no force on it"))
@@ -569,6 +652,10 @@ class Calibration:
         still_since = None
         stalled_since = None
         boost = 0.0
+        boost_dir = 0.0
+        # the cruising speed varies from move to move: the fit tells friction from damping by the range of speeds
+        v_top = self.V_MOVE * self.MOVE_SPEEDS[self.moves_made % len(self.MOVE_SPEEDS)]
+        self.moves_made += 1
         a_dec = 0.5 * self.a_kick
         while True:
             e = target - self.theta
@@ -587,13 +674,27 @@ class Calibration:
                 boost = 0.0
             else:
                 still_since = None
-                v_ref = _sign(e) * min(self.V_MOVE, math.sqrt(2 * a_dec * abs(e)), 6.0 * abs(e))
-                if abs(self.omega) < 5.0:
-                    boost = min(boost + 0.1 * self.period, self.MOVE_MAX)    # stuck: more push, slowly
-                    ff = 0.9 * self.breakaway_max + boost
+                v_ref = _sign(e) * min(v_top, math.sqrt(2 * a_dec * abs(e)), 6.0 * abs(e))
+                # speed made good towards v_ref. Well short of it the wheel is stuck whatever the speed: a motor
+                # with a dead zone near the breakaway force creeps and stops, so the push keeps growing (and
+                # starts at the breakaway) until the wheel is up to speed; it only falls back when too fast
+                made = self.omega * _sign(v_ref)
+                near = min(1.0, abs(e) / self.NEAR_DEG)     # the feed-forward fades near the target: no chatter
+                lag = (abs(v_ref) - made) / max(abs(v_ref), 20.0)
+                if _sign(v_ref) != boost_dir or made < -self.STILL_DEG_S:
+                    boost = 0.0                     # a push belongs to one direction
+                    boost_dir = _sign(v_ref)
+                if made < max(5.0, 0.3 * abs(v_ref)):
+                    boost = min(boost + self.MOVE_BOOST_RATE * self.period, self.BOOST_MAX)
+                    ff = (0.6 + 0.4 * near) * self.breakaway_max + boost
                 else:
-                    boost = max(boost - 0.5 * self.period, 0.0)
-                    ff = 0.6 * self.breakaway_max + boost                     # sliding: less than breakaway
+                    if lag > 0.3:
+                        boost = min(boost + 1.5 * self.MOVE_BOOST_RATE * self.period, self.BOOST_MAX)
+                    elif lag < -0.1:
+                        boost = max(boost - 2.0 * self.MOVE_BOOST_RATE * self.period, 0.0)
+                    # too fast: nothing pushes (friction slows it, and the coast is what the fit's friction and
+                    # damping come from)
+                    ff = 0.0 if lag < -0.1 else 0.6 * near * self.breakaway_max + boost
                 w = self.kv * (v_ref - self.omega) + _sign(v_ref) * ff
                 w = max(-self.MOVE_MAX, min(self.MOVE_MAX, w))
                 # pushed well past its breakaway and still not turning, or only creeping: held
@@ -661,10 +762,18 @@ class Calibration:
 
     def _kick(self, d):
         """The push that starts every pulse: KICK from rest until V_KICK (or KICK_MAX_S). Its acceleration
-        from the first movement is the reference that tells a free wheel from a held one. Returns it."""
+        is the reference that tells a free wheel from a held one. Returns it.
+
+        The acceleration is the slope of the speed as it rises, each speed at the time of the report it comes
+        from: the wheel may still be creeping when the push starts, the force arrives a latency after the
+        write, and the speed reads a little behind, none of which changes the slope (the time from the first
+        movement to the speed reached, which this was before, did: a creeping wheel moved at once and the
+        push read several times too weak)."""
         t_on = self._now()
         theta0 = self.theta
+        still = abs(self.omega) < self.STILL_DEG_S
         first = None
+        speeds = []
         while True:
             events = self._tick(d * self.kick)
             now = self._now()
@@ -672,11 +781,13 @@ class Calibration:
                 first = next((t for t, deg in events if deg != theta0), None)
                 if first is None and now - t_on > self.KICK_START_S:
                     raise self._grabbed(_("it did not turn when pushed"))
+            speeds.append((self.hist[-1][0], d * self.omega))
             if d * self.omega >= self.V_KICK or now - t_on > self.KICK_MAX_S:
                 break
-        self.rec.onsets.append((t_on, first))
-        self._latency = max(self._latency, min(first - t_on, 0.1))
-        accel = d * self.omega / max(self._now() - first, self.period)
+        if still:
+            self.rec.onsets.append((t_on, first))
+            self._latency = max(self._latency, min(first - t_on, 0.1))
+        accel = self._rise(speeds, first)
         if accel <= 0:
             raise self._grabbed(_("it turned the wrong way when pushed"))
         refs = self.kick_accels[d]
@@ -687,6 +798,22 @@ class Calibration:
                                     .format(accel, ref))
         refs.append(accel)
         return accel
+
+    def _rise(self, speeds, first):
+        """The acceleration (deg/s^2) of a speed rising through `speeds` ((time, speed) per tick): a line
+        through the samples between 30 % and 95 % of the final speed. With too few of them, the final speed
+        over the time since the first movement."""
+        top = speeds[-1][1]
+        pts = [(t, v) for t, v in speeds if 0.3 * top <= v <= 0.95 * top]
+        if len(pts) >= 3:
+            ts = [t for t, _v in pts]
+            vs = [v for _t, v in pts]
+            t_mean = sum(ts) / len(ts)
+            v_mean = sum(vs) / len(vs)
+            var = sum((t - t_mean) ** 2 for t in ts)
+            if var > 0:
+                return sum((t - t_mean) * (v - v_mean) for t, v in pts) / var
+        return top / max(self._now() - first, self.period) if first is not None else 0.0
 
     def _learn_strength(self, accel):
         """Tune the movement loops from a push. Its acceleration is a floor for braking at SWEEP_MAX (more
@@ -754,7 +881,9 @@ class Calibration:
             self._tick(-d * level)
             p = peak()
             elapsed = self._now() - t_pulse
-            if elapsed > window or -d * p >= v_run or abs(p) > self.V_STOP or too_far(p):
+            # (a pulse is played against the movement; for the first `lead` seconds the push before it is still
+            # acting, so a predicted peak past V_STOP then is no reason to end it: it is what brakes)
+            if elapsed > window or -d * p >= v_run or (elapsed > lead and abs(p) > self.V_STOP) or too_far(p):
                 break
             if elapsed > 0.03 and abs(self.omega) < 20.0:
                 break                                        # stopped, and the pulse can't turn it back
@@ -1018,6 +1147,77 @@ def recover_pending(path, key, io, wheel=None):
     if saved:
         write_pending(path, key, {})            # the next attempt: force 0 and the game's force only
     return False
+
+
+# --- the raw recording of each run, kept for offline analysis ---
+
+RUN_FORMAT = 1
+RUN_PREFIX = 'calibration-'
+RUN_SUFFIX = '.json.gz'
+
+
+def write_run(directory, data, keep):
+    """Write `data` as gzipped JSON into `directory` (made if needed) and keep the newest `keep` files.
+    Returns the path."""
+    os.makedirs(directory, exist_ok=True)
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    outcome = ''.join(c if c.isalnum() else '-' for c in str(data.get('outcome', ''))).strip('-')[:20] or 'run'
+    path = os.path.join(directory, '{}{}-{}{}'.format(RUN_PREFIX, stamp, outcome, RUN_SUFFIX))
+    n = 1
+    while os.path.exists(path):             # two runs in a second
+        n += 1
+        path = os.path.join(directory, '{}{}-{}-{}{}'.format(RUN_PREFIX, stamp, outcome, n, RUN_SUFFIX))
+    tmp = path + '.tmp'
+    with gzip.open(tmp, 'wt', encoding='utf-8', compresslevel=6) as f:
+        json.dump(data, f, separators=(',', ':'), default=_json_default)
+    os.replace(tmp, path)
+    files = sorted(glob.glob(os.path.join(directory, RUN_PREFIX + '*' + RUN_SUFFIX)),
+                   key=lambda p: (os.path.getmtime(p), p))
+    for old in files[:-keep] if keep > 0 else files:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    return path
+
+
+def _json_default(o):
+    if hasattr(o, 'item'):                  # a numpy scalar
+        return o.item()
+    if hasattr(o, 'tolist'):
+        return o.tolist()
+    raise TypeError(type(o).__name__)
+
+
+def load_run(path):
+    """A recording written by Calibration (write_run): the dict as written, with 'rec' turned back into a
+    wheel_calib.Recording, so `wheel_calib.analyse(load_run(path)['rec'])` re-runs the fit offline."""
+    with gzip.open(path, 'rt', encoding='utf-8') as f:
+        data = json.load(f)
+    if not isinstance(data, dict) or data.get('format') != RUN_FORMAT or not isinstance(data.get('rec'), dict):
+        raise ValueError("not a calibration recording of this version: {}".format(path))
+    data['rec'] = wc.Recording.from_dict(data['rec'])
+    return data
+
+
+def main(argv=None):
+    """python3 -m oversteer.wheel_calibration RECORDING...: what a kept recording says, and the fit run on it."""
+    import sys
+    for path in (sys.argv[1:] if argv is None else argv):
+        data = load_run(path)
+        print('{}: {} {} {} proxied={} {}'.format(path, data['date'], data['outcome'], data.get('message', ''),
+                                                  data['proxied'], data['summary']))
+        try:
+            result = wc.analyse(data['rec'])
+            print('  fit r2 {} uncertainty {} a_fs {} latency {} ms (fit {} ms) dead zone/deadband {}'.format(
+                result['fit_r2'], result['fit_uncertainty'], result['a_fs'], result['latency_ms'],
+                result['fit_latency_ms'], result['deadband']))
+        except wc.FitError as e:
+            print('  fit refused: {}'.format(e))
+
+
+if __name__ == '__main__':
+    main()
 
 
 # Calibrations running now: the process stops none of them without putting the wheel back
