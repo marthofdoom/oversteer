@@ -78,7 +78,7 @@ CASTER_TRAIL = 0.027                     # m
 PNEUMATIC_TRAIL = 0.041                  # m
 G_MIN = CASTER_TRAIL / (CASTER_TRAIL + PNEUMATIC_TRAIL)     # 0.40: the physical amount of lightening, "Understeer
                                          # lightness" 100; the slider scales from none (0) to this
-STRENGTH = 0.6                           # "Understeer lightness" default
+STRENGTH = 1.0                           # "Understeer lightness" default: the physical caster-share floor (G_MIN)
 MIN_SPEED = 5.0                          # m/s: none below
 LOWPASS_HZ = 20.0
 SLEW = 6.0                               # g_eff per second at most (1 -> 0.4 in 100 ms)

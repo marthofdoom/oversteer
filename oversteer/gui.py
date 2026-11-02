@@ -348,8 +348,8 @@ class Gui:
         if wcal.wheel_key(self.device) == getattr(self, 'correction_key', None):
             return
         held = self._wheel_held()
-        if held is not None and held[1]:
-            return              # an exclusive holder keeps the forces as they are: looked at again next tick
+        if held is not None:
+            return              # a holder (a game's force being played, the test, a demo) keeps the forces as they are: looked at again next tick
         had_key = getattr(self, 'correction_key', None) is not None
         self.apply_wheel_correction()
         if had_key and self._wheel_entry() is None:
@@ -645,8 +645,13 @@ class Gui:
     def apply_countersteer_texture(self):
         """The texture's level and parts (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_texture(*self.model.get_countersteer_texture())
+        self.apply_countersteer_strength()
         self.apply_countersteer_linearity()
         self.apply_countersteer_lightness()
+
+    def apply_countersteer_strength(self):
+        """The overall steering strength (FFB tab, under the Countersteer switch) to the engine."""
+        self.ffb_engine.set_strength(self.model.get_countersteer_strength())
 
     def apply_countersteer_linearity(self):
         """Richard Burns Rally's linearity (FFB tab, under the Countersteer switch) to the engine."""
@@ -664,6 +669,21 @@ class Gui:
         """(light, text) for the FFB tab's Countersteer FFB row."""
         from .ffb_engine import status_text
         return status_text(self.ffb_engine.status, listening=self.telemetry is not None)
+
+    def countersteer_info(self):
+        """(car text, wheel text) for the FFB tab's read-only lines: the learnt caster trail and scrub of the
+        current car, and the driver's ffb_thermal when it has one; '' for what is not there."""
+        props = self.ffb_engine.car_properties()
+        car = ''
+        if props is not None:
+            car = _("Learnt for this car: caster trail %.0f mm, scrub radius %.0f mm") % (props[1] * 1000.0, props[2] * 1000.0)
+        wheel = ''
+        thermal = self.device.get_ffb_thermal() if self.device is not None else None
+        if thermal is not None:
+            mean, derating, gain = thermal
+            wheel = (_("Wheel motor heat: {} % — easing the force to {} %").format(mean, gain) if derating
+                     else _("Wheel motor heat: {} %").format(mean))
+        return car, wheel
 
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory
@@ -2296,8 +2316,8 @@ class Gui:
 
     def _defer_wheel_writes(self):
         """The wheel is held: a crash record waits for any holder (it writes ext_force, game_ffb_level, gain
-        and range), the correction (ffb_lut, ffb_deadband, ffb_dither, ffb_soft_clip) only for an exclusive
-        one (the test, a demo), whose forces must stay as they are. Retried every second until free."""
+        and range), the correction (ffb_lut, ffb_deadband, ffb_dither, ffb_soft_clip) too: a playing force must not
+        step. Retried every second until free."""
         if getattr(self, '_wheel_retry', None) is None:
             self._wheel_retry = GLib.timeout_add(1000, self._retry_wheel_writes)
 
@@ -2342,9 +2362,9 @@ class Gui:
         entry = self._wheel_entry()
         if entry is not None:
             held = self._wheel_held()
-            # A shared holder (Countersteer FFB) plays through the shaping too: it gets the correction now.
-            # An exclusive one (the test, a demo) keeps the forces as they were until it lets go.
-            if held is not None and held[1]:
+            # Any holder (Countersteer FFB playing, the test, a demo) keeps the forces as they were until it lets
+            # go: a changed lookup table or dead band under a playing force would step it.
+            if held is not None:
                 self._defer_wheel_writes()
                 return
             try:

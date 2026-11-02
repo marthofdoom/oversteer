@@ -1,6 +1,9 @@
 import configparser
 import logging
 
+STRENGTH_MIN = 10                    # Countersteer's overall steering strength, % (a force of 0 is the switch)
+
+
 def N_(text):
     """Marks a string for translation; it is translated where shown."""
     return text
@@ -67,10 +70,12 @@ class Model:
         'profile_note': None,
         'apply_on_plug': None,
         'countersteer_ffb': None,
+        'countersteer_strength': None,
         'countersteer_texture': None,
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
         'countersteer_texture_lock': None,
+        'countersteer_texture_engine': None,
         'countersteer_linearity': None,
         'countersteer_lightness': None,
     }
@@ -111,10 +116,12 @@ class Model:
         'profile_note': 'string',
         'apply_on_plug': 'boolean',
         'countersteer_ffb': 'boolean',
+        'countersteer_strength': 'integer',
         'countersteer_texture': 'integer',
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
         'countersteer_texture_lock': 'boolean',
+        'countersteer_texture_engine': 'boolean',
         'countersteer_linearity': 'integer',
         'countersteer_lightness': 'integer',
     }
@@ -211,14 +218,17 @@ class Model:
             **self._texture_defaults(self.device.get_ext_force_support()),
         }
 
-    TEXTURE_PARTS = ('road', 'impact', 'lock')
+    TEXTURE_PARTS = ('road', 'impact', 'lock', 'engine')
 
     @classmethod
     def _texture_defaults(cls, supported):
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
+        from .ffb_engine import OVERALL_STRENGTH as OVERALL
         from .ffb_texture import LEVEL
-        data = {'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
+        # The overall Countersteer force in % of the calibrated wheel's range
+        data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
+                'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
         for part in cls.TEXTURE_PARTS:
             data['countersteer_texture_' + part] = True if supported else None
         # Richard Burns Rally: how much of NGP's force curve Countersteer undoes (ffb_rbr)
@@ -389,6 +399,8 @@ class Model:
         for key in ('countersteer_linearity', 'countersteer_lightness'):
             if data[key] is not None:
                 data[key] = min(max(data[key], 0), 100)
+        if data['countersteer_strength'] is not None:
+            data['countersteer_strength'] = min(max(data['countersteer_strength'], STRENGTH_MIN), 100)
 
         self.data = data
         self.save_reference_values()
@@ -648,6 +660,17 @@ class Model:
 
     def get_countersteer_ffb(self):
         return bool(self.data['countersteer_ffb'])
+
+    def set_countersteer_strength(self, value):
+        """Countersteer's own steering force, STRENGTH_MIN..100 % of the calibrated wheel's range."""
+        value = min(max(int(value), STRENGTH_MIN), 100)
+        if self.set_if_changed('countersteer_strength', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_strength()
+
+    def get_countersteer_strength(self):
+        from .ffb_engine import OVERALL_STRENGTH as OVERALL
+        value = self.data.get('countersteer_strength')
+        return int(round(OVERALL * 100)) if value is None else value
 
     def set_countersteer_texture(self, value):
         """The texture's master level, 0..100 %."""
@@ -930,6 +953,7 @@ class Model:
         self.ui.set_profile_note(data['profile_note'])
         self.ui.set_apply_on_plug(data['apply_on_plug'])
         self.ui.set_countersteer_ffb(data['countersteer_ffb'])
+        self.ui.set_countersteer_strength(data['countersteer_strength'])
         self.ui.set_countersteer_texture(data['countersteer_texture'],
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])

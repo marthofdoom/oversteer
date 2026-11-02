@@ -1201,12 +1201,22 @@ class GtkUi:
         self._countersteer_polling = False
         self._build_countersteer_texture(row)
 
+    COUNTERSTEER_STRENGTH_TOOLTIP = ("How strong Countersteer's own steering force is, as a share of the force the "
+                                     "tyre model gives, which already fills your calibrated wheel's range the way "
+                                     "the game's own force would. Like a car with a lighter or heavier steering "
+                                     "rack. Lower it if the wheel feels heavy or runs warm. 100 % by default. "
+                                     "Saved with the profile.")
+    COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
+                                 "in the others.")
     COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
-                                    "it: road texture from the front suspension, a jolt on landings and hits, and a "
-                                    "buzz while the front wheels lock under braking. Kept very low on purpose: at "
-                                    "100 % they still stay under 8 % of the wheel's full force. Assetto Corsa Rally "
-                                    "only for now. Saved with the profile.")
-    COUNTERSTEER_TEXTURE_PARTS = (('road', "Road"), ('impact', "Landings"), ('lock', "Front lock"))
+                                    "it: road texture from the front suspension, a jolt on landings and hits, a "
+                                    "buzz while the front wheels lock under braking, and the engine's own "
+                                    "vibration, which follows the revs (its pitch is the firing rate, strongest "
+                                    "near idle and on the throttle, and it is there at a standstill, as in a real "
+                                    "car). Kept very low on purpose: at 100 % they still stay under 8 % of the "
+                                    "wheel's full force, the engine alone near 1 %. 30 % by default, every part "
+                                    "on. Assetto Corsa Rally only for now. Saved with the profile.")
+    COUNTERSTEER_TEXTURE_PARTS = (('road', "Road"), ('impact', "Landings"), ('lock', "Front lock"), ('engine', "Engine"))
     COUNTERSTEER_LINEARITY_TOOLTIP = ("Richard Burns Rally only. The game squeezes its steering force through a curve "
                                       "that flattens it as it grows; Countersteer undoes it. 0 % plays the game's "
                                       "curve as it is; 100 % plays the steering torque straight, clipped at full "
@@ -1216,12 +1226,25 @@ class GtkUi:
                                       "it lighter as the front tyres run out of grip (from the front slip in the "
                                       "game's telemetry), so understeer is felt in the wheel. 0 % leaves the game's "
                                       "force as it is; 100 % plays the whole drop, down to 40 % of the game's "
-                                      "force at most. Never stronger than the game. 60 % by default. Saved with the "
+                                      "force at most, what a real steering keeps (its caster part). Never stronger than "
+                                      "the game. 100 % by default. Saved with the "
                                       "profile.")
+
+    COUNTERSTEER_INFO_TOOLTIP = ("Read only. The caster trail and scrub radius Countersteer has learnt for the car "
+                                 "you are driving (the real steering geometry the force is built on), and, where "
+                                 "the driver reports it, how hard the wheel's motors have been working and whether "
+                                 "it is holding the force back to protect them.")
 
     def _build_countersteer_texture(self, anchor):
         """The texture's rows under the Countersteer FFB row (shown while it is on):
         the master level and a check box per part."""
+        strong = self._response_scale(10, 100, 10)
+        strong.set_size_request(160, -1)
+        strong.connect('value-changed',
+                       lambda w: self.controller.model.set_countersteer_strength(int(w.get_value())))
+        self.countersteer_strength = strong
+        strength = self._setting_row(_("Steering strength"), None, _(self.COUNTERSTEER_STRENGTH_TOOLTIP),
+                                     (self._response_row(strong),))
         scale = self._response_scale(0, 100, 10)
         scale.set_size_request(160, -1)
         scale.connect('value-changed', lambda w: self.controller.model.set_countersteer_texture(int(w.get_value())))
@@ -1237,6 +1260,8 @@ class GtkUi:
             self.countersteer_texture_parts[part] = box
             boxes.append(box)
         parts = self._setting_row(_("Texture parts"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP), tuple(boxes))
+        game = self._setting_row(_("Game-specific"), _("Each setting below works in its own game only"),
+                                 _(self.COUNTERSTEER_GAME_TOOLTIP))
         linear = self._response_scale(0, 100, 10)
         linear.set_size_request(160, -1)
         linear.connect('value-changed',
@@ -1251,8 +1276,11 @@ class GtkUi:
         self.countersteer_lightness = light
         lightness = self._setting_row(_("Forza understeer lightness"), None, _(self.COUNTERSTEER_LIGHTNESS_TOOLTIP),
                                       (self._response_row(light),))
+        self.countersteer_car_info, self.countersteer_wheel_info = self._status_label(), self._status_label()
+        info = self._setting_row(_("Learnt car and wheel"), None, _(self.COUNTERSTEER_INFO_TOOLTIP),
+                                 (self.countersteer_car_info, self.countersteer_wheel_info))
         parent = anchor.get_parent()
-        self.countersteer_texture_rows = (level, parts, linearity, lightness)
+        self.countersteer_texture_rows = (strength, level, parts, game, linearity, lightness, info)
         for i, row in enumerate(self.countersteer_texture_rows):
             parent.insert(row, anchor.get_index() + 1 + i)
             row.show_all()
@@ -1262,6 +1290,13 @@ class GtkUi:
     def _show_countersteer_texture(self, on):
         for row in getattr(self, 'countersteer_texture_rows', ()):
             row.set_visible(bool(on))
+
+    def set_countersteer_strength(self, value):
+        """The overall steering strength, 10..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_strength') or value is None:
+            return
+        if int(self.countersteer_strength.get_value()) != int(value):
+            self.countersteer_strength.set_value(int(value))
 
     def set_countersteer_texture(self, level, parts):
         """The texture's level (0..100, None where the driver has no replace mode) and parts."""
@@ -1309,6 +1344,9 @@ class GtkUi:
         if not self.countersteer_light.get_mapped():
             self._countersteer_polling = False
             return False
+        car, wheel = self.controller.countersteer_info()
+        self.countersteer_car_info.set_text(car)
+        self.countersteer_wheel_info.set_text(wheel)
         shown = self.controller.countersteer_view()
         if shown != self._countersteer_shown:
             self._countersteer_shown = shown

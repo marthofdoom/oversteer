@@ -5,7 +5,7 @@ part is capped at a few % of full scale, their sum at TOTAL_CAP and at a
 quarter of the steering force now (plus a small floor), and it all goes
 through a master level (default 30 %).
 
-Three parts, each from the sample in hand (ACR through bridge version 5,
+Four parts, each from the sample in hand (ACR through bridge version 5,
 333 a second, one per physics step):
 
 - road: the front suspension's velocity (d/dt travel, FL minus FR: a bump
@@ -22,6 +22,12 @@ Three parts, each from the sample in hand (ACR through bridge version 5,
   game's slip unit; the radius learnt while they roll free), the game's
   own slip ratio until then. ACR leaves its ABS and kerb vibrations at 0:
   not used.
+- engine: the engine's firing vibration through the column, from the rpm
+  (class EngineHum). Rev-aware: its frequency is the firing frequency
+  rpm / 60 * cylinders / 2 (a four-stroke fires every cylinder once in two
+  turns), its amplitude highest at idle and with the throttle open, lowest
+  at the top of the revs on a closed throttle. It stays while the car
+  stands (a real idle shakes the column) and goes when the engine is off.
 - surface (gravel, kerbs): not built; ACR sends no surface. It would be
   one more part here.
 
@@ -43,7 +49,7 @@ FULL = 32767                             # ext_force full scale (ffb_engine.FULL
 
 TEXTURE_GAMES = ('acr',)                 # the physics-rate games it is tuned for (the hook for others)
 
-PARTS = ('road', 'impact', 'lock')
+PARTS = ('road', 'impact', 'lock', 'engine')
 LEVEL = 0.30                             # the master level's default (0..1)
 TOTAL_CAP = 0.08                         # share of full scale: the sum of every part, at level 100 %
 STEER_SHARE = 0.25                       # ... and never past this share of |steering force| now ...
@@ -54,6 +60,10 @@ ONSET = 0.3                              # s: it ramps in after a start or a gap
 SLEW = 0.3                               # s: the level and the switches move 0 -> 1 in this
 GAP = 0.05                               # s between samples past which the filters start again
 MIN_SPEED = 2.0                          # m/s: no texture standing (it ramps with speed up to 2x this)
+
+
+def _finite_num(x):
+    return x is not None and math.isfinite(x)
 
 
 def _finite(values, n):
@@ -344,6 +354,91 @@ class LockCue:
         return self.CAP * FULL * self._env * math.sin(self._phase)
 
 
+class EngineHum:
+    """The engine's firing vibration, rev-aware and zero-mean (a sine).
+
+    - Frequency: rpm / 60 * cylinders / 2 (firing frequency of a
+      four-stroke); the cylinders from the telemetry where the game sends
+      them (Forza), else CYLINDERS. A 4-cylinder idles at ~27 Hz and
+      reaches 200 Hz at 6000 rpm.
+    - What the wheel can render: the driver writes the force on a 2 ms
+      timer (250 Hz sample rate, 125 Hz Nyquist) and the telemetry steps at
+      3 ms, so anything above RENDER_MAX_HZ is folded down by whole octaves
+      (200 Hz plays as 100 Hz) rather than aliased to a beat; the phase is
+      continuous across a fold, so there is no step. The G29's motors and
+      its gears are mushy past ~100 Hz anyway, and the amplitude is already
+      low there. Below RENDER_MIN_HZ (a cranking engine) nothing plays.
+    - Amplitude: CAP * shape(rpm) * load. shape is 1 at idle falling to
+      REV_FLOOR at the redline (idle roughness is the strongest shake a
+      real column carries; at speed the mounts and the balance shafts take
+      it out); load is LOAD_FLOOR with the throttle shut up to 1 fully open.
+      Smoothed over AMP_TAU so a blip of the pedal is not a click.
+    - Standing: it plays at speed 0 (Texture does not gate it by speed). Off
+      when the sample says the engine is not running, or has no rpm."""
+
+    CAP = 0.012                          # share of full scale at idle, throttle open (~1.2 % of the wheel's force)
+    CYLINDERS = 4
+    RENDER_MAX_HZ = 100.0
+    RENDER_MIN_HZ = 8.0
+    IDLE_FRACTION = 0.12                 # of max rpm, when the game sends no idle rpm
+    MAX_RPM = 7000.0                     # when the game sends no max rpm
+    REV_FLOOR = 0.35
+    LOAD_FLOOR = 0.6
+    AMP_TAU = 0.15                       # s
+
+    def __init__(self):
+        self.reset()
+        self.freq = 0.0                  # Hz as rendered (tests, the log)
+
+    def reset(self):
+        self._phase = 0.0
+        self._amp = 0.0
+
+    def frequency(self, sample):
+        """The firing frequency (Hz) of the sample's rpm, or None."""
+        rpm = sample.rpm
+        if not _finite_num(rpm) or rpm <= 0.0:
+            return None
+        cylinders = getattr(sample, 'cylinders', None)
+        if not cylinders or not 0 < cylinders < 32:
+            cylinders = self.CYLINDERS
+        return rpm / 60.0 * cylinders / 2.0
+
+    @classmethod
+    def render_frequency(cls, hz):
+        """Folded down by octaves to at most RENDER_MAX_HZ."""
+        while hz > cls.RENDER_MAX_HZ:
+            hz /= 2.0
+        return hz
+
+    def target(self, sample):
+        """The amplitude (share of CAP) the sample asks for, 0 when the engine is off."""
+        hz = self.frequency(sample)
+        if hz is None or sample.running is False or self.render_frequency(hz) < self.RENDER_MIN_HZ:
+            return 0.0
+        rpm = sample.rpm
+        top = sample.max_rpm if _finite_num(sample.max_rpm) and sample.max_rpm > 0.0 else self.MAX_RPM
+        idle = sample.idle_rpm if _finite_num(sample.idle_rpm) and sample.idle_rpm > 0.0 else self.IDLE_FRACTION * top
+        span = max(top - idle, 1.0)
+        rev = min(max((rpm - idle) / span, 0.0), 1.0)
+        shape = 1.0 - (1.0 - self.REV_FLOOR) * rev
+        throttle = sample.throttle if _finite_num(sample.throttle) else 0.0
+        return shape * (self.LOAD_FLOOR + (1.0 - self.LOAD_FLOOR) * min(max(throttle, 0.0), 1.0))
+
+    def step(self, dt, sample):
+        target = self.target(sample)
+        self._amp += (target - self._amp) * dt / (self.AMP_TAU + dt)
+        if target == 0.0 and self._amp < 1e-3:
+            self._amp = 0.0
+            self.freq = 0.0
+            return 0.0
+        hz = self.frequency(sample)
+        if hz is not None:
+            self.freq = self.render_frequency(hz)
+        self._phase = (self._phase + 2.0 * math.pi * self.freq * dt) % (2.0 * math.pi)
+        return self.CAP * FULL * self._amp * math.sin(self._phase)
+
+
 class Texture:
     """The parts, summed, limited and levelled. force() per
     sample while Countersteer plays; 0.0 exactly when off (the steering
@@ -351,6 +446,7 @@ class Texture:
 
     def __init__(self):
         self.road, self.impact, self.lock = RoadTexture(), ImpactPulse(), LockCue()
+        self.engine = EngineHum()
         self._env = 0.0                  # the limiter's peak follower of |sum|
         self._dc = _HighPass(DC_HZ)
         self.level = LEVEL               # requests (the GUI's thread); read here per sample
@@ -382,6 +478,7 @@ class Texture:
         self.road.reset()
         self.impact.reset()
         self.lock.reset()
+        self.engine.reset()
         self._env = 0.0
         self._dc.reset()
         self._last = self._since = None
@@ -410,11 +507,13 @@ class Texture:
             want = 1.0 if self.parts.get(name) else 0.0
             self._gains[name] += min(max(want - self._gains[name], -step), step)
         gains = self._gains
-        total = (gains['road'] * self.road.step(dt, sample) + gains['impact'] * self.impact.step(dt, sample)
-                 + gains['lock'] * self.lock.step(dt, sample))
         speed = sample.speed if sample.speed is not None and math.isfinite(sample.speed) else 0.0
         moving = min(max((speed - MIN_SPEED) / MIN_SPEED, 0.0), 1.0)
         onset = min((t - self._since) / ONSET, 1.0)
+        # The road, the landings and the lock need the car rolling; the engine's idle shake does not
+        total = (gains['road'] * self.road.step(dt, sample) + gains['impact'] * self.impact.step(dt, sample)
+                 + gains['lock'] * self.lock.step(dt, sample)) * moving \
+            + gains['engine'] * self.engine.step(dt, sample)
         steering = abs(steering) if math.isfinite(steering) else 0.0
         total = self._dc.step(total, dt)
         # Within the headroom left by the steering force, so the engine's clamp never cuts one side
@@ -422,7 +521,7 @@ class Texture:
         # The limiter: a gain from the peak follower, so the shape is kept and |value| <= limit
         self._env = max(abs(total), self._env * math.exp(-dt / LIMIT_RELEASE))
         gain = limit / self._env if self._env > limit else 1.0     # limit 0: env > 0 gives 0, env 0 gives total 0
-        value = total * gain * self._level * onset * moving
+        value = total * gain * self._level * onset
         if not math.isfinite(value):
             self.reset()
             return 0.0

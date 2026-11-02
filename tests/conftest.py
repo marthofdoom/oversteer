@@ -1,6 +1,6 @@
 import pytest
 
-from oversteer import rbr_fingerprint, rbr_install, stage_tables
+from oversteer import ffb_carprops, rbr_fingerprint, rbr_install, stage_tables
 
 
 @pytest.fixture(autouse=True)
@@ -48,3 +48,13 @@ def without_real_lines():
     stage_tables.set_tables(tables)
     yield
     stage_tables.set_tables(None)
+
+
+@pytest.fixture(autouse=True)
+def _own_ffb_car_props(tmp_path):
+    """The per-car trail and scrub the FFB learns are kept in a file of the test's own, never the user's."""
+    ffb_carprops.STORE.use(str(tmp_path / 'ffb_car_props.json'))
+    ffb_carprops.ASYNC = False
+    yield
+    ffb_carprops.STORE.use(None)
+    ffb_carprops.ASYNC = True

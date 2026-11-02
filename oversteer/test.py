@@ -15,6 +15,10 @@ class Test:
     __test__ = False   # not a pytest class
     # How long test 1 waits for the user to feel the wheel move and press a button
     ACTION_TIMEOUT = 120
+    # The tests push with at most this share of full force (a wheel left unattended or a button never pressed
+    # must not slam into its stop at 100 %), and not further into the lock than this share of the travel
+    MAX_FORCE = 0.6
+    LOCK_LIMIT = 0.9
 
     def __init__(self, device, callback, restore=None):
         self.device = device
@@ -183,6 +187,19 @@ class Test:
         self.input_device.write(ecodes.EV_FF, effect.id, 0)
         self.erase_effect(effect)
 
+    def level_cap(self):
+        return int(0x7fff * self.MAX_FORCE)
+
+    def near_lock(self, sign):
+        """True when the wheel is within the lock margin in that direction (+1 right, -1 left): the push is skipped."""
+        try:
+            value = self.device.get_last_axis_value(ecodes.ABS_X)
+        except (KeyError, AttributeError):
+            return False
+        if value is None:
+            return False
+        return sign * (value - 32768) / 32768 > self.LOCK_LIMIT
+
     def center_wheel(self):
         # Center wheel
         self.device.set_autocenter(100)
@@ -212,14 +229,19 @@ class Test:
         self.input_device.write(ecodes.EV_FF, left_effect.id, 1)
         self.input_device.write(ecodes.EV_FF, right_effect.id, 1)
 
-        # Increasing force square effect
-        for level in range(0, 0x7fff, 30):
-            left_effect.u.ff_constant_effect.level = level
+        # Increasing force square effect (up to MAX_FORCE, for no longer than the wait for the button)
+        deadline = time.monotonic() + self.ACTION_TIMEOUT
+        for level in range(0, self.level_cap(), 30):
+            if time.monotonic() > deadline:
+                self.erase_effect(left_effect)
+                self.erase_effect(right_effect)
+                raise TestAborted(_('Timed out waiting for you to press a button on the wheel.'))
+            left_effect.u.ff_constant_effect.level = 0 if self.near_lock(-1) else level
             self.update_effect(left_effect)
             time.sleep(0.1)
             left_effect.u.ff_constant_effect.level = 0
             self.update_effect(left_effect)
-            right_effect.u.ff_constant_effect.level = level
+            right_effect.u.ff_constant_effect.level = 0 if self.near_lock(1) else level
             self.update_effect(right_effect)
             time.sleep(0.1)
             right_effect.u.ff_constant_effect.level = 0
@@ -251,12 +273,12 @@ class Test:
         self.collecting_data = True
 
         direction = 1
-        for level in np.arange(0, 0x8000, 0x7fff / 50):
+        for level in np.arange(0, self.level_cap() + 1, self.level_cap() / 50):
             level = int(round(level))
 
             if direction == 1:
                 # Move wheel right
-                right_effect.u.ff_constant_effect.level = level
+                right_effect.u.ff_constant_effect.level = 0 if self.near_lock(1) else level
                 self.update_effect(right_effect)
                 self.input_device.write(ecodes.EV_FF, right_effect.id, 1)
                 self.input_values.append((time.time() - self.test_starttime, level / 0x7fff))
@@ -264,7 +286,7 @@ class Test:
                 self.input_device.write(ecodes.EV_FF, right_effect.id, 0)
             else:
                 # Move wheel left
-                left_effect.u.ff_constant_effect.level = level
+                left_effect.u.ff_constant_effect.level = 0 if self.near_lock(-1) else level
                 self.update_effect(left_effect)
                 self.input_device.write(ecodes.EV_FF, left_effect.id, 1)
                 self.input_values.append((time.time() - self.test_starttime, -level / 0x7fff))
@@ -284,8 +306,8 @@ class Test:
         self.seed_axis_position()
         self.center_wheel()
 
-        left_effect = self.create_left_effect()
-        right_effect = self.create_right_effect()
+        left_effect = self.create_left_effect(self.level_cap())
+        right_effect = self.create_right_effect(self.level_cap())
 
         # Set the starting points for the test
         starting_wheel_pos = (self.device.get_last_axis_value(ecodes.ABS_X) - 32768) / 32768
@@ -299,19 +321,22 @@ class Test:
 
         # Move wheel right at top speed
         self.input_values.append((time.time() - self.test_starttime, 1))
-        self.input_device.write(ecodes.EV_FF, right_effect.id, 1)
+        if not self.near_lock(1):
+            self.input_device.write(ecodes.EV_FF, right_effect.id, 1)
         time.sleep(0.3)
         self.input_device.write(ecodes.EV_FF, right_effect.id, 0)
 
         # Move wheel left at top speed
         self.input_values.append((time.time() - self.test_starttime, -1))
-        self.input_device.write(ecodes.EV_FF, left_effect.id, 1)
+        if not self.near_lock(-1):
+            self.input_device.write(ecodes.EV_FF, left_effect.id, 1)
         time.sleep(0.3)
         self.input_device.write(ecodes.EV_FF, left_effect.id, 0)
 
         # Move wheel right at top speed
         self.input_values.append((time.time() - self.test_starttime, 1))
-        self.input_device.write(ecodes.EV_FF, right_effect.id, 1)
+        if not self.near_lock(1):
+            self.input_device.write(ecodes.EV_FF, right_effect.id, 1)
         time.sleep(0.3)
         self.input_device.write(ecodes.EV_FF, right_effect.id, 0)
         self.input_values.append((time.time() - self.test_starttime, 0))

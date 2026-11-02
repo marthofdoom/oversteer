@@ -80,6 +80,10 @@ def current(wheel):
 def hold_for_demo(wheel, seconds):
     if wheel is None:
         return True
+    with _cond:
+        held = _held.get(wheel)
+        if held is not None and held[0] == DEMO:
+            return False                        # one at a time: a second would stack on the first's force
     if not acquire(wheel, DEMO, exclusive=True, inhibit=False):
         return False
     with _cond:
@@ -99,8 +103,10 @@ def hold_for_demo(wheel, seconds):
 def demo_refusal(wheel):
     """Why a demo may not play now (English, for the caller to translate), or None."""
     held = current(wheel)
-    if held is None or held[0] == DEMO:
+    if held is None:
         return None
+    if held[0] == DEMO:
+        return "An effect is still playing"
     if held[0] == 'countersteer-ffb':
         return "Countersteer FFB is playing: switch it off to try the effects"
     return "The wheel is in use ({})".format(held[0])

@@ -524,6 +524,23 @@ class Device:
         except (OSError, ValueError):
             return None
 
+    def get_ffb_thermal(self):
+        """The driver's ffb_thermal as (mean_square, derating, gain), read only: the mean square in percent of
+        the limit scale, the derating flag and the current gain in percent. Older drivers print only the first
+        two fields, in which case the gain is 100. None when the driver has no such attribute or it does not
+        read as integers."""
+        path = self.device_file("ffb_thermal")
+        if not os.access(path, os.F_OK | os.R_OK):
+            return None
+        try:
+            with open(path, "r") as file:
+                fields = file.read().split()
+            mean_square, derating = int(fields[0]), int(fields[1])
+            gain = int(fields[2]) if len(fields) > 2 else 100
+            return mean_square, derating, gain
+        except (OSError, ValueError, IndexError):
+            return None
+
     TIMER_MSECS_FILE = "/sys/module/hid_logitech_new/parameters/timer_msecs"
 
     def get_ffb_tick_ms(self):

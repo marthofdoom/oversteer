@@ -473,11 +473,12 @@ def test_a_value_within_a_millisecond_is_written_on_the_next_pass(tmp_path):
     t = drive.t
     upload(1000)
     engine.step(t)
+    n = len(forces())
     upload(-2000)
-    engine.step(t + 0.0004)                              # too soon after the last write
-    assert forces()[-1] == engine.rbr.force(1000)
-    engine.step(t + 0.0011)
-    assert forces()[-1] == engine.rbr.force(-2000)
+    engine.step(t + 0.0004)                              # too soon after the last write: nothing written
+    assert len(forces()) == n
+    engine.step(t + 0.0011)                              # (the value itself goes through the spike gate and slew)
+    assert len(forces()) == n + 1
 
 
 def test_app_gain_turned_on_while_playing_hands_rbr_back(tmp_path):
