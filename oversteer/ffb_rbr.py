@@ -93,6 +93,7 @@ and use the wheel's own strength).
 """
 import logging
 import math
+import os
 import threading
 import time
 
@@ -118,6 +119,7 @@ MAX_DT = 0.05                            # s: one upload never counts for more t
 STRENGTH_PROVEN = 0.85                   # the game's own peak, share of full scale, that shows its STRENGTH is near 1
 PEAK_MARGIN = 1.0                        # ours never past the game's own peak times this
 INI_RETRY = 30.0                         # s between looks for RichardBurnsRally.ini while none was found
+INI_CHECK = 5.0                          # s between looks at its mtime
 
 
 def ngp_curve(torque, sensitivity):
@@ -255,6 +257,13 @@ class RbrForce:
         self.waiting = 'raw'
         self.gain = None
 
+    def new_stream(self, why):
+        """RBR's stream started again (the uploads restarted, a new stage): its STRENGTH may have been changed
+        in the menus, so its top is to be seen again before ours plays."""
+        if self.peak:
+            logging.info("Countersteer FFB: RBR: %s: the game's own peak is measured again", why)
+        self.peak = 0.0
+
     def _clear_s(self):
         self.base_s = None               # the car's ForceFeedbackSensitivity_NGP (None: not in the car table)
         self.s = None                    # S with the surface's %
@@ -286,7 +295,7 @@ class RbrForce:
         percents = self._ini(root, now)
         if percents is False:
             return                       # being read
-        if self.surface is not None and self.surface[0] == stage and self.surface[2] == (percents is not None):
+        if self.surface is not None and self.surface[0] == stage and self.surface[2] == percents:
             return
         surface = None
         if percents and len(set(percents.values())) > 1 and stage:
@@ -299,26 +308,41 @@ class RbrForce:
         else:
             percent = percents.get(surface or 'gravel', 100)
             self.s_note = None if surface else "stage surface unknown: gravel's sensitivity used"
-        self.surface = (stage, surface, percents is not None)
+        self.surface = (stage, surface, percents)
         self.s = sensitivity(self.base_s, percent)
 
     def _ini(self, root, now):
         """{surface: %}, None (no install, or unreadable), or False while a read runs. Read on a thread of its
-        own (rbr_install.ASYNC), never on the engine's; a missing install is looked for again every INI_RETRY s
-        (the search finds it later)."""
+        own (rbr_install.ASYNC), never on the engine's: again when the file changed (its mtime, looked at every
+        INI_CHECK s) and, while none was found, every INI_RETRY s (the install search finds it later)."""
         from . import rbr_install
-        cached = self._percents
         now = time.monotonic() if now is None else now
-        if cached is not None and (cached[2] is not None or now - cached[3] < INI_RETRY):
-            if root is None or cached[0] == root:
-                return cached[2]
+        cached = self._percents          # (root asked, path, {surface: %} or None, read at, mtime)
         if self._lookup is not None and self._lookup.is_alive():
             return False
+        if cached is not None and (root is None or cached[0] == root):
+            if cached[1] is None:
+                if now - cached[3] < INI_RETRY:
+                    return cached[2]
+            elif now - cached[3] < INI_CHECK:
+                return cached[2]
+            else:
+                try:
+                    mtime = os.stat(cached[1]).st_mtime
+                except OSError:
+                    mtime = None
+                if mtime == cached[4]:
+                    self._percents = cached[:3] + (now, mtime)
+                    return cached[2]
 
         def read():
             base = root or rbr_install.current_root()
             path = rbr_install.resolve(base, 'RichardBurnsRally.ini') if base else None
-            self._percents = (root, path, ngp_percents(base) if path else None, now)
+            try:
+                mtime = os.stat(path).st_mtime if path else None
+            except OSError:
+                mtime = None
+            self._percents = (root, path, ngp_percents(base) if path else None, now, mtime)
         if rbr_install.ASYNC:
             self._lookup = threading.Thread(target=read, name='rbr-ffb-ini', daemon=True)
             self._lookup.start()
@@ -335,7 +359,8 @@ class RbrForce:
         self._last_t = t
         if abs(level) > self.full:
             self.full = float(abs(level))     # the game's STRENGTH is above the assumed: follow it
-        self.peak = max(abs(level), self.peak)
+        if on_grid(level):
+            self.peak = max(abs(level), self.peak)    # only the game's own: another program's level is not its top
         x = self._x(level)
         if level != self._last_level:
             if level:

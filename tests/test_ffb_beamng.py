@@ -352,3 +352,71 @@ def test_writes_are_a_millisecond_apart_in_bursts_and_fades(tmp_path, monkeypatc
     assert len(times) > 500 and all(b - a >= fe.MIN_WRITE for a, b in zip(times, times[1:]))
     assert all(b - a <= fe.KEEP_WRITE + 0.0011 for a, b in zip(times, times[1:]))    # never left 30 ms
     assert forces()[-1] == 0 and levels() == [0, 100]
+
+
+# -- re-review: the steering rate, the fade on a dropped fit, seq running ahead, the centring note --
+
+def test_a_frame_quantised_steering_input_does_not_buzz_the_soft_lock():
+    b = fe.BeamNGRack()
+    b.centre_sign = 1.0
+    damping, gt = [], 0.0
+    for frame in range(40):                              # 16 ms frames, 8 packets of 2 ms, steering 0.3/s outward
+        steer = 0.95 + 0.3 * frame * 0.016
+        for i in range(8):                               # the input steps once a frame: 7 packets flat, then a step
+            gt += 0.002
+            b._rate(steer, gt)
+            damping.append(b.SOFTLOCK_DAMP * b.steer_rate)        # the damping's share of full scale at depth 1
+    assert b.steer_rate == pytest.approx(0.3, rel=0.25)
+    steps = [abs(y - x) for x, y in zip(damping, damping[1:])]
+    assert max(steps) < 0.005                            # no packet's step past 0.5 % of full scale
+    settled = damping[8 * 20:]
+    assert max(settled) - min(settled) < 0.01            # the frame rate's ripple under 1 % of full scale
+    # With the old per-packet smoothing (alpha 0.3) a step was 0.1 * 0.3 * 0.0048 / 0.002 = 7 % of full scale
+    b._rate(0.5, gt + 0.5)                               # a gap: the rate starts again
+    assert b.steer_rate == 0.0
+
+
+def test_a_dropped_fit_fades_out_instead_of_stepping(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine)
+    drive.steer_override = None
+    drive.run(7.0)
+    assert engine.status.active
+    drive.steer_override = 0.5                           # a steady corner: a steady force to fade
+    drive.run(0.3)
+    before = abs(forces()[-1])
+    assert before > 1000
+    n = len(forces())
+    drive.seq, drive.gt = 0, 0.0                         # another vehicle
+    drive.run(0.3)
+    faded = [abs(v) for v in forces()[n:]]
+    assert faded[0] > before * 0.8                       # no step to nothing ...
+    assert faded[-1] == 0 and max(faded[len(faded) // 2:]) < before * 0.6       # ... a fade
+    assert levels() == [0, 100]
+
+
+def test_seq_running_ahead_of_the_game_clock_is_another_vehicle():
+    last = csb(10.0, 5000, 0.0, 0.0)
+    assert not fe.FfbEngine._csb_restarted(last, csb(10.016, 5008, 0.0, 0.0))
+    assert fe.FfbEngine._csb_restarted(last, csb(10.016, 9000, 0.0, 0.0))
+    assert fe.FfbEngine._csb_restarted(last, csb(9.0, 5001, 0.0, 0.0))
+    assert fe.FfbEngine._csb_restarted(last, csb(10.1, 10, 0.0, 0.0))
+
+
+def test_a_centring_never_learnt_is_said(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine)
+    drive.side_slip = 6.0                                # never gripping (or the threshold is off)
+    drive.run(32.0)
+    assert not engine.status.active and engine.status.waiting == 'no-centring'
+    assert 'centring not learnt' in fe.status_text(engine.status)[1]
+
+
+def test_app_gain_turned_on_while_playing_hands_rbr_and_beamng_back(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(7.0)
+    assert engine.status.active
+    with open(path + '/app_gain', 'w') as f:
+        f.write('1\n')
+    drive.run(1.5)
+    assert engine._app_gain

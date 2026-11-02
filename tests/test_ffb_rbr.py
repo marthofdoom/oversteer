@@ -429,3 +429,81 @@ def test_profiles_keep_the_linearity(tmp_path):
     fresh.load(str(tmp_path / 'old.ini'))
     assert fresh.get_countersteer_linearity() == 70
     assert Model(FakeDevice(), None).data['countersteer_linearity'] is None
+
+
+# -- re-review: the peak per stream, pending writes, app_gain read again, the ini's mtime --
+
+def test_the_peak_counts_only_the_games_own_levels():
+    force = r.RbrForce()
+    force.feed(0.0, 32002)                               # off DirectInput's grid: not NGP's
+    assert not r.on_grid(32002) and force.peak == 0.0
+    force.feed(0.001, r.level_of(-9000))
+    assert force.peak == abs(r.level_of(-9000))
+    force.new_stream('test')
+    assert force.peak == 0.0
+
+
+@pytest.mark.parametrize('how', ['count', 'gap', 'stage'])
+def test_a_restarted_stream_measures_the_games_peak_again(tmp_path, how):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(9.0)
+    assert engine.status.active and engine.rbr.peak > r.STRENGTH_PROVEN * r.FULL
+    if how == 'count':
+        FakeDriver.raw = (FakeDriver.raw[0], 0, 0)       # the wheel bound again: the count starts over
+        drive.run(0.05)
+    elif how == 'gap':
+        drive.uploads = False
+        drive.run(fe.RBR_STREAM_GAP + 0.1)
+        drive.uploads = True
+        drive.run(0.05)
+    else:
+        engine.offer(drive.t, Sample(5000.0, gear=3, speed=20.0, car=CAR, game='rbr'))
+        stage = Sample(5000.0, gear=3, speed=20.0, car=CAR, game='rbr')
+        stage.stage = 'rbr:10'
+        engine.offer(drive.t + 0.0005, stage)
+        drive.run(0.01)
+    assert engine.rbr.peak < r.STRENGTH_PROVEN * r.FULL
+    assert engine.status.reason in ('rbr-strength', 'rbr-raw') or not engine.status.active
+
+
+def test_a_value_within_a_millisecond_is_written_on_the_next_pass(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(7.0)
+    assert engine.status.active
+    t = drive.t
+    upload(1000)
+    engine.step(t)
+    upload(-2000)
+    engine.step(t + 0.0004)                              # too soon after the last write
+    assert forces()[-1] == engine.rbr.force(1000)
+    engine.step(t + 0.0011)
+    assert forces()[-1] == engine.rbr.force(-2000)
+
+
+def test_app_gain_turned_on_while_playing_hands_rbr_back(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(7.0)
+    assert engine.status.active
+    with open(path + '/app_gain', 'w') as f:
+        f.write('1\n')
+    drive.run(1.5)
+    assert not engine.status.active and engine.status.reason == 'rbr-app-gain' and levels() == [0, 100]
+
+
+def test_the_ini_is_read_again_when_it_changes(tmp_path):
+    root = tmp_path / 'rbr'
+    root.mkdir()
+    ini = root / 'RichardBurnsRally.ini'
+    ini.write_text('[NGP]\r\nForceFeedbackSensitivityGravel=50\r\nForceFeedbackSensitivityTarmac=50\r\n'
+                   'ForceFeedbackSensitivitySnow=50\r\n')
+    force = r.RbrForce()
+    force.set_car(CAR, None, root=str(root), now=0.0)
+    assert force.s == 50.0
+    ini.write_text('[NGP]\r\nForceFeedbackSensitivityGravel=200\r\nForceFeedbackSensitivityTarmac=200\r\n'
+                   'ForceFeedbackSensitivitySnow=200\r\n')
+    import os
+    os.utime(ini, (1e9, 1e9))
+    force.set_car(CAR, None, root=str(root), now=1.0)
+    assert force.s == 50.0                               # not looked at yet
+    force.set_car(CAR, None, root=str(root), now=1.0 + r.INI_CHECK)
+    assert force.s == 200.0

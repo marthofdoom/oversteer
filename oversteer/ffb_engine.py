@@ -500,12 +500,32 @@ class BeamNGRack(RackForce):
     SOFTLOCK_DAMP = 0.1                  # share of full scale per (steering input / s) moving outward, in the zone
     SOFTLOCK_MAX = 0.5                   # the push and the damping together
     SOFTLOCK_SPEED = 2.0                 # m/s: the soft lock fades in up to this
+    RATE_TAU = 0.04                      # s of game time: the steering rate's low-pass (the input steps per frame)
+    RATE_GAP = 0.1                       # s of game time between samples past which the rate starts again at 0
+    CENTRE_NOTE = 30.0                   # s of moving samples without a centring latched: said in the status
 
     def reset(self, car=None):
         self._clear_centre()
         self._steer_at = None            # (steering input, game time) of the last sample
         self.steer_rate = 0.0            # its rate per second of game time (smoothed)
+        self._steer_smooth = None        # the input low-passed (the rate's first stage)
+        if not hasattr(self, '_held'):
+            self._held = None            # (sign, scale, centre_sign) playing: kept through a fade out (hold())
         super().reset(car)
+
+    def hold(self):
+        """The engine plays this fit: should it be dropped (a mismatch, a new vehicle), the fade out goes on
+        with it rather than stepping to nothing."""
+        self._held = (self.sign, self.scale, self.centre_sign)
+
+    def release(self):
+        self._held = None
+
+    def _playing(self):
+        """(sign, scale, centre_sign) to play: the fit's, or the one held while it fades out."""
+        if self.sign is None and self._held is not None:
+            return self._held
+        return self.sign, self.scale, self.centre_sign
 
     def _clear_centre(self):
         self.centre_sign = None
@@ -550,8 +570,17 @@ class BeamNGRack(RackForce):
         if last is None or self._steer_at is None:
             return
         dgt = game_time - last[1]
-        if 0.0 < dgt <= 0.1:
-            self.steer_rate += 0.3 * ((steer - last[0]) / dgt - self.steer_rate)
+        if dgt <= 0.0:
+            return
+        if dgt > self.RATE_GAP or self._steer_smooth is None:
+            self.steer_rate, self._steer_smooth = 0.0, steer
+            return
+        # Two low-passes over RATE_TAU s of game time, on the input and on its rate: the input moves in steps once
+        # a frame (7 packets flat, then a step 2 ms wide), whose raw derivative would buzz at the frame rate
+        alpha = dgt / (self.RATE_TAU + dgt)
+        smooth = self._steer_smooth + alpha * (steer - self._steer_smooth)
+        self.steer_rate += alpha * ((smooth - self._steer_smooth) / dgt - self.steer_rate)
+        self._steer_smooth = smooth
 
     def _low_slip(self, sample):
         slip = sample.tyre_side_slip
@@ -611,19 +640,24 @@ class BeamNGRack(RackForce):
             self.sign = 1.0 if self.fit > 0 else -1.0
             self.ready, self.waiting, self._bad_since = True, None, None
         elif self.waiting != 'mismatch' or abs(self.fit) >= self.READY_FIT:
-            self.waiting = 'fit' if abs(self.fit) < self.READY_FIT else 'centring'
+            if abs(self.fit) < self.READY_FIT:
+                self.waiting = 'fit'
+            else:
+                self.waiting = 'no-centring' if self.moving_time >= self.CENTRE_NOTE else 'centring'
 
     def force(self, sample):
         x = sample.rack_force if sample is not None else None
-        if x is None or self.sign is None:
+        sign, scale, _centre = self._playing()
+        if x is None or sign is None:
             return 0
-        return min(max(self.sign * self.scale * x, -FULL), FULL)
+        return min(max(sign * scale * x, -FULL), FULL)
 
     def softlock(self, sample):
         """The soft lock's push (ext_force units; 0 inside SOFTLOCK_FROM, standing, or before the centring is
         latched)."""
         steer = getattr(sample, 'steer_input', None) if sample is not None else None
-        if steer is None or self.centre_sign is None:
+        centre = self._playing()[2]
+        if steer is None or centre is None:
             return 0.0
         depth = (abs(steer) - self.SOFTLOCK_FROM) / (1.0 - self.SOFTLOCK_FROM)
         if depth <= 0.0:
@@ -633,8 +667,8 @@ class BeamNGRack(RackForce):
         push = depth * depth * (3.0 - 2.0 * depth) * self.SOFTLOCK
         outward = max(self.steer_rate * side, 0.0)          # moving further into the lock
         push += min(self.SOFTLOCK_DAMP * outward, self.SOFTLOCK) * depth
-        gate = min(max((sample.speed or 0.0) / self.SOFTLOCK_SPEED, 0.0), 1.0)
-        return self.centre_sign * side * min(push, self.SOFTLOCK_MAX) * gate * FULL
+        gate = min(abs(sample.speed or 0.0) / self.SOFTLOCK_SPEED, 1.0)
+        return centre * side * min(push, self.SOFTLOCK_MAX) * gate * FULL
 
 
 class _CsbRate:
@@ -769,6 +803,10 @@ KEEP_WRITE = 0.010                       # s: ext_force is written at least this
                                          # holds a value 30 ms)
 MIN_WRITE = 0.001 - 1e-6                 # s: and never more often than this (RBR, BeamNG)
 SOURCE_RETRY = 5.0                       # s before binding BeamNG's port again after it failed
+REGAINS = 1.0                            # s between reads of app_gain while RBR or BeamNG may play
+RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
+CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time at most (one per physics step) ...
+CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ahead is another vehicle's
 
 
 class FfbEngine:
@@ -820,6 +858,10 @@ class FfbEngine:
         self._csb_seq = 0                # the source's last packet taken
         self._csb_sample = None
         self._rbr_level = None           # the last fresh raw level (played while fading out)
+        self._rbr_new_at = None          # when the last new upload came
+        self._rbr_sample = None          # the last RBR telemetry sample (its stage and clock)
+        self._gains_at = None            # when app_gain was last read
+        self._write_pending = False      # a new value not yet written (MIN_WRITE)
         self._written_at = None
         self._enabled = False
         self._path = None
@@ -991,6 +1033,7 @@ class FfbEngine:
             self._raw_count = self._raw_at = self._raw_id = self._raw_id_at = None
             self._raw_counts.clear()
             self.raw_rate = self.classifier.raw_rate = self._rbr_level = None
+            self._rbr_new_at = self._rbr_sample = self._gains_at = None
             self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
             self.classifier.has_game_ffb_raw = False
             if path is not None:
@@ -1055,6 +1098,12 @@ class FfbEngine:
         self._mode_at = t
         if self._mode != 'acr':
             if self._mode == 'rbr':
+                last = self._rbr_sample
+                if last is not None and (sample.stage != last.stage or (
+                        sample.game_time is not None and last.game_time is not None
+                        and sample.game_time < last.game_time)):
+                    self.rbr.new_stream('a new stage or a restart')
+                self._rbr_sample = sample
                 self.rbr.set_car(sample.car, sample.stage, now=t)
             if self._phase != 'idle' and self._played_mode != self._mode:
                 self._release('state', t)        # another game's force was playing
@@ -1095,6 +1144,7 @@ class FfbEngine:
         g = self._gain(t)
         value = int(round(min(max(force, -FULL), FULL) * g))
         self._written_at = t
+        self._write_pending = False
         try:
             self._driver.force(value)
             self.writes += 1
@@ -1172,14 +1222,24 @@ class FfbEngine:
             self._activate(now)
 
     def _write_due(self, now, new):
-        """RBR and BeamNG write on a new value, every pass of a fade, and every KEEP_WRITE; never twice in
-        MIN_WRITE."""
+        """RBR and BeamNG write on a new value (kept pending if it came within MIN_WRITE of the last write), every
+        pass of a fade, and every KEEP_WRITE; never twice in MIN_WRITE."""
+        if new:
+            self._write_pending = True
         if self._written_at is None:
             return True
         since = now - self._written_at
         if since < MIN_WRITE:
             return False
-        return new or self._phase != 'on' or since >= KEEP_WRITE
+        return self._write_pending or self._phase != 'on' or since >= KEEP_WRITE
+
+    def _regains(self, now):
+        """app_gain read again about once a second while RBR or BeamNG may play (it is the driver's setting)."""
+        if self._driver is None or not self._available:
+            return
+        if self._gains_at is None or now - self._gains_at >= REGAINS:
+            self._gains_at = now
+            self._app_gain = bool(self._driver.app_gain())
 
     def _texture_for(self, mode, t):
         """The texture on top of RBR's or BeamNG's force: none yet. The hook for RBR's strut forces (the
@@ -1187,8 +1247,16 @@ class FfbEngine:
         return 0.0
 
     def _rbr_tick(self, now):
+        before, last_new = self._raw_count, self._rbr_new_at
         level, new = self._raw(now)
         playing = self._phase in ('in', 'on')
+        if new:
+            self._rbr_new_at = now
+            count = self._raw_count
+            if (before is not None and count is not None and count < before) or \
+                    (last_new is not None and now - last_new > RBR_STREAM_GAP):
+                self.rbr.new_stream('the uploads restarted')      # the wheel bound again, or the game away
+        self._regains(now)
         if level is not None:
             self._rbr_level = level
             if new:
@@ -1216,23 +1284,35 @@ class FfbEngine:
         playing = self._phase in ('in', 'on')
         if fresh:
             self._csb_seq = src.seq
-            last = self._csb_sample
-            if last is not None and last.packet_id is not None and sample.packet_id is not None and (
-                    sample.packet_id < last.packet_id or (sample.game_time or 0.0) < (last.game_time or 0.0)):
-                # The mod's seq or the game's clock went back: another vehicle, or this one reset
+            if self._csb_restarted(self._csb_sample, sample):
+                # The mod's seq or the game's clock went back, or seq ran ahead of the clock: another vehicle,
+                # or this one reset
                 logging.info("Countersteer FFB: BeamNG: a new vehicle or a reset: learning its rack again")
                 self.beamng.reset(self.beamng.car)
             self._csb.feed(now, sample)
             self._csb_sample = sample
             self.beamng.feed(now, sample, *self._raw(now))
+        self._regains(now)
         v = self._verdict = self._beamng_verdict(now, sample, playing)
         want = self._enabled and self._available and v.state == 'replace' and self.beamng.ready
         self._decide(now, playing, want, 'state')
+        if self._phase in ('in', 'on') and self.beamng.ready:
+            self.beamng.hold()                   # what plays: kept through the fade out if the fit is dropped
+        elif self._phase == 'idle':
+            self.beamng.release()
         if self._phase != 'idle' and self._played_mode == 'beamng':
             s = self._csb_sample
             if self._write_due(now, fresh):
                 self._out(now, self.beamng.force(s) + self.beamng.softlock(s) + self._texture_for('beamng', now))
         self._publish(now)
+
+    @staticmethod
+    def _csb_restarted(last, sample):
+        if last is None or last.packet_id is None or sample.packet_id is None:
+            return False
+        dseq = sample.packet_id - last.packet_id
+        dgt = (sample.game_time or 0.0) - (last.game_time or 0.0)
+        return dseq < 0 or dgt < 0.0 or dseq > CSB_MAX_RATE * dgt + CSB_SEQ_SLACK
 
     def _beamng_verdict(self, now, sample, holding):
         tel = self.classifier.verdict(now)
@@ -1436,6 +1516,7 @@ def status_text(status, listening=True):
                 'fit': _("the game's force does not follow {} yet").format(source),
                 'mismatch': _("the game's force stopped following {}, learning again").format(source),
                 'centring': _("learning which way the game centres the wheel, drive a few gentle corners"),
+                'no-centring': _("centring not learnt: no gentle corners seen with the tyres gripping"),
             }.get(status.waiting, _("learning the game's force"))
             return light, "{}; {}".format(supported, waiting)
         if status.active:
