@@ -2,6 +2,9 @@ name: release
 on:
   push:
     tags: ['v*']
+  # Warms the Flatpak dependency cache without tagging: run it from the Actions tab on master. The bundle
+  # is built but not attached to a release unless the chosen ref is a v* tag.
+  workflow_dispatch:
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -10,7 +13,7 @@ jobs:
       - name: Dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-evdev python3-pyudev python3-xdg python3-pytest
       - name: Unit tests that need no hardware
-        run: python3 -m pytest tests/ -q -k "not uinput" || true
+        run: python3 -m pytest tests/ -q -k "not uinput" --ignore=tests/test_proxy.py
   flatpak:
     runs-on: ubuntu-latest
     permissions:
@@ -20,14 +23,25 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
+      # The cache key follows the dependencies only. The manifest names the release tag of the oversteer
+      # module itself, so that one line is left out of the hash: a source-only release reuses the cache.
+      - name: Cache key from the dependency manifests
+        id: key
+        run: |
+          h=$({ sed '/marthofdoom\/oversteer.git/{n;d}' flatpak/io.github.berarma.Oversteer.yaml
+                cat flatpak/python-dependencies.yaml
+                find flatpak/shared-modules -type f | sort | xargs cat; } | sha256sum | cut -c1-32)
+          echo "key=flatpak-builder-$h" >> "$GITHUB_OUTPUT"
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           bundle: Oversteer.flatpak
           manifest-path: flatpak/io.github.berarma.Oversteer.yaml
-          cache-key: flatpak-builder-${{ github.sha }}
+          cache-key: ${{ steps.key.outputs.key }}
       - name: Name the bundle after the tag
+        if: startsWith(github.ref, 'refs/tags/v')
         run: mv Oversteer.flatpak "Oversteer-${GITHUB_REF_NAME#v}.flatpak"
       - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: Oversteer-*.flatpak
