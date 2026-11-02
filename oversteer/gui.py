@@ -680,7 +680,9 @@ class Gui:
         wheel = ''
         thermal = self.device.get_ffb_thermal() if self.device is not None else None
         if thermal is not None:
-            wheel = _("Wheel motor load: mean square %d, derating %d") % thermal
+            mean, derating, gain = thermal
+            wheel = (_("Wheel motor heat: {} % — easing the force to {} %").format(mean, gain) if derating
+                     else _("Wheel motor heat: {} %").format(mean))
         return car, wheel
 
     def launch_options(self):
