@@ -49,6 +49,10 @@ class Aborted(Exception):
         self.reason = reason
 
 
+class ProxyLost(Exception):
+    """The proxy whose virtual device the wheel is read through stopped or restarted (DeviceIO)."""
+
+
 class _NearLock(Exception):
     """Within the lock margin: the current step is dropped and the wheel centred."""
 
@@ -148,6 +152,9 @@ class Calibration:
             try:
                 self._prepare()
                 self._measure()
+            except ProxyLost as e:
+                self._zero()
+                raise Aborted('proxy', str(e)) from e
             except PermissionError as e:
                 raise Aborted('permission', _("Oversteer may not change this wheel's settings ({}). The udev "
                                               "rules that come with Oversteer give that permission.").format(e)) from e
@@ -347,6 +354,9 @@ class Calibration:
         try:
             reports = self.io.poll()
             current = self.io.position_now()
+        except ProxyLost as e:
+            self._zero()
+            raise Aborted('proxy', str(e)) from e
         except OSError as e:
             self._zero()
             raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
@@ -786,13 +796,14 @@ def boot_id():
 
 def instance_key(device):
     """The crash record's key: the model and which one (the serial, else the USB port), so an identical
-    wheel is never given another's record."""
+    wheel is never given another's record. Not split by the active device: the record is about the physical
+    wheel's settings, which must be found whichever device is active when it is read."""
     which = getattr(device, 'serial', None)
     if not which:
         dev_path = getattr(device, 'dev_path', None) or ''
         # .../usb1/1-3/1-3:1.0/0003:046D:C24F.0005: the interface (port) stays, the HID number does not
         which = os.path.basename(os.path.dirname(dev_path)) if dev_path else ''
-    return '{}@{}'.format(wheel_key(device), which)
+    return '{}@{}'.format(base_key(device), which)
 
 
 def write_pending(path, key, saved):
@@ -916,21 +927,67 @@ class DeviceIO:
         names = {'range': 'range', 'ff_gain': 'gain', 'autocenter': 'autocenter'}
         return {names[k]: v for k, v in self.device.release_settings().items() if k in names}
 
+    PROXY_CHECK_S = 0.25            # how often a proxied node is checked for a restarted or stopped proxy
+
+    def _proxy_id_of(self, node):
+        """The id of the proxy presenting `node` for this wheel, None if the status doesn't list one."""
+        from .proxy.manager import ProxyManager
+        status = ProxyManager.read_status() or {}
+        return next((p.get('id') for p in status.get('proxies', [])
+                     if p.get('devnode') == node and self.device.dev_name in p.get('sources', {}).values()), None)
+
     def open(self):
         from evdev import InputDevice, ecodes
         node = self.device._input_node()
         if node is None:
             raise PermissionError(errno.EACCES, "the wheel's input device can't be read")
+        self._proxy_id = None
         if node != self.device.dev_name:
-            # only a proxy's virtual device: what it reports (and its axis value) is the proxy's, so a stall
-            # or a grab there can't be told from the wheel standing still
-            raise PermissionError(errno.EACCES, "only the combined device's virtual input can be read")
+            # Behind a proxy: its virtual device is the active one and what is calibrated, as it reports (an
+            # inverted axis is learnt as the force's direction). A stall or restart there would look like a
+            # wheel standing still, so the proxy is watched (_check_proxy)
+            self._proxy_id = self._proxy_id_of(node)
+            if self._proxy_id is None:
+                raise Aborted('proxy', _("The combined device holding the wheel can't be found."))
         self._force_fd = os.open(self.device.device_file('ext_force'), os.O_WRONLY)
         self._input = InputDevice(node)
+        self._node = node
+        self._ino = os.fstat(self._input.fd).st_ino
         self._abs_x = ecodes.ABS_X
         self._ev_abs = ecodes.EV_ABS
+        if self._proxy_id is not None:
+            info = self._input.absinfo(ecodes.ABS_X)
+            self._abs_min, self._abs_max = info.min, info.max
+            if self._abs_max <= self._abs_min:
+                raise Aborted('proxy', _("The combined device has no usable steering axis."))
+        self._next_check = 0.0
+        self._lost = 0
         # Reports carry the wall clock; the loop runs on the monotonic one
         self._clock_offset = time.time() - time.monotonic()
+
+    def _check_proxy(self):
+        """Raise ProxyLost when the proxy presenting the wheel stopped or restarted (its virtual device is a
+        new node, or gone, or the proxy no longer lists this wheel). Checked a few times a second."""
+        if self._proxy_id is None:
+            return
+        now = time.monotonic()
+        if now < self._next_check:
+            return
+        self._next_check = now + self.PROXY_CHECK_S
+        lost = _("The combined device stopped or restarted during the calibration; it was stopped.")
+        try:
+            if os.stat(self._node).st_ino != self._ino:
+                raise ProxyLost(lost)
+        except OSError as e:
+            raise ProxyLost(lost) from e
+        from .proxy.manager import ProxyManager
+        status = ProxyManager.read_status() or {}
+        listed = any(p.get('id') == self._proxy_id and p.get('devnode') == self._node and
+                     self.device.dev_name in p.get('sources', {}).values() for p in status.get('proxies', []))
+        # one missed look is allowed: the status file is a heartbeat the daemon refreshes
+        self._lost = 0 if listed else self._lost + 1
+        if self._lost >= 2:
+            raise ProxyLost(lost)
 
     def close(self):
         try:
@@ -961,7 +1018,15 @@ class DeviceIO:
         else:
             os.pwrite(self._force_fd, str(int(raw)).encode(), 0)
 
+    def _from_proxy(self, value):
+        """A virtual device's ABS_X as the 0..65535 the calibration works in, from its own range."""
+        span = self._abs_max - self._abs_min
+        return int(round(min(1.0, max(0.0, (value - self._abs_min) / span)) * 65535))
+
     def position_raw(self):
+        self._check_proxy()
+        if self._proxy_id is not None:
+            return self._from_proxy(self._input.absinfo(self._abs_x).value)
         code, value = self.device._normalized_axis(self._abs_x, self._input.absinfo(self._abs_x).value)
         return value
 
@@ -971,6 +1036,7 @@ class DeviceIO:
         return self.position_raw()
 
     def poll(self):
+        self._check_proxy()
         out = []
         now = time.monotonic()
         while True:
@@ -979,13 +1045,19 @@ class DeviceIO:
                 return out
             if event.type != self._ev_abs:
                 continue
-            event = self.device.normalize_event(event)
-            if event.code != self._abs_x:
-                continue
+            if self._proxy_id is not None:
+                if event.code != self._abs_x:
+                    continue
+                value = self._from_proxy(event.value)
+            else:
+                event = self.device.normalize_event(event)
+                if event.code != self._abs_x:
+                    continue
+                value = event.value
             t = event.timestamp() - self._clock_offset
             if not now - 1.0 < t <= now + 0.005:      # the wall clock jumped: take the read time
                 t = now
-            out.append((t, event.value))
+            out.append((t, value))
 
     def get_gain(self):
         return self.device.get_ff_gain()
@@ -1014,9 +1086,20 @@ class DeviceIO:
 STORE_NAME = 'wheel_calibration.json'
 
 
-def wheel_key(device):
-    """The store's key for a wheel: its USB vendor:product (the model), so it survives another port."""
+def base_key(device):
+    """The wheel's USB vendor:product (the model), so it survives another port."""
     return getattr(device, 'usb_id', None) or getattr(device, 'name', None) or str(device.get_id())
+
+
+def wheel_key(device):
+    """The store's key for the wheel as it is read now: the model, plus '+combined' while a proxy's virtual
+    device is the active one (its axis may differ, so it has an entry of its own; none yet means no
+    correction, not the direct entry's)."""
+    try:
+        proxied = device._input_node() not in (None, device.dev_name)
+    except Exception:
+        proxied = False
+    return base_key(device) + ('+combined' if proxied else '')
 
 
 def load_store(path):

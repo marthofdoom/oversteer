@@ -335,9 +335,30 @@ class Gui:
         try:
             self.refresh_equipment()
             self.update_handbrake()
+            self.check_active_device()
         except Exception as e:
             logging.debug("combine status: %s", e)
         return True
+
+    def check_active_device(self):
+        """The wheel's stored correction belongs to the device that is active (its own or the combined
+        device's): when the proxy comes or goes, the other entry's correction is put on."""
+        if self.calibration is not None or self.device is None or not self._wheel_supported():
+            return
+        if wcal.wheel_key(self.device) == getattr(self, 'correction_key', None):
+            return
+        held = self._wheel_held()
+        if held is not None and held[1]:
+            return              # an exclusive holder keeps the forces as they are: looked at again next tick
+        had_key = getattr(self, 'correction_key', None) is not None
+        self.apply_wheel_correction()
+        if had_key and self._wheel_entry() is None:
+            # no entry for this device: identity and 0, not the other device's correction
+            try:
+                wcal.apply_correction(self.device.write_attr, {})
+            except Exception as e:
+                logging.warning("wheel correction: %s", e)
+        self.refresh_wheel_correction()
 
     def _confirm_wine_running(self):
         """True when it is fine to re-create the combined device: no Wine
@@ -2317,6 +2338,7 @@ class Gui:
         calibrated, the driver lacks the attributes or a calibration is running."""
         if self.calibration is not None or not self._wheel_supported():
             return
+        self.correction_key = wcal.wheel_key(self.device)
         entry = self._wheel_entry()
         if entry is not None:
             held = self._wheel_held()
@@ -2366,15 +2388,6 @@ class Gui:
         if self.test is not None and (self.test.is_awaiting_action() or self.test.is_collecting_data()):
             self.ui.info_dialog(_("A wheel test is running."), _("Let it finish first."))
             return
-        try:
-            proxied = self.device._input_node() != self.device.dev_name
-        except Exception:
-            proxied = False
-        if proxied:
-            self.ui.info_dialog(_("The wheel is behind the combined device."),
-                                _("The calibration has to read the wheel itself; switch the combined device off "
-                                  "for it."))
-            return
         if self.grab_input:
             # the overlay holds the wheel's input: the calibration would not see the wheel move
             self.ui.info_dialog(_("The wheel's input is grabbed by the overlay."),
@@ -2394,6 +2407,7 @@ class Gui:
 
         cal = wcal.Calibration(wcal.DeviceIO(device), progress, pending_path=self._wheel_pending(),
                                pending_key=wcal.instance_key(device))
+        cal.store_key = wcal.wheel_key(device)          # the active device when it started: where it is kept
         self.calibration = cal
         self.refresh_wheel_correction()
         self.ui.show_calibration_dialog(cal.cancel)
@@ -2421,7 +2435,7 @@ class Gui:
         if result is not None:
             path = self._wheel_store()
             store = wcal.load_store(path)
-            key = wcal.wheel_key(device)
+            key = getattr(cal, 'store_key', None) or wcal.wheel_key(device)
             store[key] = wcal.new_entry(result, store.get(key))
             try:
                 wcal.save_store(path, store)
