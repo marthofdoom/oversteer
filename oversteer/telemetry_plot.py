@@ -172,12 +172,13 @@ STEER_GRID = (0.1, 0.25, 0.5, 1.0)       # fractions of lock the strips draw a l
 
 
 STRIPS = (('delta', 'Δ s', 56), ('v', 'km/h', 84), ('pedals', 'PEDAL', 56), ('steer', 'STEER', 44),
-          ('gear', 'GEAR', 40), ('rpm', 'RPM', 56))
+          ('gear', 'GEAR', 40), ('rpm', 'RPM', 56), ('elev', 'ELEV m', 40))
 LANE, LANE2, GAP, GUT = 16, 12, 6, 34
 
 
 def _strips(data, scale):
-    return [(k, label, int(round(h * scale))) for k, label, h in STRIPS if k != 'delta' or data.get('cmp')]
+    return [(k, label, int(round(h * scale))) for k, label, h in STRIPS
+            if (k != 'delta' or data.get('cmp')) and (k != 'elev' or (data.get('elev') or {}).get('h'))]
 
 
 def strips_height(data, scale=1.0):
@@ -367,6 +368,27 @@ def strips(cr, w, h, data, view, cursor, scale=1.0):
             if cmp_:
                 _line(cr, pts(cmp_['rpm'], Y), REF, 1, 0.8)
             _line(cr, pts(this['rpm'], Y), RPM, 1.75)
+        elif key == 'elev':
+            # the stage's height from its positions (terrain.elevation), its crests ticked
+            elev = data['elev']
+            seen = [v for v in elev['h'] if v is not None]
+            lo, hi = min(seen), max(max(seen), min(seen) + 5.0)
+
+            def Y(v, bot=bot, hh=hh, lo=lo, hi=hi):
+                return bot - 2 - (v - lo) / (hi - lo) * (hh - 4)
+            p = [q for q in pts(elev['h'], Y) if q is not None]
+            if len(p) > 1:
+                cr.move_to(p[0][0], bot - 2)
+                for q in p:
+                    cr.line_to(*q)
+                cr.line_to(p[-1][0], bot - 2)
+                rgb(cr, DIM, 0.18)
+                cr.fill()
+                _line(cr, p, DIM, 1.5)
+            for c in elev['crests']:
+                if a <= c['d'] <= z:
+                    _rect(cr, int(X(c['d'])), Y(c['h']) - 4, 2, 4, ACCENT)
+            text(cr, '{:.0f}'.format(hi - lo), 4, top + 24, 9.5, FAINT)
         y = bot + GAP
     if a <= cursor <= z:
         _rect(cr, int(X(cursor)), LANE, 1, total - LANE, TEXT)

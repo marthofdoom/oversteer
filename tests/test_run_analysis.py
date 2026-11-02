@@ -118,6 +118,19 @@ def test_the_position_comes_through_when_the_run_has_one(tmp_path):
     assert found['x'][100] == pytest.approx(100.0, abs=0.5) and found['z'][100] == pytest.approx(-120.0, abs=0.5)    # ACR's plan is (x, -z)
 
 
+def test_the_elevation_comes_through_when_the_run_has_positions(tmp_path):
+    from oversteer import telemetry_plot as plot
+    h = Stage(tmp_path / 't.db')
+    plain = drive(h)
+    ranked = drive(h, positions=True, corners=corners_with())
+    found = ra.analysis(h.store, ranked, 'pb')
+    assert found['elev'] is not None and len(found['elev']['h']) == len(found['this']['t'])
+    assert found['elev']['range'] == pytest.approx(0.0, abs=0.2)               # the synthetic road is flat (y = 0)
+    assert any(k == 'elev' for k, _l, _h in plot._strips(found, 1.0))
+    alone = ra.analysis(h.store, plain, '99999')                                # no position: no elevation, no strip
+    assert alone['elev'] is None and all(k != 'elev' for k, _l, _h in plot._strips(alone, 1.0))
+
+
 def test_the_result_is_kept_per_run(runs):
     h, first, second, third = runs
     assert ra.analysis(h.store, third, 'pb') is ra.analysis(h.store, third, 'pb')
