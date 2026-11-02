@@ -1531,3 +1531,78 @@ def test_pulses_starting_fifteen_degrees_short_of_the_start_still_fit(monkeypatc
     assert result['duration_s'] < 200
     assert_safe_run(sim, cal)
     assert_put_back(sim)
+
+
+# --- a real G29, fitted ---
+
+def g29_field_recording():
+    """The calibration run of a real G29 behind the proxy (2026-11-02), as tests/data/g29-calibration-fit.npz
+    keeps it: times in 0.1 ms and positions in encoder counts (1/72.8 degree), both as differences, the
+    commands only where they changed. This run was refused ("fit 0.69, uncertainty 16 %") by the first
+    version of the fit, whose single window length could not see the brief hard pulses."""
+    z = np.load(os.path.join(os.path.dirname(__file__), 'data', 'g29-calibration-fit.npz'))
+    rec = wc.Recording()
+    rec.pos_t = [t / 1e4 for t in np.cumsum(z['pos_dt'].astype(np.int64)).tolist()]
+    rec.pos = (np.cumsum(z['pos_dc'].astype(np.int64)) / float(z['cpd'])).tolist()
+    rec.cmd_t = [t / 1e4 for t in z['cmd_t'].tolist()]
+    rec.cmd = (z['cmd_w'].astype(float) / 30000).tolist()
+    rec.breakaway = [tuple(b) for b in z['breakaway'].tolist()]
+    rec.counts_per_deg = float(z['cpd'])
+    return rec
+
+
+@pytest.fixture(scope='module')
+def field_result():
+    return wc.analyse(g29_field_recording())
+
+
+def test_the_real_g29_recording_fits_well(field_result):
+    r = field_result
+    assert r['fit_r2'] > 0.85
+    assert r['fit_uncertainty'] < wc.MAX_UNCERTAINTY
+    assert 2 <= r['fit_latency_ms'] <= 10
+    # a motor that gives nothing below ~8 % of full scale and about 15000 deg/s^2 at full scale
+    assert 0.05 < r['deadband'] / wc.FULL < 0.12
+    assert 10000 < r['a_fs'] < 20000
+    assert 0.03 < r['friction'] < 0.1
+
+
+def test_the_real_g29s_correction_is_sane(field_result):
+    lut = field_result['lut']
+    assert wcal.valid_lut(lut) and wc.plausible_lut(lut)
+    assert all(b > a for a, b in zip(lut, lut[1:]))
+    # no large gain where the wheel is touchy (the bottom quarter), the soft end stays inside the range
+    n = len(lut) - 1
+    assert all(lut[i + 1] - lut[i] < 3 * wc.FULL / n for i in range(n // 4))
+    curve = field_result['curve']
+    assert all(b >= a for a, b in zip(curve, curve[1:])) and curve[0] == 0.0 and curve[-1] == 1.0
+
+
+def _with_a_hand(rec, seed, strength):
+    """The recording with a random hand on the wheel: a force that changes sign every 20-60 ms is added to the
+    wheel's movement (positions only, the commands stay as written)."""
+    rng = np.random.default_rng(seed)
+    t = np.asarray(rec.pos_t)
+    grid = np.arange(t[0], t[-1], 0.001)
+    steps = rng.integers(20, 60, size=len(grid) // 20 + 2)
+    force = np.repeat(rng.uniform(-1, 1, size=len(steps)), steps)[:len(grid)]
+    acc = strength * force
+    v = np.cumsum(acc) * 0.001
+    x = np.cumsum(v) * 0.001
+    out = wc.Recording()
+    out.__dict__.update(rec.__dict__)
+    out.pos = (np.asarray(rec.pos) + np.interp(t, grid, x)).tolist()
+    return out
+
+
+@pytest.mark.parametrize('seed', [1, 2, 3])
+def test_a_hand_on_the_real_wheel_is_refused(seed):
+    with pytest.raises(wc.FitError):
+        wc.analyse(_with_a_hand(g29_field_recording(), seed, 15000.0))
+
+
+@pytest.mark.parametrize('seed', [1, 2])
+def test_a_hand_on_a_simulated_wheel_is_refused(g29_like, seed):
+    sim, cal, result = g29_like
+    with pytest.raises(wc.FitError):
+        wc.analyse(_with_a_hand(cal.rec, seed, 15000.0))

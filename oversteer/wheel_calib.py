@@ -17,7 +17,8 @@ over all the moving samples finds them all; L is found by trying each value. The
 differentiated out of the position samples on its own: the same Savitzky-Golay filter that turns positions
 into accelerations is applied to the double integral of every regressor, so both sides of the fit see exactly
 the same smoothing (the filter is linear and blind to constants and slopes, which hold the unknown starting
-position and speed).
+position and speed). Several window lengths are used together, each weighted by its noise gain: the long ones
+read the slow movements, the short ones the brief hard pulses a strong wheel is stopped and turned in.
 
 Units. tau/J at full scale (a_fs, deg/s^2 per full-scale command) is what one command does to this wheel; the
 torque curve is reported relative to it (1.0 at full scale). Friction is reported in full-scale command units
@@ -37,10 +38,14 @@ LUT_POINTS = 33              # ffb_lut values: input i * 32767 / 32
 KNOTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.0)
 
 GRID_S = 0.001               # positions are resampled to 1 ms
-SG_HALF = 10                 # Savitzky-Golay half window in samples (21 ms)...
-SG_HALF_SLOW = 20            # ...41 ms when that leaves the curve uncertain: a heavy wheel's small accelerations
-                             # drown in the encoder's step, and change slowly enough for the longer window
-MOVING_DEG_S = 30.0          # a sample is used when the wheel turned faster than this throughout its window
+SG_HALVES = (3, 5, 8, 12, 20)        # Savitzky-Golay half windows in samples (7 to 41 ms), all used together...
+SG_HALVES_SLOW = (8, 12, 20, 30)     # ...and these when that leaves the curve uncertain: a heavy wheel's small
+                                     # accelerations drown in the encoder's step, and change slowly enough for
+                                     # the longer windows
+MOVING_DEG_S = 8.0           # a sample is used when the wheel turned faster than this throughout its window
+MIN_ROWS = 200               # rows a window length needs to take part
+BLOCKS = 12                  # groups of stretches the uncertainty is judged over
+CHUNK = 250                  # samples (ms) in a stretch
 LATENCIES_S = tuple(i / 1000 for i in range(0, 101, 5))   # latency candidates (a proxy hop adds to the driver's),
                                                           # refined to 1 ms around the best
 DEADBAND_FLOOR = 0.02        # below 2 % of the full-scale torque the motor counts as giving nothing
@@ -196,47 +201,70 @@ def isotonic(y):
 
 # --- the fit ---
 
-def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, half=SG_HALF):
+def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     """Least-squares fit of the model above to a recording. Returns a dict: 'curve' (tau/J at each knot,
-    deg/s^2), 'friction' (f), 'damping' (beta), 'bias', 'latency' (s), 'r2', 'rows' (samples used)."""
+    deg/s^2), 'curve_se' (its uncertainty), 'friction' (f), 'damping' (beta), 'bias', 'latency' (s), 'r2',
+    'rows' (samples used).
+
+    Every window length in `halves` contributes its own rows, each weighted by the inverse of that filter's
+    noise gain: a long window reads the slow movements (small forces) with little noise, a short one the
+    brief hard pulses (a strong wheel is stopped and turned in 10-30 ms, no long window sees them moving
+    throughout). Their rows are the same data seen at different scales, so the uncertainty is not taken from
+    the rows' scatter but from refitting without each of a dozen groups of stretches of the run in turn."""
     if len(rec.cmd_t) < 2:
         raise FitError("no forces were recorded")
     h = GRID_S
     grid, theta = resample(rec.pos_t, rec.pos, h)
     n = len(grid)
-    if n < 4 * half + 10:
+    halves = tuple(hf for hf in halves if n >= 4 * hf + 10)
+    if not halves:
         raise FitError("the recording is too short")
-    c0, c1, c2 = savgol(half, h)
-    idx_all = np.arange(half, n - half)
-    omega = np.zeros(n)
-    omega[idx_all] = apply_at(theta, c1, idx_all)
-    # Moving, the same way, throughout the window: the friction there is sliding friction of one sign
-    fwd = rolling_min(omega, half) > MOVING_DEG_S
-    back = rolling_min(-omega, half) > MOVING_DEG_S
-    ok = np.zeros(n, dtype=bool)
-    ok[half:n - half] = True
-    ok[:2 * half] = False
-    ok[n - 2 * half:] = False
-    rows = np.flatnonzero(ok & (fwd | back))
-    if len(rows) < 200:
-        raise FitError("the wheel hardly moved during the run")
-    accel = apply_at(theta, c2, rows)
-
-    sgn = np.sign(omega)
-    fixed = np.column_stack([
-        apply_at(double_integral(-sgn, h), c2, rows),
-        apply_at(double_integral(-omega, h), c2, rows),
-        apply_at(double_integral(np.ones(n), h), c2, rows),
-    ])
     cmd_t = np.asarray(rec.cmd_t, dtype=float)
     cmd = np.asarray(rec.cmd, dtype=float)
 
-    def solve(lat):
+    # Per window length: the rows (moving the same way throughout the window: the friction there is sliding
+    # friction of one sign), the acceleration there, the regressors that don't depend on the latency
+    scales = []
+    for half in halves:
+        c0, c1, c2 = savgol(half, h)
+        idx_all = np.arange(half, n - half)
+        omega = np.zeros(n)
+        omega[idx_all] = apply_at(theta, c1, idx_all)
+        fwd = rolling_min(omega, half) > MOVING_DEG_S
+        back = rolling_min(-omega, half) > MOVING_DEG_S
+        ok = np.zeros(n, dtype=bool)
+        ok[2 * half:n - 2 * half] = True
+        rows = np.flatnonzero(ok & (fwd | back))
+        if len(rows) < MIN_ROWS:
+            continue
+        sgn = np.sign(omega)
+        fixed = np.column_stack([
+            apply_at(double_integral(-sgn, h), c2, rows),
+            apply_at(double_integral(-omega, h), c2, rows),
+            apply_at(double_integral(np.ones(n), h), c2, rows),
+        ])
+        scales.append({'half': half, 'c2': c2, 'rows': rows, 'accel': apply_at(theta, c2, rows),
+                       'fixed': fixed, 'weight': 1.0 / float(np.linalg.norm(c2))})
+    if not scales:
+        raise FitError("the wheel hardly moved during the run")
+
+    def design(lat):
         w = command_at(cmd_t, cmd, grid - lat)
         basis = hats(np.abs(w), knots) * np.sign(w)[:, None]
-        cols = np.column_stack([apply_at(double_integral(basis[:, k], h), c2, rows)
-                                for k in range(basis.shape[1])])
-        x = np.column_stack([cols, fixed])
+        xs = []
+        for sc in scales:
+            cols = np.column_stack([apply_at(double_integral(basis[:, k], h), sc['c2'], sc['rows'])
+                                    for k in range(basis.shape[1])])
+            xs.append(np.column_stack([cols, sc['fixed']]) * sc['weight'])
+        return np.vstack(xs)
+
+    accel = np.concatenate([sc['accel'] * sc['weight'] for sc in scales])
+    # the group (of BLOCKS) each row belongs to: stretches of CHUNK samples dealt out in turn, so every group
+    # holds a share of every kind of movement
+    block = np.concatenate([(sc['rows'] // CHUNK) % BLOCKS for sc in scales])
+
+    def solve(lat):
+        x = design(lat)
         p, *_ = np.linalg.lstsq(x, accel, rcond=None)
         res = accel - x @ p
         return float(res @ res), p, x
@@ -251,20 +279,32 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, half=SG_HALF):
     res = accel - x @ p
     mad = np.median(np.abs(res - np.median(res))) * 1.4826 + 1e-9
     keep = np.abs(res) < 4 * mad
-    xk, ak = x[keep], accel[keep]
+    xk, ak, bk = x[keep], accel[keep], block[keep]
     p, *_ = np.linalg.lstsq(xk, ak, rcond=None)
     res = ak - xk @ p
     tot = ak - ak.mean()
     r2 = 1.0 - float(res @ res) / max(float(tot @ tot), 1e-9)
-    # Standard errors of the parameters. Neighbouring rows share most of their window, so the residuals are
-    # far from independent: the variance is scaled by the window length (the effective count of samples)
-    dof = max(len(ak) - xk.shape[1], 1)
-    cov = np.linalg.pinv(xk.T @ xk) * float(res @ res) / dof * (2 * half + 1)
-    se = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    # Uncertainty: jackknife over the groups (neighbouring rows share their windows and the scales share the
+    # data, so the rows' scatter says little). A knot the other groups don't reach moves a lot when its
+    # group is left out.
+    xtx = xk.T @ xk
+    xty = xk.T @ ak
     nk = len(knots) - 1
-    return {'curve': np.concatenate([[0.0], p[:nk]]), 'curve_se': np.concatenate([[0.0], se[:nk]]),
+    loo = []
+    for b in range(BLOCKS):
+        m = bk == b
+        if not m.any():
+            continue
+        q, *_ = np.linalg.lstsq(xtx - xk[m].T @ xk[m], xty - xk[m].T @ ak[m], rcond=None)
+        loo.append(q[:nk])
+    if len(loo) < 3:
+        raise FitError("the recording is too short")
+    loo = np.array(loo)
+    se = np.sqrt((len(loo) - 1) / len(loo) * ((loo - loo.mean(axis=0)) ** 2).sum(axis=0))
+    return {'curve': np.concatenate([[0.0], p[:nk]]), 'curve_se': np.concatenate([[0.0], se]),
             'friction': float(p[nk]), 'damping': float(p[nk + 1]), 'bias': float(p[nk + 2]),
-            'latency': float(lat), 'r2': r2, 'rows': int(keep.sum()), 'window_ms': (2 * half + 1) * h * 1000}
+            'latency': float(lat), 'r2': r2, 'rows': int(keep.sum()),
+            'window_ms': (2 * max(sc['half'] for sc in scales) + 1) * h * 1000}
 
 
 # --- the correction ---
@@ -405,7 +445,7 @@ def analyse(rec, knots=KNOTS):
     uncertainty = float(np.max(fit['curve_se'])) / a_fs
     if uncertainty > MAX_UNCERTAINTY:
         try:
-            slow = fit_dynamics(rec, knots, half=SG_HALF_SLOW)
+            slow = fit_dynamics(rec, knots, halves=SG_HALVES_SLOW)
             r_slow, a_slow = relative_curve(slow['curve'])
             u_slow = float(np.max(slow['curve_se'])) / a_slow
             if u_slow < uncertainty:
