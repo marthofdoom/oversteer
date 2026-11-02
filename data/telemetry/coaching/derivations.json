@@ -1072,6 +1072,64 @@
    "description": "The car is the last stretch's, not yet confirmed by its gearing: nothing is learnt under it (Richard Burns Rally, rbr_fingerprint).",
    "convention": "",
    "rate": "packet"
+  },
+  "packet_id": {
+   "kind": "sample",
+   "unit": "int",
+   "description": "The AC games' physics step counter (packetId, OVST v5): one packet per step, 333 a second in ACR.",
+   "rate": "packet"
+  },
+  "game_ffb": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "The game's own steering force (finalFF, OVST v5); on marth's ACR dump it follows the front tyres' Mz (r +0.92, about Mz / 582).",
+   "rate": "packet"
+  },
+  "tyre_mz": {
+   "kind": "sample",
+   "unit": "game unit (Nm)",
+   "description": "Self-aligning torque at each tyre (mz, OVST v5), as the game writes it.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_slip_ratio": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "The game's per-wheel slip ratio (slipRatio, OVST v5), raw.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_slip_angle": {
+   "kind": "sample",
+   "unit": "game unit (rad)",
+   "description": "The game's per-wheel slip angle (slipAngle, OVST v5), raw.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "contact_normal": {
+   "kind": "sample",
+   "unit": "unit vector",
+   "description": "The road's normal under each tyre (tyreContactNormal, OVST v5), world frame as the game has it.",
+   "convention": "per wheel, ordered FL, FR, RL, RR; each (x, y, z)",
+   "rate": "packet"
+  },
+  "vibrations": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "The game's FFB vibration channels (kerb, slip, g, abs; OVST v5). ACR leaves kerb and abs at 0.",
+   "rate": "packet"
+  },
+  "abs_active": {
+   "kind": "sample",
+   "unit": "bool",
+   "description": "ABS is acting (absInAction, OVST v5).",
+   "rate": "packet"
+  },
+  "tc_active": {
+   "kind": "sample",
+   "unit": "bool",
+   "description": "Traction control is acting (tcinAction, OVST v5).",
+   "rate": "packet"
   }
  },
  "rig": {
@@ -1385,6 +1443,42 @@
      "status": "absent",
      "evidence": "OVST v3/v4 packets of marth's ACR captures, 2026-10-05 (Greece Aghii Theodori, Sommet; i20N, Fabia, 208, Polo)",
      "note": "the packet carries it, ACR fills it with zeros"
+    },
+    "packet_id": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "game_ffb": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "tyre_mz": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "tyre_slip_ratio": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "tyre_slip_angle": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "contact_normal": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "abs_active": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "tc_active": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet"
+    },
+    "vibrations": {
+     "status": "decoded",
+     "note": "marth's ACR dump of the physics page (ffb-research, 2026-11-01): filled; decoded from OVST v5, which no capture has yet; kerb and abs always 0"
     }
    },
    "static": {
@@ -1570,6 +1664,39 @@
     "ang_vel": {
      "status": "absent",
      "note": "AC and ACC captures have not confirmed the local angular velocity: not decoded"
+    },
+    "packet_id": {
+     "status": "decoded"
+    },
+    "game_ffb": {
+     "status": "decoded"
+    },
+    "contact_normal": {
+     "status": "decoded"
+    },
+    "tyre_mz": {
+     "status": "absent",
+     "note": "past AC's 580-byte physics page (the bridge sends them for ACC and ACR only)"
+    },
+    "tyre_slip_ratio": {
+     "status": "absent",
+     "note": "past AC's 580-byte physics page (the bridge sends them for ACC and ACR only)"
+    },
+    "tyre_slip_angle": {
+     "status": "absent",
+     "note": "past AC's 580-byte physics page (the bridge sends them for ACC and ACR only)"
+    },
+    "vibrations": {
+     "status": "absent",
+     "note": "past AC's 580-byte physics page (the bridge sends them for ACC and ACR only)"
+    },
+    "abs_active": {
+     "status": "absent",
+     "note": "past AC's 580-byte physics page (the bridge sends them for ACC and ACR only)"
+    },
+    "tc_active": {
+     "status": "absent",
+     "note": "past AC's 580-byte physics page (the bridge sends them for ACC and ACR only)"
     }
    },
    "static": {},
@@ -1695,6 +1822,33 @@
     "ang_vel": {
      "status": "absent",
      "note": "AC and ACC captures have not confirmed the local angular velocity: not decoded"
+    },
+    "packet_id": {
+     "status": "decoded"
+    },
+    "game_ffb": {
+     "status": "decoded"
+    },
+    "tyre_mz": {
+     "status": "decoded"
+    },
+    "tyre_slip_ratio": {
+     "status": "decoded"
+    },
+    "tyre_slip_angle": {
+     "status": "decoded"
+    },
+    "contact_normal": {
+     "status": "decoded"
+    },
+    "vibrations": {
+     "status": "decoded"
+    },
+    "abs_active": {
+     "status": "decoded"
+    },
+    "tc_active": {
+     "status": "decoded"
     }
    },
    "static": {},

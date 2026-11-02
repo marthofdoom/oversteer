@@ -351,3 +351,40 @@ def stage_packets(minutes=10.0):
             out.append((t, eawrc_packet(sample)))
         t += 5.0
     return out
+
+
+def ovst_packet(sample, packet_id, game=3, car=b'rally_car', track=b'test_stage', length=None):
+    """The sample as oversteer-shm-bridge sends it for ACR (OVST version 5, 456 bytes): the page's own frames
+    and signs (car frame x left, y up, z forward; steer -1 at full left lock; clutch 1 engaged), the tyre forces
+    of an even split of m x a, the front tyres' Mz following the lateral force, finalFF about front Mz / 582."""
+    import struct
+    from oversteer.telemetry_formats import OVST3_FORMAT, OVST5_TAIL
+    a_long, a_lat = (sample.accel or (0.0, 0.0, 0.0))[:2]
+    speed = sample.speed or 0.0
+    gear = sample.gear if sample.gear is not None else 0
+    head = b'OVST' + struct.pack('<BBHffif', 5, 1, 0, sample.rpm, LIMITER, gear, speed * 3.6)
+    head += struct.pack('<ff', sample.throttle or 0.0, sample.brake or 0.0) + car.ljust(32, b'\0') + track.ljust(32, b'\0')
+    mass, radius = 1250.0, 0.32
+    fx, fy = mass * a_long / 4, mass * a_lat / 4
+    x, y, z = sample.pos or (0.0, 0.0, 0.0)
+    v3 = ([game, 0, 0, 1.0 - (sample.clutch or 0.0), -(sample.steer or 0.0), a_lat / G, 0.0, a_long / G,
+           0.0, 0.0, speed, 0.0, sample.yaw_rate or 0.0, 0.0]
+          + [0.05] * 4 + [speed / radius] * 4 + [0.05] * 4 + [mass * G / 4] * 4 + [0.0, 0.0]
+          + [radius] * 4 + [0.12] * 4 + [fx] * 4 + [fy] * 4
+          + [LIMITER, length or sample.stage_length or 0.0, 0.0, sample.lap_distance or 0.0, 1.0, 0.6, 0, 0, x, y, z])
+    mz = (-0.03 * fy, -0.03 * fy, -0.01 * fy, -0.01 * fy)
+    tail = OVST5_TAIL.pack(packet_id, (mz[0] + mz[1]) / 582.0, *mz, *([0.02] * 4), *([0.01] * 4),
+                           *((0.0, 1.0, 0.0) * 4), 0.0, 0.1, 0.05, 0.0, 0, 0)
+    return head + struct.pack(OVST3_FORMAT, *v3) + struct.pack('<f', sample.stage_time or 0.0) + tail
+
+
+def acr_packets(seconds=100.0, hz=333.0):
+    """(t, packet): ACR through the v5 bridge at `hz` packets a second (one per physics step), stages of the
+    sim's course back to back for about `seconds`."""
+    out, t, step = [], 0.0, 1000
+    while t < seconds:
+        for t, sample, _ in course_samples(Course(STAGE), game='acr', car='acr/rally_car', t=t, dt=1 / hz):
+            step += 1
+            out.append((t, ovst_packet(sample, step)))
+        t += 5.0
+    return out
