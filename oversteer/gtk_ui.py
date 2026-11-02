@@ -1526,6 +1526,18 @@ class GtkUi:
             _("Shared-memory games (Assetto Corsa family)"), _("Put this in the game's Steam launch options."),
             tooltips.get(self.launch_options), (self.launch_options, self.launch_options_copy)))
         receive.add(self._eawrc_setup())
+        self.telemetry_forward = Gtk.Entry(width_chars=34, placeholder_text="192.168.1.20:20777, localhost:9996")
+        self.telemetry_forward.connect('activate', self._forward_commit)
+        self.telemetry_forward.connect('focus-out-event', lambda w, e: self._forward_commit(w) and False)
+        self.telemetry_forward.connect('changed', lambda w: self._forward_error(None))
+        receive.add(self._setting_row(
+            _("Forward to"), _("Also send every telemetry packet, unchanged, to up to 3 other places, as "
+                               "host:port separated by commas (SimHub on another PC, a dashboard, motion software). "
+                               "Empty: off. An app setting, for every profile."),
+            _("Oversteer holds the game's UDP port, so other tools cannot listen on it. Type where they listen, "
+              "for example 192.168.1.20:20777 or mypc:20777. Host names are looked up once, when you press "
+              "Enter. IPv4 only. This computer's own Oversteer ports are refused: that would loop."),
+            (self.telemetry_forward,)))
         self._section(page, _("Receiving telemetry"), receive)
 
         leds = self._list()
@@ -1641,6 +1653,23 @@ class GtkUi:
         label.get_style_context().add_class('dim-label')
         return label
 
+    def _forward_error(self, message):
+        entry = self.telemetry_forward
+        context = entry.get_style_context()
+        if message:
+            context.add_class('error')
+            entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, 'dialog-error-symbolic')
+            entry.set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY, message)
+        else:
+            context.remove_class('error')
+            entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, None)
+
+    def _forward_commit(self, entry):
+        """Enter or leaving the box: apply the text, or show why it is refused."""
+        error = self.controller.set_telemetry_forward(entry.get_text())
+        self._forward_error(error)
+        return False
+
     def telemetry_tab_visible(self):
         page = self.main_notebook.get_nth_page(self.main_notebook.get_current_page())
         return page is self._telemetry_page and self.window.is_active()
@@ -1650,6 +1679,7 @@ class GtkUi:
         shown without writing them back."""
         # The handlers see the values the controller already has: no write
         self.telemetry_learn.set_active(prefs['telemetry_learn'])
+        self.telemetry_forward.set_text(prefs['telemetry_forward'])
         self.telemetry_web.set_active(prefs['telemetry_web_on'])
         self.telemetry_web_port.set_value(prefs['telemetry_web_port'])
         self.telemetry_web_bind.set_active_id(prefs['telemetry_web_bind'])

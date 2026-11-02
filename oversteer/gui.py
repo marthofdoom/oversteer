@@ -102,6 +102,7 @@ class Gui:
         from .telemetry_view import read_preferences
         for name, value in read_preferences({}).items():
             setattr(self, name, value)
+        self._forward_targets = []
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -671,6 +672,7 @@ class Gui:
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry.recorder = self.telemetry_recorder
+        self.telemetry.forwarder.set_targets(self._forward_targets)
         if self.telemetry_recorder is not None and not self.telemetry.auto:
             self.telemetry_recorder.port = self.telemetry.port   # Auto: each packet brings its port
         self.telemetry_status = show
@@ -901,6 +903,27 @@ class Gui:
             self.telemetry_learn = bool(state)
             self.save_preferences()
             self.apply_rev_leds()
+
+    def _resolve_forward(self):
+        """Resolve the saved "Forward to" text once (host names too); a bad one forwards nowhere."""
+        from .telemetry import parse_forward
+        targets, error = parse_forward(self.telemetry_forward)
+        self._forward_targets = targets
+        if error:
+            logging.warning("telemetry: forwarding is off, the saved \"Forward to\" is invalid: %s", error)
+
+    def set_telemetry_forward(self, text):
+        """The "Forward to" text of the Telemetry tab. Returns the error message,
+        or None; an invalid text is not kept."""
+        from .telemetry import parse_forward, own_ports
+        targets, error = parse_forward(text, own_ports([getattr(self.telemetry, 'port', None)]))
+        if error is None:
+            self.telemetry_forward = (text or '').strip()
+            self._forward_targets = targets
+            self.save_preferences()
+            if self.telemetry is not None:
+                self.telemetry.forwarder.set_targets(targets)
+        return error
 
     def set_telemetry_web(self, on=None, port=None, bind=None):
         changed = False
@@ -1419,6 +1442,7 @@ class Gui:
             from .telemetry_view import read_preferences
             for name, value in read_preferences(config['DEFAULT']).items():
                 setattr(self, name, value)
+            self._resolve_forward()
             self.web_token = config['DEFAULT'].get('web_token', '')
             if 'hotkeys' in config['DEFAULT']:
                 self.global_hotkeys = {a: i for a, i in hotkeys.parse(config['DEFAULT']['hotkeys']).items()
