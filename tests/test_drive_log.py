@@ -1273,3 +1273,18 @@ def test_a_looped_clock_still_counts_the_lap_in_the_result():
     clock.tick(0.1, 0.1)                                  # back to 0: a lap
     clock.tick(0.2, 0.1)
     assert clock.result_offset > 0.5
+
+
+def test_a_corner_the_car_reversed_in_still_spans_the_road_it_covered_from_the_least_distance_to_the_most():
+    # marth's run 80 (Afon Biga hairpin): the car backed up, so the corner's last row is at a smaller distance than its first
+    from tests.test_coach_context import C, stage
+    rows = stage([(0.0, 20.0), (1000.0, 20.0)], [(400.0, 600.0, 1, 0.5)])
+    inside = [k for k, r in enumerate(rows) if 400.0 <= r[C['distance']] <= 600.0]
+    first = rows[inside[0]][C['distance']]
+    rows = [r[:C['distance']] + (first - 0.05 * (k - inside[0]),) + r[C['distance'] + 1:] if k in inside else r
+            for k, r in enumerate(rows)]
+    corners = drive_log.find_corners(rows)
+    assert len(corners) == 1
+    k = corners[0]
+    assert k['d0'] <= k['d'] <= k['d1'] and k['d0'] < k['d1']
+    assert rows[inside[0]][C['distance']] > rows[inside[-1]][C['distance']]
