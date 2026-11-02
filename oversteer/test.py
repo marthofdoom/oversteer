@@ -1,9 +1,19 @@
+import errno
 from evdev import ecodes, ff
+import logging
 import numpy as np
 from threading import Thread
 import time
 
+class TestAborted(Exception):
+    """A test that can't go on (no force feedback, no answer from the user); the message is shown."""
+    __test__ = False
+
+
 class Test:
+    __test__ = False   # not a pytest class
+    # How long test 1 waits for the user to feel the wheel move and press a button
+    ACTION_TIMEOUT = 120
 
     def __init__(self, device, callback):
         self.device = device
@@ -12,6 +22,14 @@ class Test:
         self.collecting_data = False
         self.awaiting_action = False
         self.minimum_level = 0
+        self.input_values = []
+        self.output_values = []
+        self.action_triggered = False
+        self.test_starttime = time.time()
+        self.current_range = None
+        self.current_ff_gain = None
+        self.current_autocenter = None
+        self.effects = []
 
     def get_input_values(self):
         return self.input_values
@@ -31,9 +49,17 @@ class Test:
     def trigger_action(self):
         self.action_triggered = True
 
+    def has_output_data(self):
+        """True when wheel positions arrived during the run: past the seed point at t=0 there is at
+        least one sample. Without them the charts have nothing to work on."""
+        return len(self.output_values) > 1
+
     def start(self):
         self.input_values = []
         self.output_values = []
+        self.effects = []
+        if self.input_device is None:
+            raise TestAborted('The wheel\'s input device could not be opened.')
 
         # Save wheel settings
         self.current_range = self.device.get_range()
@@ -52,10 +78,33 @@ class Test:
         self.device.set_autocenter(0)
 
     def stop(self):
-        # Restore wheel settings
-        self.device.set_range(self.current_range)
-        self.device.set_ff_gain(self.current_ff_gain)
-        self.device.set_autocenter(self.current_autocenter)
+        # Drop any effect a failed run left behind
+        for effect in list(self.effects):
+            try:
+                self.erase_effect(effect)
+            except OSError:
+                pass
+        self.effects = []
+
+        # Restore wheel settings (those that were read before the run got started)
+        if self.current_range is not None:
+            self.device.set_range(self.current_range)
+        if self.current_ff_gain is not None:
+            self.device.set_ff_gain(self.current_ff_gain)
+        if self.current_autocenter is not None:
+            self.device.set_autocenter(self.current_autocenter)
+        self.current_range = self.current_ff_gain = self.current_autocenter = None
+
+    def upload_effect(self, effect):
+        try:
+            effect.id = self.input_device.upload_effect(effect)
+        except OSError as e:
+            if e.errno == errno.ENOSYS:
+                raise TestAborted('This wheel or its driver does not support the force feedback effects the '
+                                  'tests use.') from e
+            raise
+        self.effects.append(effect)
+        return effect.id
 
     def create_left_effect(self, level = 0x7fff):
         left_effect = ff.Effect(
@@ -64,7 +113,7 @@ class Test:
             ff.Replay(0, 0),
             ff.EffectType(ff_constant_effect=ff.Constant(level=level))
         )
-        left_effect.id = self.input_device.upload_effect(left_effect)
+        self.upload_effect(left_effect)
         return left_effect
 
     def create_right_effect(self, level = 0x7fff):
@@ -74,22 +123,44 @@ class Test:
             ff.Replay(0, 0),
             ff.EffectType(ff_constant_effect=ff.Constant(level=level))
         )
-        right_effect.id = self.input_device.upload_effect(right_effect)
+        self.upload_effect(right_effect)
         return right_effect
 
     def update_effect(self, effect):
         self.input_device.upload_effect(effect)
 
     def erase_effect(self, effect):
+        if effect in self.effects:
+            self.effects.remove(effect)
         self.input_device.erase_effect(effect.id)
 
     def run(self, test_id):
-        if test_id == 0:
-            Thread(target=self.test1, daemon=True).start()
-        elif test_id == 1:
-            Thread(target=self.test2, daemon=True).start()
-        elif test_id == 2:
-            Thread(target=self.test3,).start()
+        test = (self.test1, self.test2, self.test3)[test_id]
+        Thread(target=self._guarded, args=(test,), daemon=True).start()
+
+    def _guarded(self, test):
+        """Run one test so that it always ends: the wheel's settings are put back and the application is
+        told, with 'end' when it finished or 'error' and a message when it could not."""
+        error = None
+        try:
+            self.start()
+            test()
+        except TestAborted as e:
+            error = str(e)
+        except OSError as e:
+            logging.exception("wheel test")
+            error = str(e)
+        finally:
+            self.collecting_data = False
+            self.awaiting_action = False
+            try:
+                self.stop()
+            except OSError:
+                logging.exception("restoring the wheel after the test")
+        if error is None:
+            self.notify()
+        else:
+            self.notify('error', error)
 
     def append_data(self, timestamp, value):
         if self.collecting_data is False:
@@ -115,13 +186,15 @@ class Test:
 
     # Minimum torque test
     def test1(self):
-        self.start()
         self.center_wheel()
 
         # Start test
         self.action_triggered = False
         self.awaiting_action = True
+        deadline = time.monotonic() + self.ACTION_TIMEOUT
         while not self.action_triggered:
+            if time.monotonic() > deadline:
+                raise TestAborted('Timed out waiting for the wheel to move.')
             time.sleep(0.5)
         self.action_triggered = False
         self.notify('running')
@@ -150,15 +223,9 @@ class Test:
         self.erase_effect(left_effect)
         self.erase_effect(right_effect)
 
-        # Stop test
         self.awaiting_action = False
-        self.stop()
-
-        # Notify application the test is done
-        self.notify()
 
     def test2(self):
-        self.start()
         self.seed_axis_position()
         self.center_wheel()
 
@@ -205,11 +272,7 @@ class Test:
         self.erase_effect(left_effect)
         self.erase_effect(right_effect)
 
-        # Notify application the test is done
-        self.notify()
-
     def test3(self):
-        self.start()
         self.seed_axis_position()
         self.center_wheel()
 
@@ -254,6 +317,3 @@ class Test:
 
         self.erase_effect(left_effect)
         self.erase_effect(right_effect)
-
-        # Notify application the test is done
-        self.notify()

@@ -67,6 +67,8 @@ class Signal:
         return Signal(newdata)
 
     def filter(self, average_size):
+        if not self.values:
+            return Signal([])
         (times, values) = zip(*self.values)
         #times = [t / 1000 for t in range(0, average_size // 2)] + [t + average_size // 2 / 1000 for t in times]
         #values = [values[0] for v in range(0, average_size // 2)] + list(values)

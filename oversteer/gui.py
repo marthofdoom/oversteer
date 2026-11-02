@@ -1913,16 +1913,28 @@ class Gui:
             self.ui.safe_call(self.ui.quit)
 
     def start_test(self):
-        def test_callback(name = 'end'):
+        def test_callback(name = 'end', message = ''):
             if name == 'end':
                 self.ui.safe_call(self.end_test)
             elif name == 'running':
                 self.ui.safe_call(self.ui.show_test_running, self.test_run, 1)
+            elif name == 'error':
+                self.ui.safe_call(self.abort_test, message)
         self.test = Test(self.device, test_callback)
         self.test_run = 0
         self.ui.switch_test_panel(self.test_run)
 
+    def abort_test(self, message = ''):
+        """A test that could not run or finish: say why and go back to the idle Test tab."""
+        self.test = None
+        self.test_run = None
+        self.ui.error_dialog(_('The wheel test could not be completed.'), message)
+        self.ui.switch_test_panel(None)
+
     def end_test(self):
+        if self.test_run in (1, 2) and not self.test.has_output_data():
+            self.abort_test(_('No wheel movement could be registered.'))
+            return
         if self.test_run == 0:
             self.minimum_level = self.test.get_minimum_level()
         elif self.test_run == 1:
