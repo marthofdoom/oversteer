@@ -146,9 +146,9 @@ def test_analyse_a_synthetic_capture(tmp_path):
     assert result['meta']['capture_rate_hz'] == pytest.approx(HZ, rel=0.02) and not result['meta']['low_rate']
     assert result['meta']['ready_share'] > 0.5
     # finalFF is Mz / 582: the game follows Mz closely and with no lag; ours is the same signal scaled
-    assert result['game']['corr'] > 0.99 and result['ours']['corr'] > 0.99
+    assert result['game']['corr'] > 0.99 and result['ours']['corr'] > 0.95     # (ours is the physical target's level: the crossfade with the game's force bends it)
     assert abs(result['game']['lag_ms']) < 0.5 and abs(result['ours']['lag_ms']) < 0.5
-    assert result['game']['clip'] == 0.0 and result['ours']['rms_diff'] < 0.1
+    assert result['game']['clip'] == 0.0 and result['ours']['rms_diff'] < 0.25
     assert result['ours']['band_rms'] is not None and result['game']['band_rms'] is not None
     assert len(result['sections']) >= 1 and result['sections'][0]['label'].startswith('section')
     text = fm.table(result, 'x')

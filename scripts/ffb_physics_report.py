@@ -82,21 +82,25 @@ def acr_sample(d, i, car, interp=None):
     return s
 
 
-def replay_acr(d, hz=100.0, learn=True):
+def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     """Feed the dump through RackForce at `hz` (linear interpolation between the ~4 Hz snapshots, so the learner's
     sample-count prior weighs as it does live), the game's raw level = finalFF x FULL (ACR's FF gain 100 %).
-    Returns per snapshot: our force (ext_force units, full strength), ready flag, trail, scrub."""
+    Returns per snapshot: our force (ext_force units, full strength; its level is the physical target's, not
+    finalFF's), ready flag, trail, scrub, the learnt p99 of |front torque| (Nm)."""
     tmp = tempfile.mkdtemp(prefix='ffb-verify-')
     kept = (cp.STORE.path, cp.ASYNC)
     cp.STORE.use(os.path.join(tmp, 'props.json'))
     cp.ASYNC = False
     rack = fe.RackForce()
     rack.LEARNS = learn
+    rack.wheel_peak = wheel_peak          # Nm; None: the relative target (p99 at TARGET_P99)
     n = len(d['t'])
     out = np.zeros(n)
     ready = np.zeros(n, dtype=bool)
     trail = np.zeros(n)
     scrub = np.zeros(n)
+    p99 = np.zeros(n)
+    torque = np.zeros(n)
     t0 = d['t'][0]
     for i in range(n):
         car = 'acr/seg%d' % d['seg'][i]
@@ -106,6 +110,8 @@ def replay_acr(d, hz=100.0, learn=True):
         out[i] = rack.force(s)
         ready[i] = rack.ready
         trail[i], scrub[i] = rack.trail, rack.scrub
+        p99[i] = rack.p99
+        torque[i] = fe.front_torque(s, rack.trail, rack.scrub) or 0.0
         if i + 1 < n and d['seg'][i + 1] == d['seg'][i] and hz:
             gap = d['t'][i + 1] - d['t'][i]
             k = int(gap * hz)
@@ -116,7 +122,7 @@ def replay_acr(d, hz=100.0, learn=True):
     rack.reset(None)
     cp.STORE.use(kept[0])
     cp.ASYNC = kept[1]
-    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub}
+    return {'force': out, 'ready': ready, 'trail': trail, 'scrub': scrub, 'p99': p99, 'torque': torque}
 
 
 def r2(y, x):
@@ -158,6 +164,9 @@ def acr_cases(d, rep):
     """Section 1 on the dump: per case, n, our force's sign agreeing with finalFF's, r, and |ours| / |finalFF|."""
     ours = rep['force'] / FULL
     ff = d['ffb']
+    for seg in np.unique(d['seg']):                                           # per stretch at finalFF's level: shape and sign only
+        m = (d['seg'] == seg) & (d['speed'] / 3.6 > fe.MIN_SPEED)
+        ours[d['seg'] == seg] *= np.sum(np.abs(ff[m])) / max(np.sum(np.abs(ours[m])), 1e-9)
     sp = d['speed'] / 3.6
     load_f = d['load'][:, 0] + d['load'][:, 1]
     sa_f = np.max(np.abs(d['sa'][:, :2]), axis=1)
@@ -217,20 +226,25 @@ def acr_cases(d, rep):
 
 def acr_fit(d, rep):
     """Section 2: our force against finalFF."""
-    ours = rep['force'] / FULL
+    ours_abs = rep['force'] / FULL                      # the physical target's own level
     ff = d['ffb']
     moving = d['speed'] / 3.6 > fe.MIN_SPEED
+    ours = ours_abs.copy()                              # per stretch at finalFF's level (the fit's shape, not the target's level)
+    for seg in np.unique(d['seg']):
+        m = moving & (d['seg'] == seg)
+        ours[d['seg'] == seg] *= np.sum(np.abs(ff[m])) / max(np.sum(np.abs(ours_abs[m])), 1e-9)
+    learnt_torque = rep['torque']                       # the learnt trail/scrub's torque: a constant strength per stretch
     ready = rep['ready'] & moving
     torque, mz, fy, dfx = front_torque_arrays(d)
     res = {
         'n_moving': int(moving.sum()), 'ready_share': float(ready.sum() / max(moving.sum(), 1)),
         'r2_moving': r2(ff[moving], ours[moving]), 'r2_ready': r2(ff[ready], ours[ready]) if ready.any() else None,
         'r_moving': float(np.corrcoef(ours[moving], ff[moving])[0, 1]),
-        'gain_ratio_moving': float(np.sum(np.abs(ours[moving])) / np.sum(np.abs(ff[moving]))),
+        'gain_ratio_moving': float(np.sum(np.abs(ours_abs[moving])) / np.sum(np.abs(ff[moving]))),   # the target's level over finalFF's
         'lag_s': lag_s(d, ff, ours, moving),
-        'clip_share_ours': float(np.mean(np.abs(ours[moving]) >= 0.999)),
+        'clip_share_ours': float(np.mean(np.abs(ours_abs[moving]) >= 0.999)),
         'clip_share_ff': float(np.mean(np.abs(ff[moving]) >= 0.98)),
-        'p50_p90_p99_ours': [float(v) for v in np.percentile(np.abs(ours[moving]), [50, 90, 99])],
+        'p50_p90_p99_ours': [float(v) for v in np.percentile(np.abs(ours_abs[moving]), [50, 90, 99])],
         'p50_p90_p99_ff': [float(v) for v in np.percentile(np.abs(ff[moving]), [50, 90, 99])],
         'learnt_trail_mm': {}, 'learnt_scrub_mm': {},
     }
@@ -249,7 +263,13 @@ def acr_fit(d, rep):
         res['learnt_trail_mm'][int(seg)] = round(rep['trail'][last] * 1000, 1)
         res['learnt_scrub_mm'][int(seg)] = round(rep['scrub'][last] * 1000, 1)
         mm = m & moving
-        res.setdefault('r2_per_stretch', {})[int(seg)] = round(r2(ff[mm], ours[mm]), 3) if mm.sum() > 20 else None
+        if mm.sum() > 20:
+            x = learnt_torque[mm]
+            res.setdefault('r2_per_stretch', {})[int(seg)] = round(r2(ff[mm], x * (x @ ff[mm]) / (x @ x)), 3)
+        else:
+            res.setdefault('r2_per_stretch', {})[int(seg)] = None
+        res.setdefault('p99_learnt_nm', {})[int(seg)] = round(float(rep['p99'][last]), 0)
+        res.setdefault('p99_true_nm', {})[int(seg)] = round(float(np.percentile(np.abs(learnt_torque[mm]), 99)), 0) if mm.sum() > 20 else None
     return res
 
 
@@ -554,6 +574,7 @@ def texture_synthetic(seconds=60.0, steering_force=0.3 * FULL, seed=7, game='acr
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--peak-nm', type=float, default=None, help='the wheel peak torque (Nm) for the physical target; default: unknown wheel')
     ap.add_argument('--dump', default=DUMP)
     ap.add_argument('--hz', type=float, default=100.0)
     ap.add_argument('--fh6', default=FH6)
@@ -578,7 +599,7 @@ def main():
         d = load_dump(args.dump)
         print('\n== 1/2. ACR dump: %d snapshots, %d stretches, %.0f s; replay at %.0f Hz ==' % (
             len(d['t']), len(np.unique(d['seg'])), float(np.sum(np.clip(np.diff(d['t']), 0.0, 1.0))), args.hz))
-        rep = replay_acr(d, args.hz)
+        rep = replay_acr(d, args.hz, wheel_peak=args.peak_nm)
         for name, c in acr_cases(d, rep).items():
             print('  %-50s %s' % (name, json.dumps({k: (round(v, 3) if isinstance(v, float) else v) for k, v in c.items()})))
         fit = acr_fit(d, rep)

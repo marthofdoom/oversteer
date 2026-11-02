@@ -104,26 +104,27 @@ def test_a_new_car_keeps_the_playing_strength_through_the_fade():
     rack = fe.RackForce()
     rack.reset('acr/a')
     rack.scale = rack.FF_SCALE * 5
+    rack.play_scale = rack.FF_SCALE * 5
     rack.ready = True
     rack.hold()
     rack.reset('acr/b')
     assert not rack.ready and rack.scale == rack.FF_SCALE
     assert rack.force(front_sample(car='acr/b')) == pytest.approx(rack.FF_SCALE * 5 * 50.0, rel=1e-6)
     rack.release()
-    assert rack.force(front_sample(car='acr/b')) == pytest.approx(rack.FF_SCALE * 50.0, rel=1e-6)
+    assert rack.force(front_sample(car='acr/b')) == pytest.approx(rack.play_scale * 50.0, rel=1e-6)
 
 
 def test_a_reversing_car_is_bounded_not_faded():
     rack = fe.RackForce()
     rack.reset('acr/a')
-    rack.scale = rack.FF_SCALE * 3
+    rack.scale = rack.play_scale = rack.FF_SCALE * 3
     big = 2000.0
     assert rack.force(front_sample(big, vel=(10.0, 0.0, 0.0))) == fe.FULL
     back = rack.force(front_sample(big, vel=(-4.0, 0.0, 0.0)))
     assert back == pytest.approx(fe.FULL * fe.REVERSE_MAX)
     assert rack.force(front_sample(-big, vel=(-4.0, 0.0, 0.0))) == pytest.approx(-fe.FULL * fe.REVERSE_MAX)
     small = rack.force(front_sample(100.0, vel=(-4.0, 0.0, 0.0)))
-    assert small == pytest.approx(rack.scale * 100.0)     # a modest force is the game's own, unfaded
+    assert small == pytest.approx(rack.play_scale * 100.0)     # a modest force is the game's own, unfaded
 
 
 # -- the car properties file --
