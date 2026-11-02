@@ -467,10 +467,31 @@ class Device:
         if not path:
             return False
         peak_ffb_level = str(peak_ffb_level)
-        logging.debug("Setting peak FF level: %s", peak_ffb_level)
         with open(path, "w") as file:
             file.write(peak_ffb_level)
         return True
+
+    def get_ffb_clip_count(self):
+        """The driver's count of force feedback ticks above full scale, a
+        free-running u32; None when the driver has no such attribute."""
+        path = self.device_file("ffb_clip_count")
+        if not os.access(path, os.F_OK | os.R_OK):
+            return None
+        try:
+            with open(path, "r") as file:
+                return int(file.read().strip())
+        except (OSError, ValueError):
+            return None
+
+    TIMER_MSECS_FILE = "/sys/module/hid_logitech_new/parameters/timer_msecs"
+
+    def get_ffb_tick_ms(self):
+        """The driver's force feedback timer period, 2 ms if it can't be read."""
+        try:
+            with open(self.TIMER_MSECS_FILE, "r") as file:
+                return max(int(file.read().strip()), 1)
+        except (OSError, ValueError):
+            return 2
 
     def center_wheel(self):
         self.set_autocenter(100)

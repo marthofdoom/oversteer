@@ -7,6 +7,7 @@ import os
 import time
 from .gtk_handlers import GtkHandlers
 from . import hotkeys
+from .ffb_meter import FfbMeter, FfbPoller
 from . import qr
 from . import steam_options
 from .telemetry import AUTO, DEFAULT_PORT, PORT_PRESETS, PORT_MIN, PORT_MAX, parse_port
@@ -63,6 +64,7 @@ class GtkUi:
         self._build_hotkeys_page()
         self._build_telemetry_page()
         self._build_wheel_launch_options()
+        self._build_ffb_meter()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -921,6 +923,7 @@ class GtkUi:
                 self.overlay_window.show()
             if not self.ffbmeter_timer and self.overlay_window.props.visible and ffbmeter_overlay:
                 self.ffbmeter_timer = True
+                self.controller.ffb_consumer_start('overlay')
                 GLib.timeout_add(250, self._update_ffbmeter_overlay)
             if ffbmeter_overlay:
                 self._ffbmeter_overlay.show()
@@ -1003,11 +1006,89 @@ class GtkUi:
         elif test_id == 2:
             self.test_container_stack.set_visible_child(self.test_panel_running)
 
+    FFB_METER_MS = 80           # ~12 Hz, only while the bar is on screen
+
+    def _build_ffb_meter(self):
+        """A live level bar with a peak-hold marker and a clip counter, as a
+        row under the FFBmeter row. Polled only while it is mapped."""
+        anchor = self._row_of(self.ffbmeter_leds)
+        if anchor is None or anchor.get_parent() is None:
+            return
+        self.ffb_meter = FfbMeter()
+        bar = Gtk.DrawingArea()
+        bar.set_size_request(220, 18)
+        bar.connect('draw', self._draw_ffb_meter)
+        bar.connect('map', self._start_ffb_meter)
+        self.ffb_meter_bar = bar
+        self.ffb_poller = FfbPoller(self.ffb_meter, self.controller, bar.get_mapped)
+        self.ffb_clip_label = Gtk.Label(xalign=1)
+        self._show_ffb_clips()
+        reset = Gtk.Button(label=_("Reset"))
+        reset.connect('clicked', self._reset_ffb_clips)
+        row = self._setting_row(_("FFB level"), None, _("Live force feedback level as a share of the wheel's full torque, with the highest recent value held. Clipped is how long the game asked for more than 100%: the force was cut off there, so the detail in it was lost. Lower the in-game FFB strength or the gain if it keeps counting."),
+                (bar, self.ffb_clip_label, reset))
+        anchor.get_parent().insert(row, anchor.get_index() + 1)
+        row.show_all()
+
+    def reset_ffb_meter(self):
+        if hasattr(self, 'ffb_meter'):
+            self.ffb_meter.reset()
+            self._show_ffb_clips()
+            self.ffb_meter_bar.queue_draw()
+
+    def _show_ffb_clips(self):
+        meter = self.ffb_meter
+        if meter.driver:
+            seconds = meter.clipped * self.controller.read_ffb_tick_ms() / 1000
+            self.ffb_clip_label.set_text(_("Clipped: %.1f s") % seconds)
+        elif meter.clipped:
+            self.ffb_clip_label.set_text(_("Clipped: about %d polls") % meter.clipped)
+        else:
+            self.ffb_clip_label.set_text(_("Clipped: none"))
+
+    def _start_ffb_meter(self, *args):
+        if self.ffb_poller.arm():
+            GLib.timeout_add(self.FFB_METER_MS, self._poll_ffb_meter)
+
+    def _poll_ffb_meter(self):
+        if not self.ffb_poller.tick(time.monotonic()):
+            return False
+        self.ffb_meter_bar.queue_draw()
+        self._show_ffb_clips()
+        return True
+
+    def _reset_ffb_clips(self, *args):
+        self.ffb_meter.clear_clips()
+        self._show_ffb_clips()
+
+    def _draw_ffb_meter(self, area, cr):
+        width = area.get_allocated_width()
+        height = area.get_allocated_height()
+        context = area.get_style_context()
+        fg = context.get_color(Gtk.StateFlags.NORMAL)
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.15)
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+        fraction = self.ffb_meter.fraction
+        if self.ffb_meter.over:
+            cr.set_source_rgb(0.85, 0.2, 0.2)
+        elif fraction >= 0.9:
+            cr.set_source_rgb(0.9, 0.7, 0.1)
+        else:
+            cr.set_source_rgb(0.25, 0.65, 0.35)
+        cr.rectangle(0, 0, width * fraction, height)
+        cr.fill()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.9)
+        cr.rectangle(min(width * self.ffb_meter.peak, width - 2), 0, 2, height)
+        cr.fill()
+
     def _update_ffbmeter_overlay(self):
         if not self.overlay_window.props.visible or not self.ffbmeter_overlay.props.visible:
             self.ffbmeter_timer = False
             return False
-        level = self.controller.read_ffbmeter()
+        level = self.controller.read_ffbmeter('overlay')
+        if level is None:
+            return True
         if level < 2458: # < 7.5%
             led_states = 0
         elif level < 8192: # < 25%
