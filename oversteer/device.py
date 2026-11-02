@@ -74,10 +74,20 @@ class Device:
         if not os.access(path, os.F_OK):
             return True
         status = os.stat(path)
+        # Only for the log: a uid or gid the sandbox (Flatpak) has no name for must not fail the check
+        try:
+            owner = pwd.getpwuid(status.st_uid)[0]
+        except KeyError:
+            owner = status.st_uid
+        try:
+            group = grp.getgrgid(status.st_gid)[0]
+        except KeyError:
+            group = status.st_gid
         logging.debug("check_file_permissions mode: %s user: %s group: %s file: %s", oct(status.st_mode & 0o777),
-                pwd.getpwuid(status.st_uid)[0], grp.getgrgid(status.st_gid)[0], path)
+                owner, group, path)
         if os.access(path, os.R_OK | os.W_OK):
             return True
+        logging.warning("no read/write access to %s", path)
         return False
 
     def get_max_range(self):
