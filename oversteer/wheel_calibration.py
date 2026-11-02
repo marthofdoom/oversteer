@@ -23,6 +23,7 @@ Safety (all enforced here, whatever the step asks for):
 import atexit
 import datetime
 import errno
+import gc
 import json
 import logging
 import math
@@ -86,10 +87,16 @@ class Calibration:
     REPEATS = 2
     GRAB_RATIO = 2.0            # a push accelerating the wheel this much less (hands on it) or more (pushed
                                 # along) than the others stops the run
+    BLIND_DEG = 4.0             # the reported position and the axis's current value may differ this much
+    TICK_GAP_S = 0.020          # a pause between writes this long during a pulse above SWEEP_MAX stops the run
+    EMERGENCY_BRAKE_S = 0.200   # stopping at the hard margin: brake this long at most, then force 0
+    STALE_SAMPLES = 3           # ext_force reads taken (50 ms apart) to tell a stale value from a live writer
 
-    def __init__(self, io, progress=None):
+    def __init__(self, io, progress=None, pending_path=None, pending_key=None):
         self.io = io
         self.progress = progress
+        self.pending_path = pending_path    # crash record: what to put back if this process dies mid-run
+        self.pending_key = pending_key
         self.cancel_event = threading.Event()
         self.rec = wc.Recording()
         self.saved = {}
@@ -113,6 +120,8 @@ class Calibration:
         self._high_since = None
         self._high_end = -1e9
         self._next = 0.0
+        self._last_tick = None
+        self._last_w = 0.0
         self.t0 = 0.0
         self.period = 0.002
         self.log = []                   # (time, event) for the report and the tests
@@ -124,11 +133,19 @@ class Calibration:
 
     def run(self):
         _running.add(self)
+        gc_was = gc.isenabled()
         try:
             self._check_free()              # before anything is changed: nothing to put back if it isn't
+            # no collector pauses in the middle of a pulse
+            gc.collect()
+            gc.freeze()
+            gc.disable()
             try:
                 self._prepare()
                 self._measure()
+            except PermissionError as e:
+                raise Aborted('permission', _("Oversteer may not change this wheel's settings ({}). The udev "
+                                              "rules that come with Oversteer give that permission.").format(e)) from e
             except OSError as e:
                 raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
             except _NearLock as e:
@@ -136,6 +153,9 @@ class Calibration:
                                              "and try again.")) from e
             finally:
                 self._restore()
+                gc.unfreeze()
+                if gc_was:
+                    gc.enable()
             self._report(_("Analysing"))
             try:
                 result = wc.analyse(self.rec)
@@ -147,29 +167,50 @@ class Calibration:
             result['duration_s'] = round(self.rec.cmd_t[-1] - self.rec.cmd_t[0], 1) if self.rec.cmd_t else 0
             return result
         finally:
+            if gc_was:
+                gc.enable()
             _running.discard(self)
 
     # --- set up and put back ---
 
     def _check_free(self):
+        """Nothing else may be driving the force. The driver's ext_force reads the last value written even
+        after its watchdog faded it out: a value that stays the same while the game's force is at 100 % is
+        such a leftover (an application that stopped without writing 0), and is cleared."""
+        io = self.io
         try:
-            busy = int(self.io.read('ext_force') or 0)
-            muted = int(self.io.read('game_ffb_level') or 100) < 100
+            samples = []
+            for i in range(self.STALE_SAMPLES):
+                if i:
+                    io.sleep_until(io.now() + 0.05)
+                samples.append((int(io.read('ext_force') or 0), int(io.read('game_ffb_level') or 100)))
         except ValueError:
-            busy, muted = 0, False
+            return
+        except PermissionError as e:
+            raise Aborted('permission', _("Oversteer may not read this wheel's settings ({}).").format(e)) from e
         except OSError as e:
             raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
-        if busy or muted:
+        forces = {f for f, _l in samples}
+        if any(level < 100 for _f, level in samples) or len(forces) > 1:
             raise Aborted('busy', _("Something else is driving the wheel's force right now (Countersteer FFB?)."))
+        if forces != {0}:
+            logging.info("calibration: ext_force %s is left over from an earlier writer; clearing it", forces)
+            try:
+                io.write('ext_force', '0')
+            except OSError as e:
+                raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
 
     def _prepare(self):
         io = self.io
+        io.hold()                           # from now on nobody else changes range, gain or centring
         for name in ATTRS:
             if name != 'ext_force':
                 self.saved[name] = io.read(name)
         self.saved['gain'] = io.get_gain()
         self.saved['autocenter'] = io.get_autocenter()
         self.saved['range'] = io.get_range()
+        if self.pending_path:
+            write_pending(self.pending_path, self.pending_key, self.saved)
         io.open()
         io.force(0)
         io.write('game_ffb_level', '0')
@@ -182,6 +223,10 @@ class Calibration:
         io.write('ffb_soft_clip', '0')
         max_range = io.max_range()
         io.set_range(max_range)
+        actual = io.get_range()
+        if actual is None or abs(int(actual) - int(max_range)) > 1:
+            raise Aborted('range', _("The wheel's range could not be set to {} degrees (it reads {}).")
+                          .format(max_range, actual))
         self.lock = max_range / 2.0
         self.rec.counts_per_deg = 65536.0 / max_range
         self.period = max(io.tick_s, 0.001)
@@ -196,31 +241,18 @@ class Calibration:
 
     def _restore(self):
         io = self.io
-
-        def attempt(fn, *args):
-            try:
-                fn(*args)
-            except Exception as e:      # each one on its own: one failing must not skip the rest
-                logging.debug("calibration restore %s%s: %s", getattr(fn, '__name__', fn), args, e)
-
-        attempt(io.force, 0)
-        attempt(io.write, 'game_ffb_level', '100')
-        for name in SHAPING + ('ext_force_cap',):
-            if name in self.saved:
-                attempt(io.write, name, self.saved[name])
-        # what was asked for during the run (a profile loaded meanwhile), else what was there before
         asked = {}
         try:
-            asked = io.deferred()
-        except Exception:
-            pass
-        for key, setter in (('gain', io.set_gain), ('range', io.set_range), ('autocenter', io.set_autocenter)):
-            value = asked.get(key, self.saved.get(key))
-            if value is not None:
-                attempt(setter, value)
-        attempt(io.force, 0)
-        attempt(io.write, 'game_ffb_level', '100')
-        attempt(io.close)
+            asked = io.release() or {}      # first: a request made from now on goes straight to the wheel
+        except Exception as e:
+            logging.debug("calibration release: %s", e)
+        failed = restore_saved(io, self.saved, asked)
+        try:
+            io.close()
+        except Exception as e:
+            logging.debug("calibration close: %s", e)
+        if self.pending_path and not failed:
+            clear_pending(self.pending_path, self.pending_key)
 
     # --- one tick ---
 
@@ -250,6 +282,9 @@ class Calibration:
         except OSError:
             pass
 
+    def _raw(self, w):
+        return max(-32768, min(32767, int(round(self.sign * w * wc.FULL))))
+
     def _tick(self, w):
         """Write one force, wait for the next tick, read the wheel and check it. Returns the new reports."""
         if self.cancel_event.is_set():
@@ -259,13 +294,20 @@ class Calibration:
         if now - self.t0 > self.TOTAL_S:
             self._zero()
             raise Aborted('timeout', _("The calibration took too long."))
+        if self._last_tick is not None and now - self._last_tick > self.TICK_GAP_S and \
+                abs(self._last_w) > self.SWEEP_MAX:
+            self._zero()
+            raise Aborted('stall', _("The calibration was held up for {:.0f} ms during a pulse; it stopped to be "
+                                     "safe.").format((now - self._last_tick) * 1000))
         w = self._limit(w, now)
-        raw = int(round(self.sign * w * wc.FULL))
-        raw = max(-32768, min(32767, raw))
         try:
-            self.io.force(raw)
+            self.io.force(self._raw(w))
+        except PermissionError:
+            raise
         except OSError as e:
             raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
+        self._last_tick = now
+        self._last_w = w
         self.rec.command(now, w)
         self._next += self.period
         if self._next < now:
@@ -278,6 +320,7 @@ class Calibration:
     def _read(self):
         try:
             reports = self.io.poll()
+            current = self.io.position_now()
         except OSError as e:
             self._zero()
             raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
@@ -301,20 +344,50 @@ class Calibration:
                 break
             ref = deg
         self.omega = (self.theta - ref) / self.VEL_WINDOW_S
+        # The reports can stop while the wheel turns (another program grabbed the input node): the axis's
+        # current value, which a grab doesn't stop, must agree with them
+        self.theta_now = self._deg(current)
+        if abs(self.theta_now - self.theta) > self.BLIND_DEG:
+            self._zero()
+            raise Aborted('blind', _("The wheel's position stopped arriving (another program may have taken the "
+                                     "wheel's input); the calibration stopped."))
         return events
+
+    def _stopping_angle(self):
+        """|angle| the wheel would stop at if braked now, moving towards the nearer lock (a_kick, the push's
+        acceleration, is a floor for braking at SWEEP_MAX)."""
+        outward = max(0.0, self.omega * _sign(self.theta))
+        return abs(self.theta) + outward * outward / (2.0 * self.a_kick)
 
     def _check(self):
         if abs(self.omega) > self.V_ABORT:
             self._zero()
             raise Aborted('overspeed', _("The wheel turned faster than {:.0f} degrees a second.").format(self.V_ABORT))
         hard = self.recovering or not self.sign_known
-        margin = self.HARD_MARGIN_DEG if hard else self.LOCK_MARGIN_DEG
-        if abs(self.theta) > self.lock - margin:
-            if hard:
-                self._zero()
-                raise Aborted('near_lock', _("The wheel is too close to its lock. Turn it towards the centre "
-                                             "and try again."))
+        if abs(self.theta) > self.lock - self.HARD_MARGIN_DEG or \
+                (hard and self._stopping_angle() > self.lock - self.HARD_MARGIN_DEG):
+            self._emergency_brake()
+            raise Aborted('near_lock', _("The wheel is too close to its lock. Turn it towards the centre "
+                                         "and try again."))
+        if not hard and self._stopping_angle() > self.lock - self.LOCK_MARGIN_DEG:
             raise _NearLock()
+
+    def _emergency_brake(self):
+        """At the hard margin: if the wheel is still heading for the lock (and which way the force turns it is
+        known), brake for at most EMERGENCY_BRAKE_S at most SWEEP_MAX, then force 0."""
+        try:
+            if self.sign_known:
+                end = self.io.now() + self.EMERGENCY_BRAKE_S
+                while self.io.now() < end and self.omega * _sign(self.theta) > self.STILL_DEG_S:
+                    w = -_sign(self.omega) * min(self.SWEEP_MAX, 0.8 * self.breakaway_max +
+                                                 self.kv * abs(self.omega))
+                    self.io.force(self._raw(w))
+                    self.rec.command(self.io.now(), w)
+                    self.io.sleep_until(self.io.now() + self.period)
+                    self._read()
+        except (OSError, Aborted):
+            pass
+        self._zero()
 
     def _now(self):
         return self.io.now()
@@ -643,6 +716,88 @@ class Calibration:
         self._unit(_("Done"))
 
 
+def restore_saved(io, saved, asked=None):
+    """Put a wheel back after a run: ext_force 0 and game_ffb_level 100 first and last, the shaping and cap as
+    they were, and the range, gain and centring spring as asked for meanwhile (`asked`) or as they were. Each
+    write on its own, so one failing does not skip the rest. Returns True if any failed."""
+    asked = asked or {}
+    failed = []
+
+    def attempt(fn, *args):
+        try:
+            fn(*args)
+        except Exception as e:
+            failed.append(e)
+            logging.debug("calibration restore %s%s: %s", getattr(fn, '__name__', fn), args, e)
+
+    attempt(io.force, 0)
+    attempt(io.write, 'game_ffb_level', '100')
+    for name in SHAPING + ('ext_force_cap',):
+        if saved.get(name) is not None:
+            attempt(io.write, name, saved[name])
+    for key, setter in (('gain', io.set_gain), ('range', io.set_range), ('autocenter', io.set_autocenter)):
+        value = asked.get(key, saved.get(key))
+        if value is not None:
+            attempt(setter, value)
+    attempt(io.force, 0)
+    attempt(io.write, 'game_ffb_level', '100')
+    return bool(failed)
+
+
+# --- the crash record: what to put back if the process died during a run (SIGKILL, a crash, power) ---
+
+PENDING_NAME = 'wheel_calibration.pending.json'
+
+
+def write_pending(path, key, saved):
+    try:
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump({'key': key, 'saved': saved}, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        logging.warning("calibration crash record: %s", e)
+
+
+def clear_pending(path, key):
+    try:
+        with open(path) as f:
+            if json.load(f).get('key') != key:
+                return
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def take_pending(path, key):
+    """The settings a run that never finished had saved for this wheel, or None. The record stays until the
+    wheel has been put back (clear_pending)."""
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get('key') != key or not isinstance(data.get('saved'), dict):
+        return None
+    return data['saved']
+
+
+def recover_pending(path, key, io):
+    """At start or when the wheel comes back: undo a run that never got to put the wheel back. True if there
+    was one and it is undone."""
+    saved = take_pending(path, key)
+    if saved is None:
+        return False
+    logging.warning("wheel calibration: an earlier run did not finish; putting the wheel back")
+    if not restore_saved(io, saved):
+        clear_pending(path, key)
+        return True
+    return False
+
+
 # Calibrations running now: the process stops none of them without putting the wheel back
 _running = set()
 
@@ -685,13 +840,20 @@ class DeviceIO:
         with open(self.device.device_file(name), 'w') as f:
             f.write(str(value))
 
+    def hold(self):
+        self.device.hold_settings()
+
+    def release(self):
+        """Stop holding the settings; the range, gain and centring spring asked for while they were held."""
+        names = {'range': 'range', 'ff_gain': 'gain', 'autocenter': 'autocenter'}
+        return {names[k]: v for k, v in self.device.release_settings().items() if k in names}
+
     def open(self):
         from evdev import InputDevice, ecodes
-        self.device.hold_settings()
         self._force_fd = os.open(self.device.device_file('ext_force'), os.O_WRONLY)
         node = self.device._input_node()
         if node is None:
-            raise OSError(errno.ENODEV, "the wheel's input device can't be read")
+            raise PermissionError(errno.EACCES, "the wheel's input device can't be read")
         self._input = InputDevice(node)
         self._abs_x = ecodes.ABS_X
         self._ev_abs = ecodes.EV_ABS
@@ -713,12 +875,6 @@ class DeviceIO:
         finally:
             self.device.release_settings()
 
-    def deferred(self):
-        """The range, gain and centring spring asked for while the run held them."""
-        held = self.device._held or {}
-        names = {'range': 'range', 'ff_gain': 'gain', 'autocenter': 'autocenter'}
-        return {names[k]: v for k, v in held.items() if k in names}
-
     def now(self):
         return time.monotonic()
 
@@ -736,6 +892,11 @@ class DeviceIO:
     def position_raw(self):
         code, value = self.device._normalized_axis(self._abs_x, self._input.absinfo(self._abs_x).value)
         return value
+
+    def position_now(self):
+        """The axis's current value (EVIOCGABS: it keeps up even while another program grabs the node and
+        the reports stop arriving here)."""
+        return self.position_raw()
 
     def poll(self):
         out = []
@@ -804,43 +965,90 @@ def save_store(path, data):
 
 def new_entry(result, old=None):
     """The store entry after a successful run: the correction on, dither as recommended unless the user
-    chose, the soft clip kept."""
-    old = old or {}
+    chose, the soft clip and friction compensation kept."""
+    old = old if isinstance(old, dict) else {}
     entry = {
-        'version': 1,
+        'version': ENTRY_VERSION,
         'result': result,
         'use': True,
         'dither': old['dither'] if old.get('dither_chosen') else bool(result.get('dither')),
         'dither_chosen': bool(old.get('dither_chosen')),
-        'soft_clip': int(old.get('soft_clip', 0)),
+        'soft_clip': _clamped_int(old.get('soft_clip'), 0, 100),
+        'friction_comp': _clamped_int(old.get('friction_comp'), 0, 100),
     }
     return entry
 
 
+ENTRY_VERSION = 1
+FRICTION_COMP_CAP = 0.8         # friction compensation lifts the force at most to this share of the breakaway
+
+
+def _clamped_int(value, low, high, default=0):
+    try:
+        return max(low, min(high, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
 def valid_lut(lut):
-    return (isinstance(lut, list) and 2 <= len(lut) <= 65 and all(isinstance(v, int) and 0 <= v <= wc.FULL
-            for v in lut) and all(b >= a for a, b in zip(lut, lut[1:])))
+    return wc.plausible_lut(lut)
+
+
+def valid_entry(entry):
+    """True for a stored entry whose correction may be written: this version, a plausible LUT (33 points,
+    0 to 32767, strictly increasing, not steeper than 4x identity) and a dead zone within 15 %."""
+    if not isinstance(entry, dict) or entry.get('version') != ENTRY_VERSION:
+        return False
+    result = entry.get('result')
+    if not isinstance(result, dict) or not wc.plausible_lut(result.get('lut')):
+        return False
+    deadband = result.get('deadband')
+    return isinstance(deadband, int) and not isinstance(deadband, bool) and \
+        0 <= deadband <= wc.MAX_DEAD_ZONE * wc.FULL
+
+
+def compensated_deadband(result, percent):
+    """ffb_deadband with `percent` of the measured Coulomb friction folded in: the lift then starts at the
+    command that gives that much torque, so the smallest force just about overcomes the friction. Capped at
+    FRICTION_COMP_CAP of the breakaway force (past that the wheel would move by itself)."""
+    deadband = result['deadband']
+    share = _clamped_int(percent, 0, 100) / 100.0
+    friction = result.get('friction')
+    breakaway = result.get('breakaway')
+    if not share or not isinstance(friction, (int, float)) or not isinstance(breakaway, (int, float)) or \
+            friction <= 0 or breakaway <= 0:
+        return deadband
+    target = wc.shaped(min(friction, 1.0) * wc.FULL, result['lut'], deadband)
+    lifted = deadband + share * (target - deadband)
+    cap = min(FRICTION_COMP_CAP * breakaway, 0.2) * wc.FULL
+    return int(round(max(deadband, min(lifted, cap))))
 
 
 def correction_values(entry):
-    """{attribute: text} to write for a store entry: the LUT and deadband when the correction is on
-    (identity and 0 when off), the dither and soft clip as chosen."""
-    result = entry.get('result') or {}
-    lut = result.get('lut')
-    use = bool(entry.get('use')) and valid_lut(lut)
-    deadband = int(result.get('deadband') or 0) if use else 0
+    """{attribute: text} to write for a store entry: the LUT and deadband (with any friction compensation)
+    when the correction is on and the entry is valid, identity and 0 otherwise; the dither and soft clip as
+    chosen."""
+    entry = entry if isinstance(entry, dict) else {}
+    use = bool(entry.get('use')) and valid_entry(entry)
+    result = entry.get('result') if use else None
     return {
-        'ffb_lut': ' '.join(str(v) for v in lut) if use else 'identity',
-        'ffb_deadband': str(max(0, min(wc.FULL, deadband))),
-        'ffb_dither': '1' if entry.get('dither') else '0',
-        'ffb_soft_clip': str(max(0, min(100, int(entry.get('soft_clip') or 0)))),
+        'ffb_lut': ' '.join(str(v) for v in result['lut']) if use else 'identity',
+        'ffb_deadband': str(compensated_deadband(result, entry.get('friction_comp'))) if use else '0',
+        'ffb_dither': '1' if entry.get('dither') is True else '0',
+        'ffb_soft_clip': str(_clamped_int(entry.get('soft_clip'), 0, 100)),
     }
 
 
 def apply_correction(write, entry):
-    """Write an entry's correction with write(name, text); False if any write failed."""
+    """Write an entry's correction with write(name, text); False if anything failed (a broken entry writes
+    identity and 0)."""
+    try:
+        values = correction_values(entry)
+    except Exception as e:
+        logging.warning("wheel correction: %s", e)
+        values = correction_values({})
     ok = True
-    for name, value in correction_values(entry).items():
+    for name, value in values.items():
         try:
             write(name, value)
         except (OSError, ValueError) as e:

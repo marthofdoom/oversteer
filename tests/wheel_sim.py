@@ -71,6 +71,9 @@ class SimWheel:
         self._high_start = None
         self.impure_ticks = 0
         self.asked = {}                     # settings asked for by the application during a run
+        self.held = False
+        self.blind_at = None                # from then on no reports arrive (another program grabbed the node)
+        self.stall_high = None              # (after, seconds): from then, one pause this long during a pulse
 
     # --- disturbances ---
 
@@ -201,6 +204,10 @@ class SimWheel:
         return self.t
 
     def sleep_until(self, t):
+        if self.stall_high is not None and self.t >= self.stall_high[0] and \
+                abs(int(self.attrs['ext_force'])) > 0.6 * FULL + 256:
+            t += self.stall_high[1]                 # the process is held up (a collector, the scheduler)
+            self.stall_high = None
         while self.t < t:
             self._step()
 
@@ -234,7 +241,16 @@ class SimWheel:
     def poll(self):
         self._fail()
         out, self.reports = self.reports, []
+        if self.blind_at is not None and self.t >= self.blind_at:
+            return []
         return out
+
+    def position_now(self):
+        self._fail()
+        return self.raw()
+
+    def blind(self, after):
+        self.blind_at = self.t + after
 
     def position_raw(self):
         self._fail()
@@ -273,8 +289,13 @@ class SimWheel:
     def max_range(self):
         return self._max_range
 
-    def deferred(self):
-        return dict(self.asked)
+    def hold(self):
+        self.held = True
+
+    def release(self):
+        self.held = False
+        asked, self.asked = self.asked, {}
+        return asked
 
     # --- for the tests ---
 

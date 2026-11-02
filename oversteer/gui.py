@@ -133,6 +133,9 @@ class Gui:
         self.recent_profiles = []               # profile names, most recently selected first (preferences)
 
         signal.signal(signal.SIGINT, self.sig_int_handler)
+        # A logout or kill: quit through on_quit, so a running wheel calibration puts the wheel back
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            GLib.unix_signal_add(GLib.PRIORITY_HIGH, signum, self._quit_on_signal, signum)
 
         self.config_path = save_config_path('oversteer')
 
@@ -201,6 +204,14 @@ class Gui:
 
     def sig_int_handler(self, signal, frame):
         sys.exit(0)
+
+    def _quit_on_signal(self, signum):
+        logging.info("signal %s: quitting", signum)
+        try:
+            self.on_quit()
+        finally:
+            self.ui.quit()
+        return False
 
     def install_udev_files(self):
         while True:
@@ -469,6 +480,10 @@ class Gui:
         plugged = self.device_manager.take_plugged()
         for device_id in dict.fromkeys(plugged):        # each once, the last one stays selected
             self.apply_plug_profile(device_id)
+        # the driver starts a wheel it binds with no shaping: a replugged wheel gets its correction back
+        if self.device is not None and self.device.get_id() in plugged:
+            self.recover_wheel()
+            self.apply_wheel_correction()
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
     # selected in the device list; a profile was applied to it only if its
@@ -534,6 +549,7 @@ class Gui:
             self.refresh_wheel_correction()
             return
 
+        self.recover_wheel()                # an earlier run that died: put the wheel back before it is read
         if not self.device.check_permissions() and self.check_permissions:
             if self.app.udev_path:
                 self.install_udev_files()
@@ -2136,10 +2152,30 @@ class Gui:
         return os.path.join(self.config_path, wcal.STORE_NAME)
 
     def _wheel_entry(self, device=None):
+        """The stored entry of a wheel, None if there is none or it is not the shape this version writes."""
         device = device or self.device
         if device is None:
             return None
-        return wcal.load_store(self._wheel_store()).get(wcal.wheel_key(device))
+        try:
+            entry = wcal.load_store(self._wheel_store()).get(wcal.wheel_key(device))
+        except Exception as e:
+            logging.warning("wheel calibration store: %s", e)
+            return None
+        if not isinstance(entry, dict) or not isinstance(entry.get('result'), dict):
+            return None
+        return entry
+
+    def _wheel_pending(self):
+        return os.path.join(self.config_path, wcal.PENDING_NAME)
+
+    def recover_wheel(self):
+        """A calibration that never put the wheel back (the process was killed): do it now."""
+        if self.calibration is not None or not self._wheel_supported():
+            return
+        try:
+            wcal.recover_pending(self._wheel_pending(), wcal.wheel_key(self.device), wcal.DeviceIO(self.device))
+        except Exception as e:
+            logging.warning("wheel calibration crash record: %s", e)
 
     def _wheel_supported(self):
         try:
@@ -2159,7 +2195,10 @@ class Gui:
             return
         entry = self._wheel_entry()
         if entry is not None:
-            wcal.apply_correction(self.device.write_attr, entry)
+            try:
+                wcal.apply_correction(self.device.write_attr, entry)
+            except Exception as e:
+                logging.warning("wheel correction: %s", e)
 
     def _change_wheel_entry(self, **changes):
         if self.device is None:
@@ -2188,11 +2227,19 @@ class Gui:
     def set_wheel_soft_clip(self, value):
         self._change_wheel_entry(soft_clip=max(0, min(100, int(value))))
 
+    def set_wheel_friction_comp(self, value):
+        self._change_wheel_entry(friction_comp=max(0, min(100, int(value))))
+
     def start_calibration(self):
         if self.calibration is not None or not self._wheel_supported():
             return
         if self.test is not None and (self.test.is_awaiting_action() or self.test.is_collecting_data()):
             self.ui.info_dialog(_("A wheel test is running."), _("Let it finish first."))
+            return
+        if self.grab_input:
+            # the overlay holds the wheel's input: the calibration would not see the wheel move
+            self.ui.info_dialog(_("The wheel's input is grabbed by the overlay."),
+                                _("Release it with the toggle buttons first."))
             return
         if not self.ui.confirmation_dialog(
                 _("Hands off the wheel: it will turn by itself.") + "\n\n" +
@@ -2206,7 +2253,8 @@ class Gui:
         def progress(fraction, text):
             self.ui.safe_call(self.ui.set_calibration_progress, fraction, text)
 
-        cal = wcal.Calibration(wcal.DeviceIO(device), progress)
+        cal = wcal.Calibration(wcal.DeviceIO(device), progress, pending_path=self._wheel_pending(),
+                               pending_key=wcal.wheel_key(device))
         self.calibration = cal
         self.refresh_wheel_correction()
         self.ui.show_calibration_dialog(cal.cancel)
@@ -2240,11 +2288,11 @@ class Gui:
                 wcal.save_store(path, store)
             except OSError as e:
                 logging.warning("wheel calibration store: %s", e)
-            if self.device is device:
-                self.apply_wheel_correction()
+            self.apply_wheel_correction()
             self.refresh_wheel_correction()
             self.ui.info_dialog(_("Wheel calibrated."), wcal.summary(result))
         else:
+            self.apply_wheel_correction()       # the run put back what was there: the correction goes on again
             self.refresh_wheel_correction()
             if not (isinstance(error, wcal.Aborted) and error.reason == 'cancelled'):
                 self.ui.error_dialog(_("The wheel calibration did not finish."), str(error))

@@ -112,13 +112,16 @@ def test_the_run_stays_within_its_limits_and_puts_everything_back(g29_like):
     (dict(inertia=1 / 1500, coulomb=0.1, static=0.14, curve=0.0), 0.03),   # heavy, high friction
     (dict(dead_zone=0.0, encoder_deg=900 / 65536), 0.02),                  # no dead zone, fine encoder
     (dict(max_range=270, range=270, stop_deg=135), 0.03),                  # a small range
+    (dict(dead_zone=0.0, coulomb=0.08, static=0.1), 0.03),                 # friction, no dead zone...
+    (dict(dead_zone=0.08, coulomb=0.01, static=0.015), 0.03),              # ...and the other way round
 ])
 def test_other_wheels(params, tolerance):
     sim = SimWheel(**params)
     cal = Calibration(sim)
     result = cal.run()
     assert linearity_error(sim, result) < tolerance
-    assert abs(result['deadband'] / wc.FULL - sim.dead_zone) < 0.015
+    # (friction is not taken for dead zone; a curve weak at the bottom blurs where it starts)
+    assert abs(result['deadband'] / wc.FULL - sim.dead_zone) < (0.015 if params.get('curve', 3.0) < 0 else 0.01)
     assert_safe_run(sim, cal)
     assert_put_back(sim, rng=sim._max_range if params.get('range') else 540)
 
@@ -277,17 +280,34 @@ def test_a_wheel_that_does_not_move_stops_the_run():
 
 
 def test_a_wheel_driven_by_something_else_is_left_alone():
+    # a live writer: ext_force changes between the reads
     sim = SimWheel()
-    sim.attrs['ext_force'] = '1200'
+    values = iter(['1200', '1350', '900', '0', '0'])
+    read = sim.read
+    sim.read = lambda name: next(values) if name == 'ext_force' else read(name)
     with pytest.raises(Aborted) as e:
         Calibration(sim).run()
     assert e.value.reason == 'busy'
     assert sim.writes == []
+    # the game muted by something else
     sim = SimWheel()
     sim.attrs['game_ffb_level'] = '0'
     with pytest.raises(Aborted):
         Calibration(sim).run()
     assert sim.writes == []
+
+
+def test_a_stale_ext_force_is_cleared(monkeypatch):
+    """The driver keeps the last value written after its watchdog faded it: the same non-zero value over
+    150 ms with the game's force at 100 % is a leftover, cleared before the run."""
+    sim = SimWheel()
+    sim.attrs['ext_force'] = '1200'
+    monkeypatch.setattr(Calibration, 'TOTAL_S', 3.0)
+    with pytest.raises(Aborted) as e:
+        Calibration(sim).run()
+    assert e.value.reason == 'timeout'                          # it ran
+    assert sim.writes[0][1:] == ('ext_force', '0')
+    assert_put_back(sim)
 
 
 def test_settings_asked_for_during_the_run_are_the_ones_put_back(monkeypatch):
@@ -441,18 +461,18 @@ def test_settings_are_held_while_a_calibration_runs(tmp_path):
     dev = Device(None, {'dev_path': str(tmp_path)})
     (tmp_path / 'range').write_text('540')
     (tmp_path / 'gain').write_text('65535')
-    dev.hold_settings()
+    io = wcal.DeviceIO.__new__(wcal.DeviceIO)
+    io.device = dev
+    io.hold()
     dev.set_range(270)
     dev.set_ff_gain(80)
     assert (tmp_path / 'range').read_text() == '540'
-    io = wcal.DeviceIO.__new__(wcal.DeviceIO)
-    io.device = dev
-    assert io.deferred() == {'range': 270, 'gain': 80}
     io.set_range(900)                                            # the calibration itself writes
     assert (tmp_path / 'range').read_text() == '900'
-    assert dev.release_settings() == {'range': 270, 'ff_gain': 80}
+    assert io.release() == {'range': 270, 'gain': 80}
     dev.set_range(720)
     assert (tmp_path / 'range').read_text() == '720'
+    assert io.release() == {}
 
 
 # --- the window's side (oversteer/gui.py, oversteer/gtk_ui.py) ---
@@ -489,6 +509,9 @@ class _Wheel:
     def has_wheel_correction(self):
         return self.supported
 
+    def get_ffb_tick_ms(self):
+        return 2
+
     def write_attr(self, name, value):
         self.attrs[name] = str(value)
 
@@ -502,6 +525,7 @@ def _gui(tmp_path, wheel, confirm=True):
     gui.calibration = None
     gui.calibration_thread = None
     gui.test = None
+    gui.grab_input = False
     return gui
 
 
@@ -578,14 +602,15 @@ def test_the_ffb_tab_rows(tmp_path):
     ui.controller = SimpleNamespace(start_calibration=lambda: calls.append('start'),
                                     set_use_wheel_correction=lambda s: calls.append(('use', s)),
                                     set_wheel_dither=lambda s: calls.append(('dither', s)),
-                                    set_wheel_soft_clip=lambda v: calls.append(('clip', v)))
+                                    set_wheel_soft_clip=lambda v: calls.append(('clip', v)),
+                                    set_wheel_friction_comp=lambda v: calls.append(('comp', v)))
     listbox = Gtk.ListBox()
     row = Gtk.ListBoxRow()
     ui.autocenter_persistent = Gtk.Switch()
     row.add(ui.autocenter_persistent)
     listbox.add(row)
     ui._build_wheel_calibration()
-    assert len(listbox.get_children()) == 5
+    assert len(listbox.get_children()) == 6
     assert not ui.calibrate_button.get_sensitive()
     assert 'new-lg4ff' in ui.calibrate_button.get_tooltip_text()
     ui.set_wheel_calibration(True, None, False)
@@ -601,3 +626,206 @@ def test_the_ffb_tab_rows(tmp_path):
     assert calls == [('use', False), ('clip', 80)]
     ui.set_wheel_calibration(True, entry, True)
     assert not ui.calibrate_button.get_sensitive() and ui.calibration_status.get_text() == 'Calibrating...'
+
+
+# --- review round 1: blind position, stalls, range, permissions, crash record, validation ---
+
+def test_reports_stopping_while_the_wheel_turns_stops_the_run():
+    """Another program grabbing the input node stops the reports; the axis's current value still moves."""
+    sim = SimWheel()
+    sim.blind(20.0)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'blind'
+    assert sim.t - sim.blind_at < 2.0
+    assert sim.max_abs_theta < cal.lock - Calibration.LOCK_MARGIN_DEG
+    assert_put_back(sim)
+
+
+def test_blind_from_the_start_never_drives_to_the_stop():
+    sim = SimWheel()
+    sim.blind(0.0)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'blind'
+    assert sim.max_abs_theta < 10
+    assert_put_back(sim)
+
+
+def test_a_pause_during_a_pulse_stops_the_run():
+    sim = SimWheel()
+    sim.stall_high = (sim.t + 30.0, 0.03)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'stall'
+    assert_put_back(sim)
+
+
+def test_a_range_that_does_not_take_stops_the_run():
+    sim = SimWheel()
+    sim.set_range = lambda v: None                              # the driver ignores it
+    with pytest.raises(Aborted) as e:
+        Calibration(sim).run()
+    assert e.value.reason == 'range'
+    assert not any(n == 'ext_force' and v != '0' for _t, n, v in sim.writes)
+    assert sim.last('game_ffb_level') == '100'
+
+
+def test_no_permission_is_said_so():
+    sim = SimWheel()
+    write = sim.write
+
+    def refuse(name, value):
+        if name == 'ffb_lut' and value == 'identity' and sim.attrs['game_ffb_level'] == '0':
+            raise PermissionError(13, 'Permission denied')
+        return write(name, value)
+    sim.write = refuse
+    with pytest.raises(Aborted) as e:
+        Calibration(sim).run()
+    assert e.value.reason == 'permission'
+    assert 'udev' in str(e.value)
+    assert sim.last('game_ffb_level') == '100' and sim.last('ext_force') == '0'
+
+
+def test_the_garbage_collector_is_back_on_after_a_run(monkeypatch):
+    import gc
+    monkeypatch.setattr(Calibration, 'TOTAL_S', 2.0)
+    assert gc.isenabled()
+    with pytest.raises(Aborted):
+        Calibration(SimWheel()).run()
+    assert gc.isenabled()
+
+
+def test_the_crash_record(tmp_path, monkeypatch):
+    path = str(tmp_path / wcal.PENDING_NAME)
+    sim = SimWheel()
+    sim.attrs.update(ffb_lut='0 20000 32767', ffb_deadband='900')
+    seen = []
+
+    def progress(fraction, text):
+        seen.append(os.path.exists(path))
+        if fraction > 0.1:
+            cal.cancel()
+    cal = Calibration(sim, progress, pending_path=path, pending_key='046d:c24f')
+    with pytest.raises(Aborted):
+        cal.run()
+    assert seen and all(seen)                                    # written before anything changed
+    assert not os.path.exists(path)                              # and gone once the wheel is back
+    # the process dies mid-run (no finally): the record stays and the next start puts the wheel back
+    sim = SimWheel()
+    monkeypatch.setattr(Calibration, '_restore', lambda self: None)
+    cal = Calibration(sim, lambda f, t: f > 0.05 and cal.cancel(), pending_path=path, pending_key='046d:c24f')
+    with pytest.raises(Aborted):
+        cal.run()
+    assert os.path.exists(path)
+    assert sim.attrs['game_ffb_level'] == '0' and sim.range == 900
+    assert wcal.take_pending(path, 'other') is None
+    assert wcal.recover_pending(path, 'other', sim) is False
+    assert wcal.recover_pending(path, '046d:c24f', sim) is True
+    assert_put_back(sim)
+    assert not os.path.exists(path)
+    assert wcal.recover_pending(path, '046d:c24f', sim) is False
+
+
+def test_implausible_measurements_are_refused():
+    knots = np.array(wc.KNOTS)
+    r = np.clip((knots - 0.2) / 0.8, 0, None)                    # "nothing below 20 %"
+    assert wc.dead_zone(wc.KNOTS, r) > wc.MAX_DEAD_ZONE
+    ident = [round(i * wc.FULL / 32) for i in range(33)]
+    assert wc.plausible_lut(ident)
+    assert not wc.plausible_lut(ident[:-1])
+    assert not wc.plausible_lut([1] + ident[1:])
+    assert not wc.plausible_lut(ident[:-1] + [32000])
+    flat = list(ident)
+    flat[2] = flat[1]
+    assert not wc.plausible_lut(flat)                            # a flat run
+    steep = list(ident)
+    steep[1] = 4 * 1024 + 1024 + 10
+    steep[2] = max(steep[2], steep[1] + 1)
+    assert not wc.plausible_lut(steep)
+    assert not wc.plausible_lut([float(v) for v in ident])
+
+
+def _entry(result):
+    return wcal.new_entry(json.loads(json.dumps(result)))
+
+
+@pytest.mark.parametrize('damage', [
+    lambda e: e.update(version=2),
+    lambda e: e['result'].update(lut=e['result']['lut'][:-1]),
+    lambda e: e['result'].update(lut=[1] + e['result']['lut'][1:]),
+    lambda e: e['result'].update(lut=e['result']['lut'][:-1] + [30000]),
+    lambda e: e['result'].update(lut=list(reversed(e['result']['lut']))),
+    lambda e: e['result'].update(deadband=int(0.2 * wc.FULL)),
+    lambda e: e['result'].update(deadband=-1),
+    lambda e: e['result'].update(deadband='1966'),
+    lambda e: e.update(result='x'),
+    lambda e: e['result'].pop('lut'),
+])
+def test_a_damaged_entry_writes_identity(g29_like, damage):
+    entry = _entry(g29_like[2])
+    assert wcal.valid_entry(entry)
+    damage(entry)
+    assert not wcal.valid_entry(entry)
+    values = wcal.correction_values(entry)
+    assert values['ffb_lut'] == 'identity' and values['ffb_deadband'] == '0'
+
+
+def test_friction_compensation_is_folded_into_the_deadband(g29_like):
+    result = g29_like[2]
+    entry = _entry(result)
+    assert wcal.correction_values(entry)['ffb_deadband'] == str(result['deadband'])
+    half = int(wcal.correction_values(dict(entry, friction_comp=50))['ffb_deadband'])
+    full = int(wcal.correction_values(dict(entry, friction_comp=100))['ffb_deadband'])
+    assert result['deadband'] < half < full
+    assert full <= wcal.FRICTION_COMP_CAP * result['breakaway'] * wc.FULL + 1
+    # never below the dead zone, junk is off
+    assert wcal.correction_values(dict(entry, friction_comp='x'))['ffb_deadband'] == str(result['deadband'])
+    capped = dict(entry, result=dict(entry['result'], friction=0.5), friction_comp=100)
+    assert int(wcal.correction_values(capped)['ffb_deadband']) <= round(0.8 * result['breakaway'] * wc.FULL)
+
+
+def test_a_damaged_store_does_not_break_the_window(tmp_path):
+    wheel = _Wheel()
+    gui = _gui(tmp_path, wheel)
+    for store in ({'046d:c24f': 'junk'}, {'046d:c24f': {'result': 5}}, {'046d:c24f': {'version': 1, 'use': True,
+                  'result': {'lut': 'a b c', 'deadband': 'x'}, 'soft_clip': 'many'}}):
+        wcal.save_store(str(tmp_path / wcal.STORE_NAME), store)
+        wheel.attrs = {}
+        gui.apply_wheel_correction()
+        gui.refresh_wheel_correction()
+        assert wheel.attrs in ({}, {'ffb_lut': 'identity', 'ffb_deadband': '0', 'ffb_dither': '0',
+                                    'ffb_soft_clip': '0'})
+
+
+def test_no_calibration_while_the_overlay_holds_the_input(tmp_path):
+    gui = _gui(tmp_path, _Wheel())
+    gui.grab_input = True
+    gui.start_calibration()
+    assert gui.calibration is None
+    assert not any(c[0] == 'confirm' for c in gui.ui.calls)
+
+
+def test_a_replugged_wheel_gets_its_correction_back(tmp_path, g29_like):
+    wheel = _Wheel()
+    gui = _gui(tmp_path, wheel)
+    wcal.save_store(str(tmp_path / wcal.STORE_NAME), {'046d:c24f': _entry(g29_like[2])})
+    gui.device_manager = SimpleNamespace(is_changed=lambda: False, take_plugged=lambda: ['/sys/fake'])
+    gui.apply_plug_profile = lambda device_id: None
+    gui.populate_devices()
+    assert wheel.attrs['ffb_lut'] != 'identity'
+
+
+def test_term_and_hup_quit_through_on_quit():
+    from oversteer import gui as gui_module
+    text = open(gui_module.__file__).read()
+    assert 'GLib.unix_signal_add(GLib.PRIORITY_HIGH, signum, self._quit_on_signal, signum)' in text
+    g = gui_module.Gui.__new__(gui_module.Gui)
+    calls = []
+    g.on_quit = lambda: calls.append('on_quit')
+    g.ui = SimpleNamespace(quit=lambda: calls.append('quit'))
+    assert g._quit_on_signal(15) is False
+    assert calls == ['on_quit', 'quit']

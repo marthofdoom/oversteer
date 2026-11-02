@@ -46,6 +46,9 @@ DEADBAND_FLOOR = 0.02        # below 2 % of the full-scale torque the motor coun
 MIN_R2 = 0.3                 # a fit explaining less of the measured acceleration than this is not trusted (the
                              # rest is mostly the encoder's step, large for a heavy wheel)...
 MAX_UNCERTAINTY = 0.05       # ...nor one leaving a point of the torque curve this uncertain (share of full)
+MAX_DEAD_ZONE = 0.15         # a motor dead zone above 15 % of full scale is a measurement gone wrong
+LUT_SLOPE_MAX = 4.0          # no LUT point above 4 times the identity (plus LUT_MARGIN): a curve that steep
+LUT_MARGIN = 1024            # means a torque curve measured wrong at the bottom
 DITHER_RATIO = 1.5           # dither when one 8-bit step spans this many native steps of the game's force
 
 
@@ -303,6 +306,20 @@ def build_lut(knots, r, d, points=LUT_POINTS):
     return lut, int(round(d * FULL))
 
 
+def plausible_lut(lut, points=LUT_POINTS):
+    """True for a LUT a calibration can have produced: `points` integers from 0 to 32767, strictly increasing
+    (no flat runs, which would make a range of forces the same), never more than LUT_SLOPE_MAX times the
+    identity (plus LUT_MARGIN)."""
+    if not isinstance(lut, (list, tuple)) or len(lut) != points:
+        return False
+    if any(isinstance(v, bool) or not isinstance(v, int) for v in lut):
+        return False
+    if lut[0] != 0 or lut[-1] != FULL or any(b <= a for a, b in zip(lut, lut[1:])):
+        return False
+    n = points - 1
+    return all(v <= LUT_SLOPE_MAX * FULL * i / n + LUT_MARGIN for i, v in enumerate(lut))
+
+
 def shaped(x, lut, deadband):
     """What the driver sends for a force x (0..32767): the LUT, then the deadband lift."""
     n = len(lut) - 1
@@ -369,7 +386,12 @@ def analyse(rec, knots=KNOTS):
         raise FitError("the wheel's response did not follow a consistent pattern (fit {:.2f}, uncertainty {:.0f} %);"
                        " was it touched?".format(fit['r2'], uncertainty * 100))
     d = dead_zone(knots, r)
+    if d > MAX_DEAD_ZONE:
+        raise FitError("the motor seemed to give nothing below {:.0f} % (more than {:.0f} % is not plausible)"
+                       .format(d * 100, MAX_DEAD_ZONE * 100))
     lut, deadband = build_lut(knots, r, d)
+    if not plausible_lut(lut):
+        raise FitError("the force curve came out implausible")
     dither, step_span = recommend_dither(lut, deadband)
     breakaway = [w for _a, _d, w in rec.breakaway]
     return {
