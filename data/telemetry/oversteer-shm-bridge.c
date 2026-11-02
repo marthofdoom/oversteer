@@ -594,7 +594,7 @@ int main(int argc, char **argv)
     uint8_t game = 0;
     int32_t last_packet = -1, last_sent = -1;
     DWORD last_change = 0, last_report = 0, last_watch = 0;
-    unsigned long sent = 0, skipped = 0;
+    unsigned long sent = 0, skipped = 0, reread = 0;
     double period, next_send = 0.0;
     const char *name_used = "?";
     int seen = 0, announced = 0, i;
@@ -663,7 +663,7 @@ int main(int argc, char **argv)
 
     for (;;) {
         struct ovst_packet pkt;
-        int32_t packet_id;
+        int32_t packet_id, again;
         DWORD now = GetTickCount();
         DWORD wait = 1;
         double t_ms = 0.0;
@@ -719,6 +719,16 @@ int main(int argc, char **argv)
              * doesn't push the next one back, one more than a period
              * late starts the count again */
             next_send = t_ms - next_send < period ? next_send + period : t_ms + period;
+            fill_packet(&pkt, game, packet_id, phys, phys_size, stat, stat_size, graph, graph_size);
+            /* The pages have no seqlock: when the game wrote the next step
+             * while it was being read, the packet may mix two steps (one
+             * wheel's Mz from each), so it is read once more */
+            again = rd_i32(phys, PHYS_PACKET_ID);
+            if (again != packet_id) {
+                packet_id = again;
+                reread++;
+                fill_packet(&pkt, game, packet_id, phys, phys_size, stat, stat_size, graph, graph_size);
+            }
             if (last_sent >= 0) {
                 int64_t steps = (int64_t)packet_id - last_sent;     /* a new session starts the ids again */
                 if (steps > 1 && steps < 1000)
@@ -727,7 +737,6 @@ int main(int argc, char **argv)
             last_sent = packet_id;
             last_packet = packet_id;
             last_change = now;
-            fill_packet(&pkt, game, packet_id, phys, phys_size, stat, stat_size, graph, graph_size);
             dump_pages(now, phys, phys_size, graph, graph_size);
             if (verbose && now - last_detail >= 1000) {
                 /* For confirming the offsets and signs on a real capture */
@@ -766,8 +775,9 @@ int main(int argc, char **argv)
         }
         if (now - last_report > 10000) {
             last_report = now;
-            logmsg("packetId %d, rpm %d, %lu datagrams sent, %lu physics steps between them not sent", packet_id,
-                   rd_i32(phys, PHYS_RPMS), sent, skipped);
+            logmsg("packetId %d, rpm %d, %lu datagrams sent, %lu physics steps between them not sent, "
+                   "%lu read twice (the game wrote a step meanwhile)", packet_id, rd_i32(phys, PHYS_RPMS), sent,
+                   skipped, reread);
         }
         Sleep(wait);
     }
