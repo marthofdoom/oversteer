@@ -1655,7 +1655,8 @@ document.addEventListener("visibilitychange", () => {
   // A wake lock is released when the page is hidden; take it again
   if (wake.want && !wake.lock) {
     lockScreen().then((got) => {
-      if (got || !wake.video) return;
+      if (got) return;
+      if (!wake.video) { showWake("tap"); document.addEventListener("pointerup", firstTap, true); document.addEventListener("keydown", firstTap, true); return; }
       wake.video.play().then(() => showWake("video")).catch(() => showWake("tap"));
     });
   }

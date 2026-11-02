@@ -495,7 +495,7 @@ function splitsTable() {
       `<td style="color:${splitColour(k, LAST, cmp)}">${isGold(k, LAST) ? "★ " : ""}${signed(d)}</td><td>${clock(bestSec[k])}</td>` +
       `<td style="color:var(--dim)">${save == null || save < 0.05 ? "–" : save.toFixed(1)}</td></tr>`;
   });
-  html += `<tr><td class="name"><b>Stage</b></td><td><b>${clock(LAST.time)}</b></td><td style="color:var(--${!alone && LAST.time > cmp.time ? "slower" : "faster"})"><b>${alone ? "–" : signed(LAST.time - cmp.time)}</b></td><td><b>${clock(SOB)}</b></td><td style="color:var(--dim)">${SOB == null ? "–" : (LAST.time - SOB).toFixed(1)}</td></tr>`;
+  html += `<tr><td class="name"><b>Stage</b></td><td><b>${clock(LAST.time)}</b></td><td style="color:var(--${!alone && LAST.time > cmp.time ? "slower" : "faster"})"><b>${alone ? "–" : signed(LAST.time - cmp.time)}</b></td><td><b>${clock(SOB)}</b></td><td style="color:var(--dim)">${SOB == null ? "–" : signed(SOB - LAST.time)}</td></tr>`;
   tb.innerHTML = html;
 }
 $("splits").addEventListener("click", () => {
@@ -504,8 +504,8 @@ $("splits").addEventListener("click", () => {
   if (open) splitsTable();
 });
 function headerTexts() {
-  $("sp-stage").textContent = ST.name; $("sp-pb").textContent = clock(LAST.time); $("sp-sob").textContent = clock(SOB);
-  $("sp-gain").textContent = SOB == null ? "" : " (" + signed(SOB - LAST.time) + ")";
+  $("sp-stage").textContent = ST.name; $("sp-pb").textContent = clock(Math.min(LAST.time, cmp.time)); $("sp-sob").textContent = clock(SOB);
+  $("sp-gain").textContent = SOB == null ? "" : " (" + signed(SOB - Math.min(LAST.time, cmp.time)) + ")";
   $("pb2").textContent = alone ? "–" : "Run " + cmp.n + " " + clock(cmp.time);
   $("dm-l").firstChild.textContent = alone ? "one run, " : "vs ";
   $("stage-sub").textContent = `${ST.car} · ${(L / 1000).toFixed(1)} km · ${P.length} ${pWord()}s`;

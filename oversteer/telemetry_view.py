@@ -184,7 +184,7 @@ def signed(delta):
 
 def sob_gain(gain):
     """' (−3.2)': what the sum of best would save against the best, appended to the SoB; '' without it."""
-    return '' if gain is None else ' (\u2212{:.1f})'.format(gain)
+    return '' if gain is None else ' ({})'.format(signed(-gain))
 
 
 def splits_lines(found):

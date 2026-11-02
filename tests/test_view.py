@@ -218,7 +218,7 @@ def test_the_splits_summary_and_rows():
 
 
 def test_sob_gain_is_the_signed_gain_after_the_sob():
-    assert view.sob_gain(3.23) == ' (\u22123.2)' and view.sob_gain(None) == ''
+    assert view.sob_gain(3.23) == ' (\u22123.2)' and view.sob_gain(None) == '' and view.sob_gain(0.0) == ' (\u00b10.0)'
 
 
 def test_the_splits_row_tones_rows_and_sectors():
