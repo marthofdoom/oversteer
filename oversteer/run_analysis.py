@@ -17,7 +17,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from . import coach, coach_context as cc, coach_diagnosis, potential, stage_tables
+from . import coach, coach_context as cc, coach_diagnosis, potential, stage_tables, terrain
 from .telemetry_formats import plan_xy
 
 SLACK = 5.0                      # m a run may stop short of the grid's end, or start past its start, and still be drawn there
@@ -163,7 +163,7 @@ def resolve(reader, run, vs):
 def head(reader, run_id, tips=None, namespace=None):
     """One run's header: id, n, started, time, finished, run_class, stage, stage_name, car, car_name, wet,
     compare (the PB and the previous run as {id, run, n, time, label, delta, role}: delta is this run's time less
-    theirs), `delta_pb`, `limiter` (rpm, from the car's model), `game`, and `advice` (the coach's tips about this run, as Tip.to_dict() gives them, when
+    theirs), `delta_pb`, `limiter` (rpm, from the car's model), `game`, `build_pb` (build_pb()), and `advice` (the coach's tips about this run, as Tip.to_dict() gives them, when
     `tips` -- all of the car's tips -- is given). None for a run that does not exist."""
     run = reader.run(run_id)
     if run is None:
@@ -189,7 +189,24 @@ def head(reader, run_id, tips=None, namespace=None):
             'car': run['car'], 'car_name': (car or {}).get('name') or (car or {}).get('key'), 'wet': run['wet'],
             'limiter': ((car or {}).get('model') or {}).get('limiter'), 'game': (car or {}).get('game'),
             'compare': compare, 'delta_pb': compare[0]['delta'], 'advice': advice,
-            'potential': stage_potential(reader, run)}
+            'potential': stage_potential(reader, run), 'build_pb': build_pb(reader, run)}
+
+
+def build_pb(reader, run):
+    """The PB on the game build `run` was driven on, beside the all-time PB, where the two differ: {'pb': the all-time
+    PB's time, 'pb_build': its build, 'build': the run's build, 'time': the PB on it, 'run': that run's id}. None where
+    either build is unknown (unknown is not another build: every session from before builds were kept), the all-time
+    PB was set on the run's build, or that build has no PB yet."""
+    if not run.get('stage') or run.get('car') is None or not hasattr(reader, 'stage_pb_builds'):
+        return None
+    build = reader.run_build(run['id'])
+    if build is None:
+        return None
+    found = reader.stage_pb_builds(run['stage'], run['car'], build)
+    pb, mine = found['pb'], found['build']
+    if pb is None or mine is None or pb['build'] is None or pb['build'] == build:
+        return None
+    return {'pb': pb['time'], 'pb_build': pb['build'], 'build': build, 'time': mine['time'], 'run': mine['run']}
 
 
 def stage_potential(reader, run):
@@ -494,6 +511,7 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
         this = _rounded(resample(rows, grid))
         ref = _rounded(resample(other_rows, grid)) if other_rows else None
         xs, zs = _positions(rows, grid, run['stage'].partition(':')[0])
+        profile = terrain.elevation(rows, run['stage'].partition(':')[0])
         numbers = {}
         info = None
         if other_rows:
@@ -506,6 +524,11 @@ def analysis(reader, run_id, vs='pb', step=STEP, namespace=None):
                 'time': run['result_time'] if run['finished'] == 1 else None,
                 'ref_time': other['result_time'] if other_rows else None, 'channels': list(CHANNELS),
                 'this': this, 'cmp': ref, 'x': xs, 'z': zs,
+                'elev': None if profile is None else {
+                    'h': terrain.on_grid(profile, grid), 'range': round(profile['range'], 1),
+                    'max_grade': round(profile['max_grade'], 1),
+                    'crests': [{'d': round(c['d']), 'h': round(c['h'], 1), 'drop': round(c['drop'], 1)}
+                               for c in profile['crests']]},
                 'potential': potential.layers(pot, _sum_of_best(reader, run['stage'], run['car'], pot)) if pot else None,
                 'sections': _section_rows(reader, run, rows, other, other_rows, other_corners, grid_run, pot),
                 'sectors': _sector_rows(run['stage'], rows, other_rows, reader, (run, other))}

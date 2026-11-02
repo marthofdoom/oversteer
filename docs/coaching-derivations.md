@@ -438,7 +438,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `corner.pace_note` Corners by pace note | corners_by_note (list) | notes [planned]: lap_distance, speed, static:pace_notes | discipline: rally-stage | untested | planned (86e3faftn) |
 | `balance.understeer_oversteer` Understeer / oversteer balance | balance.gradient (lock per g) | fit [implemented]: steer, yaw_rate, a_lat, speed | surface: per surface; between tunes | validated | implemented: balance.gradient |
 | `balance.counter_steer` Counter-steer | counter_steer (fraction) | corners [implemented]: steer, yaw_rate, aspect:context.corners | surface: technique on loose, habit or setup on tarmac | validated | implemented: counter_steer |
-| `balance.slip_angle` Slip angle management | slip.peak (deg), slip.over (s per corner) | body [planned]: body_slip, aspect:context.corners; tyres [planned]: slip_angle | surface: per surface | untested | planned (86e3ev2dy) |
+| `balance.slip_angle` Slip angle management | slip.peak (deg), slip.over (s per corner), drift.mean (deg) | heading [implemented]: pos, yaw_rate, aspect:context.corners; body [planned]: body_slip, aspect:context.corners; tyres [planned]: slip_angle | surface: per surface | validated | partial: oversteer/terrain.py drift (86e3kfj8v) |
 | `vehicle.jumps` Jumps and landings | jump.air_time (s), jump.landing_g (g) | susp_accel [planned]: susp, a_vert, clock; accel_only [planned]: a_vert, clock | discipline: rally-stage | untested | planned |
 | `vehicle.bottoming` Bottoming | bottoming.per_km (hits/km) | norm [planned]: susp_norm; learnt_stop [planned]: susp | conditions: suspension units verified per game | untested | planned: oversteer/tuning.py (section 10) |
 | `consistency.runs` Consistency across runs | consistency.split_sd (s) | splits [implemented]: run_distance, clock, aspect:context.stage_result | conditions: >= 3 finished runs of the stage | validated | implemented: consistency.split_sd |
@@ -453,6 +453,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `corner.phases` Corner phases | corners (columns) | trace [implemented]: throttle, brake, speed, yaw_rate, run_distance, aspect:context.corners | - | validated | implemented: oversteer/coach_context.py describe_corners, build_sections, section_loss; oversteer/coach.py Coach._place_tips |
 | `corner.consistency` Minimum speed through the same section across runs | corner.spread (m/s) | trace [implemented]: speed, yaw_rate, run_distance, aspect:context.corners | - | validated | implemented: corner.spread |
 | `traction.slip` Driven-wheel slip from the revs | exit.spin (fraction) | trace [implemented]: rpm, speed, gear, throttle, clutch, static:car_data | - | validated | implemented: exit.spin |
+| `terrain.elevation` Elevation, gradient and crests | elev.h (m), elev.grade (%), elev.crest (m along the stage) | positions [implemented]: pos, run_distance | - | validated | implemented: oversteer/terrain.py elevation; oversteer/run_analysis.py (the Run view's ELEV strip) (86e3kfj8v) |
 
 ### Assetto Corsa Rally coverage
 
@@ -487,7 +488,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `corner.pace_note` | planned | - |  | ACR only: the note distances are along the same spline as lap_distance |
 | `balance.understeer_oversteer` | validated | fit [implemented] |  |  |
 | `balance.counter_steer` | validated | corners [implemented] |  |  |
-| `balance.slip_angle` | planned | body [planned] |  | local velocity confirmed |
+| `balance.slip_angle` | validated | heading [implemented] |  | yaw rate is the game's own; Richard Burns Rally sends one too (sign agrees on one run) but its winding stages give few straight anchors: not enabled |
 | `vehicle.jumps` | planned | susp_accel [planned] |  | susp decoded, vertical acceleration confirmed as kinematic |
 | `vehicle.bottoming` | planned | learnt_stop [planned] |  | no suspension range in ACR: the learnt bump stop |
 | `consistency.runs` | validated | splits [implemented] |  |  |
@@ -502,6 +503,7 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `corner.phases` | validated | trace [implemented] |  |  |
 | `corner.consistency` | validated | trace [implemented] |  |  |
 | `traction.slip` | implemented | trace [implemented] |  |  |
+| `terrain.elevation` | validated | positions [implemented] |  | positions the bridge sends since 2026-09-27; games whose plan axes are unchecked (telemetry_formats.plan_xyz) give none |
 
 ### Assetto Corsa Rally gaps
 
