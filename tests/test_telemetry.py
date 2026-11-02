@@ -482,7 +482,6 @@ def test_ovst_v4_the_games_clock():
     assert decode_sample(_ovst4(58.0, game=0)).stage_time is None
     # A later version only appends: a longer packet is read as far as known
     longer = bytearray(_ovst4(12.5, extra=b'\0' * 12))
-    longer[4] = 5
     assert abs(decode_sample(bytes(longer)).stage_time - 12.5) < 1e-6
     # The old bridge's packets still decode, with no clock
     v3 = decode_sample(_ovst3())
@@ -493,18 +492,60 @@ def test_ovst_v4_the_games_clock():
     assert decode_sample(bytes(long3)) is None                              # version 3 is 324 bytes exactly
 
 
+def _ovst5(clock=58.094, game=3, packet_id=1234, ffb=0.42, mz=(-35.0, -41.0, -5.0, -6.0), ratio=(0.01, 0.02, -0.03, 0.04),
+           angle=(0.05, 0.06, 0.01, 0.02), normal=(0.0, 1.0, 0.0) * 4, vib=(0.0, 0.3, 0.1, 0.0), tc=0, abs_=1):
+    """A version 5 packet: version 4's, then the tail (OVST5_TAIL, the bridge's header comment)."""
+    from oversteer.telemetry_formats import OVST5_TAIL
+    v4 = bytearray(_ovst4(clock, game=game))
+    v4[4] = 5
+    return bytes(v4) + OVST5_TAIL.pack(packet_id, ffb, *mz, *ratio, *angle, *normal, *vib, tc, abs_)
+
+
+def test_ovst_v5_the_force_feedback_tail():
+    from oversteer.telemetry_formats import decode_sample, OVST5_SIZE
+    packet = _ovst5()
+    assert len(packet) == OVST5_SIZE == 456
+    sample = decode_sample(packet)
+    assert sample.packet_id == 1234 and abs(sample.game_ffb - 0.42) < 1e-6
+    assert [round(x, 3) for x in sample.tyre_mz] == [-35.0, -41.0, -5.0, -6.0]
+    assert [round(x, 3) for x in sample.tyre_slip_ratio] == [0.01, 0.02, -0.03, 0.04]
+    assert [round(x, 3) for x in sample.tyre_slip_angle] == [0.05, 0.06, 0.01, 0.02]
+    assert sample.contact_normal == ((0.0, 1.0, 0.0),) * 4
+    assert [round(x, 3) for x in sample.vibrations] == [0.0, 0.3, 0.1, 0.0]
+    assert sample.tc_active is False and sample.abs_active is True
+    # version 4's fields as they were
+    assert sample.game == 'acr' and abs(sample.stage_time - 58.094) < 1e-4 and sample.lap_distance == 2030.0
+    # what the page or the game doesn't have: NaN and -1 from the bridge, None here
+    nan = float('nan')
+    ac = decode_sample(_ovst5(game=1, mz=(nan,) * 4, ratio=(nan,) * 4, angle=(nan,) * 4, vib=(nan,) * 4, tc=-1, abs_=-1))
+    assert ac.game == 'ac' and abs(ac.game_ffb - 0.42) < 1e-6 and ac.contact_normal is not None
+    assert ac.tyre_mz is ac.tyre_slip_ratio is ac.tyre_slip_angle is ac.vibrations is ac.tc_active is ac.abs_active is None
+    assert decode_sample(_ovst5(ffb=nan, normal=(nan,) + (0.0,) * 11)).game_ffb is None
+    assert decode_sample(_ovst5(normal=(nan,) + (0.0,) * 11)).contact_normal is None
+    # version 4 decodes as before, the tail's fields None
+    v4 = decode_sample(_ovst4(58.094))
+    assert abs(v4.stage_time - 58.094) < 1e-4
+    assert v4.packet_id is v4.game_ffb is v4.tyre_mz is v4.contact_normal is v4.vibrations is v4.abs_active is None
+    # a version 5 packet too short for its tail is not decoded
+    assert decode_sample(packet[:-4]) is None
+    assert decode_sample(packet[:328]) is None
+
+
 def test_an_unknown_future_ovst_version_is_said_once(caplog):
     import logging
     from oversteer import telemetry_formats
     from oversteer.telemetry_formats import decode_sample
     telemetry_formats._ovst_future_said.clear()
-    future = bytearray(_ovst4(12.5, extra=b'\0' * 12))
-    future[4] = 5
+    future = bytearray(_ovst5(clock=12.5) + b'\0' * 12)
+    future[4] = 6
     with caplog.at_level(logging.WARNING):
-        assert abs(decode_sample(bytes(future)).stage_time - 12.5) < 1e-6    # still read as far as known
+        sample = decode_sample(bytes(future))
+        assert abs(sample.stage_time - 12.5) < 1e-6 and sample.packet_id == 1234    # still read as far as known
         decode_sample(bytes(future))
         decode_sample(_ovst4(1.0))                                           # a known version says nothing
-    said = [r for r in caplog.records if 'OVST v5' in r.getMessage()]
+        decode_sample(_ovst5())
+    said = [r for r in caplog.records if 'OVST v' in r.getMessage()]
+    assert 'OVST v6' in said[0].getMessage()
     assert len(said) == 1 and 'update Oversteer' in said[0].getMessage()
 
 

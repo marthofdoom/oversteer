@@ -46,6 +46,8 @@ import threading
 import time
 import zlib
 
+from .telemetry_formats import OVST4_SIZE, OVST5_SIZE, OVST_MAGIC
+
 MAGIC = b'OVCAP1\n'
 RECORD = struct.Struct('<dIH')
 SUFFIX = '.ovcap.gz'
@@ -66,6 +68,14 @@ THIN = {664: (60.0, 720.0, struct.Struct('<Iiffff'))}
 THIN_CLOCK_JUMP = 0.5       # s the stage clock may jump between two packets before both are kept (a penalty, a restart)
 THIN_DISTANCE_JUMP = 5.0    # m the distance to the end may jump
 THIN_FROZEN = 0.1           # s of the packets' own clock the stage clock must stand still to count as stopped (it steps in threes)
+# Oversteer's bridge sends a packet per physics step from OVST version 5 on (333 a second in ACR), of a length
+# that grows with later versions: those are thinned to OVST_THIN_RATE a second on the arrival clock (the bridge
+# sends each step as it happens). Always kept, as for THIN: the first packet and every one where the session's
+# state changes: the car, track, game or pit/auto-shift flags, the laps or session type, the physics step going
+# back or leaping, the stage clock starting, stopping or jumping, the distance jumping. Versions 1 to 4 (60 a
+# second) are saved as they come.
+OVST_THIN_RATE = 60.0
+OVST_THIN_STEP_LEAP = 1000  # physics steps the packet id may leap forward before both packets are kept (a new session)
 
 
 def rbr_meta(first):
@@ -112,10 +122,17 @@ class CaptureWriter:
         self._moved = None                # steps at which the stage clock last changed
         self._kept = None                 # steps of the last packet saved
         self._held = None                 # the last packet not saved: written on close, the session's last stays
+        self._ovst = None                 # OVST v5+: the last packet's (step, state, clock, distance, frozen)
+        self._ovst_due = None             # arrival time from which the next OVST v5+ packet is saved
+        self._ovst_moved = None           # arrival time at which its stage clock last changed
 
     def write(self, now, addr, data):
-        if len(data) in THIN and not self._keep(now, addr, data):
-            return
+        if len(data) in THIN:
+            if not self._keep(now, addr, data):
+                return
+        elif len(data) >= OVST5_SIZE and data[:4] == OVST_MAGIC and data[4] >= 5:
+            if not self._keep_ovst(now, addr, data):
+                return
         self._put(now, addr, data)
 
     def _put(self, now, addr, data):
@@ -143,6 +160,36 @@ class CaptureWriter:
         if keep:
             self._held = None
             self._kept = steps
+            return True
+        self._held = (now, addr, data)
+        self.thinned += 1
+        return False
+
+    def _keep_ovst(self, now, addr, data):
+        """Whether an OVST packet of version 5 or later is saved: OVST_THIN_RATE a second on average, and every
+        one where the session's state changes (OVST_THIN_RATE's note)."""
+        # The struct's offsets (oversteer-shm-bridge.c): packet_id at 328, stage_clock 324, distance 292, laps and
+        # session_type 304, car and track names 32, game and flags2 96
+        step = struct.unpack_from('<i', data, OVST4_SIZE)[0]
+        clock, distance = struct.unpack_from('<f', data, OVST4_SIZE - 4)[0], struct.unpack_from('<f', data, 292)[0]
+        state = (data[32:98], data[304:312], 0 if clock != clock else 1 if clock == 0 else 2)
+        prev = self._ovst
+        if prev is None or not (clock == prev[2] or (clock != clock and prev[2] != prev[2])):
+            self._ovst_moved = now
+        frozen = clock > 0 and now - self._ovst_moved >= THIN_FROZEN
+        period, due = 1.0 / OVST_THIN_RATE, self._ovst_due
+        on_time = due is None or now >= due
+        keep = prev is None or on_time
+        if not keep:
+            keep = (state != prev[1] or frozen != prev[4] or step < prev[0] or step - prev[0] > OVST_THIN_STEP_LEAP
+                    or abs(clock - prev[2]) > THIN_CLOCK_JUMP or abs(distance - prev[3]) > THIN_DISTANCE_JUMP)
+        self._ovst = (step, state, clock, distance, frozen)
+        if on_time:
+            # One kept late does not push the next one back; one more than a period late starts the count again.
+            # A packet kept for a change in between leaves the count alone.
+            self._ovst_due = due + period if due is not None and now - due < period else now + period
+        if keep:
+            self._held = None
             return True
         self._held = (now, addr, data)
         self.thinned += 1
