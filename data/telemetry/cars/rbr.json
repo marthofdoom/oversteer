@@ -2,13 +2,15 @@
  "game": "rbr",
  "title": "Richard Burns Rally (RallySimFans) car names, engines and gearing",
  "keys": "name is the RSFCarID as a string: the car key is rbr/<RSFCarID>, the one Oversteer makes from the install's Cars/Cars.ini [Car05] (rbr_install.car_in_slot). screen_name is RSF's name of the car. `names` lists every car RSF's car list (rsfdata/cache/cars.json) has, with the facts cars_data.json holds (path, year, drivetrain, gear count); `cars` only those whose NGP physics have been on the install.",
- "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-10-26; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm seen reached is up to 0.6 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
+ "notes": "Derived numbers only, read from RSF's physics files of the cars on marth's install, 2026-11-01; built by research/rbr/car_table.py. torque_curve: [rpm, Nm], the engine's full-load torque: the normalised curve (Tq_NN_NGP, 0..1) times the peak torque RSF lists for the car (cars_data.json), cut at the limiter; the curve peaks at the listed rpm. limiter_rpm: ControlUnit RPMLimit (the rpm seen reached is up to 0.6 % above it). gear_sets: one per distinct default setup (gravel, tarmac, snow; the surfaces that share one are joined in its id), gravel the default; gears are the setup's GearId entries 2.. (GearId0 is reverse, 1 neutral) as GearList Gear / Pinion teeth. final_drive: the setup's DropGearId entry, whose pair is stored the other way (Pinion / Gear: 35 / 8 = 4.375 on the Fiesta); a set whose drop gear differs carries the quotient in `primary`, so the overall ratio is gear x primary x final_drive. transfer_ratio: the FinalDriveId entry (Gear / Pinion, 62 / 63 on the Fiesta): NOT in the overall ratio, the Fiesta's and i20's captures fit without it to 0.3 %. The player's own setup may change the drop gear (DropGearOptions): the overall ratio then differs, the steps between gears (the best upshift) do not. gearbox_efficiency: 1 - DriveTrainLoss_NGP / 100. tyre_radius_m: EffWheelRadius (one value for every surface). auto_upshift_rpm: ControlUnit GearNUpshift for 1st.. (the AI's automatic gearbox). mass_kg: 1 / InverseMass. steer_lock_deg: Car MaxSteeringLock x 360, the STEERING-WHEEL angle from centre to full lock in degrees (MaxSteeringLock is in wheel turns: x 720 is the steering_wheel degrees lock to lock cars_data.json lists, 540 on the Fiesta); steering_rack_ratio: Car SteeringRackRatio, rack travel in metres per steering-wheel turn (0.056 x 0.75 = 0.042 m, the lateral move of the tie-rod mount the r_tarmac.lsp 'lock' comment gives). A slot folder of rsfdata/Physics counts only where a file named after the RSF car marks it; the others hold stock Richard Burns Rally cars and are not shipped. Verified on the i20 Coupe WRC 2021 (all gears) and the Fiesta WRC 2019 (gears 1-3) against marth's captures of 2026-10-26 (docs/richard-burns-rally.md).",
  "cars": [
   {
    "name": "11",
    "screen_name": "Ford Fiesta WRC 2019",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
+   "steer_lock_deg": 270.0,
+   "steering_rack_ratio": 0.056,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -109,15 +111,235 @@
     6970
    ],
    "sources": [
-    "rsfdata/cars/Ford_Fiesta_WRC_2019_ngp6: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 3 / 2019-09-02",
+    "rsfdata/cars/Ford_Fiesta_WRC_2019_ngp6: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 3 / 2019-09-02",
     "rsfdata/cache/cars_data.json: peak torque 450 Nm at 5500 rpm"
    ]
   },
   {
-   "name": "104",
-   "screen_name": "Hyundai i20 Coupe WRC 2021",
+   "name": "14",
+   "screen_name": "Citroen C3 WRC 2017",
    "drivetrain": "awd",
    "mass_kg": 1390.8,
+   "steer_lock_deg": 270.0,
+   "steering_rack_ratio": 0.056,
+   "limiter_rpm": 8500,
+   "torque_curve": [
+    [
+     0,
+     222.5
+    ],
+    [
+     1000,
+     267.0
+    ],
+    [
+     2700,
+     409.4
+    ],
+    [
+     3000,
+     422.8
+    ],
+    [
+     4000,
+     436.1
+    ],
+    [
+     4500,
+     445.0
+    ],
+    [
+     5250,
+     444.6
+    ],
+    [
+     6000,
+     444.6
+    ],
+    [
+     6500,
+     409.4
+    ],
+    [
+     6750,
+     392.5
+    ],
+    [
+     7500,
+     341.8
+    ],
+    [
+     8000,
+     314.6
+    ],
+    [
+     8500,
+     290.6
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+tarmac+snow",
+     "gears": [
+      3.0,
+      2.3846,
+      1.9286,
+      1.5789,
+      1.3182,
+      1.12
+     ],
+     "primary": 1.0,
+     "reverse": 3.5833,
+     "default": true
+    }
+   ],
+   "final_drive": 4.375,
+   "transfer_ratio": 1.0317,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "auto_upshift_rpm": [
+    7330,
+    7240,
+    7170,
+    7070,
+    6970
+   ],
+   "sources": [
+    "rsfdata/cars/Citroen_C3_WRC_2017_ngp6: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 3 / 2019-09-02",
+    "rsfdata/cache/cars_data.json: peak torque 445 Nm at 4500 rpm"
+   ]
+  },
+  {
+   "name": "16",
+   "screen_name": "Toyota Yaris WRC 2018",
+   "drivetrain": "awd",
+   "mass_kg": 1390.8,
+   "steer_lock_deg": 270.0,
+   "steering_rack_ratio": 0.056,
+   "limiter_rpm": 8500,
+   "torque_curve": [
+    [
+     0,
+     222.5
+    ],
+    [
+     1000,
+     267.0
+    ],
+    [
+     2700,
+     409.4
+    ],
+    [
+     3000,
+     422.8
+    ],
+    [
+     4000,
+     436.1
+    ],
+    [
+     4500,
+     442.8
+    ],
+    [
+     5000,
+     445.0
+    ],
+    [
+     6000,
+     445.0
+    ],
+    [
+     6300,
+     423.6
+    ],
+    [
+     6500,
+     409.4
+    ],
+    [
+     6750,
+     392.5
+    ],
+    [
+     7500,
+     341.8
+    ],
+    [
+     8000,
+     314.6
+    ],
+    [
+     8500,
+     290.6
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+tarmac+snow",
+     "gears": [
+      3.0,
+      2.3846,
+      1.9286,
+      1.5789,
+      1.3182,
+      1.12
+     ],
+     "primary": 1.0,
+     "reverse": 3.5833,
+     "default": true
+    }
+   ],
+   "final_drive": 4.375,
+   "transfer_ratio": 1.0159,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "auto_upshift_rpm": [
+    7320,
+    7230,
+    7170,
+    7060,
+    6960
+   ],
+   "sources": [
+    "rsfdata/cars/Toyota_Yaris_WRC_2018_ngp6: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 2 / 2019-09-02",
+    "rsfdata/cache/cars_data.json: peak torque 445 Nm at 5000 rpm"
+   ]
+  },
+  {
+   "name": "76",
+   "screen_name": "Hyundai i20 Coupe WRC 2020",
+   "drivetrain": "awd",
+   "mass_kg": 1390.8,
+   "steer_lock_deg": 270.0,
+   "steering_rack_ratio": 0.056,
    "limiter_rpm": 8500,
    "torque_curve": [
     [
@@ -222,7 +444,122 @@
     6980
    ],
    "sources": [
-    "rsfdata/cars/Hyundai_i20_Coupe_WRC_2021_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2023-04-01",
+    "rsfdata/cars/Hyundai_i20_Coupe_WRC_2020_ngp6: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2020-04-19",
+    "rsfdata/cache/cars_data.json: peak torque 450 Nm at 5500 rpm"
+   ]
+  },
+  {
+   "name": "104",
+   "screen_name": "Hyundai i20 Coupe WRC 2021",
+   "drivetrain": "awd",
+   "mass_kg": 1390.8,
+   "steer_lock_deg": 270.0,
+   "steering_rack_ratio": 0.056,
+   "limiter_rpm": 8500,
+   "torque_curve": [
+    [
+     0,
+     222.3
+    ],
+    [
+     1000,
+     266.8
+    ],
+    [
+     2700,
+     409.5
+    ],
+    [
+     3000,
+     422.5
+    ],
+    [
+     4000,
+     436.1
+    ],
+    [
+     4500,
+     442.8
+    ],
+    [
+     5250,
+     444.6
+    ],
+    [
+     5500,
+     450.0
+    ],
+    [
+     5750,
+     444.6
+    ],
+    [
+     6000,
+     443.7
+    ],
+    [
+     6500,
+     410.4
+    ],
+    [
+     6750,
+     392.4
+    ],
+    [
+     7500,
+     342.0
+    ],
+    [
+     8000,
+     314.5
+    ],
+    [
+     8500,
+     290.2
+    ]
+   ],
+   "gear_sets": [
+    {
+     "id": "gravel+tarmac+snow",
+     "gears": [
+      3.0,
+      2.3846,
+      1.9286,
+      1.5789,
+      1.3182,
+      1.12
+     ],
+     "primary": 1.0,
+     "reverse": 3.5833,
+     "default": true
+    }
+   ],
+   "final_drive": 4.375,
+   "transfer_ratio": 1.0,
+   "gearbox_efficiency": 0.88,
+   "tyre_radius_m": {
+    "gravel": [
+     0.315,
+     0.315
+    ],
+    "tarmac": [
+     0.315,
+     0.315
+    ],
+    "snow": [
+     0.315,
+     0.315
+    ]
+   },
+   "auto_upshift_rpm": [
+    7330,
+    7240,
+    7180,
+    7070,
+    6980
+   ],
+   "sources": [
+    "rsfdata/cars/Hyundai_i20_Coupe_WRC_2021_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2023-04-01",
     "rsfdata/cache/cars_data.json: peak torque 450 Nm at 5500 rpm"
    ]
   },
@@ -231,6 +568,8 @@
    "screen_name": "Skoda Fabia RS Rally2",
    "drivetrain": "awd",
    "mass_kg": 1430.6,
+   "steer_lock_deg": 214.2,
+   "steering_rack_ratio": 0.0756,
    "limiter_rpm": 7500,
    "torque_curve": [
     [
@@ -330,7 +669,7 @@
     6150
    ],
    "sources": [
-    "rsfdata/cars/Skoda_Fabia_RS_Rally2_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 2 / 2024-12-09",
+    "rsfdata/cars/Skoda_Fabia_RS_Rally2_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 2 / 2024-12-09",
     "rsfdata/cache/cars_data.json: peak torque 430 Nm at 4000 rpm"
    ]
   },
@@ -339,6 +678,8 @@
    "screen_name": "Toyota GR Yaris Rally2",
    "drivetrain": "awd",
    "mass_kg": 1430.6,
+   "steer_lock_deg": 239.8,
+   "steering_rack_ratio": 0.0675,
    "limiter_rpm": 7500,
    "torque_curve": [
     [
@@ -425,7 +766,7 @@
     6160
    ],
    "sources": [
-    "rsfdata/cars/Toyota_GR_Yaris_Rally2_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass and EffWheelRadius), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2025-02-03",
+    "rsfdata/cars/Toyota_GR_Yaris_Rally2_ngp7: common.lsp (Engine Tq_NN_RPM_NGP and Tq_NN_NGP, ControlUnit RPMLimit and GearNUpshift, Car InverseMass, EffWheelRadius, MaxSteeringLock and SteeringRackRatio), r_<surface>.lsp (GearList, DriveTrainLoss_NGP), setups/d_<surface>.lsp (GearId, FinalDriveId, DropGearId); revision 1 / 2025-02-03",
     "rsfdata/cache/cars_data.json: peak torque 430 Nm at 4000 rpm"
    ]
   }
