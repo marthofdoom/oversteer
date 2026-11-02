@@ -25,9 +25,13 @@ Three parts, each from the sample in hand (ACR through bridge version 5,
 - surface (gravel, kerbs): not built; ACR sends no surface. It would be
   one more part here.
 
-No DC: each part averages to zero (band-passed then an odd tanh, a sine,
-a zero-area pulse), and the sum is limited by a gain (a peak follower),
-not by clipping, so a pulse keeps its shape and its zero area. No steps: it ramps in over ONSET after any start (or a gap), and the level
+No DC: the sum of the parts goes through a DC blocker (DC_HZ high-pass)
+before the limiter. The parts alone need not average to zero: tanh after
+the road's band-pass turns a lopsided input (a kerb's sawtooth under one
+wheel) into a steady pull, which the blocker takes out. The limiter is a
+gain (a peak follower), not clipping, so it adds no DC of its own; its
+limit is also kept within the headroom FULL - |steering force|, so the
+engine's clamp never cuts one side of it. No steps: it ramps in over ONSET after any start (or a gap), and the level
 and the parts' switches slew over SLEW.
 
 Games: TEXTURE_GAMES only. The hook for others is that list: a game whose
@@ -44,6 +48,7 @@ LEVEL = 0.30                             # the master level's default (0..1)
 TOTAL_CAP = 0.08                         # share of full scale: the sum of every part, at level 100 %
 STEER_SHARE = 0.25                       # ... and never past this share of |steering force| now ...
 FLOOR = 0.015                            # ... plus this (of full scale), so a straight keeps a little
+DC_HZ = 4.0                              # Hz: the sum's DC blocker (after every nonlinearity but the limiter)
 LIMIT_RELEASE = 0.3                      # s: the limiter's peak follower lets go over this
 ONSET = 0.3                              # s: it ramps in after a start or a gap
 SLEW = 0.3                               # s: the level and the switches move 0 -> 1 in this
@@ -153,6 +158,7 @@ class ImpactPulse:
     PHI = math.pi - 2.0 * math.atan(W * TAU)
 
     def __init__(self):
+        self._car = None
         self.reset()
         self.count = 0                   # pulses (tests, the log)
 
@@ -164,6 +170,9 @@ class ImpactPulse:
         self._pulse = None               # (start, amplitude with its sign)
 
     def step(self, dt, sample):
+        if sample.car != self._car:
+            self._car = sample.car
+            self.reset()                 # another car: another mean front load
         self._t = t = self._t + dt
         load = _finite(sample.tyre_load, 2)
         normals = sample.contact_normal
@@ -343,6 +352,7 @@ class Texture:
     def __init__(self):
         self.road, self.impact, self.lock = RoadTexture(), ImpactPulse(), LockCue()
         self._env = 0.0                  # the limiter's peak follower of |sum|
+        self._dc = _HighPass(DC_HZ)
         self.level = LEVEL               # requests (the GUI's thread); read here per sample
         self.parts = dict.fromkeys(PARTS, True)
         self._gains = dict.fromkeys(PARTS, 0.0)
@@ -373,6 +383,7 @@ class Texture:
         self.impact.reset()
         self.lock.reset()
         self._env = 0.0
+        self._dc.reset()
         self._last = self._since = None
         self._out = 0.0
         self._level = 0.0
@@ -405,10 +416,12 @@ class Texture:
         moving = min(max((speed - MIN_SPEED) / MIN_SPEED, 0.0), 1.0)
         onset = min((t - self._since) / ONSET, 1.0)
         steering = abs(steering) if math.isfinite(steering) else 0.0
-        limit = min(TOTAL_CAP * FULL, STEER_SHARE * steering + FLOOR * FULL)
+        total = self._dc.step(total, dt)
+        # Within the headroom left by the steering force, so the engine's clamp never cuts one side
+        limit = min(TOTAL_CAP * FULL, STEER_SHARE * steering + FLOOR * FULL, max(FULL - steering, 0.0))
         # The limiter: a gain from the peak follower, so the shape is kept and |value| <= limit
         self._env = max(abs(total), self._env * math.exp(-dt / LIMIT_RELEASE))
-        gain = limit / self._env if self._env > limit else 1.0
+        gain = limit / self._env if self._env > limit else 1.0     # limit 0: env > 0 gives 0, env 0 gives total 0
         value = total * gain * self._level * onset * moving
         if not math.isfinite(value):
             self.reset()

@@ -71,7 +71,49 @@ def test_road_texture_averages_to_zero_and_stays_under_its_cap():
     mean, rms = mean_rms(out[int(HZ):])
     assert rms > 0.004 * FULL                          # there is texture ...
     assert abs(mean) < 0.02 * rms                      # ... and it never pulls
-    assert max(abs(v) for v in out) <= ft.RoadTexture.CAP * FULL
+    assert max(abs(v) for v in out) <= ft.TOTAL_CAP * FULL
+    road = ft.RoadTexture()
+    assert max(abs(road.step(DT, x)) for x in rough(5.0, amp=0.05)) <= ft.RoadTexture.CAP * FULL
+
+
+def kerb(seconds, hz=12.0, depth=0.03):
+    """A kerb's sawtooth under FL only: pushed up quickly (20 % of the period), let down slowly."""
+    out = []
+    for i in range(int(seconds * HZ)):
+        phase = (i * DT * hz) % 1.0
+        up = phase / 0.2 if phase < 0.2 else 1.0 - (phase - 0.2) / 0.8
+        out.append(car(susp=(0.1 + depth * up, 0.1, 0.1, 0.1)))
+    return out
+
+
+def test_a_lopsided_input_never_pulls():
+    """The road part alone (tanh after the band-pass) turns the sawtooth into a steady pull; the sum's DC
+    blocker takes it out."""
+    road = ft.RoadTexture()
+    raw = [road.step(DT, x) for x in kerb(6.0)][int(HZ):]
+    raw_mean, raw_rms = mean_rms(raw)
+    assert abs(raw_mean) > 0.05 * raw_rms                       # the pull is there before the blocker
+    out = drive(texture(1.0, road=True), kerb(6.0))[int(2 * HZ):]
+    mean, rms = mean_rms(out)
+    assert rms > 0.002 * FULL
+    assert abs(mean) < 0.01 * rms and abs(mean) < 0.0005 * FULL
+
+
+def test_it_stays_within_the_headroom_left_by_the_steering_force():
+    for steering in (32767.0, 32500.0, -32700.0):
+        out = drive(texture(1.0, road=True, impact=True, lock=True), rough(3.0, amp=0.02), steering=steering)
+        assert max(abs(v) for v in out) <= 32767.0 - abs(steering) + 1e-6
+    assert all(v == 0.0 for v in drive(texture(1.0, road=True), rough(1.0, amp=0.02), steering=32767.0))
+
+
+def test_a_new_car_starts_the_impact_mean_again():
+    impact = ft.ImpactPulse()
+    for _ in range(int(HZ)):
+        impact.step(DT, car(load=(9000.0, 9000.0, 0.0, 0.0)))
+    s = car(load=(2000.0, 2000.0, 0.0, 0.0))
+    s.car = 'acr/Another'
+    impact.step(DT, s)
+    assert impact._mean == pytest.approx(4000.0)
 
 
 def test_the_high_pass_removes_slow_suspension_motion():
@@ -373,6 +415,14 @@ def test_the_engine_takes_the_texture_settings_on_its_thread(tmp_path):
     engine.step(0.0)
     assert engine.texture.level == 0.5 and engine.texture.parts == {'road': True, 'impact': False, 'lock': True}
     assert engine.texture.describe() == '50 % (road, lock)'
+    # Applied once per request; a request made after it is taken, not lost
+    engine.texture.set(0.9)
+    engine.step(0.01)
+    assert engine.texture.level == 0.9
+    engine.set_texture(0.2, {'road': True, 'impact': True, 'lock': True})
+    engine.set_texture(0.4, {'road': True, 'impact': True, 'lock': True})
+    engine.step(0.02)
+    assert engine.texture.level == 0.4
 
 
 def test_profiles_keep_the_texture(tmp_path):

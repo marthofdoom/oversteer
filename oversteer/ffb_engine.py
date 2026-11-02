@@ -559,7 +559,9 @@ class FfbEngine:
         self._enabled_req = False        # GUI requests, applied on the engine thread
         self._path_req = None
         self._inhibit_req = False        # wheel_owner: an exclusive owner wants the wheel
-        self._texture_req = None         # (level 0..1, {part: on}) from the GUI, applied on the engine thread
+        self._texture_req = None         # (seq, level 0..1, {part: on}) from the GUI, applied on the engine thread
+        self._texture_seq = 0            # the GUI's last request number
+        self._texture_seen = 0           # the engine's last applied
         self._running = False
         self._thread = None
         self._stop_lock = threading.Lock()
@@ -617,7 +619,10 @@ class FfbEngine:
 
     def set_texture(self, level, parts):
         """The texture's master level (0..1) and its parts' switches ({'road': bool, ...})."""
-        self._texture_req = (level, dict(parts))
+        # One tuple, swapped whole and never cleared: the engine applies it when its number is new, so a
+        # request made while the engine reads the previous one is not lost
+        self._texture_seq += 1
+        self._texture_req = (self._texture_seq, level, dict(parts))
         self._wake.set()
 
     def set_device(self, path):
@@ -695,9 +700,10 @@ class FfbEngine:
             self._idle(now)
 
     def _requests(self, now):
-        texture, self._texture_req = self._texture_req, None
-        if texture is not None:
-            self.texture.set(*texture)
+        texture = self._texture_req
+        if texture is not None and texture[0] != self._texture_seen:
+            self._texture_seen = texture[0]
+            self.texture.set(*texture[1:])
         if self._inhibit_req:
             self._inhibit_req = False
             self._quick_release('inhibited', now)
