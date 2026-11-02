@@ -18,7 +18,7 @@ So it scales the game's force by that and nothing else:
   TireCombinedSlip weighs the two alike; the trail wants slip ratio
   weighed more, so s is computed here.
 - g = exp(-s^Q), clamped to [G_MIN, 1]: never stronger than the game, never
-  fully dead. The user's "Understeer lightness" (0..1, default STRENGTH)
+  lighter than a real steering with only its caster left (G_MIN, below). The user's "Understeer lightness" (0..1, default STRENGTH)
   scales how much of the drop is played: g_eff = 1 - strength x (1 - g).
 - Only above MIN_SPEED and with both front slip channels there: g_eff 1
   otherwise.
@@ -67,7 +67,17 @@ K = 0.7                                  # ... slip ratio. FH6 drive (34 min, 4 
                                          # ratio <0.05 / 0.05-0.2 / 0.2-0.5 / >0.5); 0.35 lightened AWD straights under
                                          # power (front ratio p90 0.27) and hard braking. scripts/ffb-addon-replay.py
 Q = 3.0                                  # exp(-s^Q)'s shape (report: 2-4)
-G_MIN = 0.4                              # the lightest: 40 % of the game's force
+# The lightest the game's force gets is what a real steering keeps when the tyre's pneumatic trail has gone:
+# the mechanical (caster) part, which does not fade. Steering torque ~ Fy x (pneumatic trail + caster trail), so the
+# share left is caster / (caster + pneumatic trail at low slip). ACR (marth's dump, 14,247 moving snapshots,
+# ffb_engine.CASTER_TRAIL): caster trail 27 mm from the fit of finalFF to Mz and Fy; pneumatic trail at low
+# slip (|slip angle| < 0.06 rad, load 1500 N+) the median of -Mz/Fy, 38 mm (FL) and 43 mm (FR), 41 mm. A road car
+# typically has 0.35-0.45 here. Past the grip peak ACR's force stays with Fy (r -0.94 at slip angles over 0.4 rad,
+# against Mz's 0.65), the same effect.
+CASTER_TRAIL = 0.027                     # m
+PNEUMATIC_TRAIL = 0.041                  # m
+G_MIN = CASTER_TRAIL / (CASTER_TRAIL + PNEUMATIC_TRAIL)     # 0.40: the physical amount of lightening, "Understeer
+                                         # lightness" 100; the slider scales from none (0) to this
 STRENGTH = 0.6                           # "Understeer lightness" default
 MIN_SPEED = 5.0                          # m/s: none below
 LOWPASS_HZ = 20.0

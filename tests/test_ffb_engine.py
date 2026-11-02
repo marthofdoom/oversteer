@@ -866,3 +866,51 @@ def test_a_stop_published_as_0_is_no_game_force_for_the_fit(tmp_path):
     # As with no upload at all: once front Mz moves on with none, the fit is dropped and waits for the game
     run(engine, t, 1.0, raw=False)
     assert not model.ready and model.waiting == 'raw'
+
+
+# -- the caster term: the force is Mz + the Fy arm, as a real steering and ACR's own force --
+
+def tyre_sample(mz, fy, speed=20.0):
+    """Front tyres' Mz and Fy each, in the game's signs (Fy left-positive, Mz opposite to Fy in grip)."""
+    s = Sample(6000.0, 7500.0, gear=3, speed=speed, car='acr/Skoda Fabia RS Rally2', game='acr')
+    s.packet_id = 1
+    s.tyre_mz = (mz / 2, mz / 2, 0.0, 0.0)
+    s.tyre_fy = (fy / 2, fy / 2, 0.0, 0.0)
+    return s
+
+
+def test_front_torque_adds_the_caster_arm_and_falls_back_to_mz():
+    s = tyre_sample(-100.0, 3000.0)                          # grip: Mz = -tp * Fy
+    assert fe.front_torque(s) == pytest.approx(-100.0 - fe.CASTER_TRAIL * 3000.0)
+    s.tyre_fy = None
+    assert fe.front_torque(s) == pytest.approx(-100.0)
+    s.tyre_mz = None
+    assert fe.front_torque(s) is None
+
+
+def test_in_a_drift_the_force_pulls_toward_the_direction_of_travel_when_mz_has_gone():
+    model = fe.RackForce()
+    model.scale = 10.0
+    cornering = tyre_sample(-120.0, 3500.0)                  # same sign as Mz alone, a little bigger
+    mz_only = model.scale * -120.0
+    assert model.force(cornering) * mz_only > 0
+    assert 1.0 < model.force(cornering) / mz_only < 2.5
+    # a left slide (car turning left, Fy left-positive, past the peak: Mz ~ 0): the wheel is pulled the way
+    # the grip-cornering torque would pull, the self-steer into countersteer, not left slack
+    drift = tyre_sample(0.0, 4500.0)
+    assert model.force(drift) < -1.0 and model.force(drift) * model.force(cornering) > 0
+    right = tyre_sample(0.0, -4500.0)
+    assert model.force(right) == pytest.approx(-model.force(drift))
+
+
+def test_straight_line_force_stays_zero_without_side_force():
+    model = fe.RackForce()
+    assert model.force(tyre_sample(0.0, 0.0)) == 0
+
+
+def test_driven_front_axle_couple_adds_the_scrub_term():
+    s = tyre_sample(0.0, 0.0)
+    s.tyre_fx = (800.0, 200.0, 0.0, 0.0)                     # left front pulls harder: torque steer
+    assert fe.front_torque(s) == pytest.approx(-fe.SCRUB * 600.0)
+    s.tyre_fx = (500.0, 500.0, 0.0, 0.0)                     # an even split: no couple
+    assert fe.front_torque(s) == pytest.approx(0.0)
