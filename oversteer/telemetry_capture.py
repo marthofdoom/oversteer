@@ -266,24 +266,47 @@ def _wheel_size(path):
 
 
 def ffb_tuning(path):
-    """Whether a capture's header says it was recorded for FFB tuning."""
+    """Whether a capture's header says it was recorded for FFB tuning: True or False when the header was read,
+    None when it could not be (being created, truncated, unreadable). A file that is not gzip at all, or
+    whose first line is not a capture's, is a definite False."""
     try:
         with gzip.open(path, 'rb') as stream:
-            if stream.readline() != MAGIC:
+            first = stream.readline()
+            if first and first != MAGIC:
                 return False
-            return bool(json.loads(stream.readline().decode() or '{}').get('ffb_tuning'))
-    except (OSError, EOFError, ValueError, zlib.error):
+            line = stream.readline().decode()
+            if not first or not line:
+                return None
+            return bool(json.loads(line).get('ffb_tuning'))
+    except gzip.BadGzipFile:
         return False
+    except (OSError, EOFError, ValueError, zlib.error):
+        return None
 
 
-_TUNING = {}          # path -> whether its header says ffb_tuning (a header never changes)
+_TUNING = {}          # path -> whether its header says ffb_tuning: only definite answers (a header never changes)
+_UNKNOWN = set()      # paths whose header could not be read at the last listing: never pruned, asked again
 
 
 def _is_tuning(path):
     found = _TUNING.get(path)
     if found is None:
-        found = _TUNING[path] = ffb_tuning(path)
+        found = ffb_tuning(path)
+        if found is None:
+            if path not in _UNKNOWN:
+                logging.warning("capture %s: header unreadable, kept and checked again", path)
+            _UNKNOWN.add(path)
+            return False
+        _UNKNOWN.discard(path)
+        _TUNING[path] = found
     return found
+
+
+def _forget_gone(paths):
+    """Drop the cache entries of captures no longer in the folder."""
+    for path in [p for p in list(_TUNING) + list(_UNKNOWN) if p not in paths and not os.path.exists(p)]:
+        _TUNING.pop(path, None)
+        _UNKNOWN.discard(path)
 
 
 def tuning_captures(folder):
@@ -304,6 +327,7 @@ def list_captures(folder):
                           os.path.exists(path + '.json')))
         except OSError:
             continue                     # deleted meanwhile
+    _forget_gone({f[1] for f in found})
     return [(path, size, labelled) for _mtime, path, size, labelled in sorted(found) if not _is_tuning(path)]
 
 
@@ -339,7 +363,7 @@ def prune(folder, cap, keep=None):
     for path, size, labelled in captures:
         if total <= cap:
             break
-        if labelled or path in keep:
+        if labelled or path in keep or path in _UNKNOWN:       # (a header that can't be read: not ours to delete)
             continue
         try:
             os.remove(path)

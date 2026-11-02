@@ -398,3 +398,24 @@ def test_prune_skips_captures_recorded_for_ffb_tuning(tmp_path):
     assert tc.capture_summary(str(tmp_path))[2] == 0              # not "labelled"; apart, and not in the cap's total
     assert tc.prune(str(tmp_path), 0) == paths[1:]
     assert os.path.exists(paths[0])
+
+
+def test_prune_keeps_a_capture_whose_header_cannot_be_read_yet(tmp_path):
+    from oversteer import telemetry_capture as tc
+    old = str(tmp_path / '20260101-120000.ovcap.gz')
+    CaptureWriter(old, extra={'ffb_tuning': True}).close()
+    good = open(old, 'rb').read()
+    open(old, 'wb').write(good[:12])                                # as if still being created
+    os.utime(old, (1.7e9, 1.7e9))
+    newer = str(tmp_path / '20260102-120000.ovcap.gz')
+    CaptureWriter(newer).close()
+    os.utime(newer, (1.7e9 + 100, 1.7e9 + 100))
+    assert tc.prune(str(tmp_path), 0) == [newer]                    # the unreadable one stays
+    assert os.path.exists(old)
+    assert old not in tc._TUNING and old in tc._UNKNOWN
+    open(old, 'wb').write(good)                                     # complete now: asked again, found to be FFB
+    assert tc.list_captures(str(tmp_path)) == []
+    assert tc._TUNING[old] is True and old not in tc._UNKNOWN
+    os.remove(old)
+    tc.list_captures(str(tmp_path))
+    assert old not in tc._TUNING
