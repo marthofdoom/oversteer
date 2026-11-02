@@ -24,7 +24,8 @@ Three parts:
   'none': no telemetry. Measured live over a sliding second, not taken
   from a list: Forza's rate follows its frame rate, and ACC or AC go
   green only if they really send the forces.
-- RackForce: ACR's rack force from the front tyres' Mz (FL + FR), at the
+- RackForce: ACR's rack force from the front tyres' steering torque (FL + FR Mz plus the caster arm times
+  their Fy, front_torque), at the
   physics rate (333 a second), fitted to the force the game itself sends
   the wheel (the driver's game_ffb_raw: ext_force's units and sign, read
   the same while the game is muted): played only while the two agree
@@ -268,6 +269,46 @@ def front_mz(sample):
     return total if math.isfinite(total) else None
 
 
+# ACR's steering force carries the caster and the scrub radius as well as the pneumatic trail: on marth's dump
+# (14,247 moving snapshots in 8 segments of 12 sessions/cars; no car names in it) finalFF fits
+# a * (front Mz - CASTER_TRAIL * front Fy - SCRUB * (Fx_FL - Fx_FR)); Mz alone R^2 0.85, with Fy 0.948, with
+# the Fx couple 0.973 (the couple is uncorrelated with Fy, r 0.03). Game units: Fy is positive to the left and
+# Mz comes out negative for positive Fy (Mz ~ -tp * Fy), so the mechanical part adds as -t * Fy.
+#   - Pooled: a = 9.5e-4 per Nm, trail 27 mm (25.8 mm without the Fx term), scrub 26 mm. Per segment the trail
+#     runs 6-46 mm and a 8e-4 to 1.6e-3 (the cars differ; a is refitted live per car by RackForce, the trail is
+#     one number for all). The linear-slip slope (|slip angle| < 0.12 rad) agrees, 6-46 mm per segment too.
+#   - Scrub: the left-right difference of the front tyres' Fx, -15 mm on near-straight samples (|Fy| < 800 N,
+#     -14.7 to -15.5 mm in every segment with enough of them); -13 to -35 mm per segment in the full fit. The
+#     smaller, steadier straight-line value is used (a real scrub radius is 10-30 mm; a driven axle's torque
+#     steer is this couple).
+#   - Past the peak (|slip angle| > 0.4 rad) Mz has fallen to a third and finalFF still follows Fy (r -0.94
+#     against Mz's 0.65): the pull toward countersteer in a drift.
+# The cars' own suspension data (DA_*_Suspension_Front, unversioned UE data assets, hardpoints without field
+# names) was not decodable, and the dump has no surface input (grip 0 throughout), so one trail serves every car
+# and surface; 27 mm is also a typical rally-car mechanical trail.
+CASTER_TRAIL = 0.027                    # m
+SCRUB = 0.0155                          # m
+
+
+def front_torque(sample):
+    """Steering torque about the kingpins (Nm, front Mz's sign): FL + FR Mz plus the lateral forces' caster
+    arm, -CASTER_TRAIL * (FL + FR Fy), and the scrub-radius couple of the driven or braked front axle,
+    -SCRUB * (Fx_FL - Fx_FR). Terms without their forces are left out; None without Mz."""
+    mz = front_mz(sample)
+    if mz is None:
+        return None
+    fy, fx = sample.tyre_fy, sample.tyre_fx
+    if fy is not None:
+        side = fy[0] + fy[1]
+        if math.isfinite(side):
+            mz -= CASTER_TRAIL * side
+    if fx is not None:
+        couple = fx[0] - fx[1]
+        if math.isfinite(couple):
+            mz -= SCRUB * couple
+    return mz
+
+
 
 
 class _Moments:
@@ -321,7 +362,9 @@ class _Moments:
 
 
 class RackForce:
-    """The steering force from the front tyres' Mz, fitted to the force the
+    """The steering force from the front tyres' torque (Mz plus the caster arm times Fy, front_torque: a real
+    steering's torque, and what ACR's own force follows; in a drift Mz fades and the Fy term pulls toward
+    countersteer), fitted to the force the
     game itself sends the wheel: the driver's game_ffb_raw level, in
     ext_force's own units and sign, read the same with the game muted (it is
     taken before game_ffb_level), so the check goes on while ours plays.
@@ -389,6 +432,10 @@ class RackForce:
         self.waiting = 'raw'             # why not ready: 'raw', 'corners', 'fit', 'mismatch'
         self.fit = self.fit_now = None
 
+    @staticmethod
+    def _torque(sample):
+        return front_torque(sample)
+
     def feed(self, t, sample, raw, new=True):
         """A sample, with the game's raw level now (None if it sent none
         lately); `new`: it came with an upload since the last sample (not a
@@ -397,7 +444,7 @@ class RackForce:
             self.reset(sample.car)
         dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
         self._last = t
-        mz = front_mz(sample)
+        mz = self._torque(sample)
         if raw is not None and new:
             self._raw_at = t
             if mz is not None:
@@ -478,7 +525,7 @@ class RackForce:
 
     def force(self, sample):
         """ext_force for this sample at full strength (0 without Mz)."""
-        mz = front_mz(sample)
+        mz = self._torque(sample)
         if mz is None:
             return 0
         return min(max(self.scale * mz, -FULL), FULL)

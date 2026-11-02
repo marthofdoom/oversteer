@@ -199,7 +199,7 @@ def test_the_gain_is_smoothed_and_slew_limited():
 
 def test_strength_scales_the_drop():
     s = fh6(slip_angle=(2.0, 2.0, 0, 0))
-    for strength, g in ((0.0, 1.0), (0.6, 1.0 - 0.6 * 0.6), (1.0, fa.G_MIN)):
+    for strength, g in ((0.0, 1.0), (0.6, 1.0 - 0.6 * (1.0 - fa.G_MIN)), (1.0, fa.G_MIN)):
         a = fa.ForzaLightness(strength=strength)
         a.feed(0.0, s, 1000)
         assert a.target == pytest.approx(g)
@@ -690,3 +690,14 @@ def test_an_older_driver_falls_back_to_ext_force(tmp_path):
     Drive(engine).run(8.0)
     assert engine.status.active and not engine._fh_scale
     assert scales() == [] and any(forces()) and never_lowered(path)
+
+
+def test_the_floor_is_the_physical_caster_share():
+    assert fa.G_MIN == pytest.approx(fa.CASTER_TRAIL / (fa.CASTER_TRAIL + fa.PNEUMATIC_TRAIL))
+    assert 0.35 <= fa.G_MIN <= 0.45
+    assert fa.CASTER_TRAIL == pytest.approx(fe_trail())
+
+
+def fe_trail():
+    from oversteer import ffb_engine
+    return ffb_engine.CASTER_TRAIL
