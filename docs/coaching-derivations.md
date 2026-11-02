@@ -228,6 +228,9 @@ docs/coaching-derivations.md`. A test keeps this part equal to the JSON.
 | `packet_id` | sample | int |  | packet |  |
 | `game_ffb` | sample | game unit |  | packet |  |
 | `tyre_mz` | sample | game unit (Nm) | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `rack_force` | sample | N | BeamNG input space, as the game's own force feedback reads it | packet |  |
+| `tyre_side_slip` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
+| `tyre_slip_energy` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
 | `tyre_slip_ratio` | sample | game unit | per wheel, ordered FL, FR, RL, RR | packet |  |
 | `tyre_slip_angle` | sample | game unit (rad) | per wheel, ordered FL, FR, RL, RR | packet |  |
 | `contact_normal` | sample | unit vector | per wheel, ordered FL, FR, RL, RR; each (x, y, z) | packet |  |
@@ -386,6 +389,9 @@ C confirmed on a capture, D decoded (unverified), d derivable, - absent.
 | `packet_id` | D | D | D | - | - | - | - | - | - | - |
 | `game_ffb` | D | D | D | - | - | - | - | - | - | - |
 | `tyre_mz` | D | - | D | - | - | - | - | - | - | - |
+| `rack_force` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_side_slip` | - | - | - | - | - | - | - | - | - | - |
+| `tyre_slip_energy` | - | - | - | - | - | - | - | - | - | - |
 | `tyre_slip_ratio` | D | - | D | - | - | - | - | - | - | - |
 | `tyre_slip_angle` | D | - | D | - | - | - | - | - | - | - |
 | `contact_normal` | D | D | D | - | - | - | - | - | - | - |

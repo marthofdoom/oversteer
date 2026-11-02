@@ -1526,6 +1526,14 @@ class GtkUi:
             _("Shared-memory games (Assetto Corsa family)"), _("Put this in the game's Steam launch options."),
             tooltips.get(self.launch_options), (self.launch_options, self.launch_options_copy)))
         receive.add(self._eawrc_setup())
+        self.install_beamng = install_beamng = Gtk.Button(label=_("Install the Countersteer mod for BeamNG"))
+        install_beamng.connect('clicked', lambda w: self.controller.install_beamng_mod())
+        receive.add(self._setting_row(
+            _("BeamNG.drive force feedback"),
+            _("Adds a small mod to BeamNG's mods folder that sends the steering rack force and each tyre's load "
+              "and slip on port 5320. Groundwork for now: the receiver arrives with Countersteer FFB, and the "
+              "telemetry above keeps using OutGauge. Safe to press again: it never replaces a newer version."),
+            controls=(install_beamng,)))
         self.telemetry_forward = Gtk.Entry(width_chars=34, placeholder_text="192.168.1.20:20777, localhost:9996")
         self.telemetry_forward.connect('activate', self._forward_commit)
         self.telemetry_forward.connect('focus-out-event', lambda w, e: self._forward_commit(w) and False)
@@ -2123,6 +2131,9 @@ class GtkUi:
         expander.add(box)
         row.add(expander)
         return row
+
+    def set_beamng_install_busy(self, busy):
+        self.install_beamng.set_sensitive(not busy)
 
     def _copy_text(self, text):
         Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
