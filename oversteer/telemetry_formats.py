@@ -12,6 +12,8 @@ None. The formats:
   16, the shift-light flag (DL_SHIFT) in the ShowLights word at 44. There is
   no max RPM in the packet, so the ceiling is learnt from the highest RPM
   seen and forgotten when the telemetry stops.
+- Countersteer's BeamNG mod ("CSB1", 96 bytes, data/beamng/countersteer_ffb): the steering rack force and each
+  tyre's load and slip at up to 500 Hz, on a port of its own (see csb1_packet() for the layout).
 - Codemasters extradata=3 (DiRT Rally 2.0, DiRT 4) and the games that copy
   its layout (WRC 10 / WRC Generations native telemetry): 64 or more
   little-endian floats, engine rate at index 37, max at 63 and idle at 64,
@@ -168,7 +170,7 @@ class Sample:
       game's own shift lights end), car ('<game>/<id>': a key naming the
       car within its game), car_name, car_class, drivetrain ('fwd', 'rwd', 'awd').
     - Game: game ('forza-fh', 'forza-fm', 'forza', 'dirt', 'wrcg',
-      'eawrc', 'acpmf', 'beamng', 'lfs'), track (as the game names it),
+      'eawrc', 'acpmf', 'beamng', 'beamng-ffb', 'lfs'), track (as the game names it),
       stage (a key where the game identifies the stage or route),
       stage_length (m), game_time (the game's clock, s), running (False
       in menus or paused, where the game says), packet (EA SPORTS WRC:
@@ -217,7 +219,11 @@ class Sample:
       packet_id (the physics step), game_ffb (finalFF, the game's own
       force), tyre_mz (self-aligning torque), tyre_slip_ratio,
       tyre_slip_angle, contact_normal (per wheel a world-frame (x, y, z)),
-      vibrations (kerb, slip, g, abs), abs_active and tc_active (bools)."""
+      vibrations (kerb, slip, g, abs), abs_active and tc_active (bools).
+    - For force feedback, BeamNG through the Countersteer mod ('beamng-ffb'; None elsewhere): rack_force (N, the
+      sum of the steering hydros' beam stress times their input factor: the game's own rack force;
+      positive = it pushes steering_input positive, hydros.lua:324-327, to confirm on a capture), tyre_load (N), tyre_slip, tyre_side_slip (the game's units) and tyre_slip_energy per wheel
+      FL, FR, RL, RR, and packet_id (the packet's sequence number); the packet's steering input is left unread until its sign is confirmed."""
 
     __slots__ = ('rpm', 'max_rpm', 'shift', 'gear', 'speed', 'car', 'car_name', 'throttle', 'clutch', 'power',
                  'track', 'game', 'brake', 'stage', 'packet',
@@ -236,7 +242,7 @@ class Sample:
                  'tyre_carcass_temp', 'tyre_tread_temp', 'tyre_seg_temp', 'tyre_seg_wear', 'tyre_contact', 'ang_accel',
                  'car_slot', 'wheels_speed', 'car_epoch', 'car_provisional',
                  'packet_id', 'game_ffb', 'tyre_mz', 'tyre_slip_ratio', 'tyre_slip_angle', 'contact_normal',
-                 'vibrations', 'abs_active', 'tc_active')
+                 'vibrations', 'abs_active', 'tc_active', 'rack_force', 'tyre_side_slip', 'tyre_slip_energy')
 
     def __init__(self, rpm, max_rpm=None, shift=None, gear=None, speed=None, car=None, car_name=None,
                  throttle=None, clutch=None, power=None, game=None, brake=None):
@@ -266,6 +272,7 @@ class Sample:
         self.tyre_seg_temp = self.tyre_seg_wear = self.tyre_contact = self.ang_accel = None
         self.car_slot = self.wheels_speed = self.car_epoch = None
         self.car_provisional = False
+        self.rack_force = self.tyre_side_slip = self.tyre_slip_energy = None
         self.packet_id = self.game_ffb = self.tyre_mz = self.tyre_slip_ratio = self.tyre_slip_angle = None
         self.contact_normal = self.vibrations = self.abs_active = self.tc_active = None
 
@@ -937,10 +944,42 @@ def _rbr(data, n, recorded_car=None):
     return sample
 
 
+CSB_MAGIC = b'CSB1'
+CSB_FORMAT = '<4sIffffIf16f'            # magic, seq, time, rack, steer, speed, wheel mask, send rate, 4 x (down, slip, side slip, energy)
+CSB_SIZE = struct.calcsize(CSB_FORMAT)  # 96, the size of an OutGauge packet: the magic is looked at first
+
+
+def csb1_packet(seq, game_time, rack, steer, speed, wheels, rate=500.0, mask=15):
+    """A CSB1 packet as the mod sends it (the tests and replays build theirs here). `wheels`: four
+    (down force, slip, side slip, slip energy) tuples, FL FR RL RR."""
+    flat = [v for w in wheels for v in w]
+    return struct.pack(CSB_FORMAT, CSB_MAGIC, seq & 0xFFFFFFFF, game_time, rack, steer, speed, mask, rate, *flat)
+
+
+def _csb1(data):
+    """Countersteer's BeamNG mod: no rpm, so rpm is 0 and nothing here reads it as an engine."""
+    magic, seq, game_time, rack, _steer, speed, mask, _rate, *w = struct.unpack(CSB_FORMAT, data)
+    if not math.isfinite(game_time):
+        return None
+    sample = Sample(0.0, speed=_finite(speed), car='beamng/unknown', game='beamng-ffb')
+    sample.game_time = game_time
+    sample.packet_id = seq
+    sample.rack_force = _finite(rack)
+    if mask & 15 == 15:                          # all four wheels found by the mod, in FL FR RL RR order
+        wheels = [w[i:i + 4] for i in range(0, 16, 4)]
+        sample.tyre_load = _vector(x[0] for x in wheels)
+        sample.tyre_slip = _vector(x[1] for x in wheels)
+        sample.tyre_side_slip = _vector(x[2] for x in wheels)
+        sample.tyre_slip_energy = _vector(x[3] for x in wheels)
+    return sample
+
+
 def decode_sample(data, rbr_car=None):
     """A Sample, or None if the packet isn't a telemetry format we know
     (or carries nonsense)."""
     n = len(data)
+    if data[:4] == CSB_MAGIC:
+        return _csb1(data) if n == CSB_SIZE else None    # before OutGauge, whose 96 bytes this one shares
     if data[:4] == OVST_MAGIC:
         # Ours whatever its length: a cut-short one must not pass for a
         # Codemasters packet, whose sizes it falls among

@@ -5,7 +5,7 @@ import os
 import subprocess
 from .device_manager import DeviceManager
 from .model import Model
-from . import car_data, diagnostics, stage_tables
+from . import beamng_mod, car_data, diagnostics, stage_tables
 import sys
 from xdg.BaseDirectory import save_config_path
 
@@ -16,6 +16,7 @@ class Application:
         self.datadir = pkgdatadir
         stage_tables.DATADIR = pkgdatadir
         car_data.DATADIR = pkgdatadir
+        beamng_mod.DATADIR = pkgdatadir
         self.icondir = icondir
         self.udev_path = self.datadir + '/udev/'
         self.target_dir = '/etc/udev/rules.d/'
