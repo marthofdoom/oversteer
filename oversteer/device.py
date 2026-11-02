@@ -524,6 +524,19 @@ class Device:
         except (OSError, ValueError):
             return None
 
+    def get_ffb_thermal(self):
+        """The driver's ffb_thermal as (mean_square, derating), read only; None when the driver has no such
+        attribute or it does not read as two integers."""
+        path = self.device_file("ffb_thermal")
+        if not os.access(path, os.F_OK | os.R_OK):
+            return None
+        try:
+            with open(path, "r") as file:
+                mean_square, derating = file.read().split()[:2]
+            return int(mean_square), int(derating)
+        except (OSError, ValueError):
+            return None
+
     TIMER_MSECS_FILE = "/sys/module/hid_logitech_new/parameters/timer_msecs"
 
     def get_ffb_tick_ms(self):
