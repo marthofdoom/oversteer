@@ -645,8 +645,13 @@ class Gui:
     def apply_countersteer_texture(self):
         """The texture's level and parts (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_texture(*self.model.get_countersteer_texture())
+        self.apply_countersteer_strength()
         self.apply_countersteer_linearity()
         self.apply_countersteer_lightness()
+
+    def apply_countersteer_strength(self):
+        """The overall steering strength (FFB tab, under the Countersteer switch) to the engine."""
+        self.ffb_engine.set_strength(self.model.get_countersteer_strength())
 
     def apply_countersteer_linearity(self):
         """Richard Burns Rally's linearity (FFB tab, under the Countersteer switch) to the engine."""
@@ -664,6 +669,19 @@ class Gui:
         """(light, text) for the FFB tab's Countersteer FFB row."""
         from .ffb_engine import status_text
         return status_text(self.ffb_engine.status, listening=self.telemetry is not None)
+
+    def countersteer_info(self):
+        """(car text, wheel text) for the FFB tab's read-only lines: the learnt caster trail and scrub of the
+        current car, and the driver's ffb_thermal when it has one; '' for what is not there."""
+        props = self.ffb_engine.car_properties()
+        car = ''
+        if props is not None:
+            car = _("Learnt for this car: caster trail %.0f mm, scrub radius %.0f mm") % (props[1] * 1000.0, props[2] * 1000.0)
+        wheel = ''
+        thermal = self.device.get_ffb_thermal() if self.device is not None else None
+        if thermal is not None:
+            wheel = _("Wheel motor load: mean square %d, derating %d") % thermal
+        return car, wheel
 
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory

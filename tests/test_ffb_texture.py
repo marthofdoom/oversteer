@@ -410,17 +410,17 @@ def test_the_fade_gain_applies_to_the_texture(tmp_path):
 
 def test_the_engine_takes_the_texture_settings_on_its_thread(tmp_path):
     engine, path = engine_on(tmp_path)
-    engine.set_texture(0.5, {'road': True, 'impact': False, 'lock': True})
+    engine.set_texture(0.5, {'road': True, 'impact': False, 'lock': True, 'engine': True})
     assert engine.texture.level == ft.LEVEL                 # not before its step
     engine.step(0.0)
-    assert engine.texture.level == 0.5 and engine.texture.parts == {'road': True, 'impact': False, 'lock': True}
-    assert engine.texture.describe() == '50 % (road, lock)'
+    assert engine.texture.level == 0.5 and engine.texture.parts == {'road': True, 'impact': False, 'lock': True, 'engine': True}
+    assert engine.texture.describe() == '50 % (road, lock, engine)'
     # Applied once per request; a request made after it is taken, not lost
     engine.texture.set(0.9)
     engine.step(0.01)
     assert engine.texture.level == 0.9
-    engine.set_texture(0.2, {'road': True, 'impact': True, 'lock': True})
-    engine.set_texture(0.4, {'road': True, 'impact': True, 'lock': True})
+    engine.set_texture(0.2, {'road': True, 'impact': True, 'lock': True, 'engine': True})
+    engine.set_texture(0.4, {'road': True, 'impact': True, 'lock': True, 'engine': True})
     engine.step(0.02)
     assert engine.texture.level == 0.4
 
@@ -431,16 +431,140 @@ def test_profiles_keep_the_texture(tmp_path):
     device = FakeDevice(ext_force_support=True)
     model = Model(device, None)
     assert model.data['countersteer_texture'] == 30
-    assert model.get_countersteer_texture() == (0.3, {'road': True, 'impact': True, 'lock': True})
+    assert model.get_countersteer_texture() == (0.3, {'road': True, 'impact': True, 'lock': True, 'engine': True})
     model.data['countersteer_texture'] = 55
     model.data['countersteer_texture_impact'] = False
     profile = str(tmp_path / 'p.ini')
     model.save(profile)
     fresh = Model(device, None)
     fresh.load(profile)
-    assert fresh.get_countersteer_texture() == (0.55, {'road': True, 'impact': False, 'lock': True})
+    assert fresh.get_countersteer_texture() == (0.55, {'road': True, 'impact': False, 'lock': True, 'engine': True})
     (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\n')
     fresh.load(str(tmp_path / 'old.ini'))
     assert fresh.data['countersteer_texture'] == 30 and fresh.data['countersteer_texture_lock'] is True
     none = Model(FakeDevice(), None)
     assert none.data['countersteer_texture'] is None
+
+
+# -- the engine part --
+
+def revving(rpm, speed=20.0, throttle=1.0, cylinders=None, running=None, idle=900.0, top=7500.0):
+    s = car(speed=speed)
+    s.rpm, s.max_rpm, s.idle_rpm, s.throttle = rpm, top, idle, throttle
+    s.running = running
+    if cylinders is not None:
+        s.cylinders = cylinders
+    return s
+
+
+def hum(sample, seconds=1.0, steering=8000.0):
+    tx = texture(1.0, engine=True)
+    return drive(tx, [sample] * int(seconds * HZ), steering=steering), tx
+
+
+def dominant_hz(values):
+    n = len(values)
+    best = max(range(5, 160), key=lambda f: abs(sum(v * complex(math.cos(2 * math.pi * f * i / HZ),
+                                                               -math.sin(2 * math.pi * f * i / HZ))
+                                                     for i, v in enumerate(values))))
+    return best
+
+
+def test_engine_frequency_follows_the_firing_rate():
+    e = ft.EngineHum()
+    assert e.frequency(revving(1800.0)) == pytest.approx(60.0)             # 4 cylinders: rpm / 60 * 2
+    assert e.frequency(revving(1800.0, cylinders=8)) == pytest.approx(120.0)
+    assert e.frequency(revving(1800.0, cylinders=0)) == pytest.approx(60.0)   # unknown: the default
+    assert e.frequency(revving(None)) is None and e.frequency(revving(float('nan'))) is None
+    # Above what the wheel renders it folds down by octaves
+    assert e.render_frequency(60.0) == 60.0 and e.render_frequency(200.0) == 100.0
+    assert e.render_frequency(240.0) == 60.0
+
+
+def test_engine_is_rev_aware_in_pitch_and_amplitude():
+    idle, _ = hum(revving(900.0, throttle=0.0), 1.5)
+    mid, _ = hum(revving(2400.0, throttle=0.0), 1.5)
+    assert dominant_hz(idle[-333:]) == 30 and dominant_hz(mid[-333:]) == 80
+    peak = lambda v: max(abs(x) for x in v[-333:])
+    top_open, _ = hum(revving(900.0, throttle=1.0), 1.5)
+    top_shut, _ = hum(revving(900.0, throttle=0.0), 1.5)
+    high, _ = hum(revving(7000.0, throttle=0.0), 1.5)
+    assert peak(top_open) > peak(top_shut) > peak(high) > 0.0              # idle and load are strongest
+    assert peak(top_open) <= ft.EngineHum.CAP * FULL + 1
+
+
+def test_engine_is_zero_mean_and_stays_in_the_texture_headroom():
+    values, tx = hum(revving(1500.0), 3.0)
+    assert abs(sum(values[-666:]) / 666.0) < 0.02 * max(abs(v) for v in values)
+    assert tx.peak <= ft.TOTAL_CAP * FULL + 1
+    # Next to a steering force near full scale, the headroom FULL - |steering| still holds
+    near, _ = hum(revving(1500.0), 1.0, steering=FULL - 100.0)
+    assert max(abs(v) for v in near) <= 100.0 + 1e-6
+
+
+def test_engine_idle_shake_plays_standing_but_not_when_off():
+    still, _ = hum(revving(900.0, speed=0.0), 1.5)
+    assert max(abs(v) for v in still[-333:]) > 0.0
+    assert hum(revving(900.0, speed=0.0, running=False), 1.5)[0][-1] == 0.0
+    assert max(abs(v) for v in hum(revving(None), 1.5)[0]) == 0.0
+    assert max(abs(v) for v in hum(revving(0.0), 1.5)[0]) == 0.0
+    # The other parts still wait for the car to roll: a landing does not shake a car at rest
+    tx = texture(1.0, road=True)
+    assert max(abs(v) for v in drive(tx, rough(1.0), steering=8000.0)) > 0.0
+
+
+def test_engine_respects_the_switch_and_master_level():
+    tx = texture(1.0, engine=False)
+    assert max(abs(v) for v in drive(tx, [revving(900.0)] * 700)) == 0.0
+    tx = texture(0.0, engine=True)
+    assert max(abs(v) for v in drive(tx, [revving(900.0)] * 700)) == 0.0
+    full, _ = hum(revving(900.0), 2.0)
+    tx = texture(0.5, engine=True)
+    half = drive(tx, [revving(900.0)] * 666)
+    assert max(abs(v) for v in half[-333:]) == pytest.approx(0.5 * max(abs(v) for v in full[-333:]), rel=0.1)
+
+
+def test_countersteer_settings_in_the_profile(tmp_path):
+    from oversteer.model import Model
+    from tests.fake_wheel import FakeDevice
+    device = FakeDevice(ext_force_support=True)
+    model = Model(device, None)
+    assert model.data['countersteer_strength'] == 100 and model.get_countersteer_strength() == 100
+    assert model.data['countersteer_texture_engine'] is True
+    model.data['countersteer_strength'] = 60
+    model.data['countersteer_texture_engine'] = False
+    profile = str(tmp_path / 'p.ini')
+    model.save(profile)
+    fresh = Model(device, None)
+    fresh.load(profile)
+    assert fresh.get_countersteer_strength() == 60 and fresh.get_countersteer_texture()[1]['engine'] is False
+    (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\ncountersteer_strength = 3\n')
+    fresh.load(str(tmp_path / 'old.ini'))
+    assert fresh.data['countersteer_strength'] == 10 and fresh.data['countersteer_texture_engine'] is True
+    assert Model(FakeDevice(), None).data['countersteer_strength'] is None
+
+
+def test_strength_scales_the_rack_force_only(tmp_path):
+    engine, path = engine_on(tmp_path)
+    assert engine._strength == 1.0
+    engine.set_strength(50)
+    engine.step(0.0)
+    assert engine._strength == 0.5
+    engine.set_strength(500)
+    engine.step(0.01)
+    assert engine._strength == 1.0
+    assert engine.car_properties() is None or len(engine.car_properties()) == 3
+
+
+def test_thermal_is_read_only_and_may_be_absent(tmp_path):
+    from oversteer.device import Device
+    class D(Device):
+        def __init__(self, base):
+            self.base = base
+        def device_file(self, name):
+            return str(self.base / name)
+    assert D(tmp_path).get_ffb_thermal() is None
+    (tmp_path / 'ffb_thermal').write_text('37 0\n')
+    assert D(tmp_path).get_ffb_thermal() == (37, 0)
+    (tmp_path / 'ffb_thermal').write_text('junk\n')
+    assert D(tmp_path).get_ffb_thermal() is None

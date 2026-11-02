@@ -113,6 +113,7 @@ MZ_FLAT = 1.0                            # Nm: front Mz spanning less over the m
 MZ_MOVING_MIN = 50                       # moving samples in the window to judge Mz on
 MZ_MISSING_RUN = 10                      # samples in a row without Mz (30 ms at 333/s) before it counts as gone
 
+OVERALL_STRENGTH = 1.0                   # "Steering strength" default: Countersteer's own force as the model gives it
 FULL = 32767                             # ext_force full scale (an FF_CONSTANT level at 0x4000)
 
 
@@ -966,6 +967,8 @@ class FfbEngine:
         self.beamng = BeamNGRack()       # BeamNG: the mod's rack force
         self.addon = ForzaLightness()    # Forza Horizon: lighter as the front tyres run out of grip
         self._lightness_req = None       # its strength (0..1) from the GUI
+        self._strength_req = None        # the overall steering strength (%) from the GUI
+        self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
         self._fh_scale = False           # the driver has game_const_scale: Forza is lightened through it
@@ -1057,6 +1060,16 @@ class FfbEngine:
         """Forza Horizon: "Understeer lightness", 0..100 % of the drop the front slip asks for; ffb_addon."""
         self._lightness_req = value
         self._wake.set()
+
+    def set_strength(self, value):
+        """The overall strength of Countersteer's own steering force (ACR, RBR, BeamNG), in % of what the model gives."""
+        self._strength_req = value
+        self._wake.set()
+
+    def car_properties(self):
+        """(car, caster trail m, scrub radius m) as the ACR model holds them for the current car, None before one."""
+        model = self.model
+        return None if model.car is None else (model.car, model.trail, model.scrub)
 
     def set_device(self, path):
         """The wheel's sysfs directory, None for none. The old one's game
@@ -1152,6 +1165,9 @@ class FfbEngine:
         linearity = self._linearity_req
         if linearity is not None and linearity != self.rbr.linearity:
             self.rbr.set_linearity(linearity)
+        strength = self._strength_req
+        if strength is not None:
+            self._strength = min(max(float(strength), 0.0), 100.0) / 100.0
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -1291,7 +1307,7 @@ class FfbEngine:
         return 1.0
 
     def _play(self, t, sample):
-        rack = self.model.force(sample)
+        rack = self.model.force(sample) * self._strength
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
         self._out(t, rack + self.texture.force(t, sample, rack))
 
@@ -1434,7 +1450,7 @@ class FfbEngine:
         self._decide(now, playing, want, 'raw' if level is None else 'state')
         if self._phase != 'idle' and self._played_mode == 'rbr':
             if self._write_due(now, new):
-                self._out(now, self.rbr.force(self._rbr_level or 0) + self._texture_for('rbr', now))
+                self._out(now, self.rbr.force(self._rbr_level or 0) * self._strength + self._texture_for('rbr', now))
         self._publish(now)
 
     def _beamng_tick(self, now):
@@ -1463,7 +1479,7 @@ class FfbEngine:
         if self._phase != 'idle' and self._played_mode == 'beamng':
             s = self._csb_sample
             if self._write_due(now, fresh):
-                self._out(now, self.beamng.force(s) + self.beamng.softlock(s) + self._texture_for('beamng', now))
+                self._out(now, (self.beamng.force(s) + self.beamng.softlock(s)) * self._strength + self._texture_for('beamng', now))
         self._publish(now)
 
     def _forza_tick(self, now):
