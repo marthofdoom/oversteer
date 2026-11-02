@@ -1809,6 +1809,12 @@ class Gui:
             self.device.set_peak_ffb_level(0)
         return level
 
+    def read_ffb_clips(self):
+        """The driver's clip counter, None if the wheel or driver has none."""
+        if not self.device:
+            return None
+        return self.device.get_ffb_clip_count()
+
     def process_events(self, events):
         for event in events:
             if event.type == ecodes.EV_SYN and event.code == ecodes.SYN_DROPPED:

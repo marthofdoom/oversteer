@@ -462,6 +462,18 @@ class Device:
             file.write(peak_ffb_level)
         return True
 
+    def get_ffb_clip_count(self):
+        """The driver's count of force feedback ticks above full scale, a
+        free-running u32; None when the driver has no such attribute."""
+        path = self.device_file("ffb_clip_count")
+        if not os.access(path, os.F_OK | os.R_OK):
+            return None
+        try:
+            with open(path, "r") as file:
+                return int(file.read().strip())
+        except (OSError, ValueError):
+            return None
+
     def center_wheel(self):
         self.set_autocenter(100)
         time.sleep(1)
