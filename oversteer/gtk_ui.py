@@ -1216,7 +1216,8 @@ class GtkUi:
                                       "it lighter as the front tyres run out of grip (from the front slip in the "
                                       "game's telemetry), so understeer is felt in the wheel. 0 % leaves the game's "
                                       "force as it is; 100 % plays the whole drop, down to 40 % of the game's "
-                                      "force at most. Never stronger than the game. 60 % by default. Saved with the "
+                                      "force at most, what a real steering keeps (its caster part). Never stronger than "
+                                      "the game. 100 % by default. Saved with the "
                                       "profile.")
 
     def _build_countersteer_texture(self, anchor):

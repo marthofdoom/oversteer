@@ -235,12 +235,12 @@ def test_forza_adds_lightness_on_top_of_its_own_force(tmp_path, raw_sign):
     writes = RecordingDriver.writes[n:]
     assert len(writes) > 400                                 # on each upload and as g moves, not only 60/s
     for ext, raw in writes:
-        assert abs(ext) <= 0.6 * abs(raw) + 1               # never past the clamp's share of the game's own
+        assert abs(ext) <= (1.0 - fa.G_MIN) * abs(raw) + 1               # never past the clamp's share of the game's own
         assert ext == 0 or (ext > 0) != (raw > 0)            # always against it: |total| only ever drops
     # The total follows g x the game's force, g from the front slip (smoothed: compared where it moves slowly)
     ratios = [(raw + ext) / raw for ext, raw in writes if abs(raw) > 4000]
     assert min(ratios) == pytest.approx(expected_g(0.9), abs=0.03)        # at the top of each weave
-    assert max(ratios) > 0.99                                              # little slip: the game's force alone
+    assert max(ratios) > 0.98                                              # little slip: the game's force alone
     assert min(ratios) >= 1.0 - fa.STRENGTH * (1.0 - fa.G_MIN) - 0.01
     assert never_lowered(path)
 
@@ -512,7 +512,7 @@ def test_profiles_keep_the_lightness(tmp_path):
     from tests.fake_wheel import FakeDevice
     device = FakeDevice(ext_force_support=True)
     model = Model(device, None)
-    assert model.data['countersteer_lightness'] == 60 and model.get_countersteer_lightness() == 60
+    assert model.data['countersteer_lightness'] == 100 and model.get_countersteer_lightness() == 100
     model.data['countersteer_lightness'] = 35
     profile = str(tmp_path / 'p.ini')
     model.save(profile)
@@ -521,7 +521,7 @@ def test_profiles_keep_the_lightness(tmp_path):
     assert fresh.get_countersteer_lightness() == 35
     (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\n')
     fresh.load(str(tmp_path / 'old.ini'))
-    assert fresh.get_countersteer_lightness() == 60
+    assert fresh.get_countersteer_lightness() == 100
     assert Model(FakeDevice(), None).data['countersteer_lightness'] is None
 
 

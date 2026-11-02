@@ -83,6 +83,7 @@ import time
 from locale import gettext as _
 
 from . import wheel_owner
+from . import ffb_carprops
 from .ffb_addon import ForzaLightness
 from .ffb_rbr import RbrForce
 from .ffb_sources import BeamNGForceSource
@@ -290,10 +291,10 @@ CASTER_TRAIL = 0.027                    # m
 SCRUB = 0.0155                          # m
 
 
-def front_torque(sample):
+def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB):
     """Steering torque about the kingpins (Nm, front Mz's sign): FL + FR Mz plus the lateral forces' caster
-    arm, -CASTER_TRAIL * (FL + FR Fy), and the scrub-radius couple of the driven or braked front axle,
-    -SCRUB * (Fx_FL - Fx_FR). Terms without their forces are left out; None without Mz."""
+    arm, -trail * (FL + FR Fy) (CASTER_TRAIL unless the car's own is known), and the scrub-radius couple of the driven or braked front axle,
+    -scrub * (Fx_FL - Fx_FR) (SCRUB likewise). Terms without their forces are left out; None without Mz."""
     mz = front_mz(sample)
     if mz is None:
         return None
@@ -301,11 +302,11 @@ def front_torque(sample):
     if fy is not None:
         side = fy[0] + fy[1]
         if math.isfinite(side):
-            mz -= CASTER_TRAIL * side
+            mz -= trail * side
     if fx is not None:
         couple = fx[0] - fx[1]
         if math.isfinite(couple):
-            mz -= SCRUB * couple
+            mz -= scrub * couple
     return mz
 
 
@@ -405,12 +406,23 @@ class RackForce:
     RAW_STALE = 0.5                      # s without a fresh raw level while ready ...
     RAW_STALE_DMZ = 20.0                 # ... and front Mz this far (Nm) from where it was then: dropped
     LOW_SLIP = 0.05                      # rad: front slip angle under this counts for the centring hint
+    LEARNS = True                        # the car's trail and scrub are learnt from the game's force (ffb_carprops)
 
     def __init__(self):
+        self.learner = None
+        self.car = None
         self.reset()
 
     def reset(self, car=None):
+        if self.learner is not None and self.car is not None:
+            ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True)
         self.car = car
+        self.trail, self.scrub = CASTER_TRAIL, SCRUB
+        self.learner = None
+        if self.LEARNS:
+            kept = ffb_carprops.STORE.get(car) if car is not None else None
+            self.trail, self.scrub = kept or (CASTER_TRAIL, SCRUB)
+            self.learner = ffb_carprops.TorqueLearner(self.trail, self.scrub)
         self.scale = self.FF_SCALE
         self.refused = None
         self.cross = None
@@ -432,9 +444,8 @@ class RackForce:
         self.waiting = 'raw'             # why not ready: 'raw', 'corners', 'fit', 'mismatch'
         self.fit = self.fit_now = None
 
-    @staticmethod
-    def _torque(sample):
-        return front_torque(sample)
+    def _torque(self, sample):
+        return front_torque(sample, self.trail, self.scrub)
 
     def feed(self, t, sample, raw, new=True):
         """A sample, with the game's raw level now (None if it sent none
@@ -463,7 +474,22 @@ class RackForce:
         self.moving_time += dt
         self._long.add(mz, raw, dt, abs(raw) < self.RAW_CLIPPED)
         self._short.add(mz, raw, dt)
+        if self.learner is not None and abs(raw) < self.RAW_CLIPPED:
+            self._learn(sample, raw, dt)
         self._judge(t)
+
+    def _learn(self, sample, raw, dt):
+        """The car's trail and scrub from this sample (ffb_carprops), when it has the front forces."""
+        mz, fy, fx = front_mz(sample), sample.tyre_fy, sample.tyre_fx
+        if mz is None or fy is None or fx is None:
+            return
+        side, couple = fy[0] + fy[1], fx[0] - fx[1]
+        if not (math.isfinite(side) and math.isfinite(couple)):
+            return
+        learner = self.learner
+        learner.add(mz, side, couple, raw, dt, self.scale)
+        self.trail, self.scrub = learner.trail, learner.scrub
+        ffb_carprops.STORE.put(self.car, self.trail, self.scrub)
 
     def _check_raw(self, t, mz):
         """No fresh raw level. A game may upload its constant force only when
@@ -554,6 +580,7 @@ class BeamNGRack(RackForce):
     short window (r * centre_sign <= -CENTRE_FLIP for MISMATCH_FOR s) is a mismatch: the force stops and both
     are learnt again."""
 
+    LEARNS = False                       # no tyre forces: nothing to learn the trail from
     FF_SCALE = FULL / 4000.0             # ext_force per N until the fit has any (a guess: the fit replaces it)
     SCALE_RANGE = (FULL / 200000.0, FULL / 20.0)
     MIN_SPREAD = 150.0                   # N
