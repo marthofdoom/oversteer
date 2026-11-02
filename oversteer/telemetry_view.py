@@ -524,6 +524,7 @@ PREFERENCES = (
     ('telemetry_web_control', 'telemetry_web_control', False),      # wheel settings changeable from the page
     ('telemetry_capture_on', 'telemetry_capture', False),
     ('telemetry_capture_cap', 'telemetry_capture_cap', 1),       # GB
+    ('telemetry_forward', 'telemetry_forward', ''),               # "Forward to": comma-separated host:port
     ('diagnostics_debug', 'diagnostics_debug', False),           # debug lines in the log file
 )
 LIMITS = {'telemetry_web_port': (1024, 65535), 'telemetry_capture_cap': (1, 100)}
@@ -547,6 +548,8 @@ def read_preferences(section):
                     value = max(low, min(high, int(text)))
                 except ValueError:
                     pass
+            elif name not in CHOICES:
+                value = text.strip()
             elif text in CHOICES[name]:
                 value = text
         values[name] = value

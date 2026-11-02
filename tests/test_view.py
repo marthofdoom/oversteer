@@ -165,7 +165,7 @@ def test_preferences_round_trip():
     defaults = view.read_preferences({})
     assert defaults == {'telemetry_learn': False, 'telemetry_web_on': False, 'telemetry_web_port': 5301,
                         'telemetry_web_bind': 'lan', 'telemetry_web_control': False, 'telemetry_capture_on': False,
-                        'telemetry_capture_cap': 1, 'diagnostics_debug': False}
+                        'telemetry_capture_cap': 1, 'telemetry_forward': '', 'diagnostics_debug': False}
     chosen = dict(defaults, telemetry_learn=True, telemetry_web_on=True, telemetry_web_port=8080,
                   telemetry_web_bind='local', telemetry_web_control=True, telemetry_capture_on=True,
                   telemetry_capture_cap=5, diagnostics_debug=True)
