@@ -258,4 +258,6 @@ def test_the_driver_attributes_are_in_every_udev_list_that_has_ext_force():
     assert lines
     for l in lines:
         assert ' ffb_output_cap ' in l and ' ffb_thermal_limit ' in l
+        for name in ('ffb_dyn_wheel', 'ffb_dyn_damping', 'ffb_dyn_friction', 'ffb_align'):
+            assert f' {name} ' in l
         assert 'ffb_thermal ' not in l.replace('ffb_thermal_limit', '')    # read-only: no chmod
