@@ -456,8 +456,8 @@ class Gui:
                     device_list.append((device.get_id(), device.name))
             self.ui.set_devices(device_list)
         plugged = self.device_manager.take_plugged()
-        if plugged:
-            self.apply_plug_profile(plugged[-1])
+        for device_id in dict.fromkeys(plugged):        # each once, the last one stays selected
+            self.apply_plug_profile(device_id)
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
     # selected in the device list; a profile was applied to it only if its
@@ -480,7 +480,10 @@ class Gui:
         if self.ui.profile_combobox.get_active_id() != name:
             self.ui.set_profile(name)       # loads it through the profile handler
         else:
-            self.load_profile(name, force=True)
+            # already this profile's: write the model's values (unsaved edits too) to the new device
+            self.model.flush_device()
+            self.update_pedals()
+            self.apply_rev_leds()
 
     def populate_profiles(self):
         profiles = []
@@ -1287,6 +1290,18 @@ class Gui:
             text += _("  ·  combined device active ({})").format(proxied)
         self.ui.set_driver_status('<small>{}</small>'.format(GLib.markup_escape_text(text)))
 
+    def persist_apply_on_plug(self, state):
+        """Write just the plug flag to the selected profile's file right away (other unsaved
+        edits stay unsaved), because a plug reads the flag from the files."""
+        profile_file = self.model.get_profile()
+        if not profile_file or not os.path.exists(profile_file) or read_apply_on_plug(profile_file) == bool(state):
+            return
+        config = configparser.ConfigParser()
+        config.read(profile_file)
+        config['DEFAULT']['apply_on_plug'] = '1' if state else '0'
+        with open(profile_file, 'w') as configfile:
+            config.write(configfile)
+
     def load_profile(self, profile_name, force=False):
         if profile_name is None or profile_name == '':
             return
@@ -1339,15 +1354,20 @@ class Gui:
         current_file = os.path.join(self.app.profile_path, current_name + '.ini')
         new_file = os.path.join(self.app.profile_path, new_name + '.ini')
         os.rename(current_file, new_file)
-        self.recent_profiles = [new_name if n == current_name else n for n in self.recent_profiles]
+        recent = [new_name if n == current_name else n for n in self.recent_profiles]
+        self.recent_profiles = list(dict.fromkeys(recent))
         if self.last_profile == current_name:
             self._remember_profile(new_name)
+        self.save_preferences()
 
     def delete_profile(self, profile_name):
         if profile_name != '' and profile_name is not None:
             profile_file = os.path.join(self.app.profile_path, profile_name + '.ini')
             if self.ui.confirmation_dialog(_("This profile will be deleted, are you sure?")):
                 os.remove(profile_file)
+                if profile_name in self.recent_profiles:
+                    self.recent_profiles.remove(profile_name)
+                    self.save_preferences()
                 if self.last_profile == profile_name:
                     self._remember_profile('')
             else:
@@ -1384,7 +1404,8 @@ class Gui:
             self.last_profile = config['DEFAULT'].get('last_profile', '')
             try:
                 recent = json.loads(config['DEFAULT'].get('recent_profiles', '[]'))
-                self.recent_profiles = [n for n in recent if isinstance(n, str)] if isinstance(recent, list) else []
+                self.recent_profiles = list(dict.fromkeys(n for n in recent if isinstance(n, str)))[:20] \
+                    if isinstance(recent, list) else []
             except ValueError:
                 self.recent_profiles = []
             from .telemetry_view import read_preferences

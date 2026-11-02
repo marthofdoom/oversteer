@@ -407,6 +407,7 @@ class GtkHandlers:
 
     def on_profile_apply_on_plug_toggled(self, widget):
         self.model.set_apply_on_plug(widget.get_active())
+        self.controller.persist_apply_on_plug(widget.get_active())
 
     def on_start_app_manually_state_set(self, widget, state):
         self.model.set_start_app_manually(state)

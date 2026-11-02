@@ -78,8 +78,8 @@ class DeviceManager:
             if device:
                 time.sleep(5)
                 device.enable()
+                self.changed = True     # before the id is queued, so the list is refreshed by the time it is taken
                 self.plugged.append(id)
-                self.changed = True
         if action == 'remove':
             device = self.get_device(id)
             if device:
