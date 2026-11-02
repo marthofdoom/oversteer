@@ -74,10 +74,20 @@ class Device:
         if not os.access(path, os.F_OK):
             return True
         status = os.stat(path)
+        # Only for the log: a uid or gid the sandbox (Flatpak) has no name for must not fail the check
+        try:
+            owner = pwd.getpwuid(status.st_uid)[0]
+        except KeyError:
+            owner = status.st_uid
+        try:
+            group = grp.getgrgid(status.st_gid)[0]
+        except KeyError:
+            group = status.st_gid
         logging.debug("check_file_permissions mode: %s user: %s group: %s file: %s", oct(status.st_mode & 0o777),
-                pwd.getpwuid(status.st_uid)[0], grp.getgrgid(status.st_gid)[0], path)
+                owner, group, path)
         if os.access(path, os.R_OK | os.W_OK):
             return True
+        logging.warning("no read/write access to %s", path)
         return False
 
     def get_max_range(self):
@@ -457,10 +467,31 @@ class Device:
         if not path:
             return False
         peak_ffb_level = str(peak_ffb_level)
-        logging.debug("Setting peak FF level: %s", peak_ffb_level)
         with open(path, "w") as file:
             file.write(peak_ffb_level)
         return True
+
+    def get_ffb_clip_count(self):
+        """The driver's count of force feedback ticks above full scale, a
+        free-running u32; None when the driver has no such attribute."""
+        path = self.device_file("ffb_clip_count")
+        if not os.access(path, os.F_OK | os.R_OK):
+            return None
+        try:
+            with open(path, "r") as file:
+                return int(file.read().strip())
+        except (OSError, ValueError):
+            return None
+
+    TIMER_MSECS_FILE = "/sys/module/hid_logitech_new/parameters/timer_msecs"
+
+    def get_ffb_tick_ms(self):
+        """The driver's force feedback timer period, 2 ms if it can't be read."""
+        try:
+            with open(self.TIMER_MSECS_FILE, "r") as file:
+                return max(int(file.read().strip()), 1)
+        except (OSError, ValueError):
+            return 2
 
     def center_wheel(self):
         self.set_autocenter(100)

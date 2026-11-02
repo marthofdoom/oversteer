@@ -2,16 +2,22 @@ name: release
 on:
   push:
     tags: ['v*']
+    # A master build warms the Flatpak dependency cache (a tag run's cache is not shared with later tags).
+    branches: [master]
+    paths: ['flatpak/**']
+  # Same by hand from the Actions tab. The bundle is built but not attached to a release unless the ref is a v* tag.
+  workflow_dispatch:
 jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-evdev python3-pyudev python3-xdg python3-pytest
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-evdev python3-pyudev python3-xdg python3-pytest python3-numpy python3-scipy python3-matplotlib python3-gi python3-gi-cairo python3-cairo gir1.2-gtk-3.0 xvfb
       - name: Unit tests that need no hardware
-        run: python3 -m pytest tests/ -q -k "not uinput" || true
+        run: xvfb-run -a python3 -m pytest tests/ -q -k "not uinput" --ignore=tests/test_proxy.py
   flatpak:
+    needs: tests
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -20,14 +26,32 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
+      # The cache key follows the dependencies only. The manifest names the release tag of the oversteer
+      # module itself, so that one line is left out of the hash: a source-only release reuses the cache.
+      - name: Cache key from the dependency manifests
+        id: key
+        run: |
+          set -euo pipefail
+          # The SDK's commit is part of the key, so a new runtime build starts a fresh cache; the month is
+          # the fallback when the runtime is not installed (or reachable) yet.
+          sdk=$(flatpak info --show-commit org.gnome.Sdk//50 2>/dev/null \
+                || flatpak remote-info --show-commit flathub org.gnome.Sdk//50 2>/dev/null \
+                || date +%Y-%m)
+          h=$({ echo "$sdk"
+                sed '/marthofdoom\/oversteer.git/,$d' flatpak/io.github.berarma.Oversteer.yaml
+                cat flatpak/python-dependencies.yaml
+                find flatpak/shared-modules -type f | sort | xargs cat; } | sha256sum | cut -c1-32)
+          echo "key=flatpak-builder-$h" >> "$GITHUB_OUTPUT"
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           bundle: Oversteer.flatpak
           manifest-path: flatpak/io.github.berarma.Oversteer.yaml
-          cache-key: flatpak-builder-${{ github.sha }}
+          cache-key: ${{ steps.key.outputs.key }}
       - name: Name the bundle after the tag
+        if: startsWith(github.ref, 'refs/tags/v')
         run: mv Oversteer.flatpak "Oversteer-${GITHUB_REF_NAME#v}.flatpak"
       - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: Oversteer-*.flatpak

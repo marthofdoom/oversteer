@@ -214,3 +214,81 @@ def test_a_capture_being_written_can_be_labelled(tmp_path):
     assert tc.label_captures(str(tmp_path), 900.0, 1e12, {'surface': 'snow'}) == 1
     recorder.close()
     assert tc.capture_summary(str(tmp_path))[2] == 1
+
+
+# -- OVST version 5 (a packet per physics step) is saved at about 60 a second --
+
+def _ovst5_stream(seconds=20.0, hz=333.0, start=5.0, finish=15.0, step0=5000):
+    """(t, packet): ACR's bridge at `hz`, parked with the clock at 0 until `start`, then running to `finish`,
+    where the clock stops (the flying finish) while the physics goes on."""
+    from oversteer.telemetry_formats import OVST5_TAIL
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_telemetry import _ovst5
+    out = []
+    for i in range(int(seconds * hz)):
+        t = i / hz
+        clock = 0.0 if t < start else min(t, finish) - start
+        data = bytearray(_ovst5(clock=clock, packet_id=step0 + i))
+        struct.pack_into('<f', data, 292, 100.0 + 20.0 * max(0.0, t - start))      # the distance along the stage
+        out.append((t, bytes(data)))
+    assert len(out[0][1]) == 328 + OVST5_TAIL.size
+    return out
+
+
+def _saved(tmp_path, packets, name='v5.ovcap.gz'):
+    path = tmp_path / name
+    with CaptureWriter(str(path), port=5300) as writer:
+        for t, data in packets:
+            writer.write(100.0 + t, ('127.0.0.1', 1), data)
+    return writer, [(t, d) for t, _a, d in read_capture(str(path))[1]]
+
+
+def test_ovst_v5_at_333_a_second_is_saved_at_60(tmp_path):
+    packets = _ovst5_stream()
+    writer, kept = _saved(tmp_path, packets)
+    rate = len(kept) / 20.0
+    assert 58.0 <= rate <= 62.0, rate
+    assert writer.thinned == len(packets) - len(kept)
+    assert kept[0][1] == packets[0][1] and kept[-1][1] == packets[-1][1]      # the first and the last
+    gaps = [b - a for (a, _), (b, _) in zip(kept, kept[1:])]
+    assert max(gaps) < 1 / 60 + 1 / 333 + 1e-6                                # no hole
+    clocks = [struct.unpack_from('<f', d, 324)[0] for _, d in kept]
+    # the clock's start: its first running packet is there
+    first_running = next(i for i, c in enumerate(clocks) if c > 0)
+    every = [struct.unpack_from('<f', d, 324)[0] for _, d in packets]
+    last_zero = max(i for i, c in enumerate(every) if c == 0.0)
+    assert clocks[first_running - 1] == 0.0 and kept[first_running][1] == packets[last_zero + 1][1]
+    # the stop at the finish is seen within THIN_FROZEN, on a packet kept for it
+    stopped = [i for i, (t, _) in enumerate(kept) if t >= 15.0 + 0.1 - 1e-9]
+    assert stopped and abs(kept[stopped[0]][0] - (15.0 + 0.1)) < 2 / 333
+
+
+def test_ovst_v5_keeps_every_change_of_session(tmp_path):
+    import copy
+    packets = _ovst5_stream(seconds=4.0, start=1.0, finish=10.0)
+    changed = copy.copy(packets)
+    # a restart at 2 s: the physics step goes back, the clock goes to 0
+    i = int(2.0 * 333)
+    from test_telemetry import _ovst5
+    for k in range(i, len(changed)):
+        changed[k] = (changed[k][0], _ovst5(clock=0.0, packet_id=10 + k - i))
+    j = int(3.0 * 333) + 1
+    car = bytearray(changed[j][1])
+    car[32:41] = b'other_car'
+    changed[j] = (changed[j][0], bytes(car))
+    _, kept = _saved(tmp_path, changed)
+    ids = [struct.unpack_from('<i', d, 328)[0] for _, d in kept]
+    saved = [d for _, d in kept]
+    assert changed[i][1] in saved                                       # the step going back (and the clock to 0)
+    assert changed[j][1] in saved and changed[j + 1][1] in saved        # the car's name changing, and back
+    assert ids == sorted(ids[:ids.index(10)]) + sorted(ids[ids.index(10):])
+
+
+def test_ovst_before_v5_and_v5_at_60_are_saved_as_they_come(tmp_path):
+    packets = _ovst5_stream(seconds=3.0, hz=60.0)
+    _, kept = _saved(tmp_path, packets)
+    assert len(kept) == len(packets)
+    v4 = [(t, d[:328]) for t, d in _ovst5_stream(seconds=3.0)]
+    v4 = [(t, d[:4] + b'\x04' + d[5:]) for t, d in v4]
+    _, kept = _saved(tmp_path, v4, 'v4.ovcap.gz')
+    assert len(kept) == len(v4)

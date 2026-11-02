@@ -65,6 +65,7 @@ class Gui:
         self.model = model
         self.device_manager = self.app.device_manager
         self.device = None
+        self.ffb_pending = {}       # FFB meter consumer -> highest level not yet handed over
         self.grab_input = False
         self.test = None
         self.linear_chart = None
@@ -509,6 +510,8 @@ class Gui:
             self.telemetry.stop()
             self.telemetry = None
         self.device = self.device_manager.get_device(device_id)
+        self.ffb_pending = {}
+        self.ui.safe_call(self.ui.reset_ffb_meter)
 
         if self.device is None or not self.device.is_ready():
             self.handbrake_axis = None
@@ -872,6 +875,11 @@ class Gui:
             self.ui.safe_call(self.refresh_telemetry_cars)
 
     def on_quit(self):
+        if self.test is not None:
+            try:
+                self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
+            except Exception:
+                logging.exception("restoring the wheel at quit")
         if self.telemetry_web is not None:
             self.telemetry_web.stop()
             self.telemetry_web = None
@@ -1858,14 +1866,40 @@ class Gui:
             wrange = max_range
         self.ui.set_range(wrange)
 
-    def read_ffbmeter(self):
-        level = self.device.get_peak_ffb_level()
-        if level is None:
-            return level
-        level = int(level)
-        if level > 0:
-            self.device.set_peak_ffb_level(0)
+    def ffb_consumer_start(self, consumer):
+        """A meter timer starts: forget what accumulated while it was off."""
+        self.ffb_pending[consumer] = 0
+
+    def read_ffbmeter(self, consumer='overlay'):
+        """The highest force level since this consumer last asked. One read
+        (which resets the driver's peak) serves every running consumer: the
+        level is folded into each one's pending maximum."""
+        if not self.device:
+            return None
+        try:
+            level = self.device.get_peak_ffb_level()
+            if level is None:
+                return None
+            level = int(level)
+            if level > 0:
+                self.device.set_peak_ffb_level(0)
+        except (OSError, ValueError):
+            return None
+        self.ffb_pending.setdefault(consumer, 0)
+        for key in self.ffb_pending:
+            self.ffb_pending[key] = max(self.ffb_pending[key], level)
+        level = self.ffb_pending[consumer]
+        self.ffb_pending[consumer] = 0
         return level
+
+    def read_ffb_tick_ms(self):
+        return self.device.get_ffb_tick_ms() if self.device else 2
+
+    def read_ffb_clips(self):
+        """The driver's clip counter, None if the wheel or driver has none."""
+        if not self.device:
+            return None
+        return self.device.get_ffb_clip_count()
 
     def process_events(self, events):
         for event in events:
@@ -1971,16 +2005,29 @@ class Gui:
             self.ui.safe_call(self.ui.quit)
 
     def start_test(self):
-        def test_callback(name = 'end'):
+        def test_callback(name = 'end', message = ''):
             if name == 'end':
                 self.ui.safe_call(self.end_test)
             elif name == 'running':
                 self.ui.safe_call(self.ui.show_test_running, self.test_run, 1)
-        self.test = Test(self.device, test_callback)
+            elif name == 'error':
+                self.ui.safe_call(self.abort_test, message)
+        self.test = Test(self.device, test_callback, {'range': self.model.get_range(),
+                'ff_gain': self.model.get_ff_gain(), 'autocenter': self.model.get_autocenter()})
         self.test_run = 0
         self.ui.switch_test_panel(self.test_run)
 
+    def abort_test(self, message = ''):
+        """A test that could not run or finish: say why and go back to the idle Test tab."""
+        self.test = None
+        self.test_run = None
+        self.ui.error_dialog(_('The wheel test could not be completed.'), message)
+        self.ui.switch_test_panel(None)
+
     def end_test(self):
+        if self.test_run in (1, 2) and not self.test.has_output_data():
+            self.abort_test(_('No wheel movement could be registered.'))
+            return
         if self.test_run == 0:
             self.minimum_level = self.test.get_minimum_level()
         elif self.test_run == 1:
