@@ -149,10 +149,12 @@ def test_the_gain_follows_the_combined_front_slip():
     assert all(x > y for x, y in zip(gs, gs[1:]))
     assert gs[0] > 0.99 and gs[3] == pytest.approx(math.exp(-(0.6 / fa.A) ** fa.Q), rel=1e-5)
     assert fa.lightness(fh6(slip_angle=(0.7, 0.7, 0, 0))) == fa.G_MIN          # exp(-1) is under the clamp
-    # The sign of the slip does not matter, the slip ratio counts (weighted more than the angle)
+    # The sign of the slip does not matter, the slip ratio counts (weighted by K against the angle's A)
     assert fa.lightness(fh6(slip_angle=(-0.5, -0.5, 0, 0))) == gs[2]
     assert fa.lightness(fh6(slip_angle=(0.3, 0.3, 0, 0), slip_ratio=(0.1, 0.1, 0, 0))) < gs[1]
-    assert fa.lightness(fh6(slip_ratio=(0.1, 0.1, 0, 0))) < fa.lightness(fh6(slip_angle=(0.1, 0.1, 0, 0)))
+    r, a = 0.5 * fa.K, 0.5 * fa.A
+    assert fa.lightness(fh6(slip_ratio=(r, r, 0, 0))) == pytest.approx(fa.lightness(fh6(slip_angle=(a, a, 0, 0))))
+    assert fa.lightness(fh6(slip_ratio=(0.3, 0.3, 0, 0))) < fa.lightness(fh6(slip_ratio=(0.1, 0.1, 0, 0)))
     # The mean of the two fronts; the rears do not count
     assert fa.lightness(fh6(slip_angle=(0.0, 0.0, 2.0, 2.0))) == 1.0
     one = fa.lightness(fh6(slip_angle=(0.6, 0.0, 0, 0)))
