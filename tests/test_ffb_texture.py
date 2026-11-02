@@ -565,6 +565,8 @@ def test_thermal_is_read_only_and_may_be_absent(tmp_path):
             return str(self.base / name)
     assert D(tmp_path).get_ffb_thermal() is None
     (tmp_path / 'ffb_thermal').write_text('37 0\n')
-    assert D(tmp_path).get_ffb_thermal() == (37, 0)
+    assert D(tmp_path).get_ffb_thermal() == (37, 0, 100)
+    (tmp_path / 'ffb_thermal').write_text('37 1 74\n')
+    assert D(tmp_path).get_ffb_thermal() == (37, 1, 74)
     (tmp_path / 'ffb_thermal').write_text('junk\n')
     assert D(tmp_path).get_ffb_thermal() is None
