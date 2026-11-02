@@ -66,7 +66,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .splits .stg { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 700;
   overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
 .splits .kv { font-size: 13px; flex: none; }
-.splits .kv b { font-weight: 600; } .splits .kv i { font-style: normal; color: var(--dim); font-size: 10.5px; letter-spacing: .06em; margin-right: 4px; }
+.splits .kv b { font-weight: 600; } .splits .kv small { font-size: inherit; color: var(--dim); } .splits .kv i { font-style: normal; color: var(--dim); font-size: 10.5px; letter-spacing: .06em; margin-right: 4px; }
 .splits .now { margin-left: auto; font-weight: 700; }
 .ribbon { display: flex; gap: 1.5px; height: 7px; margin-top: 3px; }
 .ribbon i { flex: 1 1 0; border-radius: 1.5px; background: var(--ls-none); min-width: 0; }
@@ -244,8 +244,8 @@ body.ap .demo { display: none; }
   <button class="splits" id="splits" aria-expanded="false" aria-controls="sheet">
     <div class="l1">
       <span class="stg" id="sp-stage">–</span>
-      <span class="kv num"><i>PB</i><b id="sp-pb">–</b></span>
-      <span class="kv num"><i>SoB</i><b id="sp-sob">–</b></span>
+      <span class="kv num"><i>Best</i><b id="sp-pb">–</b></span>
+      <span class="kv num"><i>SoB</i><b id="sp-sob">–</b><small id="sp-gain"></small></span>
       <span class="kv num now" id="sp-now">–</span>
     </div>
     <div class="ribbon" id="ribbon" aria-hidden="true"></div>
@@ -505,6 +505,7 @@ $("splits").addEventListener("click", () => {
 });
 function headerTexts() {
   $("sp-stage").textContent = ST.name; $("sp-pb").textContent = clock(LAST.time); $("sp-sob").textContent = clock(SOB);
+  $("sp-gain").textContent = SOB == null ? "" : " (" + signed(SOB - LAST.time) + ")";
   $("pb2").textContent = alone ? "–" : "Run " + cmp.n + " " + clock(cmp.time);
   $("dm-l").firstChild.textContent = alone ? "one run, " : "vs ";
   $("stage-sub").textContent = `${ST.car} · ${(L / 1000).toFixed(1)} km · ${P.length} ${pWord()}s`;

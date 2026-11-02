@@ -95,6 +95,9 @@ def test_the_page_and_its_headers(served):
     page = body.decode('utf-8')
     assert "navigator.wakeLock.request(\"screen\")" in page and 'visibilitychange' in page
     assert 'captureStream' in page and 'MediaRecorder' in page
+    # The compact splits row reads "Best 3:17.7 · SoB 3:14.5 (−3.2)": the label Best, the gain after the SoB
+    assert '<i>Best</i><b id="sp-pb">' in page and '<i>PB</i>' not in page and 'id="sp-gain"' in page
+    assert 'signed(-sp.gain)' in page
     for external in ('src="http', "src='http", 'href="http', '@import', 'url('):
         assert external not in page
     # The sub-tabs, the splits row and no inline style attributes (the CSP allows <style> by hash only)

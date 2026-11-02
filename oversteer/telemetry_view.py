@@ -182,6 +182,11 @@ def signed(delta):
     return '{}{:.1f}'.format('+' if r > 0 else '\u2212' if r < 0 else '\u00b1', abs(r))
 
 
+def sob_gain(gain):
+    """' (−3.2)': what the sum of best would save against the best, appended to the SoB; '' without it."""
+    return '' if gain is None else ' (\u2212{:.1f})'.format(gain)
+
+
 def splits_lines(found):
     """coach.splits() as (summary, rows): the summary line ('Afon Bidno · Best 3:17.7 · SoB 3:14.5 (−3.2)')
     and one (name, last, best, delta, tone) per split, tone 'gold' (the last run set the best), 'good'
@@ -190,8 +195,7 @@ def splits_lines(found):
         return None, []
     summary = '{}  ·  {} {}  ·  {} {}'.format(found['name'].split(' - ')[0], _("Best"), clock(found['best']),
                                               _("SoB"), clock(found['possible']))
-    if found.get('gain') is not None:
-        summary += ' (\u2212{:.1f})'.format(found['gain'])
+    summary += sob_gain(found.get('gain'))
     rows = []
     for r in found['splits']:
         tone = '' if r['last'] is None else 'gold' if r['gold'] else 'good' if r['delta'] <= 0.05 else 'bad'
