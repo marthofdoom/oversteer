@@ -2,9 +2,9 @@
 
 ## Build, run, test
 - Run from source: `scripts/run-dev.sh [--gui]` (meson build dir `build/`, then `python3 build/bin/oversteer`).
-- Tests: `python3 -m pytest -q --ignore=tests/test_proxy.py` (about 2 minutes). CI runs the same with `-k "not uinput"`.
-- Release steps: `RELEASING.md`; version lives in `meson.build`, `data/io.github.berarma.Oversteer.appdata.xml.in`
-  and `CHANGELOG.md`.
+- Tests: `python3 -m pytest -q --ignore=tests/test_proxy.py` (about 2 minutes). CI adds `-k "not uinput"` and runs under xvfb.
+- Release steps: `RELEASING.md`; the version lives in `meson.build`, `data/io.github.berarma.Oversteer.appdata.xml.in`,
+  `CHANGELOG.md` and the oversteer module's `tag:` line in `flatpak/io.github.berarma.Oversteer.yaml`.
 
 ## Layout
 - `oversteer/` Python package. GTK UI: `gtk_ui.py`, `gtk_handlers.py`, `gtk_live_view.py`, `gtk_run_view.py`,
@@ -15,7 +15,7 @@
 - Coaching/analysis: `coach*.py`, `coaching_matrix.py`, `potential.py`, `run_analysis.py`, `shift_learner.py`,
   `tuning.py`, `car_data.py`, `stage_tables.py`, `rbr_*.py` (Richard Burns Rally).
 - `oversteer/proxy/` FFB/input proxy daemon (virtual uinput device in front of the wheel).
-- `data/telemetry/` shipped tables, `web/` front end, `oversteer-shm-bridge.c` (Wine shared-memory bridge).
+- `data/telemetry/` shipped tables; `data/telemetry/web/` front end; `data/telemetry/oversteer-shm-bridge.c` (Wine shared-memory bridge).
 - `flatpak/` manifest, `scripts/` dev helpers, `docs/`, `research/`, `tests/` (pytest, `conftest.py` isolates
   RBR installs and learnt tables).
 
@@ -31,5 +31,5 @@
 - Never run `tests/test_proxy.py` or restart the proxy while a game is running; never set `OVERSTEER_TEST_UINPUT`
   (virtual-device churn has crashed games).
 - Never open the live telemetry DB for writing in experiments: read-only backup copies only
-  (`telemetry_store` has a backup function and a `mode=ro` opener).
+  (`telemetry_store._backup(db, dest)` for the copy, `open_reader(path)` for a `mode=ro` connection).
 - Do not `pkill`; kill only your own PIDs. No `git stash`/`reset` in a shared tree; use worktrees.

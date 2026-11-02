@@ -16,10 +16,15 @@ against the wheel and the matching new-lg4ff release exists.
    CLI parsing and udev quoting. Fix or consciously waive every finding.
 5. Bump `version` in `meson.build`, add a `<release>` entry to
    `data/io.github.berarma.Oversteer.appdata.xml.in`, add a section to
-   `CHANGELOG.md`.
+   `CHANGELOG.md`, and set the oversteer module's `tag:` in
+   `flatpak/io.github.berarma.Oversteer.yaml` to the new tag.
 6. Commit, tag `vX.Y.Z` (annotated), push `master` and the tag.
 7. `gh release create vX.Y.Z --notes-file <notes>`; state which new-lg4ff
    version the release expects.
 
 Versioning: 0.x while Windows parity is incomplete; 1.0.0 when
 `docs/g29-windows-parity.md` has no red rows for the G29.
+
+CI: pushing a `v*` tag runs the tests and then builds and attaches the Flatpak. Pushes to `master` that touch
+`flatpak/` (and the "release" workflow run by hand from the Actions tab) build the bundle without publishing, which
+warms the dependency cache the tag build then reuses.

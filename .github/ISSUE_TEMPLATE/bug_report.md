@@ -4,7 +4,7 @@ about: Something does not work as expected
 labels: bug
 ---
 
-**Oversteer version** (Help > About, or `--version`; Flatpak or source):
+**Oversteer version** (main menu button > "About Oversteer", or `oversteer --version`; Flatpak: `flatpak run io.github.berarma.Oversteer --version`; Flatpak or source):
 
 **Distro and kernel** (`uname -r`):
 
@@ -18,4 +18,4 @@ labels: bug
 
 **Expected / actual behaviour:**
 
-**Logs** (run `oversteer --gui` from a terminal; attach output, and the diagnostics report if it is about telemetry):
+**Logs** (run `oversteer --gui` from a terminal; Flatpak: `flatpak run io.github.berarma.Oversteer --gui`; attach the output, and a diagnostics bundle (`--diagnostics-bundle PATH`, or Settings > Diagnostics) if it is about a device or telemetry):
