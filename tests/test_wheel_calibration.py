@@ -899,20 +899,105 @@ def test_a_crash_record_belongs_to_one_wheel():
     assert wcal.instance_key(SimpleNamespace(usb_id='046d:c24f', serial='ABC', dev_path='x')) == '046d:c24f@ABC'
 
 
-def test_no_calibration_through_the_combined_device(tmp_path):
-    wheel = _Wheel()
-    wheel.dev_name = '/dev/input/event7'
-    wheel._input_node = lambda: '/dev/input/event21'             # the proxy's virtual device
-    gui = _gui(tmp_path, wheel)
-    gui.start_calibration()
-    assert gui.calibration is None and not any(c[0] == 'confirm' for c in gui.ui.calls)
+NODE = '/dev/input/event21'                                      # the proxy's virtual device
+REAL = '/dev/input/event7'
+
+
+def _proxied_io(monkeypatch):
+    """A DeviceIO behind a proxy whose status is faked: nothing is opened."""
+    from oversteer.proxy.manager import ProxyManager
+    status = {'proxies': [{'id': 'combined-wheel', 'devnode': NODE, 'sources': {'wheel': REAL}}]}
+    monkeypatch.setattr(ProxyManager, 'read_status', staticmethod(lambda *a, **k: status))
     io = wcal.DeviceIO.__new__(wcal.DeviceIO)
-    io.device = SimpleNamespace(device_file=lambda n: os.devnull, _input_node=wheel._input_node,
-                                dev_name=wheel.dev_name)
-    io._force_fd = None
-    with pytest.raises(PermissionError):
-        io.open()
-    assert io._force_fd is None                                  # refused before anything was opened
+    io.device = SimpleNamespace(dev_name=REAL)
+    return io, status
+
+
+def test_the_active_combined_device_is_the_one_calibrated(monkeypatch):
+    io, status = _proxied_io(monkeypatch)
+    assert io._proxy_id_of(NODE) == 'combined-wheel'
+    assert io._proxy_id_of('/dev/input/event30') is None
+    # its own range, whatever the mapping did: no inversion or rescale is undone
+    io._abs_min, io._abs_max = 0, 1000
+    assert io._from_proxy(0) == 0 and io._from_proxy(1000) == 65535
+    io._abs_min, io._abs_max = -100, 100
+    assert io._from_proxy(-100) == 0 and io._from_proxy(100) == 65535
+
+
+def test_an_inverted_active_axis_is_calibrated_with_the_direction_learnt():
+    sim = SimWheel()
+    raw = sim.raw
+    sim.raw = lambda: 65535 - raw()                              # the axis (and its reports) read the other way
+    cal = Calibration(sim)
+    cal.run()
+    assert cal.sign_known and cal.sign == 1.0                   # the sim's motor is -1 when read the right way round
+    assert_put_back(sim)
+
+
+def test_stored_corrections_are_kept_per_active_device():
+    direct = SimpleNamespace(usb_id='046d:c24f', dev_name=REAL, _input_node=lambda: REAL, dev_path='x/1-3:1.0/h')
+    proxied = SimpleNamespace(usb_id='046d:c24f', dev_name=REAL, _input_node=lambda: NODE, dev_path='x/1-3:1.0/h')
+    assert wcal.wheel_key(direct) == '046d:c24f'
+    assert wcal.wheel_key(proxied) == '046d:c24f+combined'
+    # the crash record is the physical wheel's, found whichever device is active
+    assert wcal.instance_key(direct) == wcal.instance_key(proxied)
+
+
+def test_a_restarted_proxy_is_noticed(monkeypatch, tmp_path):
+    io, status = _proxied_io(monkeypatch)
+    node = tmp_path / 'event21'
+    node.write_text('')
+    io._proxy_id, io._node, io._ino, io._lost = 'combined-wheel', str(node), os.stat(node).st_ino, 0
+    status['proxies'][0]['devnode'] = str(node)
+    io._next_check = 0.0
+    io._check_proxy()                                           # fine
+    io._next_check = 0.0
+    node.unlink()
+    node.write_text('')                                         # a new node under the same name
+    while os.stat(node).st_ino == io._ino:                      # (a freed inode can be handed out again)
+        node.unlink()
+        other = tmp_path / 'filler'
+        other.write_text('')
+        node.write_text('')
+    with pytest.raises(wcal.ProxyLost):
+        io._check_proxy()
+    io._ino = os.stat(node).st_ino
+    io._next_check = 0.0
+    node.unlink()                                               # gone
+    with pytest.raises(wcal.ProxyLost):
+        io._check_proxy()
+
+
+def test_a_proxy_that_stops_listing_the_wheel_is_noticed(monkeypatch, tmp_path):
+    io, status = _proxied_io(monkeypatch)
+    node = tmp_path / 'event21'
+    node.write_text('')
+    status['proxies'][0]['devnode'] = str(node)
+    io._proxy_id, io._node, io._ino, io._lost = 'combined-wheel', str(node), os.stat(node).st_ino, 0
+    io._next_check = 0.0
+    io._check_proxy()
+    status['proxies'].clear()
+    io._next_check = 0.0
+    io._check_proxy()                                           # one missed look is allowed
+    io._next_check = 0.0
+    with pytest.raises(wcal.ProxyLost):
+        io._check_proxy()
+
+
+def test_a_proxy_lost_mid_run_stops_the_run_with_the_forces_zeroed(monkeypatch):
+    class LosingWheel(SimWheel):
+        def poll(self):
+            if self.t > 3.0:
+                raise wcal.ProxyLost('the combined device restarted')
+            return super().poll()
+
+    sim = LosingWheel()
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'proxy'
+    assert sim.max_abs_theta < cal.lock - Calibration.LOCK_MARGIN_DEG
+    assert_put_back(sim)
 
 
 def test_the_owner_hook_is_released(monkeypatch):
