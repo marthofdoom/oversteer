@@ -2406,7 +2406,8 @@ class Gui:
             self.ui.safe_call(self.ui.set_calibration_progress, fraction, text)
 
         cal = wcal.Calibration(wcal.DeviceIO(device), progress, pending_path=self._wheel_pending(),
-                               pending_key=wcal.instance_key(device))
+                               pending_key=wcal.instance_key(device),
+                               record_dir=os.path.join(self.config_path, 'calibration-runs'))
         cal.store_key = wcal.wheel_key(device)          # the active device when it started: where it is kept
         self.calibration = cal
         self.refresh_wheel_correction()

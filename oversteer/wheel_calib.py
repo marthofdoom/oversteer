@@ -41,7 +41,8 @@ SG_HALF = 10                 # Savitzky-Golay half window in samples (21 ms)...
 SG_HALF_SLOW = 20            # ...41 ms when that leaves the curve uncertain: a heavy wheel's small accelerations
                              # drown in the encoder's step, and change slowly enough for the longer window
 MOVING_DEG_S = 30.0          # a sample is used when the wheel turned faster than this throughout its window
-LATENCIES_S = tuple(i / 1000 for i in range(0, 41, 2))   # latency candidates, refined to 1 ms around the best
+LATENCIES_S = tuple(i / 1000 for i in range(0, 101, 5))   # latency candidates (a proxy hop adds to the driver's),
+                                                          # refined to 1 ms around the best
 DEADBAND_FLOOR = 0.02        # below 2 % of the full-scale torque the motor counts as giving nothing
 MIN_R2 = 0.3                 # a fit explaining less of the measured acceleration than this is not trusted (the
                              # rest is mostly the encoder's step, large for a heavy wheel)...
@@ -75,6 +76,26 @@ class Recording:
     def position(self, t, deg):
         self.pos_t.append(t)
         self.pos.append(deg)
+
+    FIELDS = ('cmd_t', 'cmd', 'pos_t', 'pos', 'breakaway', 'onsets', 'raw_steps', 'counts_per_deg')
+
+    def to_dict(self):
+        """Plain lists and numbers (JSON), times to the microsecond: everything analyse() reads."""
+        return {'cmd_t': [round(float(t), 6) for t in self.cmd_t], 'cmd': [round(float(w), 5) for w in self.cmd],
+                'pos_t': [round(float(t), 6) for t in self.pos_t], 'pos': [round(float(p), 4) for p in self.pos],
+                'breakaway': [list(b) for b in self.breakaway], 'onsets': [list(o) for o in self.onsets],
+                'raw_steps': list(self.raw_steps), 'counts_per_deg': self.counts_per_deg}
+
+    @classmethod
+    def from_dict(cls, d):
+        rec = cls()
+        rec.cmd_t, rec.cmd = list(d['cmd_t']), list(d['cmd'])
+        rec.pos_t, rec.pos = list(d['pos_t']), list(d['pos'])
+        rec.breakaway = [tuple(b) for b in d.get('breakaway', [])]
+        rec.onsets = [tuple(o) for o in d.get('onsets', [])]
+        rec.raw_steps = list(d.get('raw_steps', []))
+        rec.counts_per_deg = d.get('counts_per_deg')
+        return rec
 
 
 class FitError(Exception):
@@ -224,7 +245,7 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, half=SG_HALF):
         return min(((solve(l)[0], l) for l in candidates), key=lambda e: e[0])[1]
 
     lat = best_of(latencies)
-    lat = best_of([max(0.0, lat + d / 1000) for d in (-1, 0, 1)])
+    lat = best_of([max(0.0, lat + d / 1000) for d in range(-4, 5)])
     ss, p, x = solve(lat)
     # One pass without the outliers (a stray report, a moment the model doesn't cover), then refit
     res = accel - x @ p

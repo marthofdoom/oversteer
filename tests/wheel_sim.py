@@ -21,7 +21,8 @@ class SimWheel:
     def __init__(self, inertia=1 / 5000.0, coulomb=0.035, static=0.05, static_wobble=0.25, damping=4e-5,
                  dead_zone=0.06, curve=3.0, latency=0.012, encoder_deg=360 / 4096, ext_sign=-1,
                  max_range=900, range=540, gain=110, autocenter=30, start_deg=0.0, game_spring=0.002,
-                 stop_deg=450.0, dt=0.0005, tick=0.002, report=0.001, read_delay=0.0, read_batch=0.0):
+                 stop_deg=450.0, dt=0.0005, tick=0.002, report=0.001, read_delay=0.0, read_batch=0.0,
+                 rim_zone=None):
         self.J = inertia                    # full scale per deg/s^2
         self.coulomb = coulomb              # full scale
         self.static = static
@@ -42,6 +43,7 @@ class SimWheel:
         self.tick = tick
         self.tick_s = tick
         self.report = report
+        self.rim_zone = rim_zone            # (degrees, extra friction): heavier past that angle on both sides
         self.read_delay = read_delay        # extra delay of every position that reaches the application (a proxy hop)
         self.read_batch = read_batch        # ...and they arrive in batches this far apart (0: as they come)
         self._pos_hist = []                 # (time it reaches the application, raw) for position_now
@@ -106,8 +108,11 @@ class SimWheel:
             v = (1 - math.exp(-self.curve * v)) / (1 - math.exp(-self.curve))
         return math.copysign(v, u)
 
+    def _rim(self, theta):
+        return self.rim_zone[1] if self.rim_zone and abs(theta) > self.rim_zone[0] else 0.0
+
     def static_at(self, theta):
-        return self.static * (1 + self.static_wobble * math.sin(math.radians(theta) * 3))
+        return self.static * (1 + self.static_wobble * math.sin(math.radians(theta) * 3)) + self._rim(theta)
 
     def _driver_tick(self):
         """What the driver sends this tick: game force under game_ffb_level, ext_force under gain and cap,
@@ -167,9 +172,9 @@ class SimWheel:
                 self.omega = 0.0
             else:
                 self.stuck = False
-                self.omega += (tau - math.copysign(self.coulomb, tau)) / J * dt
+                self.omega += (tau - math.copysign(self.coulomb + self._rim(self.theta), tau)) / J * dt
         else:
-            fric = math.copysign(self.coulomb, self.omega) if self.omega else math.copysign(self.coulomb, tau)
+            fric = math.copysign(self.coulomb + self._rim(self.theta), self.omega if self.omega else tau)
             new = self.omega + (tau - fric - b * self.omega) / J * dt
             if new * self.omega < 0 or new == 0:
                 if abs(tau) <= self.static_at(self.theta):
