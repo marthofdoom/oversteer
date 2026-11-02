@@ -1022,6 +1022,7 @@ def test_the_correction_follows_the_active_device(tmp_path):
     wheel._input_node = lambda: REAL
     gui = _gui(tmp_path, wheel)
     calls = []
+    gui._wheel_entry = lambda device=None: None
     gui.apply_wheel_correction = lambda: (calls.append('apply'), setattr(gui, 'correction_key', wcal.wheel_key(wheel)))
     gui.refresh_wheel_correction = lambda: calls.append('refresh')
     gui.correction_key = wcal.wheel_key(wheel)
@@ -1030,12 +1031,23 @@ def test_the_correction_follows_the_active_device(tmp_path):
     wheel._input_node = lambda: NODE                             # the proxy takes the wheel
     gui.check_active_device()
     assert calls == ['apply', 'refresh']
+    assert wheel.attrs['ffb_lut'] == 'identity' and wheel.attrs['ffb_deadband'] == '0'   # no entry: identity
     gui.check_active_device()
     assert calls == ['apply', 'refresh']                         # once
-    gui.calibration = object()                                   # not while a run is going
-    wheel._input_node = lambda: REAL
+    wheel.attrs.clear()
+    wheel._input_node = lambda: REAL                             # the proxy goes; an exclusive holder has it
+    gui._wheel_held = lambda: ('test', True)
     gui.check_active_device()
-    assert calls == ['apply', 'refresh']
+    assert calls == ['apply', 'refresh'] and wheel.attrs == {}   # nothing written, tried again later
+    gui._wheel_held = lambda: ('countersteer-ffb', False)        # a shared one does not stop it
+    gui.check_active_device()
+    assert calls == ['apply', 'refresh', 'apply', 'refresh'] and wheel.attrs['ffb_lut'] == 'identity'
+    del calls[:]
+    gui._wheel_held = lambda: None
+    gui.calibration = object()                                   # not while a run is going
+    wheel._input_node = lambda: NODE
+    gui.check_active_device()
+    assert calls == []
 
 
 def test_the_owner_hook_is_released(monkeypatch):

@@ -345,9 +345,20 @@ class Gui:
         device's): when the proxy comes or goes, the other entry's correction is put on."""
         if self.calibration is not None or self.device is None or not self._wheel_supported():
             return
-        if wcal.wheel_key(self.device) != getattr(self, 'correction_key', None):
-            self.apply_wheel_correction()
-            self.refresh_wheel_correction()
+        if wcal.wheel_key(self.device) == getattr(self, 'correction_key', None):
+            return
+        held = self._wheel_held()
+        if held is not None and held[1]:
+            return              # an exclusive holder keeps the forces as they are: looked at again next tick
+        had_key = getattr(self, 'correction_key', None) is not None
+        self.apply_wheel_correction()
+        if had_key and self._wheel_entry() is None:
+            # no entry for this device: identity and 0, not the other device's correction
+            try:
+                wcal.apply_correction(self.device.write_attr, {})
+            except Exception as e:
+                logging.warning("wheel correction: %s", e)
+        self.refresh_wheel_correction()
 
     def _confirm_wine_running(self):
         """True when it is fine to re-create the combined device: no Wine
