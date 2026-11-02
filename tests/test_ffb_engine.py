@@ -208,8 +208,8 @@ def test_other_games_are_model_add_on_or_none():
     assert c.verdict(t)[:2] == ('model', 'rbr-raw')        # no uploads measured yet
     c.raw_rate = 810.0
     assert c.verdict(t)[:2] == ('replace', 'ok')
-    assert classify(stream(1.5, hz=60.0, game='forza-fh', v5=False))[1][:2] == ('add-on', 'no-forces')
-    assert classify(stream(1.5, hz=240.0, game='forza-fh', v5=False))[1][:2] == ('model', 'fh-model')
+    assert classify(stream(1.5, hz=60.0, game='forza-fh', v5=False))[1][:2] == ('add-on', 'fh-addon')
+    assert classify(stream(1.5, hz=20.0, game='forza-fh', v5=False))[1][:2] == ('add-on', 'fh-rate')
     assert classify(stream(1.5, hz=60.0, game='dirt', v5=False))[1][:2] == ('add-on', 'no-forces')
     c, _ = classify(stream(1.5))
     assert c.verdict(1.5 + 1.1).state == 'none'      # a second of silence

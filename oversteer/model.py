@@ -72,6 +72,7 @@ class Model:
         'countersteer_texture_impact': None,
         'countersteer_texture_lock': None,
         'countersteer_linearity': None,
+        'countersteer_lightness': None,
     }
 
     types = {
@@ -115,6 +116,7 @@ class Model:
         'countersteer_texture_impact': 'boolean',
         'countersteer_texture_lock': 'boolean',
         'countersteer_linearity': 'integer',
+        'countersteer_lightness': 'integer',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -213,6 +215,7 @@ class Model:
 
     @classmethod
     def _texture_defaults(cls, supported):
+        from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_texture import LEVEL
         data = {'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
@@ -220,6 +223,8 @@ class Model:
             data['countersteer_texture_' + part] = True if supported else None
         # Richard Burns Rally: how much of NGP's force curve Countersteer undoes (ffb_rbr)
         data['countersteer_linearity'] = LINEARITY if supported else None
+        # Forza Horizon: how much of the add-on's lightening is played (ffb_addon)
+        data['countersteer_lightness'] = int(round(STRENGTH * 100)) if supported else None
         return data
 
     def pedal_bit(self, name):
@@ -381,8 +386,9 @@ class Model:
                 data[key] = value
         if data['countersteer_texture'] is not None:
             data['countersteer_texture'] = min(max(data['countersteer_texture'], 0), 100)
-        if data['countersteer_linearity'] is not None:
-            data['countersteer_linearity'] = min(max(data['countersteer_linearity'], 0), 100)
+        for key in ('countersteer_linearity', 'countersteer_lightness'):
+            if data[key] is not None:
+                data[key] = min(max(data[key], 0), 100)
 
         self.data = data
         self.save_reference_values()
@@ -664,6 +670,17 @@ class Model:
         value = self.data.get('countersteer_linearity')
         return LINEARITY if value is None else value
 
+    def set_countersteer_lightness(self, value):
+        """Forza Horizon: "Understeer lightness", how much of the add-on's lightening is played, 0..100 %."""
+        value = min(max(int(value), 0), 100)
+        if self.set_if_changed('countersteer_lightness', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_lightness()
+
+    def get_countersteer_lightness(self):
+        from .ffb_addon import STRENGTH
+        value = self.data.get('countersteer_lightness')
+        return int(round(STRENGTH * 100)) if value is None else value
+
     def get_countersteer_texture(self):
         """(level 0..1, {part: on}) for the engine."""
         from .ffb_texture import LEVEL
@@ -916,6 +933,7 @@ class Model:
         self.ui.set_countersteer_texture(data['countersteer_texture'],
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])
+        self.ui.set_countersteer_lightness(data['countersteer_lightness'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()

@@ -16,10 +16,11 @@ Three parts:
   the Countersteer mod's CSB1 (BeamNGForceSource: started when BeamNG's
   OutGauge is heard with a wheel set, kept while OutGauge or CSB1 is; CSB1
   alone cannot start it, OutGauge must be on): 'replace' at CSB_RATE packets per second of game time
-  with its clock moving and a rack force, grey otherwise. 'model' (amber)
-  also: Forza Horizon at 200 a second or more, whose force could be
-  modelled; nothing is played for it yet. 'add-on' (grey): every other game heard,
-  and AC games that fail a 'replace' rule: the game keeps its own force.
+  with its clock moving and a rack force, grey otherwise. 'add-on' (grey): every other game heard, and AC games that fail a
+  'replace' rule: the game keeps its own force. Forza Horizon is 'add-on'
+  too, with the reason 'fh-addon' (amber) where Countersteer adds to the
+  game's force (ForzaLightness below) and an fh-* reason (grey) where it
+  cannot.
   'none': no telemetry. Measured live over a sliding second, not taken
   from a list: Forza's rate follows its frame rate, and ACC or AC go
   green only if they really send the forces.
@@ -50,6 +51,14 @@ Three parts:
   the mod, fitted to the game's own force like RackForce, with a soft lock.
   Both are read each pass (FAST_POLL, 1 ms) while they may play, not per
   telemetry sample: the telemetry only names the game and the car.
+- ForzaLightness (ffb_addon): Forza Horizon keeps its own force (its
+  game_ffb_level stays 100, never lowered) and ext_force takes a share of
+  the game's constant force off as the front tyres run out of grip: the
+  wheel gets g x the game's force, g from the front slip. Read each pass
+  like RBR (the game's uploads, not the telemetry's ~60 a second, set the
+  write rate); stops at once (a fade of ext_force) on stale raw, a low
+  upload rate, two constant effects, app_gain on, or a constant force that
+  is not the steering force (Forza on the spring/damper only).
 - Texture (ffb_texture): small vibrations from the same samples (road,
   landings, front lock), added on top of RackForce's force before the
   clamp and the fade gain, very low by default. ACR only for now.
@@ -66,6 +75,7 @@ import time
 from locale import gettext as _
 
 from . import wheel_owner
+from .ffb_addon import ForzaLightness
 from .ffb_rbr import RbrForce
 from .ffb_sources import BeamNGForceSource
 from .ffb_texture import Texture
@@ -83,7 +93,9 @@ HOLD_RATE = 200.0
 HOLD_GAP = 0.050
 STALL = 0.050                            # s without a sample while replacing: stop
 NONE_AFTER = 1.0                         # s without a sample: no telemetry
-MODEL_RATE = 200.0                       # packets/s for a model-based force (Forza Horizon)
+FH_RATE = 30.0                           # Forza Horizon packets/s for the add-on (it sends ~60, frame-locked)
+FH_RAW_RATE = 30.0                       # the game's constant uploads a second for the add-on ...
+FH_RAW_HOLD = 20.0                       # ... and to keep it
 RBR_RAW_RATE = 200.0                     # the game's constant uploads a second for RBR to go green (NGP: ~810)
 RBR_HOLD_RATE = 150.0                    # ... and to stay
 CSB_RATE = 200.0                         # BeamNG: CSB1 packets per second of the game's clock to go green (the mod: 500)
@@ -209,8 +221,11 @@ class SupportClassifier:
             if self.raw_rate is None or self.raw_rate < (RBR_HOLD_RATE if holding else RBR_RAW_RATE):
                 return Verdict('model', 'rbr-raw', game, rate, gap_ms)
             return Verdict('replace', 'ok', game, rate, gap_ms)
-        if game == 'forza-fh' and rate >= MODEL_RATE:
-            return Verdict('model', 'fh-model', game, rate, gap_ms)
+        if game == 'forza-fh':
+            # The add-on's own checks (the game's constant force, its rate, the slip channels) are the engine's
+            if rate < FH_RATE:
+                return Verdict('add-on', 'fh-rate', game, rate, gap_ms)
+            return Verdict('add-on', 'fh-addon', game, rate, gap_ms)
         return Verdict('add-on', 'no-forces', game, rate, gap_ms)
 
     def _ac(self, game, rate, gap, gap_ms, holding):
@@ -807,6 +822,9 @@ REGAINS = 1.0                            # s between reads of app_gain while RBR
 RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
 CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time at most (one per physics step) ...
 CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ahead is another vehicle's
+FH_STALL = 0.1                           # s without a Forza sample while adding: stop (its gain cannot follow)
+FH_REARM = 0.3                           # s after a release before the add-on starts again (the game is never
+                                         # muted, so no crossfade to protect: only no flapping)
 
 
 class FfbEngine:
@@ -846,8 +864,13 @@ class FfbEngine:
         self.model = RackForce()         # ACR (and AC, ACC): from the front tyres' Mz
         self.rbr = RbrForce()            # Richard Burns Rally: the game's own force, NGP's curve undone
         self.beamng = BeamNGRack()       # BeamNG: the mod's rack force
+        self.addon = ForzaLightness()    # Forza Horizon: lighter as the front tyres run out of grip
+        self._lightness_req = None       # its strength (0..1) from the GUI
+        self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
+        self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
         self.texture = Texture()
-        self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng' (each pass)
+        self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng', 'forza'
+                                         # (each pass)
         self._played_mode = None         # the mode of the force playing
         self._mode_at = None             # when the mode's game was last heard
         self._linearity_req = None       # RBR's linearity from the GUI
@@ -923,6 +946,11 @@ class FfbEngine:
     def set_linearity(self, value):
         """RBR: how much of NGP's curve to undo, 0 (the game's curve) .. 100 (linear); ffb_rbr."""
         self._linearity_req = value
+        self._wake.set()
+
+    def set_lightness(self, value):
+        """Forza Horizon: "Understeer lightness", 0..100 % of the drop the front slip asks for; ffb_addon."""
+        self._lightness_req = value
         self._wake.set()
 
     def set_device(self, path):
@@ -1005,17 +1033,22 @@ class FfbEngine:
             self._rbr_tick(now)
         elif self._mode == 'beamng':
             self._beamng_tick(now)
+        elif self._mode == 'forza':
+            self._forza_tick(now)
 
     def _fast(self):
-        """RBR or BeamNG playing or about to: their force is read each FAST_POLL, not per telemetry sample."""
+        """RBR, BeamNG or Forza's add-on playing or about to: their force is read each FAST_POLL, not per telemetry sample."""
         heard = self._mode_at is not None and self._clock() - self._mode_at <= NONE_AFTER
-        return (self._mode in ('rbr', 'beamng') and self._enabled and self._available and not self._broken
+        return (self._mode in ('rbr', 'beamng', 'forza') and self._enabled and self._available and not self._broken
                 and self._path is not None and (heard or self._phase != 'idle'))
 
     def _requests(self, now):
         linearity = self._linearity_req
         if linearity is not None and linearity != self.rbr.linearity:
             self.rbr.set_linearity(linearity)
+        lightness = self._lightness_req
+        if lightness is not None and lightness / 100.0 != self.addon.strength:
+            self.addon.set_strength(lightness / 100.0)
         texture = self._texture_req
         if texture is not None and texture[0] != self._texture_seen:
             self._texture_seen = texture[0]
@@ -1035,6 +1068,8 @@ class FfbEngine:
             self.raw_rate = self.classifier.raw_rate = self._rbr_level = None
             self._rbr_new_at = self._rbr_sample = self._gains_at = None
             self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
+            self.addon.reset()
+            self._fh_level = self._fh_fresh = None
             self.classifier.has_game_ffb_raw = False
             if path is not None:
                 self._driver = self._driver_type(path)
@@ -1097,6 +1132,8 @@ class FfbEngine:
         self._mode = self._mode_of(sample.game, t)
         self._mode_at = t
         if self._mode != 'acr':
+            if self._mode == 'forza':
+                self.addon.feed(t, sample, self._fh_fresh)
             if self._mode == 'rbr':
                 last = self._rbr_sample
                 if last is not None and (sample.stage != last.stage or (
@@ -1173,6 +1210,8 @@ class FfbEngine:
     def _mode_of(self, game, t):
         if game == 'rbr':
             return 'rbr'
+        if game == 'forza-fh':
+            return 'forza'
         if game == 'beamng':
             self._beamng_at = t
             return 'beamng'
@@ -1181,7 +1220,7 @@ class FfbEngine:
         return 'acr'
 
     def _model(self):
-        return self.rbr if self._mode == 'rbr' else self.beamng if self._mode == 'beamng' else self.model
+        return {'rbr': self.rbr, 'beamng': self.beamng, 'forza': self.addon}.get(self._mode, self.model)
 
     def _sources(self, now):
         """BeamNGForceSource runs while there is a wheel and BeamNG was heard within NONE_AFTER: started by its
@@ -1218,8 +1257,10 @@ class FfbEngine:
     def _decide(self, now, playing, want, reason):
         if playing and not want:
             self._fade_out(now, 'off' if not self._enabled else reason)
-        elif self._phase == 'idle' and want and (self._released_at is None or now - self._released_at >= REARM):
-            self._activate(now)
+        elif self._phase == 'idle' and want:
+            rearm = FH_REARM if self._mode == 'forza' else REARM
+            if self._released_at is None or now - self._released_at >= rearm:
+                self._activate(now)
 
     def _write_due(self, now, new):
         """RBR and BeamNG write on a new value (kept pending if it came within MIN_WRITE of the last write), every
@@ -1306,6 +1347,57 @@ class FfbEngine:
                 self._out(now, self.beamng.force(s) + self.beamng.softlock(s) + self._texture_for('beamng', now))
         self._publish(now)
 
+    def _forza_tick(self, now):
+        """Forza Horizon's add-on: the game's constant force read each pass, ext_force = (g - 1) x it written on
+        each new upload (and as g moves); the game's own level never touched."""
+        level, new = self._raw(now)
+        playing = self._phase in ('in', 'on')
+        self._regains(now)
+        self._fh_fresh = level
+        if level is not None:
+            self._fh_level = level
+        addon = self.addon
+        g = addon.gain(now)
+        v = self._verdict = self._forza_verdict(now, level, playing)
+        stalled = self._last_t is None or now - self._last_t > FH_STALL
+        want = (self._enabled and self._available and v.reason == 'fh-addon' and addon.ready
+                and level is not None and not stalled)
+        self._decide(now, playing, want, 'stall' if stalled else 'raw' if level is None else 'state')
+        if self._phase != 'idle' and self._played_mode == 'forza':
+            value = addon.force(self._fh_level or 0, g)
+            if self._write_due(now, new or value != self._last_value):
+                self._out(now, value)
+        self._publish(now)
+
+    def _forza_verdict(self, now, level, holding):
+        v = self.classifier.verdict(now)
+        if v.reason != 'fh-addon':
+            return v
+
+        def no(reason):
+            return Verdict('add-on', reason, v.game, v.rate, v.gap_ms)
+        addon = self.addon
+        if not self.classifier.has_game_ffb_raw:
+            return no('old-driver')
+        if self._app_gain:
+            # The driver scales the game's force by its FF_GAIN and not ours: (g - 1) x raw could even reverse it
+            return no('fh-app-gain')
+        if addon.no_slip(now):
+            return no('fh-no-slip')
+        if self._raw_id_at is not None and now - self._raw_id_at < RAW_TWO_EFFECTS:
+            return no('fh-two-effects')
+        rate = self.raw_rate
+        if self._raw_count is None or rate is None or rate < 1.0:
+            # Driving with no constant force from the game: it drives the wheel through the spring and damper
+            return no('fh-no-constant' if addon.moving(now) else 'drive')
+        if rate < (FH_RAW_HOLD if holding else FH_RAW_RATE):
+            return no('fh-raw-rate')
+        if addon.refused:
+            return no('fh-' + addon.refused)
+        if level is None:
+            return no('fh-raw-stale')
+        return v
+
     @staticmethod
     def _csb_restarted(last, sample):
         if last is None or last.packet_id is None or sample.packet_id is None:
@@ -1340,6 +1432,17 @@ class FfbEngine:
         if not wheel_owner.acquire(self._path, OWNER, exclusive=False, on_inhibit=self._on_inhibit):
             return                       # another owner has the wheel (status.held_by says who)
         self._owned = True
+        if self._mode == 'forza':
+            # An add-on: the game keeps its force at its own level (never lowered), ours fades in on top
+            self._phase, self._fade_at, self._played_mode = 'in', t, 'forza'
+            self._read_gains()
+            a = self.addon
+            logging.info("Countersteer FFB: adding to Forza Horizon's force (%.0f/s, game uploads %s/s, strength "
+                         "%.0f %%, r %s, raw %s with lateral acceleration to the left)", self._verdict.rate,
+                         'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, a.strength * 100.0,
+                         'none' if a.fit is None else '%.2f' % a.fit,
+                         'rising' if a.sign == 1.0 else 'falling' if a.sign == -1.0 else 'unclear')
+            return
         try:
             self._driver.set_game_level(0)
         except OSError as e:
@@ -1387,7 +1490,8 @@ class FfbEngine:
         """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out."""
         self._fade_from = self._gain(t)
         self._phase, self._fade_at = 'out', t
-        if self._safe_game_level(100):
+        # The add-on never lowered it: nothing to write (its level stays the game's 100)
+        if (self._muted or self._played_mode != 'forza') and self._safe_game_level(100):
             self._muted = False
         self._released_at = t
         self.last_stop = reason
@@ -1497,6 +1601,25 @@ def status_text(status, listening=True):
             return light, _("Turn on to check the game that is running")
         return light, _("No game telemetry")
     rate = int(round(status.rate))
+    if status.reason == 'fh-addon':
+        # Forza Horizon: Countersteer adds to the game's force (amber: an add-on, not a replacement)
+        adds = _("{}: adds the front grip feel to Forza's own force").format(game)
+        if status.held_by:
+            return 'amber', _("{}; the wheel is in use ({}): {}").format(adds, status.held_by, keeps)
+        if status.active:
+            text = _("{}: lightens Forza's own force as the front tyres run out of grip").format(game)
+            if status.raw_rate is not None:
+                text += _(" (the game's force: {} a second)").format(status.raw_rate)
+            return 'amber', text
+        if not status.ready:
+            waiting = {
+                'raw': _("waiting for the game's own force on the wheel"),
+                'corners': _("checking the game's force, drive a few corners"),
+            }.get(status.waiting, _("checking the game's force"))
+            return 'amber', "{}; {}".format(adds, waiting)
+        if status.enabled:
+            return 'amber', adds
+        return 'amber', _("{}: turn on to use it").format(adds)
     if status.state == 'replace':
         if status.game == 'rbr':
             supported = _("{}: supported (its own force, {} a second)").format(game, status.raw_rate or 0)
@@ -1556,7 +1679,19 @@ def status_text(status, listening=True):
         'beamng-paused': _("paused"),
         'csb-rate': _("the mod sends {} a second of game time, needs {}").format(rate, int(CSB_RATE)),
         'no-rack': _("the mod finds no steering rack on this vehicle"),
-        'fh-model': _("{} packets/s: its force could be modelled (not built yet)").format(rate),
+        'fh-rate': _("{} packets/s, needs {}").format(rate, int(FH_RATE)),
+        'fh-app-gain': _("the driver's app_gain is on: it would scale the game's force but not Countersteer's, "
+                         "turn app_gain off"),
+        'fh-no-slip': _("sends no front tyre slip"),
+        'fh-two-effects': _("it drives the wheel with two constant forces at once"),
+        'fh-no-constant': _("it drives the wheel through its spring and damper, not a constant force: nothing "
+                            "to lighten"),
+        'fh-raw-rate': _("its constant force updates {} a second, needs {}").format(status.raw_rate or 0,
+                                                                                   int(FH_RAW_RATE)),
+        'fh-flat': _("its constant force does not change: it steers the wheel through its spring and damper, "
+                     "nothing to lighten"),
+        'fh-not-steering': _("its constant force does not follow the steering: nothing to lighten"),
+        'fh-raw-stale': _("its constant force stopped updating"),
         'rbr-no-raw': _("sends no tyre forces"),
         'no-forces': _("{} packets/s, no tyre forces").format(rate),
         'old-bridge': _("the telemetry bridge is too old to send tyre forces: start the game with this "
