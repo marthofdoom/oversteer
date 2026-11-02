@@ -4522,7 +4522,7 @@
    ],
    "validation": {
     "status": "validated",
-    "evidence": "marth's ACR runs 2026-11-01 (32 runs over 3 km, 1141 corners): mean drift positive (angled into the corner) in 91 % of corners, median mean 5.0 and median peak 9.8 deg (p90 of the peak 37 deg), hairpins 40-60 deg and fast bends 7-12 deg; WRC Generations and DiRT trace no yaw rate (0 in every row), so they are not available"
+    "evidence": "marth's ACR runs, 2026-11-01 (DB copy, 138 runs with positions, 2391 corners): drift for 122 runs and 2178 corners (91 %; the rest have fewer than two straights to anchor on, or sit over 20 s from one); mean drift positive (angled into the corner) in 95 % of corners, median of the corner means 4.7 deg (p10 1.3, p90 18.2); hairpins 40-60 deg peak, fast bends 7-12 deg; WRC Generations and DiRT trace no yaw rate (0 in every row), so they are not available"
    },
    "implementation": {
     "status": "partial",

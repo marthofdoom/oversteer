@@ -12,7 +12,7 @@ Pure over the trace's rows (telemetry_store.TRACE_CHANNELS, 10 Hz) and numpy; no
 
 Height is the second of telemetry_formats.plan_xyz (ACR and DiRT: y up; WRC Generations and Richard Burns Rally:
 z up), so one place knows each game's axes. Both derive from the positions; a position that jumps (a reset, a
-teleport) is rejected and a profile that continues after one is joined at the height it left.
+teleport) is rejected, and after a lasting one (a reset) the new place's absolute height stands.
 
 Drift needs the car's own heading as well as its path, and the trace carries no heading, only the yaw rate: the
 heading is the yaw rate's integral, anchored to the path's direction on the straights (where the car points where it
@@ -45,8 +45,11 @@ CREST_SPAN_M = 40.0         # m either side the two gradients are averaged over
 CREST_MIN_GAP_M = 60.0      # m between two crests (the sharper one stays)
 
 V_MIN = 8.0                 # m/s: below it the path's direction is noise
-STRAIGHT_YAW = 0.03         # rad/s: a straight row (the car points where it goes)
-ANCHOR_S = 1.0              # s of straight a heading anchor needs
+STRAIGHT_YAW = 0.06         # rad/s: a straight row (the car points where it goes), on the yaw median-filtered over YAW_MEDIAN rows
+YAW_MEDIAN = 5              # rows (0.5 s): ACR's yaw rate jitters 0.03-0.05 rad/s on a straight, a raw threshold never holds
+ANCHOR_S = 0.5              # s of straight a heading anchor needs
+ANCHOR_REACH_S = 20.0       # s from the nearest anchor beyond which the integrated heading is not trusted (it drifts)
+MIN_ANCHORS = 2             # one anchor would apply one offset to the whole stage
 DRIFT_MAX = 100.0           # degrees: a reading beyond it is a reversal or a spin, not a drift angle
 MIN_CORNER_ROWS = 3
 
@@ -74,6 +77,14 @@ def _smooth(x, n):
     return np.convolve(pad, np.ones(n) / n, mode='valid')
 
 
+def _median(x, n):
+    """A running median over n rows (odd), edges kept."""
+    if n <= 1 or len(x) < n:
+        return x.copy()
+    pad = np.pad(x, (n // 2, n // 2), mode='edge')
+    return np.median(np.lib.stride_tricks.sliding_window_view(pad, n), axis=1)
+
+
 def _median3(x):
     """A 3-point running median: a one-row spike goes, a ramp stays."""
     if len(x) < 3:
@@ -85,28 +96,29 @@ def _median3(x):
 
 def _clean_path(game, arr):
     """The rows that are the road, as arrays (distance, east, height, north): positions that are finite and not
-    zero, no jump beyond what the distance covered (JUMP_M), a profile that continues after a lasting jump joined
-    at the height it left. None without positions."""
+    zero (plan_xyz's east and north), no jump beyond what the distance covered (JUMP_M); after a lasting jump (a
+    reset) the new place's absolute height stands: the car is back on the road, wherever it fell to. None without
+    positions."""
     d = _along(arr['distance'])
     keep = []
     last = None
     bad = 0
-    offset = 0.0
     out = []
     for i in range(len(d)):
         pos = (arr['x'][i], arr['y'][i], arr['z'][i])
-        if not all(math.isfinite(v) for v in pos) or abs(pos[0]) + abs(pos[2]) < 0.1 or not math.isfinite(d[i]):
+        if not all(math.isfinite(v) for v in pos) or not math.isfinite(d[i]):
             continue
         e, h, n = plan_xyz(game, pos)
+        if abs(e) + abs(n) < 0.1:
+            continue                                       # a position the game left empty
         if last is not None:
             hop = math.hypot(e - last[1], n - last[3])
             if hop > JUMP_M + 3.0 * max(0.0, d[i] - last[0]):
                 bad += 1
                 if bad < JUMP_ROWS:
                     continue
-                offset = last[2] - h                           # join the new place at the height it left
             bad = 0
-        last = (d[i], e, h + offset, n)
+        last = (d[i], e, h, n)                             # after a lasting jump the new place's own height stands
         out.append(last)
         keep.append(i)
     if len(out) < 3:
@@ -210,15 +222,16 @@ def _wrap(a):
 
 def heading_offsets(t, yaw, speed, path_heading):
     """The car's heading (the yaw rate's integral, radians, left positive) minus the path's direction, with the
-    integration's own drift taken out: the difference's median on every straight stretch (|yaw| under
+    integration's own drift taken out: the difference's median on every straight stretch (the median-filtered |yaw| under
     STRAIGHT_YAW and above V_MIN for ANCHOR_S) is the anchor, linear between anchors, constant outside them.
-    (angle in radians, left positive, per row; NaN where no anchor exists.)"""
+    (angle in radians, left positive, per row; NaN with fewer than MIN_ANCHORS anchors, and further than
+    ANCHOR_REACH_S from the nearest one.)"""
     dt = np.diff(t, prepend=t[0])
     dt = np.where((dt > 0) & (dt < 1.0), dt, 0.0)
     heading = np.cumsum(np.nan_to_num(yaw) * dt)
     diff = _wrap(heading - path_heading)
     ok = np.isfinite(path_heading) & (speed > V_MIN)
-    straight = ok & (np.abs(yaw) < STRAIGHT_YAW)
+    straight = ok & (np.abs(_median(yaw, YAW_MEDIAN)) < STRAIGHT_YAW)
     anchors = []
     i = 0
     n = len(t)
@@ -235,12 +248,13 @@ def heading_offsets(t, yaw, speed, path_heading):
             local = _wrap(diff[i:j + 1] - ref) + ref
             anchors.append((float(t[i:j + 1].mean()), float(np.median(local))))
         i = j + 1
-    if not anchors:
+    if len(anchors) < MIN_ANCHORS:
         return np.full(n, np.nan)
     at = np.array([a[0] for a in anchors])
     off = np.unwrap(np.array([a[1] for a in anchors]))
     base = np.interp(t, at, off)
-    return _wrap(diff - base)
+    near = np.min(np.abs(t[:, None] - at[None, :]), axis=1)
+    return np.where(near <= ANCHOR_REACH_S, _wrap(diff - base), np.nan)
 
 
 def drift(rows, game, corners):
