@@ -685,6 +685,18 @@ class Gui:
                      else _("Wheel motor heat: {} %").format(mean))
         return car, wheel
 
+    def wheel_calibration_text(self):
+        """The FFB tab's calibration line ("Calibrated 2026-10-30: dead zone ..."), for the web page too."""
+        from .wheel_calibration import summary
+        if self.calibration is not None:
+            return _("Calibrating...")
+        if not self._wheel_supported():
+            return _("Not available with this driver")
+        result = (self._wheel_entry() or {}).get('result') or {}
+        if result:
+            return _("Calibrated {}: {}").format(str(result.get('date', ''))[:10], summary(result))
+        return _("Not calibrated")
+
     def launch_options(self):
         """The Steam launch options that run a game with the shared-memory
         telemetry bridge: the host path of oversteer-run."""

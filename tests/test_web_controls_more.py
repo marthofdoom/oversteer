@@ -70,3 +70,99 @@ def test_the_pairing_row_shows_when_offered_and_stays_hidden_when_not():
     GtkUi.set_web_pairing(ui, None, 'abc')
     win.show_all()
     assert not row.get_visible()
+
+
+# -- Countersteer FFB on the FFB tab --
+
+CS = dict(ext_force_support=True)
+
+
+def cs_rig(tmp_path):
+    from tests.fake_wheel import FakeDevice
+    from tests.test_web_controls import Rig
+    r = Rig(tmp_path, device=FakeDevice(**CS))
+    return r
+
+
+def test_countersteer_state(tmp_path):
+    r = cs_rig(tmp_path)
+    try:
+        state = r.state()
+        s = state['settings']
+        assert s['countersteer_ffb'] == {'value': False, 'enabled': True}
+        assert s['countersteer_strength']['min'] == 10 and s['countersteer_strength']['max'] == 100
+        assert s['countersteer_strength']['enabled'] is False            # the switch is off
+        assert s['countersteer_texture']['max'] == 100 and 'countersteer_linearity' in s and 'countersteer_lightness' in s
+        assert all(s['countersteer_texture_' + p]['value'] is True for p in ('road', 'impact', 'lock', 'engine'))
+        cs = state['countersteer']
+        assert set(cs) == {'light', 'text', 'car', 'wheel', 'calibration'}
+        assert cs['light'] == 'off' and cs['text'] and 'caster trail 30 mm' in cs['car'] and cs['calibration']
+    finally:
+        r.stop()
+
+
+def test_countersteer_absent_without_driver_support(rig):  # noqa: F811
+    state = rig.state()
+    assert not [k for k in state['settings'] if k.startswith('countersteer')]
+    assert set_(rig, countersteer_ffb=True)[0] == 409
+
+
+def test_countersteer_writes_need_pairing_csrf_and_origin(tmp_path):
+    r = cs_rig(tmp_path)
+    try:
+        body = {'set': {'countersteer_ffb': True}}
+        assert r.post(body, token=None)[0] == 401
+        assert r.post(body, token='wrong')[0] == 401
+        assert r.post(body, headers={'Origin': 'http://evil.example'})[0] == 403
+        assert r.post(body, headers={'Sec-Fetch-Site': 'cross-site'})[0] == 403
+        assert r.model.get_countersteer_ffb() is False and not r.controller.ffb_engine.calls
+    finally:
+        r.stop()
+    from tests.fake_wheel import FakeDevice
+    from tests.test_web_controls import Rig
+    (tmp_path / 'off').mkdir()
+    off = Rig(tmp_path / 'off', device=FakeDevice(**CS), enabled=False)
+    try:
+        assert off.post({'set': {'countersteer_ffb': True}})[0] == 403
+        assert off.model.get_countersteer_ffb() is False
+    finally:
+        off.stop()
+
+
+def test_a_paired_countersteer_write_takes_the_gtk_path(tmp_path):
+    r = cs_rig(tmp_path)
+    try:
+        status, body = r.post({'set': {'countersteer_ffb': True, 'countersteer_strength': 60,
+                                       'countersteer_texture': 40, 'countersteer_texture_lock': False,
+                                       'countersteer_linearity': 20, 'countersteer_lightness': 80}})
+        assert status == 200
+        m = r.model
+        assert m.get_countersteer_ffb() and m.get_countersteer_strength() == 60 and m.get_countersteer_linearity() == 20
+        assert m.get_countersteer_lightness() == 80
+        level, parts = m.get_countersteer_texture()
+        assert level == 0.4 and parts['lock'] is False and parts['road'] is True
+        calls = [c[0] for c in r.controller.ffb_engine.calls]
+        for name in ('set_enabled', 'set_texture', 'set_strength', 'set_linearity', 'set_lightness'):
+            assert name in calls
+        assert ('set_strength', 60) in r.controller.ffb_engine.calls
+        ui = [c[0] for c in r.ui.calls]
+        assert 'set_countersteer_ffb' in ui and 'set_countersteer_texture' in ui and 'set_countersteer_strength' in ui
+        assert body['state']['settings']['countersteer_strength'] == {'value': 60, 'min': 10, 'max': 100, 'step': 1, 'enabled': True}
+
+    finally:
+        r.stop()
+
+
+def test_countersteer_ranges_are_clamped_and_types_checked(tmp_path):
+    r = cs_rig(tmp_path)
+    try:
+        assert r.post({'set': {'countersteer_strength': 3, 'countersteer_texture': 250,
+                               'countersteer_linearity': -5}})[0] == 200
+        assert r.model.get_countersteer_strength() == 10 and r.model.data['countersteer_texture'] == 100
+        assert r.model.get_countersteer_linearity() == 0
+        for bad in ('50', 50.5, True, None):
+            assert r.post({'set': {'countersteer_strength': bad}})[0] == 400
+        assert r.post({'set': {'countersteer_ffb': 1}})[0] == 400
+        assert r.post({'set': {'countersteer_texture_road': 'yes'}})[0] == 400
+    finally:
+        r.stop()
