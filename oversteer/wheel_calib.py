@@ -17,7 +17,8 @@ over all the moving samples finds them all; L is found by trying each value. The
 differentiated out of the position samples on its own: the same Savitzky-Golay filter that turns positions
 into accelerations is applied to the double integral of every regressor, so both sides of the fit see exactly
 the same smoothing (the filter is linear and blind to constants and slopes, which hold the unknown starting
-position and speed).
+position and speed). Several window lengths are used together, each weighted by its noise gain: the long ones
+read the slow movements, the short ones the brief hard pulses a strong wheel is stopped and turned in.
 
 Units. tau/J at full scale (a_fs, deg/s^2 per full-scale command) is what one command does to this wheel; the
 torque curve is reported relative to it (1.0 at full scale). Friction is reported in full-scale command units
@@ -32,24 +33,35 @@ asked for, and full scale stays full scale.
 import numpy as np
 
 FULL = 32767                 # full-scale force (driver units)
+DEADBAND_FADE = 512          # the driver scales the deadband lift by m/512 for LUT outputs m below this
 LUT_POINTS = 33              # ffb_lut values: input i * 32767 / 32
 # Command levels (full-scale units) the pulses are played at; the torque curve is solved at these
-KNOTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.0)
+KNOTS = (0.0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.13, 0.16, 0.20, 0.25, 0.30, 0.33, 0.36, 0.40, 0.50,
+         0.60, 0.70, 0.80, 0.90, 1.0)
 
 GRID_S = 0.001               # positions are resampled to 1 ms
-SG_HALF = 10                 # Savitzky-Golay half window in samples (21 ms)...
-SG_HALF_SLOW = 20            # ...41 ms when that leaves the curve uncertain: a heavy wheel's small accelerations
-                             # drown in the encoder's step, and change slowly enough for the longer window
-MOVING_DEG_S = 30.0          # a sample is used when the wheel turned faster than this throughout its window
+SG_HALVES = (3, 5, 8, 12, 20)        # Savitzky-Golay half windows in samples (7 to 41 ms), all used together...
+SG_HALVES_SLOW = (8, 12, 20, 30)     # ...and these when that leaves the curve uncertain: a heavy wheel's small
+                                     # accelerations drown in the encoder's step, and change slowly enough for
+                                     # the longer windows
+MOVING_DEG_S = 8.0           # a sample is used when the wheel turned faster than this throughout its window
+MIN_ROWS = 200               # rows a window length needs to take part
+BLOCKS = 12                  # groups of stretches the uncertainty is judged over
+CHUNK = 250                  # samples (ms) in a stretch
 LATENCIES_S = tuple(i / 1000 for i in range(0, 101, 5))   # latency candidates (a proxy hop adds to the driver's),
                                                           # refined to 1 ms around the best
+DRIVER_SLEW_S = 0.012          # newer drivers take 12 ms for a full-scale change of ext_force; the fit tries with and without
 DEADBAND_FLOOR = 0.02        # below 2 % of the full-scale torque the motor counts as giving nothing
-MIN_R2 = 0.3                 # a fit explaining less of the measured acceleration than this is not trusted (the
-                             # rest is mostly the encoder's step, large for a heavy wheel)...
+MIN_R2 = 0.75                # a fit explaining less of the measured acceleration than this is not trusted (clean runs:
+                             # 0.90 to 0.999 over nine simulated wheels and the field G29; with a random hand on
+                             # the wheel, up to 0.84 for a heavy wheel and up to 0.72 otherwise)...
 MAX_UNCERTAINTY = 0.05       # ...nor one leaving a point of the torque curve this uncertain (share of full)
 MAX_DEAD_ZONE = 0.15         # a motor dead zone above 15 % of full scale is a measurement gone wrong
 LUT_SLOPE_MAX = 4.0          # no LUT point above 4 times the identity (plus LUT_MARGIN): a curve that steep
 LUT_MARGIN = 1024            # means a torque curve measured wrong at the bottom
+LUT_SEGMENT_SLOPE = 3.0      # no LUT segment steeper than 3 times the identity: a small change of the game's force is
+                             # at most 3 times as big a change of the motor command (the field G29's step in its
+                             # torque curve asked for 4.8, which would chatter)
 DITHER_RATIO = 1.5           # dither when one 8-bit step spans this many native steps of the game's force
 
 
@@ -158,6 +170,18 @@ def command_at(cmd_t, cmd, t):
     return out
 
 
+def slew_limited(w, rate, h=GRID_S):
+    """The command after a driver slew: the same series, but changing by at most `rate` (full scale per
+    second) per sample."""
+    step = rate * h
+    out = np.empty(len(w))
+    cur = 0.0
+    for i, v in enumerate(w.tolist()):
+        cur = v if abs(v - cur) <= step else cur + step if v > cur else cur - step
+        out[i] = cur
+    return out
+
+
 def hats(u, knots):
     """Piecewise-linear basis over the knots, one column per knot after the first (tau(0) = 0)."""
     k = np.asarray(knots)
@@ -179,11 +203,11 @@ def rolling_min(x, half):
     return np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1).min(axis=1)
 
 
-def isotonic(y):
-    """The non-decreasing sequence closest to y in least squares (pool adjacent violators)."""
+def isotonic(y, weights=None):
+    """The non-decreasing sequence closest to y in (weighted) least squares (pool adjacent violators)."""
     blocks = []                     # [mean, weight, count]
-    for v in y:
-        blocks.append([float(v), 1.0, 1])
+    for i, v in enumerate(y):
+        blocks.append([float(v), 1.0 if weights is None else float(weights[i]), 1])
         while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
             m2, w2, c2 = blocks.pop()
             m1, w1, c1 = blocks.pop()
@@ -196,47 +220,79 @@ def isotonic(y):
 
 # --- the fit ---
 
-def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, half=SG_HALF):
+def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     """Least-squares fit of the model above to a recording. Returns a dict: 'curve' (tau/J at each knot,
-    deg/s^2), 'friction' (f), 'damping' (beta), 'bias', 'latency' (s), 'r2', 'rows' (samples used)."""
+    deg/s^2), 'curve_se' (its uncertainty), 'friction' (f), 'damping' (beta), 'bias', 'latency' (s), 'r2',
+    'rows' (samples used).
+
+    Every window length in `halves` contributes its own rows, each weighted by the inverse of that filter's
+    noise gain: a long window reads the slow movements (small forces) with little noise, a short one the
+    brief hard pulses (a strong wheel is stopped and turned in 10-30 ms, no long window sees them moving
+    throughout). Their rows are the same data seen at different scales, so the uncertainty is not taken from
+    the rows' scatter but from refitting without each of a dozen groups of stretches of the run in turn."""
     if len(rec.cmd_t) < 2:
         raise FitError("no forces were recorded")
     h = GRID_S
     grid, theta = resample(rec.pos_t, rec.pos, h)
     n = len(grid)
-    if n < 4 * half + 10:
+    halves = tuple(hf for hf in halves if n >= 4 * hf + 10)
+    if not halves:
         raise FitError("the recording is too short")
-    c0, c1, c2 = savgol(half, h)
-    idx_all = np.arange(half, n - half)
-    omega = np.zeros(n)
-    omega[idx_all] = apply_at(theta, c1, idx_all)
-    # Moving, the same way, throughout the window: the friction there is sliding friction of one sign
-    fwd = rolling_min(omega, half) > MOVING_DEG_S
-    back = rolling_min(-omega, half) > MOVING_DEG_S
-    ok = np.zeros(n, dtype=bool)
-    ok[half:n - half] = True
-    ok[:2 * half] = False
-    ok[n - 2 * half:] = False
-    rows = np.flatnonzero(ok & (fwd | back))
-    if len(rows) < 200:
-        raise FitError("the wheel hardly moved during the run")
-    accel = apply_at(theta, c2, rows)
-
-    sgn = np.sign(omega)
-    fixed = np.column_stack([
-        apply_at(double_integral(-sgn, h), c2, rows),
-        apply_at(double_integral(-omega, h), c2, rows),
-        apply_at(double_integral(np.ones(n), h), c2, rows),
-    ])
     cmd_t = np.asarray(rec.cmd_t, dtype=float)
     cmd = np.asarray(rec.cmd, dtype=float)
 
-    def solve(lat):
-        w = command_at(cmd_t, cmd, grid - lat)
+    # Per window length: the rows (moving the same way throughout the window: the friction there is sliding
+    # friction of one sign), the acceleration there, the regressors that don't depend on the latency
+    scales = []
+    for half in halves:
+        c0, c1, c2 = savgol(half, h)
+        idx_all = np.arange(half, n - half)
+        omega = np.zeros(n)
+        omega[idx_all] = apply_at(theta, c1, idx_all)
+        fwd = rolling_min(omega, half) > MOVING_DEG_S
+        back = rolling_min(-omega, half) > MOVING_DEG_S
+        ok = np.zeros(n, dtype=bool)
+        ok[2 * half:n - 2 * half] = True
+        rows = np.flatnonzero(ok & (fwd | back))
+        if len(rows) < MIN_ROWS:
+            continue
+        sgn = np.sign(omega)
+        fixed = np.column_stack([
+            apply_at(double_integral(-sgn, h), c2, rows),
+            apply_at(double_integral(-omega, h), c2, rows),
+            apply_at(double_integral(np.ones(n), h), c2, rows),
+        ])
+        scales.append({'half': half, 'c2': c2, 'rows': rows, 'accel': apply_at(theta, c2, rows),
+                       'fixed': fixed, 'weight': 1.0 / float(np.linalg.norm(c2))})
+    if not scales:
+        raise FitError("the wheel hardly moved during the run")
+
+    raw_cmd = command_at(cmd_t, cmd, grid)
+    slewed_cmd = slew_limited(raw_cmd, 1.0 / DRIVER_SLEW_S)
+
+    def delayed(series, lat):
+        k = int(round(lat / h))
+        return np.concatenate([np.zeros(k), series[:n - k]]) if k else series
+
+    slew = [True]                                    # whether the driver is taken to slew ext_force
+
+    def design(lat):
+        w = delayed(slewed_cmd if slew[0] else raw_cmd, lat)
         basis = hats(np.abs(w), knots) * np.sign(w)[:, None]
-        cols = np.column_stack([apply_at(double_integral(basis[:, k], h), c2, rows)
-                                for k in range(basis.shape[1])])
-        x = np.column_stack([cols, fixed])
+        xs = []
+        for sc in scales:
+            cols = np.column_stack([apply_at(double_integral(basis[:, k], h), sc['c2'], sc['rows'])
+                                    for k in range(basis.shape[1])])
+            xs.append(np.column_stack([cols, sc['fixed']]) * sc['weight'])
+        return np.vstack(xs)
+
+    accel = np.concatenate([sc['accel'] * sc['weight'] for sc in scales])
+    # the group (of BLOCKS) each row belongs to: stretches of CHUNK samples dealt out in turn, so every group
+    # holds a share of every kind of movement
+    block = np.concatenate([(sc['rows'] // CHUNK) % BLOCKS for sc in scales])
+
+    def solve(lat):
+        x = design(lat)
         p, *_ = np.linalg.lstsq(x, accel, rcond=None)
         res = accel - x @ p
         return float(res @ res), p, x
@@ -247,35 +303,68 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, half=SG_HALF):
     lat = best_of(latencies)
     lat = best_of([max(0.0, lat + d / 1000) for d in range(-4, 5)])
     ss, p, x = solve(lat)
+    slew[0] = False                                  # a driver without the slew: the latency is longer by about half of it
+    lat_plain = best_of([max(0.0, lat + d / 1000) for d in range(0, 9, 2)])
+    lat_plain = best_of([max(0.0, lat_plain + d / 1000) for d in range(-1, 2)])
+    ss_plain, p_plain, x_plain = solve(lat_plain)
+    if ss_plain < ss:
+        ss, p, x, lat = ss_plain, p_plain, x_plain, lat_plain
+    else:
+        slew[0] = True
     # One pass without the outliers (a stray report, a moment the model doesn't cover), then refit
     res = accel - x @ p
     mad = np.median(np.abs(res - np.median(res))) * 1.4826 + 1e-9
     keep = np.abs(res) < 4 * mad
-    xk, ak = x[keep], accel[keep]
+    xk, ak, bk = x[keep], accel[keep], block[keep]
     p, *_ = np.linalg.lstsq(xk, ak, rcond=None)
     res = ak - xk @ p
     tot = ak - ak.mean()
     r2 = 1.0 - float(res @ res) / max(float(tot @ tot), 1e-9)
-    # Standard errors of the parameters. Neighbouring rows share most of their window, so the residuals are
-    # far from independent: the variance is scaled by the window length (the effective count of samples)
-    dof = max(len(ak) - xk.shape[1], 1)
-    cov = np.linalg.pinv(xk.T @ xk) * float(res @ res) / dof * (2 * half + 1)
-    se = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    # Uncertainty: jackknife over the groups (neighbouring rows share their windows and the scales share the
+    # data, so the rows' scatter says little). A knot the other groups don't reach moves a lot when its
+    # group is left out.
+    xtx = xk.T @ xk
+    xty = xk.T @ ak
     nk = len(knots) - 1
-    return {'curve': np.concatenate([[0.0], p[:nk]]), 'curve_se': np.concatenate([[0.0], se[:nk]]),
+    loo = []
+    for b in range(BLOCKS):
+        m = bk == b
+        if not m.any():
+            continue
+        q, *_ = np.linalg.lstsq(xtx - xk[m].T @ xk[m], xty - xk[m].T @ ak[m], rcond=None)
+        loo.append(q[:nk])
+    if len(loo) < 3:
+        raise FitError("the recording is too short")
+    loo = np.array(loo)
+    se = np.sqrt((len(loo) - 1) / len(loo) * ((loo - loo.mean(axis=0)) ** 2).sum(axis=0))
+    return {'curve': np.concatenate([[0.0], p[:nk]]), 'curve_se': np.concatenate([[0.0], se]),
             'friction': float(p[nk]), 'damping': float(p[nk + 1]), 'bias': float(p[nk + 2]),
-            'latency': float(lat), 'r2': r2, 'rows': int(keep.sum()), 'window_ms': (2 * half + 1) * h * 1000}
+            'latency': float(lat), 'r2': r2, 'rows': int(keep.sum()),
+            'window_ms': (2 * max(sc['half'] for sc in scales) + 1) * h * 1000}
 
 
 # --- the correction ---
 
-def relative_curve(curve):
-    """The torque curve over the knots as a share of full scale, non-decreasing and >= 0."""
+def relative_curve(curve, se=None):
+    """The torque curve over the knots as a share of full scale, non-decreasing and >= 0. With the knots'
+    uncertainties `se` the monotone fit weighs each knot by 1/se^2 (a doubtful knot gives way to its
+    neighbours), and a light smoothing (1-2-1 over neighbouring knots, the ends kept) takes the knot-to-knot
+    scatter out, which would otherwise come out of the LUT as steps."""
     a_fs = float(curve[-1])
     if not a_fs > 0:
         raise FitError("the wheel did not respond to full force")
-    r = isotonic(np.clip(np.asarray(curve, dtype=float) / a_fs, 0.0, None))
+    y = np.clip(np.asarray(curve, dtype=float) / a_fs, 0.0, None)
+    wts = None
+    if se is not None:
+        s = np.asarray(se, dtype=float) / a_fs
+        wts = 1.0 / np.maximum(s, 0.003) ** 2          # (the fixed zero knot and any unmeasured ones: floor)
+        wts[0] = wts.max()
+    r = isotonic(y, wts)
     r[0] = 0.0
+    if len(r) > 3:
+        sm = r.copy()
+        sm[1:-1] = 0.25 * r[:-2] + 0.5 * r[1:-1] + 0.25 * r[2:]      # (a mean of non-decreasing: non-decreasing)
+        r = sm
     return r / r[-1], a_fs
 
 
@@ -318,22 +407,46 @@ def inverse_pl(xs, ys, y):
     return float(xs[-1])
 
 
-def build_lut(knots, r, d, points=LUT_POINTS):
+def build_lut(knots, r, d, points=LUT_POINTS, comp=0.0):
     """The ffb_lut values (input i * 32767 / (points - 1)) and ffb_deadband value that make the torque
-    linear in the requested force, for the relative curve r over the knots and the dead zone d."""
+    linear in the requested force, for the relative curve r over the knots and the dead zone d. With
+    `comp` (a share of the full-scale torque, the friction to cancel) the torque follows comp + (1 - comp) * x
+    instead of x for any request above zero: the lift is made in torque space, so it is the same size
+    wherever the motor's curve is steep or flat. The first LUT point is the ramp up from 0, so the step at
+    the bottom is spread over the first segment."""
     xs, ys = torque_model(knots, r, d)
     top = ys[-1]
     lut = []
     for i in range(points):
-        target = top * i / (points - 1)
+        x = i / (points - 1)
+        target = top * (comp + (1.0 - comp) * x) if i else 0.0
         u = inverse_pl(xs, ys, target)                 # motor command giving that torque
         v = 0.0 if d >= 1 else (u - d) / (1.0 - d)     # LUT output before the driver's deadband lift
         lut.append(int(round(min(max(v, 0.0), 1.0) * FULL)))
     lut[0] = 0
     lut[-1] = FULL
-    for i in range(1, points):
-        lut[i] = max(lut[i], lut[i - 1])
+    lut = cap_slope(lut)
     return lut, int(round(d * FULL))
+
+
+def cap_slope(lut, cap=LUT_SEGMENT_SLOPE):
+    """The LUT with no segment steeper than `cap` times the identity's and none flat. Where the torque curve
+    asks for more (a step in the motor's curve), the torque is left less linear instead: a steep jump would
+    turn a small change in what the game asks into a large step of the motor."""
+    n = len(lut) - 1
+    top = FULL / n
+    step = cap * top
+    out = [float(v) for v in lut]
+    for i in range(n - 1, -1, -1):                 # it must still be able to reach full scale
+        out[i] = max(out[i], out[i + 1] - step)
+    out[0] = 0.0
+    for i in range(1, n + 1):
+        out[i] = min(max(out[i], out[i - 1] + 1.0), out[i - 1] + step)
+    out = [int(round(v)) for v in out]
+    out[-1] = FULL
+    for i in range(n - 1, 0, -1):                  # (rounding at the end)
+        out[i] = min(out[i], out[i + 1] - 1)
+    return out
 
 
 def plausible_lut(lut, points=LUT_POINTS):
@@ -358,7 +471,10 @@ def shaped(x, lut, deadband):
     y = lut[i] + (lut[i + 1] - lut[i]) * (pos - i)
     if x <= 0:
         return 0.0
-    return deadband + (FULL - deadband) * y / FULL
+    out = deadband + (FULL - deadband) * y / FULL
+    if y < DEADBAND_FADE:
+        out *= y / DEADBAND_FADE                       # the driver fades the lift in over the LUT's first 512
+    return out
 
 
 def recommend_dither(lut, deadband, low=0.3, ratio=DITHER_RATIO):
@@ -401,12 +517,12 @@ def onset_latency(onsets):
 def analyse(rec, knots=KNOTS):
     """Everything a run gives: the fitted model, the correction and the numbers stored per wheel."""
     fit = fit_dynamics(rec, knots)
-    r, a_fs = relative_curve(fit['curve'])
+    r, a_fs = relative_curve(fit['curve'], fit['curve_se'])
     uncertainty = float(np.max(fit['curve_se'])) / a_fs
     if uncertainty > MAX_UNCERTAINTY:
         try:
-            slow = fit_dynamics(rec, knots, half=SG_HALF_SLOW)
-            r_slow, a_slow = relative_curve(slow['curve'])
+            slow = fit_dynamics(rec, knots, halves=SG_HALVES_SLOW)
+            r_slow, a_slow = relative_curve(slow['curve'], slow['curve_se'])
             u_slow = float(np.max(slow['curve_se'])) / a_slow
             if u_slow < uncertainty:
                 fit, r, a_fs, uncertainty = slow, r_slow, a_slow, u_slow

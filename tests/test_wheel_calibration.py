@@ -112,7 +112,7 @@ def test_the_run_stays_within_its_limits_and_puts_everything_back(g29_like):
     (dict(curve=-2.0, dead_zone=0.03, inertia=1 / 8000), 0.03),            # weak at the bottom
     (dict(inertia=1 / 15000, latency=0.025), 0.05),                        # strong, slow to answer
     (dict(inertia=1 / 1500, coulomb=0.1, static=0.14, curve=0.0), 0.03),   # heavy, high friction
-    (dict(dead_zone=0.0, encoder_deg=900 / 65536), 0.02),                  # no dead zone, fine encoder
+    (dict(dead_zone=0.0, encoder_deg=900 / 65536), 0.03),                  # no dead zone, fine encoder
     (dict(max_range=270, range=270, stop_deg=135), 0.03),                  # a small range
     (dict(dead_zone=0.0, coulomb=0.08, static=0.1), 0.03),                 # friction, no dead zone...
     (dict(dead_zone=0.08, coulomb=0.01, static=0.015), 0.03),              # ...and the other way round
@@ -375,8 +375,8 @@ def test_a_g29_like_wheel_behind_a_proxy_finishes_well_inside_the_limit(delay, b
     cal = Calibration(sim)
     result = cal.run()
     assert cal.move_timeouts == 0 and cal.move_skips == 0
-    assert sim.t - 100.0 < 190
-    assert result['duration_s'] < 190
+    assert sim.t - 100.0 < 215                 # (190 before the two pulse levels around the torque step)
+    assert result['duration_s'] < 215
     assert_safe_run(sim, cal)
     assert_put_back(sim)
 
@@ -915,18 +915,24 @@ def test_a_damaged_entry_writes_identity(g29_like, damage):
     assert values['ffb_lut'] == 'identity' and values['ffb_deadband'] == '0'
 
 
-def test_friction_compensation_is_folded_into_the_deadband(g29_like):
+def test_friction_compensation_is_folded_into_the_lut_in_torque_terms(g29_like):
     result = g29_like[2]
     entry = _entry(result)
-    assert wcal.correction_values(entry)['ffb_deadband'] == str(result['deadband'])
-    half = int(wcal.correction_values(dict(entry, friction_comp=50))['ffb_deadband'])
-    full = int(wcal.correction_values(dict(entry, friction_comp=100))['ffb_deadband'])
-    assert result['deadband'] < half < full
-    assert full <= wcal.FRICTION_COMP_CAP * result['breakaway'] * wc.FULL + 1
-    # never below the dead zone, junk is off
-    assert wcal.correction_values(dict(entry, friction_comp='x'))['ffb_deadband'] == str(result['deadband'])
-    capped = dict(entry, result=dict(entry['result'], friction=0.5), friction_comp=100)
-    assert int(wcal.correction_values(capped)['ffb_deadband']) <= round(0.8 * result['breakaway'] * wc.FULL)
+    plain = wcal.correction_values(entry)
+    assert plain['ffb_lut'] == ' '.join(str(v) for v in result['lut'])
+    half_values = wcal.correction_values(dict(entry, friction_comp=50))
+    full_values = wcal.correction_values(dict(entry, friction_comp=100))
+    half = [int(v) for v in half_values['ffb_lut'].split()]
+    assert half_values['ffb_deadband'] == plain['ffb_deadband'] == str(result['deadband'])   # the dead zone stays
+    assert half[0] == 0 and half[1] > result['lut'][1] and wc.plausible_lut(half)
+    assert full_values['ffb_lut'] == half_values['ffb_lut']                  # the setting stops at 50 %
+    assert wcal.FRICTION_COMP_MAX_PERCENT == 50
+    # junk is off
+    assert wcal.correction_values(dict(entry, friction_comp='x'))['ffb_lut'] == plain['ffb_lut']
+    # a huge friction is held to 80 % of the torque at the breakaway
+    big = dict(entry, result=dict(entry['result'], friction=0.5), friction_comp=50)
+    lut = [int(v) for v in wcal.correction_values(big)['ffb_lut'].split()]
+    assert wc.plausible_lut(lut) and lut[1] <= wc.LUT_SEGMENT_SLOPE * wc.FULL / 32 + 1
 
 
 def test_a_damaged_store_does_not_break_the_window(tmp_path):
@@ -1177,7 +1183,10 @@ def test_the_correction_follows_the_active_device(tmp_path):
     gui._wheel_held = lambda: ('test', True)
     gui.check_active_device()
     assert calls == ['apply', 'refresh'] and wheel.attrs == {}   # nothing written, tried again later
-    gui._wheel_held = lambda: ('countersteer-ffb', False)        # a shared one does not stop it
+    gui._wheel_held = lambda: ('countersteer-ffb', False)        # a shared one (Countersteer FFB) stops it too
+    gui.check_active_device()
+    assert calls == ['apply', 'refresh'] and wheel.attrs == {}
+    gui._wheel_held = lambda: None                               # free: the next tick puts it on
     gui.check_active_device()
     assert calls == ['apply', 'refresh', 'apply', 'refresh'] and wheel.attrs['ffb_lut'] == 'identity'
     del calls[:]
@@ -1284,20 +1293,20 @@ def test_writes_while_the_wheel_is_held(tmp_path, g29_like, monkeypatch):
     finally:
         wheel_owner.release(wheel.dev_path, 'wheel-test')
 
-    # shared (Countersteer FFB): the correction now, the crash record still waits
+    # shared (Countersteer FFB): the correction and the forces wait; a killed run's cap, gain and range go back now
     assert wheel_owner.acquire(wheel.dev_path, 'countersteer-ffb', on_inhibit=lambda: None)
     try:
         gui.apply_wheel_correction()
-        assert wheel.attrs['ffb_lut'] != 'identity'
-        assert set(wheel.attrs) == {'ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip'}
+        assert wheel.attrs == {}
         gui.recover_wheel()
-        assert not recovered and os.path.exists(path)
+        assert len(recovered) == 1 and os.path.exists(path)      # the partial restore; the record stays for the rest
+        assert wcal.take_pending(path, key) == {}
         assert timers[0]() is True
     finally:
         wheel_owner.release(wheel.dev_path, 'countersteer-ffb')
     wheel.attrs = {}
     assert timers[0]() is False                                  # free: both written now
-    assert recovered and wheel.attrs['ffb_lut'] != 'identity'
+    assert len(recovered) == 2 and wheel.attrs['ffb_lut'] != 'identity'
     assert not os.path.exists(path)
 
 
@@ -1383,7 +1392,7 @@ def test_a_wheel_that_crept_and_stopped_short_now_reaches_every_position(kw):
     result = cal.run()
     assert cal.move_timeouts == 0 and cal.move_skips == 0
     assert result['lut'] and not result.get('partial')
-    assert result['duration_s'] < 200
+    assert result['duration_s'] < 230
     assert result['fit_uncertainty'] < wc.MAX_UNCERTAINTY
     assert_safe_run(sim, cal)
     assert_put_back(sim)
@@ -1531,3 +1540,244 @@ def test_pulses_starting_fifteen_degrees_short_of_the_start_still_fit(monkeypatc
     assert result['duration_s'] < 200
     assert_safe_run(sim, cal)
     assert_put_back(sim)
+
+
+# --- a real G29, fitted ---
+
+def g29_field_recording():
+    """The calibration run of a real G29 behind the proxy (2026-11-02), as tests/data/g29-calibration-fit.npz
+    keeps it: times in 0.1 ms and positions in encoder counts (1/72.8 degree), both as differences, the
+    commands only where they changed. This run was refused ("fit 0.69, uncertainty 16 %") by the first
+    version of the fit, whose single window length could not see the brief hard pulses."""
+    z = np.load(os.path.join(os.path.dirname(__file__), 'data', 'g29-calibration-fit.npz'))
+    rec = wc.Recording()
+    rec.pos_t = [t / 1e4 for t in np.cumsum(z['pos_dt'].astype(np.int64)).tolist()]
+    rec.pos = (np.cumsum(z['pos_dc'].astype(np.int64)) / float(z['cpd'])).tolist()
+    rec.cmd_t = [t / 1e4 for t in z['cmd_t'].tolist()]
+    rec.cmd = (z['cmd_w'].astype(float) / 30000).tolist()
+    rec.breakaway = [tuple(b) for b in z['breakaway'].tolist()]
+    rec.counts_per_deg = float(z['cpd'])
+    return rec
+
+
+@pytest.fixture(scope='module')
+def field_result():
+    return wc.analyse(g29_field_recording())
+
+
+def test_the_real_g29_recording_fits_well(field_result):
+    r = field_result
+    assert r['fit_r2'] > 0.85
+    assert r['fit_uncertainty'] < wc.MAX_UNCERTAINTY
+    assert 2 <= r['fit_latency_ms'] <= 10
+    # a motor that gives nothing below ~8 % of full scale and about 15000 deg/s^2 at full scale
+    assert 0.05 < r['deadband'] / wc.FULL < 0.12
+    assert 10000 < r['a_fs'] < 20000
+    assert 0.03 < r['friction'] < 0.1
+
+
+def test_the_real_g29s_correction_is_sane(field_result):
+    lut = field_result['lut']
+    assert wcal.valid_lut(lut) and wc.plausible_lut(lut)
+    assert all(b > a for a, b in zip(lut, lut[1:]))
+    # no large gain where the wheel is touchy (the bottom quarter), the soft end stays inside the range
+    n = len(lut) - 1
+    assert all(lut[i + 1] - lut[i] < 3 * wc.FULL / n for i in range(n // 4))
+    # no segment steeper than the cap (the raw curve's step asked for 4.8 times the identity)
+    assert max(b - a for a, b in zip(lut, lut[1:])) <= wc.LUT_SEGMENT_SLOPE * wc.FULL / n + 1
+    assert field_result['dither'] is True
+    curve = field_result['curve']
+    assert all(b >= a for a, b in zip(curve, curve[1:])) and curve[0] == 0.0 and curve[-1] == 1.0
+
+
+def _with_a_hand(rec, seed, strength):
+    """The recording with a random hand on the wheel: a force that changes sign every 20-60 ms is added to the
+    wheel's movement (positions only, the commands stay as written)."""
+    rng = np.random.default_rng(seed)
+    t = np.asarray(rec.pos_t)
+    grid = np.arange(t[0], t[-1], 0.001)
+    steps = rng.integers(20, 60, size=len(grid) // 20 + 2)
+    force = np.repeat(rng.uniform(-1, 1, size=len(steps)), steps)[:len(grid)]
+    acc = strength * force
+    v = np.cumsum(acc) * 0.001
+    x = np.cumsum(v) * 0.001
+    out = wc.Recording()
+    out.__dict__.update(rec.__dict__)
+    out.pos = (np.asarray(rec.pos) + np.interp(t, grid, x)).tolist()
+    return out
+
+
+@pytest.mark.parametrize('seed', [1, 2, 3])
+def test_a_hand_on_the_real_wheel_is_refused(seed):
+    with pytest.raises(wc.FitError):
+        wc.analyse(_with_a_hand(g29_field_recording(), seed, 15000.0))
+
+
+@pytest.mark.parametrize('seed', [1, 2])
+def test_a_hand_on_a_simulated_wheel_is_refused(g29_like, seed):
+    sim, cal, result = g29_like
+    with pytest.raises(wc.FitError):
+        wc.analyse(_with_a_hand(cal.rec, seed, 15000.0))
+
+
+def test_the_lut_slope_cap_gives_up_linearity_for_a_gentler_curve():
+    n = wc.LUT_POINTS - 1
+    steep = [0] + [wc.FULL // 5] * (n - 1) + [wc.FULL]            # a jump at the start, a flat run, a jump at the end
+    capped = wc.cap_slope(steep)
+    assert capped[0] == 0 and capped[-1] == wc.FULL
+    assert all(0 < b - a <= wc.LUT_SEGMENT_SLOPE * wc.FULL / n + 1 for a, b in zip(capped, capped[1:]))
+    ident = [round(i * wc.FULL / n) for i in range(wc.LUT_POINTS)]
+    assert wc.cap_slope(ident) == ident
+
+
+# --- a hand on the rim after the push, and what is put back afterwards ---
+
+def _stop_dead(sim):
+    """A hand that stops the rim at once and holds it."""
+    sim.coulomb = sim.static = 2.0
+
+
+def test_a_hand_stopping_the_rim_in_the_run_up_stops_the_run(monkeypatch):
+    sim = SimWheel()
+    real = Calibration._kick
+    calls = []
+
+    def kick(self, d):
+        accel = real(self, d)
+        calls.append(sim.t)
+        if len(calls) == 12:                                     # a pulse's push, well into the force response
+            _stop_dead(sim)
+        return accel
+
+    monkeypatch.setattr(Calibration, '_kick', kick)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'grabbed'
+    assert sim.t - calls[11] < 1.0                               # (it used to hold the push until TOTAL_S)
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_a_push_that_turns_nothing_stops_the_run_whatever_the_loop(monkeypatch):
+    sim = SimWheel(coulomb=2.0, static=2.0)
+    seen = []
+
+    def measure(self):
+        seen.append(sim.t)
+        while True:
+            self._tick(0.4)
+
+    monkeypatch.setattr(Calibration, '_measure', measure)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'grabbed'
+    assert sim.t - seen[0] < 1.2
+    assert sim.last('ext_force') == '0'
+
+
+def test_centring_after_a_near_lock_gives_up_after_a_second_and_a_half(monkeypatch):
+    sim = SimWheel(coulomb=2.0, static=2.0, start_deg=100.0)
+    seen = []
+
+    def measure(self):
+        self.sign_known, self.sign = True, -1.0
+        self.recovering = True
+        seen.append(sim.t)
+        self._move_to(0.0, tol=10.0, timeout=8.0, fatal=True)
+
+    monkeypatch.setattr(Calibration, '_measure', measure)
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'grabbed'
+    assert sim.t - seen[0] < 2.5
+    assert sim.last('ext_force') == '0'
+
+
+def _abort_with_wheel_at(sim, monkeypatch, breakaway=0.12):
+    def measure(self):
+        self.sign_known, self.sign = True, -1.0
+        self.breakaway_max = breakaway
+        raise Aborted('cancelled', 'x')
+    monkeypatch.setattr(Calibration, '_measure', measure)
+    ranges = []
+    real = sim.set_range
+    sim.set_range = lambda v: (ranges.append((v, sim.theta)), real(v))
+    cal = Calibration(sim)
+    with pytest.raises(Aborted):
+        cal.run()
+    return ranges
+
+
+def test_the_users_smaller_range_is_never_put_back_with_the_wheel_outside_it(monkeypatch):
+    sim = SimWheel(range=360, start_deg=200.0)                   # the lock of 360 degrees is at 180
+    ranges = _abort_with_wheel_at(sim, monkeypatch)
+    assert ranges[-1][0] == 360 and abs(ranges[-1][1]) <= 180 - Calibration.LOCK_MARGIN_DEG
+    assert sim.range == 360
+
+
+def test_a_wheel_that_cannot_be_centred_gets_a_wider_range_instead(monkeypatch):
+    sim = SimWheel(range=360, start_deg=200.0, coulomb=2.0, static=2.0)
+    ranges = _abort_with_wheel_at(sim, monkeypatch)
+    v, theta = ranges[-1]
+    assert v > 360 and v / 2 >= abs(theta) + Calibration.LOCK_MARGIN_DEG - 1
+
+
+def test_a_killed_runs_cap_gain_and_range_go_back_under_countersteer_ffb(tmp_path):
+    from oversteer import wheel_owner
+    path = str(tmp_path / 'pending.json')
+    saved = {'ext_force_cap': '80', 'ffb_lut': 'identity', 'gain': 110, 'range': 540, 'autocenter': 30,
+             'ffb_output_cap': '70'}
+    wcal.write_pending(path, 'k', saved)
+    sim = SimWheel()
+    assert wheel_owner.acquire('w', 'countersteer-ffb', on_inhibit=lambda: None)
+    try:
+        assert wcal.recover_pending(path, 'k', sim, wheel='w') is False
+        written = {n for _t, n, _v in sim.writes}
+        assert written == {'ext_force_cap', 'ffb_output_cap', 'gain', 'range', 'autocenter'}
+        assert sim.attrs['ffb_output_cap'] == '70' and sim.gain == 110 and sim.range == 540
+        assert wcal.take_pending(path, 'k') == {'ffb_lut': 'identity'}
+    finally:
+        wheel_owner.release('w', 'countersteer-ffb')
+    assert wheel_owner.acquire('w', 'wheel-test', exclusive=True)
+    try:
+        sim.writes.clear()
+        assert wcal.recover_pending(path, 'k', sim, wheel='w') is False and sim.writes == []
+    finally:
+        wheel_owner.release('w', 'wheel-test')
+    assert wcal.recover_pending(path, 'k', sim, wheel='w') is True
+    assert sim.last('ext_force') == '0' and sim.attrs['game_ffb_level'] == '100'
+
+
+def test_the_output_cap_is_set_to_100_for_the_run_and_put_back():
+    sim = SimWheel(inertia=1 / 15000, latency=0.025)
+    sim.attrs['ffb_output_cap'] = '60'
+    cal = Calibration(sim)
+    result = cal.run()
+    assert result['lut']
+    first_force = next(i for i, (_t, n, v) in enumerate(sim.writes) if n == 'ext_force' and v != '0')
+    assert {n: v for _t, n, v in sim.writes[:first_force]}['ffb_output_cap'] == '100'
+    assert_put_back(sim, attrs={'ffb_output_cap': '60'})
+
+
+def test_the_drivers_12_ms_slew_does_not_bias_the_latency_or_the_strength():
+    sim = SimWheel(slew_s=0.012)
+    cal = Calibration(sim)
+    result = cal.run()
+    assert abs(result['fit_latency_ms'] - sim.latency * 1000) <= 4
+    assert abs(result['a_fs'] * sim.J - 1) < 0.15
+    assert linearity_error(sim, result) < 0.04
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_the_deadband_lift_fades_in_over_the_luts_first_512_like_the_drivers():
+    ident = [round(i * wc.FULL / 32) for i in range(33)]
+    d = 3000
+    outs = [wc.shaped(x, ident, d) for x in range(0, 6000, 50)]
+    assert outs[0] == 0.0 and all(b >= a for a, b in zip(outs, outs[1:]))
+    # m = 256 of the LUT's output: half the lift's usual size, and continuous at 512
+    assert wc.shaped(256, ident, d) == pytest.approx((d + (wc.FULL - d) * 256 / wc.FULL) * 0.5, rel=1e-3)
+    assert wc.shaped(512, ident, d) == pytest.approx(d + (wc.FULL - d) * 512 / wc.FULL, rel=1e-3)

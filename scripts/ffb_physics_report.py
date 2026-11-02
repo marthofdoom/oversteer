@@ -319,9 +319,10 @@ def linearity(result, friction_comp=0, points=401):
     """Requested torque r (share of the wheel's full-scale torque) -> delivered torque, through the app's deadband
     with `friction_comp` % and the driver's shaping. Returns (r, delivered)."""
     dead = wcal.compensated_deadband(result, friction_comp)
+    lut = wcal.compensated_lut(result, friction_comp)
     tau = torque_fn(result)
     rs = np.linspace(0.0, 1.0, points)
-    out = np.array([tau(driver_shape(int(round(r * FULL)), result['lut'], dead) / FULL) for r in rs])
+    out = np.array([tau(driver_shape(int(round(r * FULL)), lut, dead) / FULL) for r in rs])
     return rs, out, dead
 
 
@@ -350,6 +351,7 @@ def hands_off(result, k_per_deg, friction_comp=0, latency=0.030, theta0=30.0, se
     tau = torque_fn(result)
     stick = tau(result['breakaway']) * friction_scale
     dead = wcal.compensated_deadband(result, friction_comp)
+    lut = wcal.compensated_lut(result, friction_comp)
     lat = latency + result.get('fit_latency_ms', 4.0) / 1000.0
     n = int(seconds / h)
     delay = int(round(lat / h))
@@ -359,7 +361,7 @@ def hands_off(result, k_per_deg, friction_comp=0, latency=0.030, theta0=30.0, se
     for i in range(n):
         seen = hist[-delay - 1] if delay else theta
         req = min(max(-k_per_deg * seen, -1.0), 1.0)
-        u = driver_shape(int(round(req * FULL)), result['lut'], dead) / FULL
+        u = driver_shape(int(round(req * FULL)), lut, dead) / FULL
         torque = tau(u)
         if omega == 0.0 and abs(torque) <= stick:
             acc = 0.0

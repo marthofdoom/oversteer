@@ -1079,16 +1079,17 @@ class GtkUi:
                                                "maximum instead of being cut flat, so a request past 100 % is "
                                                "still felt as stronger. 0: off (hard limit)."),
             controls=(self.wheel_soft_clip,)))
-        self.wheel_friction_comp = Gtk.SpinButton.new_with_range(0, 100, 10)
+        self.wheel_friction_comp = Gtk.SpinButton.new_with_range(0, 50, 10)
         self.wheel_friction_comp.set_value(0)
         self.wheel_friction_comp.connect('value-changed', lambda w: None if self.updating_calibration else
                                          self.controller.set_wheel_friction_comp(w.get_value_as_int()))
         rows.append(self._setting_row(
             _("Friction compensation (%)"),
             tooltip=_("Lifts the smallest forces by this share of the wheel's measured friction, so light "
-                      "effects get through the gears and belt instead of being eaten by them. Never more than 80 % "
-                      "of the force that starts the wheel moving. High values make the centre feel notchy (the "
-                      "force jumps as it changes side). 0: off."),
+                      "effects get through the gears and belt instead of being eaten by them. At most 50 % (a warm "
+                      "wheel has less friction than measured) and never more than 80 % of the force that starts "
+                      "the wheel moving. High values make the centre feel notchy (the force jumps as it changes "
+                      "side). 0: off."),
             controls=(self.wheel_friction_comp,)))
         index = anchor.get_index() + 1
         for row in rows:
@@ -1123,7 +1124,7 @@ class GtkUi:
             self.wheel_correction_switch.set_active(bool(have and entry.get('use')))
             self.wheel_dither_switch.set_active(bool(have and entry.get('dither')))
             self.wheel_soft_clip.set_value(_clamped_int(entry.get('soft_clip'), 0, 100) if have else 0)
-            self.wheel_friction_comp.set_value(_clamped_int(entry.get('friction_comp'), 0, 100) if have else 0)
+            self.wheel_friction_comp.set_value(_clamped_int(entry.get('friction_comp'), 0, 50) if have else 0)
         finally:
             self.updating_calibration = False
 
