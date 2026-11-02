@@ -41,6 +41,21 @@ def test_the_shipped_rbr_cars_load_under_the_rsf_car_id_and_every_rsf_car_is_nam
     assert car_data.entry('rbr/91') is None
 
 
+def test_rbr_cars_carry_steering_and_mass_for_a_rack_force_model():
+    cars = car_data.load()
+    fiesta, fabia = cars[FIESTA], cars['rbr/106']
+    # MaxSteeringLock 0.75 wheel turns = 270 deg each side; 0.056 m of rack per turn = 0.042 m at lock
+    assert fiesta['steering_wheel_lock_deg'] == 270.0 and fiesta['steering_rack_ratio'] == 0.056
+    assert fiesta['rack_travel_m'] == 0.042 and fabia['rack_travel_m'] == 0.045
+    assert abs(fiesta['steering_wheel_lock_deg'] / 360 * fiesta['steering_rack_ratio'] - fiesta['rack_travel_m']) < 1e-9
+    assert fabia['steering_wheel_lock_deg'] == 214.2 and fabia['steering_rack_ratio'] == 0.0756
+    for key, entry in cars.items():
+        if key.startswith('rbr/'):
+            assert 1200 <= entry['mass_kg'] <= 1500 and 150 <= entry['steering_wheel_lock_deg'] <= 360
+            assert 0.03 <= entry['steering_rack_ratio'] <= 0.1
+    assert all(e.get('steering_wheel_lock_deg') is None for k, e in cars.items() if not k.startswith('rbr/'))     # None where absent
+
+
 def test_rbr_sends_no_max_rpm_so_the_lights_use_the_shipped_limiter(monkeypatch):
     from oversteer import telemetry as module
     fed = []
