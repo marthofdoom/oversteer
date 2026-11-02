@@ -379,6 +379,33 @@ def test_a_g29_like_wheel_behind_a_proxy_finishes_well_inside_the_limit(delay, b
     assert_put_back(sim)
 
 
+@pytest.mark.parametrize('batch', [0.008, 0.016])
+def test_positions_arriving_in_bunches_still_run_and_fit(batch):
+    """Reports delivered together (one time for the bunch) must not read as stops and spikes in the speed, nor
+    as steps in the fit."""
+    sim = SimWheel(dead_zone=0.11, static=0.07, coulomb=0.05, read_batch=batch)
+    cal = Calibration(sim)
+    result = cal.run()
+    assert cal.move_timeouts == 0 and cal.move_skips == 0
+    assert result['lut'] and not result.get('partial')
+    assert_safe_run(sim, cal)
+    assert_put_back(sim)
+
+
+def test_the_speed_comes_from_the_reports_times():
+    cal = Calibration(SimWheel())
+    cal.lock = 450.0
+    # the newest sample against the one a window older: 30 degrees in 10 ms, whatever the arrival pattern
+    cal.hist.extend([(1.000, 0.0), (1.010, 10.0), (1.020, 40.0)])
+    assert cal._velocity(1.021) == pytest.approx(3000.0)
+    assert cal._velocity(1.0205) == pytest.approx(3000.0)
+    # no reports for a while: a still wheel, the speed decays
+    assert abs(cal._velocity(1.2)) < 250.0
+    cal.hist.clear()
+    cal.hist.append((1.0, 5.0))
+    assert cal._velocity(1.0) == 0.0
+
+
 def test_a_wheel_that_does_not_move_stops_the_run():
     sim = SimWheel(static=0.9, coulomb=0.8)                      # blocked
     with pytest.raises(Aborted) as e:

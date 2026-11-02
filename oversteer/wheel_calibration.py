@@ -91,6 +91,8 @@ class Calibration:
     STILL_DEG_S = 15.0
     SHOT_START_TOL_DEG = 20.0   # a pulse starts from this close to where it should if the wheel can't be moved there
     VEL_WINDOW_S = 0.010
+    VEL_HOLD_S = 0.020          # no report for this long (2 windows): the wheel is taken to be slowing, not mid-bunch
+    VEL_MIN_DT_S = 0.002        # the shortest span a speed is taken over
     TOTAL_S = 480.0             # a hard stop (a real wheel behind a proxy takes about twice the simulator's 170 s)
     WIND_DOWN_S = 4.0           # past TOTAL_S, a run that keeps its data may take this long to stop and centre
     PREP_S = 0.35               # game force ramps to 0 over 200 ms
@@ -402,13 +404,7 @@ class Calibration:
         now = self.io.now()
         while len(self.hist) > 2 and self.hist[1][0] < now - 0.1:
             self.hist.popleft()
-        ref_t = now - self.VEL_WINDOW_S
-        ref = self.hist[0][1]
-        for t, deg in self.hist:
-            if t > ref_t:
-                break
-            ref = deg
-        self.omega = (self.theta - ref) / self.VEL_WINDOW_S
+        self.omega = self._velocity(now)
         # The reports can stop while the wheel turns (another program grabbed the input node): the axis's
         # current value, which a grab doesn't stop, must agree with them
         self.theta_now = self._deg(current)
@@ -417,6 +413,22 @@ class Calibration:
             raise Aborted('blind', _("The wheel's position stopped arriving (another program may have taken the "
                                      "wheel's input); the calibration stopped."))
         return events
+
+    def _velocity(self, now):
+        """Speed from the reports' own times: the newest sample against the newest one at least VEL_WINDOW_S
+        older (the oldest kept if none is), so reports that arrive late or in bunches don't read as 0 between
+        bunches and a spike in them. A still wheel sends no reports: once the newest is older than
+        VEL_HOLD_S the span runs to now instead, and the speed decays towards 0."""
+        if len(self.hist) < 2:
+            return 0.0
+        t_last, deg_last = self.hist[-1]
+        ref_t, ref = self.hist[0]
+        for t, deg in self.hist:
+            if t > t_last - self.VEL_WINDOW_S:
+                break
+            ref_t, ref = t, deg
+        end = now if now - t_last > self.VEL_HOLD_S else t_last
+        return (deg_last - ref) / max(end - ref_t, self.VEL_MIN_DT_S)
 
     def _stopping_angle(self):
         """|angle| the wheel would stop at if braked now, moving towards the nearer lock (a_kick, the push's
@@ -629,7 +641,13 @@ class Calibration:
 
     def _breakaway(self, direction):
         angle = self.theta
+        coasting = self.omega * direction < 0           # still drifting the other way from the last ramp
         moved, w = self._ramp(direction)
+        if moved * direction < 0 and coasting:
+            # a light wheel coasts on after the push before: that is not the wheel turning the wrong way
+            self._settle(0.3, check=False)
+            angle = self.theta
+            moved, w = self._ramp(direction)
         if moved * direction < 0:
             raise self._grabbed(_("it turned the wrong way"))
         before = sorted(b for _a, _d, b in self.rec.breakaway)
