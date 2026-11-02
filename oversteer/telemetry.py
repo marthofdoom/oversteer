@@ -82,18 +82,20 @@ def own_ports(extra=()):
     return {p for p, _label in PORT_PRESETS} | {LEGACY_PORT} | {int(p) for p in extra if p}
 
 
-def parse_forward(text, listening=None):
-    """The "Forward to" text, comma-separated host:port (IPv4 address or
-    host name; max FORWARD_MAX), as ([(ip, port)], error). Host names are
-    resolved here, once, not per packet. error is None, or the message of
-    the first thing wrong (the list is then empty). A target on this
-    computer at a port Oversteer listens on (`listening`: own_ports()) is
-    refused: it would send the game's packets back into Oversteer."""
-    listening = own_ports() if listening is None else listening
+def held_ports(auto, port):
+    """The UDP ports a listener holds or probes: Auto's and LEGACY_PORT, or the one port and its other_port."""
+    if auto or not port:
+        return {p for p, _label in PORT_PRESETS if p not in FORZA_OWN} | {LEGACY_PORT}
+    return {int(port), DEFAULT_PORT if int(port) == LEGACY_PORT else LEGACY_PORT}
+
+
+def forward_items(text):
+    """The "Forward to" text, comma-separated host:port (max FORWARD_MAX), as
+    ([(host, port)], error): syntax only, nothing is looked up."""
     items = [i.strip() for i in (text or '').split(',') if i.strip()]
     if len(items) > FORWARD_MAX:
         return [], _("At most {} targets.").format(FORWARD_MAX)
-    targets = []
+    out = []
     for item in items:
         host, sep, port_text = item.rpartition(':')
         host = host.strip()
@@ -102,40 +104,87 @@ def parse_forward(text, listening=None):
         port_text = port_text.strip()
         if not (port_text.isascii() and port_text.isdigit()) or not 1 <= int(port_text) <= 65535:
             return [], _("\"{}\": the port must be from 1 to 65535.").format(item)
-        port = int(port_text)
+        out.append((host, int(port_text)))
+    return out, None
+
+
+def is_ip_literal(host):
+    try:
+        socket.inet_aton(host)
+    except (OSError, UnicodeError):
+        return False
+    return host.count('.') == 3
+
+
+def is_local_ip(ip):
+    """Whether `ip` is an address of this computer: a throwaway UDP socket can bind it."""
+    if ip.startswith('127.') or ip == '0.0.0.0':
+        return True
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind((ip, 0))
+        return True
+    except OSError:
+        return False
+
+
+def resolve_forward(items, listening=None):
+    """[(host, port)] as ([(ip, port)], error). Host names are looked up here
+    (getaddrinfo has no timeout: not on the GUI thread). A target on this
+    computer at a port in `listening` (default own_ports()) is refused: it
+    would send the game's packets back into Oversteer."""
+    listening = own_ports() if listening is None else listening
+    targets = []
+    for host, port in items:
         try:
             ip = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4][0]
         except (OSError, UnicodeError):
             return [], _("\"{}\": cannot find that host (IPv4 only).").format(host)
-        if (ip.startswith('127.') or ip == '0.0.0.0') and port in listening:
-            return [], _("\"{}\" is Oversteer's own port: that would loop.").format(item)
+        if port in listening and is_local_ip(ip):
+            return [], _("\"{}:{}\" is Oversteer's own port: that would loop.").format(host, port)
         if (ip, port) not in targets:
             targets.append((ip, port))
     return targets, None
 
 
+def parse_forward(text, listening=None):
+    """forward_items() then resolve_forward(): ([(ip, port)], error)."""
+    items, error = forward_items(text)
+    return ([], error) if error else resolve_forward(items, listening)
+
+
 class Forwarder:
     """Re-sends every datagram, unchanged, to the targets: one
-    non-blocking UDP socket. A send that fails (unreachable, buffer full)
-    drops that datagram; one warning per FORWARD_WARN_EVERY, never one
-    per packet. send() never raises."""
+    non-blocking UDP socket, bound to an ephemeral `port` so a datagram
+    that comes back from it (a target that loops to Oversteer) is
+    recognised. A send that fails (unreachable, buffer full) drops that
+    datagram; one warning per FORWARD_WARN_EVERY, never one per packet.
+    send() never raises."""
 
     def __init__(self):
         self.targets = ()                 # ((ip, port), ...), swapped whole by set_targets
         self.failed = 0                   # datagrams that could not be sent
+        self.port = None                  # the send socket's own port
         self._sock = None
         self._warned = 0.0
 
     def set_targets(self, targets):
-        self.targets = tuple(targets)
-        if self.targets and self._sock is None:
+        targets = tuple(targets)
+        if targets and self._sock is None:
+            sock = None
             try:
-                self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                self._sock.setblocking(False)
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.bind(('0.0.0.0', 0))
+                sock.setblocking(False)
             except OSError as e:
                 logging.warning("telemetry: cannot forward: %s", e)
-                self._sock = None
+                if sock is not None:
+                    sock.close()
                 self.targets = ()
+                return
+            self.port = sock.getsockname()[1]
+            self._sock = sock
+        self.targets = targets            # published after the socket exists
 
     def send(self, data):
         sock = self._sock
@@ -151,7 +200,7 @@ class Forwarder:
                                     "for %d s)", target[0], target[1], e, FORWARD_WARN_EVERY)
 
     def close(self):
-        sock, self._sock, self.targets = self._sock, None, ()
+        sock, self._sock, self.targets, self.port = self._sock, None, (), None
         if sock is not None:
             sock.close()
 
@@ -601,7 +650,9 @@ class Telemetry:
                             logging.warning("telemetry: UDP %s stops: %s", port, e)
                             self._close_port(port, selector)
                         break
-                    if forwarder.targets:
+                    # Not the datagram that came back from our own send socket; in Auto, only the locked port's
+                    if forwarder.targets and addr[1] != forwarder.port and \
+                            (self._source is None or self._source[0] == port):
                         forwarder.send(data)
                     self.handle(time.monotonic(), data, addr, port)
             if not self.running:

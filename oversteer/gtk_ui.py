@@ -1535,7 +1535,7 @@ class GtkUi:
                                "host:port separated by commas (SimHub on another PC, a dashboard, motion software). "
                                "Empty: off. An app setting, for every profile."),
             _("Oversteer holds the game's UDP port, so other tools cannot listen on it. Type where they listen, "
-              "for example 192.168.1.20:20777 or mypc:20777. Host names are looked up once, when you press "
+              "for example 192.168.1.20:20777 or mypc:20777. Host names are looked up once, in the background, when you press "
               "Enter. IPv4 only. This computer's own Oversteer ports are refused: that would loop."),
             (self.telemetry_forward,)))
         self._section(page, _("Receiving telemetry"), receive)
@@ -1664,10 +1664,15 @@ class GtkUi:
             context.remove_class('error')
             entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, None)
 
+    def show_forward_error(self, message):
+        self._forward_error(message)
+
     def _forward_commit(self, entry):
-        """Enter or leaving the box: apply the text, or show why it is refused."""
+        """Enter or leaving the box: apply the text, or show why it is refused (a host name that
+        cannot be found or a loop is reported a moment later, by show_forward_error)."""
         error = self.controller.set_telemetry_forward(entry.get_text())
-        self._forward_error(error)
+        if error:
+            self._forward_error(error)
         return False
 
     def telemetry_tab_visible(self):

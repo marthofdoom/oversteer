@@ -7,6 +7,7 @@ import glob
 import locale as Locale
 from locale import gettext as _
 import logging
+import threading
 import os
 import re
 import secrets
@@ -103,6 +104,9 @@ class Gui:
         for name, value in read_preferences({}).items():
             setattr(self, name, value)
         self._forward_targets = []
+        self._forward_gen = 0                   # the newest Forward-to lookup; older answers are dropped
+        self._forward_stop = threading.Event()
+        self._forward_resolved = None           # the text the live targets were resolved from
         self.handbrake_axis = None
         self.handbrake_invert = None
         self.pedal_axes = {}
@@ -614,7 +618,7 @@ class Gui:
                 self.ui.set_rev_leds_status(_("no LEDs"))
                 leds = None
         if leds is None:
-            if not self.telemetry_learn:
+            if not self.telemetry_learn and not self._forward_targets:
                 if self.device is None or not self.model.get_rev_leds():
                     self.ui.set_rev_leds_status('')
                 self.refresh_capture_status()
@@ -672,11 +676,11 @@ class Gui:
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
         self.telemetry.recorder = self.telemetry_recorder
-        self.telemetry.forwarder.set_targets(self._forward_targets)
         if self.telemetry_recorder is not None and not self.telemetry.auto:
             self.telemetry_recorder.port = self.telemetry.port   # Auto: each packet brings its port
         self.telemetry_status = show
         if self.telemetry.start():
+            self.telemetry.forwarder.set_targets(self._forward_targets)
             if self.telemetry.auto:
                 self.ui.set_rev_leds_status(listening_status(self.telemetry.listening, self.telemetry.busy))
             else:
@@ -877,6 +881,7 @@ class Gui:
             self.ui.safe_call(self.refresh_telemetry_cars)
 
     def on_quit(self):
+        self._forward_stop.set()
         if self.test is not None:
             try:
                 self.test.stop()    # a running test leaves the wheel at 900 / 100 / 0
@@ -904,26 +909,92 @@ class Gui:
             self.save_preferences()
             self.apply_rev_leds()
 
+    def _forward_held(self):
+        """The ports the listener holds (what a forward target on this computer must not use)."""
+        from .telemetry import held_ports
+        telemetry = self.telemetry
+        if telemetry is not None:
+            return held_ports(telemetry.auto, telemetry.port)
+        if self.model.get_rev_leds_port_auto():
+            return held_ports(True, None)
+        return held_ports(False, self.model.get_rev_leds_port() or 5310)
+
     def _resolve_forward(self):
-        """Resolve the saved "Forward to" text once (host names too); a bad one forwards nowhere."""
-        from .telemetry import parse_forward
-        targets, error = parse_forward(self.telemetry_forward)
-        self._forward_targets = targets
+        """The saved "Forward to" text, resolved off the GUI thread (a failed lookup is retried every 60 s)."""
+        from .telemetry import forward_items
+        items, error = forward_items(self.telemetry_forward)
         if error:
             logging.warning("telemetry: forwarding is off, the saved \"Forward to\" is invalid: %s", error)
+            items = []
+        self._forward_start(self.telemetry_forward, items, save=False, retry=True)
+
+    def _forward_start(self, text, items, save, retry=False):
+        """Look the targets up: an IP-only list at once, host names in a daemon thread. A newer call
+        (the generation) discards the answer of an older, slower lookup."""
+        from .telemetry import resolve_forward, is_ip_literal
+        self._forward_gen += 1
+        generation = self._forward_gen
+        listening = self._forward_held()
+        if not items:
+            self._forward_done(generation, text, [], None, save)
+        elif all(is_ip_literal(host) for host, _port in items):
+            targets, error = resolve_forward(items, listening)
+            self._forward_done(generation, text, targets, error, save)
+        else:
+            def work():
+                while True:
+                    targets, error = resolve_forward(items, listening)
+                    if not error or not retry or generation != self._forward_gen:
+                        break
+                    logging.warning("telemetry: forwarding: %s (trying again in 60 s)", error)
+                    self._forward_stop.wait(60.0)
+                    if generation != self._forward_gen or self._forward_stop.is_set():
+                        return
+                ui = getattr(self, 'ui', None)
+                if ui is not None:
+                    ui.safe_call(self._forward_done, generation, text, targets, error, save)
+                else:
+                    self._forward_done(generation, text, targets, error, save)
+            threading.Thread(target=work, name='forward-resolve', daemon=True).start()
+        return None
+
+    def _forward_done(self, generation, text, targets, error, save):
+        """The lookup's answer, on the GUI thread; ignored when a newer entry has superseded it."""
+        if generation != self._forward_gen:
+            return False
+        ui = getattr(self, 'ui', None)
+        if error:
+            if ui is not None:
+                ui.show_forward_error(error)
+            return False
+        if ui is not None:
+            ui.show_forward_error(None)
+        was = bool(self._forward_targets)
+        self.telemetry_forward = self._forward_resolved = text
+        self._forward_targets = targets
+        if save:
+            self.save_preferences()
+        if ui is None:
+            return False
+        if bool(targets) != was:
+            self.apply_rev_leds()           # forwarding alone runs the listener
+        elif self.telemetry is not None:
+            self.telemetry.forwarder.set_targets(targets)
+        return False
 
     def set_telemetry_forward(self, text):
-        """The "Forward to" text of the Telemetry tab. Returns the error message,
-        or None; an invalid text is not kept."""
-        from .telemetry import parse_forward, own_ports
-        targets, error = parse_forward(text, own_ports([getattr(self.telemetry, 'port', None)]))
-        if error is None:
-            self.telemetry_forward = (text or '').strip()
-            self._forward_targets = targets
-            self.save_preferences()
-            if self.telemetry is not None:
-                self.telemetry.forwarder.set_targets(targets)
-        return error
+        """The "Forward to" text of the Telemetry tab. Returns the syntax error, or None; the
+        lookup and the loop check then go on in the background and show their error on the box
+        (show_forward_error). An invalid text is not kept."""
+        from .telemetry import forward_items
+        text = (text or '').strip()
+        if text == self._forward_resolved:
+            return None
+        items, error = forward_items(text)
+        if error:
+            return error
+        self._forward_start(text, items, save=True)
+        return None
 
     def set_telemetry_web(self, on=None, port=None, bind=None):
         changed = False
