@@ -34,7 +34,8 @@ Every table of the schema, and what the merge does with it:
                   where it has none, and its priors where it has none (or the source's was set by the user and the
                   target's was not). `runs` counts the runs ported onto it
     sessions      matched by (profile, car, start within DUP_SECONDS), else inserted; a session whose runs are all
-                  duplicates goes to the session of the first one's copy
+                  duplicates goes to the session of the first one's copy. A matched session gets the source's
+                  game_build (the game's Steam build) where it has none
     runs          inserted in start order unless a duplicate (below). A run with a trace is queued (reanalyse),
                   so the backfill works it over (its corners, events, metrics, class) as the app does after an
                   upgrade; a run with no trace keeps its class and its derived rows (nothing could make them again)
@@ -403,6 +404,10 @@ def merge(tdb, sdb, profile_map=None, plan=None):
             found = tdb.execute('SELECT session FROM runs WHERE id = ?', (dup[runs[0]['id']][0],)).fetchone()
         if found is not None:
             session_map[s['id']] = found[0]
+            if s.get('game_build') is not None:         # the game's build: the source's fills an unknown one
+                if tdb.execute('UPDATE sessions SET game_build = ? WHERE id = ? AND game_build IS NULL',
+                               (s['game_build'], found[0])).rowcount:
+                    plan.add('sessions', 'update')
             plan.add('sessions', 'map')
             continue
         row = {k: v for k, v in s.items() if k != 'id'}

@@ -2218,7 +2218,10 @@ function rvHead() {
   const facts = ["Run " + H.n, H.run_class || "", rvDate(H.started)];
   $("rv-s").textContent = facts.filter(Boolean).join(" · ");
   const ref = D.ref;
-  $("rv-ref").textContent = ref ? "vs " + ref.label + " " + clock(ref.time) : "No run to compare with yet";
+  // the PB on the game build this run was driven on, where the all-time PB was set on another
+  const bp = H.build_pb;
+  $("rv-ref").textContent = (ref ? "vs " + ref.label + " " + clock(ref.time) : "No run to compare with yet") +
+    (!bp ? "" : (ref && ref.role === "pb" && ref.time === bp.pb ? "" : " · PB " + clock(bp.pb)) + " · on this build " + clock(bp.time));
   $("lg-this").textContent = "Run " + H.n;
   $("lg-ref").textContent = ref ? ref.label + (RV_ROLE[ref.role] ? " · " + RV_ROLE[ref.role][1] : "") : "no comparison";
   $("gg-ref").textContent = ref ? "Run " + ref.n : "–";

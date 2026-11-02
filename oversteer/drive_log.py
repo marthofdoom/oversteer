@@ -18,7 +18,7 @@ import queue
 import threading
 import time
 
-from . import car_data, coach, coach_context, drive_detect, live_buffer, potential, stage_tables
+from . import car_data, coach, coach_context, drive_detect, live_buffer, potential, stage_tables, steam_build
 from .telemetry_formats import plan_xy
 from .shift_learner import DRIVEN, SURFACES, CarModel, drive_slip
 from .telemetry_store import open_store, REBUILD_META, TRACE_CHANNELS
@@ -47,6 +47,9 @@ class DriveLog:
         self.ticks = []
         self.batch = 0
         self.on_rollback = []
+        # game key -> the game's Steam build or None, read at each session start (steam_build): the app's, not a
+        # replay's or a test's, whose packets were not driven on the build installed now
+        self.game_build = steam_build.lookup if threaded else None
         self._after_commit = []                          # callbacks for after the next commit (the thread's own)
         self._queue = queue.Queue(maxsize=QUEUE_SIZE)
         self._thread = None

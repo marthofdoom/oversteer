@@ -80,7 +80,8 @@ CREATE TABLE sessions (
     surface TEXT, surface_conf TEXT, wet TEXT,
     shifter TEXT,                   -- 'h-pattern', 'sequential', 'paddles', 'auto', 'mixed', NULL
     distance REAL DEFAULT 0, moving_time REAL DEFAULT 0,
-    limiter_time REAL DEFAULT 0
+    limiter_time REAL DEFAULT 0,
+    game_build TEXT                 -- the game's Steam build at the start (steam_build), NULL unknown or not on Steam
 );
 CREATE TABLE runs (                 -- one stage attempt, one lap session, one stretch of free driving
     id INTEGER PRIMARY KEY,
@@ -662,6 +663,22 @@ def _migrate_v2(db, path):
     logging.info("telemetry store: upgraded to version 3")
 
 
+# Columns added since version 3, nullable, without a version of their own (ADDED_COLUMNS, on every open): an older
+# build reads past them and keeps opening the file, which a higher user_version would stop it doing. The fresh
+# schema has them last, in this order, so a file of either kind has its columns in one order (the merge tool
+# compares them).
+ADDED_COLUMNS = (
+    ('sessions', 'game_build TEXT'),
+)
+
+
+def _add_columns(db):
+    for table, column in ADDED_COLUMNS:
+        names = {r[1] for r in db.execute('PRAGMA table_info({})'.format(table))}
+        if column.split()[0] not in names:
+            db.execute('ALTER TABLE {} ADD COLUMN {}'.format(table, column))
+
+
 def _connect(path):
     db = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=10.0)
     db.execute('PRAGMA journal_mode = WAL')
@@ -693,6 +710,7 @@ def open_store(path):
         elif version > VERSION:
             db.close()
             raise sqlite3.DatabaseError("{} is from a newer Oversteer (version {})".format(path, version))
+    _add_columns(db)
     db.execute(RUN_FINISH_DDL)
     db.execute(RUN_START_DDL)
     db.execute(RUN_CLOCK_DDL)
@@ -1023,6 +1041,39 @@ class Reader:
             ', '.join('r.' + n for n in names)), (run_id,))
         return dict(zip(names + ('car',), rows[0])) if rows else None
 
+    def run_build(self, run_id):
+        """The game build the run was driven on (its session's game_build), or None where it is unknown."""
+        try:
+            rows = self._rows('SELECT s.game_build FROM runs r JOIN sessions s ON r.session = s.id WHERE r.id = ?',
+                              (run_id,))
+        except sqlite3.OperationalError:                      # a file the writer has not opened since the column
+            return None
+        return rows[0][0] if rows else None
+
+    PB_RANKED = "r.run_class IN ('clean', 'learning', 'off')"           # coach_context.PB_CLASSES
+
+    def stage_pb_builds(self, stage, car, build=None):
+        """The car's PB on the stage over all builds of the game and on `build` (a sessions.game_build):
+        {'pb': {'run', 'time', 'build'} or None, 'build': {'run', 'time'} or None ('build' is None for a `build` of
+        None)}. Ranked as the PB is (coach_context.stage_pb_id: a finished run of a class that can be a PB, on the
+        game's clock once the car has one there; of equal times the newer), over every run of the car there."""
+        sql = ('SELECT r.id, r.result_time, s.game_build FROM runs r JOIN sessions s ON r.session = s.id '
+               'WHERE r.stage = ? AND s.car = ? AND r.ended IS NOT NULL AND r.finished = 1 AND r.result_time > 0 '
+               'AND ' + self.PB_RANKED + ' AND ' + self.ON_CLOCK + '{} ORDER BY r.result_time, r.started DESC, '
+               'r.id DESC LIMIT 1')
+        out = {'pb': None, 'build': None}
+        try:
+            rows = self._rows(sql.format(''), (stage, car))
+            if rows:
+                out['pb'] = {'run': rows[0][0], 'time': rows[0][1], 'build': rows[0][2]}
+            if build is not None:
+                rows = self._rows(sql.format(' AND s.game_build = ?'), (stage, car, build))
+                if rows:
+                    out['build'] = {'run': rows[0][0], 'time': rows[0][1]}
+        except sqlite3.OperationalError:                      # a file the writer has not opened since the column
+            return {'pb': None, 'build': None}
+        return out
+
     def runs_to_backfill(self, limit=3):
         """The oldest runs with a trace that the context layer has not
         worked over (run_class not set), at most `limit`: run ids."""
@@ -1335,8 +1386,9 @@ class Store(Reader):
             these = ', '.join('?' * len(moved))
             self.protect_pbs((old_car, car))
             self._drop_potentials_of(moved, (old_car, car), column='id')
-            new = self._do('INSERT INTO sessions (profile, car, game, started, ended, track, stage) SELECT profile, ?, '
-                           'game, ?, ?, track, stage FROM sessions WHERE id = ?', (car, started, ended, old)).lastrowid
+            new = self._do('INSERT INTO sessions (profile, car, game, started, ended, track, stage, game_build) '
+                           'SELECT profile, ?, game, ?, ?, track, stage, game_build FROM sessions WHERE id = ?',
+                           (car, started, ended, old)).lastrowid
             self._do('UPDATE shifts SET session = ? WHERE session = ? AND run IS NULL AND at >= ?', (new, old, started))
             for table, column in (('runs', 'id'), ('shifts', 'run'), ('metrics', 'run')):
                 self._do('UPDATE {} SET session = ? WHERE {} IN ({})'.format(table, column, these), (new,) + moved)
@@ -1592,11 +1644,11 @@ class Store(Reader):
 
     # -- sessions and runs --
 
-    def start_session(self, profile, car, game, started, track=None, stage=None):
+    def start_session(self, profile, car, game, started, track=None, stage=None, game_build=None):
         if stage is not None:
             self.upsert_stage(stage, stage.split(':')[0])
-        return self._do('INSERT INTO sessions (profile, car, game, started, track, stage) VALUES (?, ?, ?, ?, ?, ?)',
-                        (profile, car, game, started, track, stage)).lastrowid
+        return self._do('INSERT INTO sessions (profile, car, game, started, track, stage, game_build) '
+                        'VALUES (?, ?, ?, ?, ?, ?, ?)', (profile, car, game, started, track, stage, game_build)).lastrowid
 
     def update_session(self, session, **fields):
         if fields:
