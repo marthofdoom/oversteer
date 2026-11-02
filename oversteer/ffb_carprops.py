@@ -59,7 +59,11 @@ class Store:
             try:
                 with open(self._file()) as f:
                     for car, v in json.load(f).items():
-                        self._cars[car] = (float(v['trail']), float(v['scrub']))
+                        trail, scrub = float(v['trail']), float(v['scrub'])
+                        if not (math.isfinite(trail) and math.isfinite(scrub)):
+                            continue         # a damaged file must not put NaN or inf into the force
+                        self._cars[car] = (min(max(trail, TRAIL_RANGE[0]), TRAIL_RANGE[1]),
+                                           min(max(scrub, SCRUB_RANGE[0]), SCRUB_RANGE[1]))
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 pass
             self._saved = dict(self._cars)

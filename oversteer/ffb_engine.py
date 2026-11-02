@@ -391,6 +391,7 @@ class RackForce:
       front slip, logged as a hint at activation; it never gates (in a
       drift the force rightly pulls toward the countersteer)."""
 
+    _held_fit = None                     # (scale, trail, scrub) playing: kept through a fade out (hold())
     FF_SCALE = FULL / 582.0              # ext_force per Nm of front Mz from finalFF (finalFF ~ Mz / 582)
     SCALE_RANGE = (FF_SCALE / 8.0, FF_SCALE * 3.0)
     TAU = 10.0                           # s
@@ -550,12 +551,30 @@ class RackForce:
         elif self.waiting != 'mismatch':
             self.waiting = 'fit'
 
+    def hold(self):
+        """The engine plays this fit: should a new car reset it, the fade out goes on with its strength, trail and
+        scrub rather than stepping to the defaults (up to 8x)."""
+        self._held_fit = (self.scale, self.trail, self.scrub)
+
+    def release(self):
+        self._held_fit = None
+
     def force(self, sample):
-        """ext_force for this sample at full strength (0 without Mz)."""
-        mz = self._torque(sample)
+        """ext_force for this sample at full strength (0 without Mz). A reversing car (backwards over
+        REVERSE_SPEED) keeps the game's own sign of Mz and Fy, which turn with the travel (the caster trail is
+        negative to it: the wheel swings to the lock, and a driver holds it); the force is not faded, only
+        bounded to REVERSE_MAX of full scale, so a spin never holds the wheel at the stop with the whole of it."""
+        scale, trail, scrub = self.scale, self.trail, self.scrub
+        if not self.ready and self._held_fit is not None:
+            scale, trail, scrub = self._held_fit
+        mz = front_torque(sample, trail, scrub)
         if mz is None:
             return 0
-        return min(max(self.scale * mz, -FULL), FULL)
+        limit = FULL
+        vel = getattr(sample, 'vel', None)
+        if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:
+            limit = FULL * REVERSE_MAX
+        return min(max(scale * mz, -limit), limit)
 
 
 class BeamNGRack(RackForce):
@@ -914,6 +933,15 @@ FAST_POLL = 0.001                        # s: the pass while RBR or BeamNG plays
 KEEP_WRITE = 0.010                       # s: ext_force is written at least this often while playing (the driver
                                          # holds a value 30 ms)
 MIN_WRITE = 0.001 - 1e-6                 # s: and never more often than this (RBR, BeamNG)
+WRITE_GAP = 1.0                          # s without an ext_force write while 'on': the driver's watchdog has given
+                                         # the game its force back (and blocks ext_force): a release, then a new take-over
+LEVEL_CHECK = 0.25                       # s between reads of game_ffb_level while we hold the game muted
+SPIKE = 0.30                             # share of full scale: a jump past this must persist a second sample to pass
+SLEW = FULL / 0.010                      # ext_force units/s: the most the written value moves (full scale in 10 ms;
+                                         # the driver slews too, this only keeps a kerb's or a snap's edge from
+                                         # being a step)
+REVERSE_SPEED = 1.5                      # m/s backwards: the car is reversing
+REVERSE_MAX = 0.6                        # share of full scale: the most a reversing car's rack force pushes
 SOURCE_RETRY = 5.0                       # s before binding BeamNG's port again after it failed
 REGAINS = 1.0                            # s between reads of app_gain while RBR or BeamNG may play
 RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
@@ -994,6 +1022,10 @@ class FfbEngine:
         self._gains_at = None            # when app_gain was last read
         self._write_pending = False      # a new value not yet written (MIN_WRITE)
         self._written_at = None
+        self._smooth = None              # the force last passed by the spike gate and slew (before the fade)
+        self._smooth_at = None
+        self._spike = None               # a jump held back, waiting for a second sample to agree
+        self._level_at = None            # when game_ffb_level was last read back while we hold the game muted
         self._enabled = False
         self._path = None
         self._driver = None
@@ -1143,6 +1175,7 @@ class FfbEngine:
                 self._seen = slot[0]     # latched off (an error, a failed write): samples are not looked at
             self._publish(now)
             return
+        self._watchdog(now)
         if slot is not None and slot[0] != self._seen:
             self._sample(slot)
         else:
@@ -1258,6 +1291,21 @@ class FfbEngine:
             return None, False
         return level, new
 
+    def _watchdog(self, now):
+        """The driver's own watchdog gives the game its force back after 1 s without an ext_force write and then
+        blocks ext_force until game_ffb_level is written again: a gap that long while 'on', or game_ffb_level
+        read back as 100 while we hold the game muted, is a release (and a new take-over writes it 0 again)."""
+        if self._phase == 'on' and not (self._played_mode == 'forza' and self._fh_scale) and self._written_at is not None \
+                and now - self._written_at > WRITE_GAP:
+            self._release('gap', now)
+            return
+        if self._muted and self._phase in ('in', 'on') and self._driver is not None \
+                and (self._level_at is None or now - self._level_at >= LEVEL_CHECK):
+            self._level_at = now
+            if self._driver.game_level() == 100:
+                logging.warning("Countersteer FFB: game_ffb_level read back 100: the driver gave the game its force back")
+                self._release('level', now)
+
     def _sample(self, slot):
         seq, t, sample = slot
         arrivals = seq - self._seen      # the ones skipped arrived too: the rate counts them
@@ -1291,6 +1339,10 @@ class FfbEngine:
             self._fade_out(t, 'off' if not self._enabled else 'state')
         elif self._phase == 'idle' and want and (self._released_at is None or t - self._released_at >= REARM):
             self._activate(t)
+        if self._phase in ('in', 'on') and self.model.ready:
+            self.model.hold()                    # what plays: kept through the fade out if a new car resets the fit
+        elif self._phase == 'idle':
+            self.model.release()
         if self._phase != 'idle':
             self._play(t, sample)
         self._publish(t)
@@ -1311,10 +1363,35 @@ class FfbEngine:
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
         self._out(t, rack + self.texture.force(t, sample, rack))
 
+    def _shape(self, t, force):
+        """Spike gate and slew on the force (before the fade). A jump of over SPIKE of full scale from the last
+        value is held back one sample: it passes only when the next sample is near it too, so a one-sample outlier
+        (a glitch in the telemetry, a bad packet) never reaches the wheel while a real jump (a kerb strike, a snap
+        of oversteer) passes at its second sample. What passes then moves at most SLEW (full scale in 10 ms)."""
+        last = self._smooth
+        if last is None:
+            self._smooth, self._smooth_at, self._spike = force, t, None
+            return force
+        if abs(force - last) > SPIKE * FULL:
+            held = self._spike
+            self._spike = force
+            if held is None or abs(force - held) > SPIKE * FULL:
+                force = last                 # the first of a jump (or one that is not where the last was): not yet
+        else:
+            self._spike = None
+        dt = min(max(t - self._smooth_at, 0.0), 0.1)
+        step = SLEW * dt
+        out = last + min(max(force - last, -step), step)
+        self._smooth, self._smooth_at = out, t
+        return out
+
     def _out(self, t, force):
         """`force` (ext_force units, before the fade) clamped, faded and written."""
         g = self._gain(t)
-        value = int(round(min(max(force, -FULL), FULL) * g))
+        force = min(max(force, -FULL), FULL)
+        if self._played_mode != 'forza':     # the add-on's is added to the game's own force, which steps: it must too
+            force = self._shape(t, force)
+        value = int(round(force * g))
         self._written_at = t
         self._write_pending = False
         try:
@@ -1332,10 +1409,24 @@ class FfbEngine:
             self._phase = 'idle'         # faded out (0 written last): the game has its force back
             self._let_go()
 
+    def _rewrite(self, now):
+        """The last value again (a gap between ACR samples; STALL ends it)."""
+        try:
+            self._driver.force(self._last_value)
+            self.writes += 1
+            self._written_at = now
+        except OSError as e:
+            logging.warning("Countersteer FFB: ext_force: %s", e)
+            self._broken, self._available = True, False
+            self._release('write', now)
+
     def _idle(self, now):
         if self._phase != 'idle' and self._played_mode == 'acr' and self._last_t is not None \
                 and now - self._last_t > STALL:
             self._release('stall', now)
+        elif self._phase != 'idle' and self._played_mode == 'acr' and not self._broken and self._written_at is not None \
+                and now - self._written_at >= KEEP_WRITE:
+            self._rewrite(now)           # the driver fades a value from 30 ms: HOLD_GAP lets samples come 30-50 ms apart
         if self._mode == 'acr':
             self._verdict = self.classifier.verdict(now, holding=self._phase in ('in', 'on'))
             self._publish(now)
@@ -1744,6 +1835,8 @@ class FfbEngine:
         self._release(reason, now)
 
     def _let_go(self):
+        self._smooth = self._smooth_at = self._spike = None
+        self._written_at = None
         if self._owned:
             self._owned = False
             wheel_owner.release(self._path, OWNER)

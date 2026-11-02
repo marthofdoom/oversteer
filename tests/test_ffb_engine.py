@@ -818,7 +818,8 @@ def test_demos_never_cut_countersteer_off(tmp_path):
     engine.stop()
     assert wheel_owner.hold_for_demo(path, 0.05)
     assert wheel_owner.current(path) == ('demo', True)
-    assert wheel_owner.demo_refusal(path) is None   # another demo may follow
+    assert not wheel_owner.hold_for_demo(path, 0.05)    # one at a time
+    assert 'still playing' in wheel_owner.demo_refusal(path)
     deadline = time.monotonic() + 1.0
     while wheel_owner.current(path) is not None and time.monotonic() < deadline:
         time.sleep(0.01)
