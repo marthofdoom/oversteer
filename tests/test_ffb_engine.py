@@ -269,7 +269,7 @@ def test_it_starts_at_finalff_scale_and_fits_the_games_force_but_plays_its_own_l
     assert model.cross == pytest.approx(1.0, abs=0.05)       # finalFF agrees
     s = acr(1.0, game_gain=0.5)
     # the magnitude is the rim-torque model's, not the game's: its FFB setting does not move it
-    assert model.force(s) == pytest.approx(fe.FULL * fe.wheel_torque.rim_share(model.rim_torque(s)))
+    assert model.force(s) == pytest.approx(fe.FULL * fe.wheel_torque.rim_share(model.rim_torque(s), None, model.impedance()))
     assert fitted(game_gain=2.0).force(s) == pytest.approx(model.force(s), rel=1e-6)
     strong = fitted(game_gain=2.0)
     assert strong.scale == pytest.approx(2.0 * 32767 / 582, rel=0.1)           # clipped raw left out
