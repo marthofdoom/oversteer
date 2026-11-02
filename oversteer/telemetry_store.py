@@ -32,7 +32,9 @@ VERSION = 3
 # The stored data's version (store_meta 'data_version'), apart from the schema's: it goes up when what older code
 # worked out from the runs is wrong enough to be repaired in place (data_repair.migrate, once, on the drive-log thread).
 # A file made by this code starts at it; a file from before has none (0).
-DATA_VERSION = 2                 # 1: the 0.16 repair; 2: Richard Burns Rally's runs worked over again (0.17)
+# 1: the 0.16 repair; 2: Richard Burns Rally's runs worked over again (0.17); 3: the runs with a corner stored back to
+# front (a car that reversed in it: d1 < d0) worked over again (0.18)
+DATA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE cars (
