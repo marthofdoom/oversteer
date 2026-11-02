@@ -22,7 +22,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
-from . import diagnostics, hotkeys
+from . import beamng_mod, diagnostics, hotkeys
 from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
 from .combined_chart import CombinedChart
@@ -1096,6 +1096,29 @@ class Gui:
             self.ui.error_dialog(_("Can't write the bundle"), str(e))
             return
         self.ui.info_dialog(_("Diagnostics bundle saved"), _("{} files in {}.").format(count, path))
+
+    def install_beamng_mod(self):
+        """The Telemetry tab's "Install the Countersteer mod for BeamNG": into every BeamNG user folder found; where
+        none can be reached (a sandbox, a game not started yet) the zip can be saved to put there by hand."""
+        report = beamng_mod.install()
+        text = beamng_mod.summary(report)
+        if report['error']:
+            logging.info("beamng mod: %s", text)
+            if report['version'] is None:
+                self.ui.error_dialog(_("Can't install the BeamNG mod"), text)
+                return
+            self.ui.info_dialog(_("The BeamNG mod was not installed"), text)
+            path = self.ui.file_chooser(_('Save the BeamNG mod'), 'save', beamng_mod.ZIP_NAME)
+            if path:
+                try:
+                    with open(path, 'wb') as f:
+                        f.write(beamng_mod.build_zip(beamng_mod.find_source()))
+                except OSError as e:
+                    self.ui.error_dialog(_("Can't write the mod"), str(e))
+            return
+        logging.info("beamng mod: %s", text.replace('\n', '; '))
+        failed = any(r[2] == beamng_mod.FAILED for r in report['results'])
+        (self.ui.error_dialog if failed else self.ui.info_dialog)(_("Countersteer mod for BeamNG"), text)
 
     def capture_folder(self):
         from xdg.BaseDirectory import save_data_path

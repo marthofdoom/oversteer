@@ -1092,6 +1092,27 @@
    "convention": "per wheel, ordered FL, FR, RL, RR",
    "rate": "packet"
   },
+  "rack_force": {
+   "kind": "sample",
+   "unit": "N",
+   "description": "The steering rack force in BeamNG, from the Countersteer mod (CSB1): the steering hydros' beam stress times their input factor, averaged over the physics steps since the last packet. Sign unverified.",
+   "convention": "BeamNG input space, as the game's own force feedback reads it",
+   "rate": "packet"
+  },
+  "tyre_side_slip": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "The game's per-wheel side slip in BeamNG (getSlipVelEnergyDownPeakForceDepthMats, CSB1), raw.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
+  "tyre_slip_energy": {
+   "kind": "sample",
+   "unit": "game unit",
+   "description": "The game's per-wheel slip energy in BeamNG (CSB1), raw.",
+   "convention": "per wheel, ordered FL, FR, RL, RR",
+   "rate": "packet"
+  },
   "tyre_slip_ratio": {
    "kind": "sample",
    "unit": "game unit",
