@@ -85,6 +85,7 @@ class Calibration:
     RAMP_MOVE_DEG = 0.2         # movement that counts as breaking away
     SETTLE_TOL_DEG = 2.0        # a still wheel with no force must not move more than this
     STILL_DEG_S = 15.0
+    SHOT_START_TOL_DEG = 20.0   # a pulse starts from this close to where it should if the wheel can't be moved there
     VEL_WINDOW_S = 0.010
     TOTAL_S = 300.0
     PREP_S = 0.35               # game force ramps to 0 over 200 ms
@@ -130,6 +131,11 @@ class Calibration:
         self.t0 = 0.0
         self.period = 0.002
         self.log = []                   # (time, event) for the report and the tests
+        self.step_text = ''             # the step in progress (the last _report), for the time-out message
+        self.phase = 'start'            # the phase of the procedure, and when each began (for the summary)
+        self.phase_marks = []           # (phase, time)
+        self.move_timeouts = 0
+        self.move_skips = 0
 
     # --- the public side ---
 
@@ -140,6 +146,7 @@ class Calibration:
         _running.add(self)
         gc_was = gc.isenabled()
         owner = None
+        outcome = 'ok'
         try:
             # The wheel exclusively first (wheel_owner): Countersteer FFB lets go (and puts the game's force back
             # itself) or the run is refused before any write; only then may _check_free clear a stale ext_force
@@ -180,7 +187,14 @@ class Calibration:
             result['near_lock_events'] = self.near_lock_events
             result['duration_s'] = round(self.rec.cmd_t[-1] - self.rec.cmd_t[0], 1) if self.rec.cmd_t else 0
             return result
+        except Aborted as e:
+            outcome = e.reason
+            raise
+        except BaseException:
+            outcome = 'error'
+            raise
         finally:
+            self._log_summary(outcome)
             if gc_was:
                 gc.enable()
             self._release_owner(owner)      # a safety net: normally released after the restore above
@@ -326,7 +340,8 @@ class Calibration:
         now = self.io.now()
         if now - self.t0 > self.TOTAL_S:
             self._zero()
-            raise Aborted('timeout', _("The calibration took too long."))
+            raise Aborted('timeout', _("The calibration took too long (more than {:.0f} s, in the step \"{}\").")
+                          .format(self.TOTAL_S, self.step_text or _("start")))
         if self._last_tick is not None and now - self._last_tick > self.TICK_GAP_S and \
                 abs(self._last_w) > self.SWEEP_MAX:
             self._zero()
@@ -429,6 +444,9 @@ class Calibration:
         return self.io.now()
 
     def _report(self, text):
+        self.step_text = text
+        if self.t0:
+            logging.info("calibration: %.1f s: %s", self._now() - self.t0, text)
         if self.progress is not None:
             try:
                 self.progress(min(self.done_units / self.total_units, 1.0), text)
@@ -438,6 +456,30 @@ class Calibration:
     def _unit(self, text):
         self.done_units += 1
         self._report(text)
+
+    def _enter(self, phase):
+        self.phase_marks.append((phase, self._now()))
+        self.phase = phase
+
+    def _log_summary(self, outcome):
+        """One compact INFO record of how the run went (every ending): the time per phase, the time-outs of
+        _move_to, near-lock events, what was measured and the last entries of the log."""
+        try:
+            end = self._now()
+            marks = self.phase_marks + [('end', end)]
+            phases = {}
+            for (name, t), (_n, t_next) in zip(marks, marks[1:]):
+                phases[name] = phases.get(name, 0.0) + t_next - t
+            logging.info(
+                "calibration summary: %s after %.1f s (step \"%s\"); phases %s; move timeouts %d, shots skipped %d, "
+                "near-lock events %d; latency %.0f ms, a_kick %.0f, a_fs %.0f deg/s2, breakaway_max %.3f; last log %s",
+                outcome, end - self.t0 if self.t0 else 0.0, self.step_text,
+                ', '.join('{} {:.1f} s'.format(k, v) for k, v in phases.items()) or 'none',
+                self.move_timeouts, self.move_skips, self.near_lock_events, self._latency * 1000, self.a_kick,
+                self.a_fs, self.breakaway_max,
+                [(round(t - self.t0, 1), e) for t, e in self.log[-30:]])
+        except Exception:
+            logging.exception("calibration summary")
 
     def _grabbed(self, why):
         self._zero()
@@ -496,6 +538,8 @@ class Calibration:
     def _move_to(self, target, tol=3.0, timeout=3.0, fatal=False):
         """Turn the wheel to `target` degrees under a velocity loop (at most MOVE_MAX force, V_MOVE)."""
         start = self._now()
+        if not fatal:
+            timeout = min(timeout, self._move_allowance())
         still_since = None
         stalled_since = None
         boost = 0.0
@@ -540,7 +584,17 @@ class Calibration:
                     self._zero()
                     raise Aborted('stalled', _("The wheel could not be turned back to the centre."))
                 self.log.append((self._now(), 'move timeout'))
+                self.move_timeouts += 1
+                logging.info("calibration: move to %.1f timed out after %.1f s at %.1f degrees, %.0f deg/s (%s)",
+                             target, timeout, self.theta, self.omega, self.step_text)
                 return False
+
+    def _move_allowance(self):
+        """The longest a move between positions may take: its share of the time left over the steps left, so a
+        wheel that is slow to settle can't use the whole budget (at least a second, at most the default)."""
+        left = self.TOTAL_S - (self._now() - self.t0) - 5.0
+        units = max(self.total_units - self.done_units, 1)
+        return max(1.0, left / units)
 
     def _ramp(self, direction):
         """Slowly raise the force in one direction (wheel frame, or ext_force's before the sign is known) until
@@ -623,7 +677,17 @@ class Calibration:
         turns it back until it is as fast the other way. Speed never exceeds the run-up's, and one pulse gives
         the level's acceleration with and against the movement."""
         start = self._shot_start(d)
-        self._move_to(start)
+        if not self._move_to(start):
+            # not there in time: near enough is used (the run-up only needs room), otherwise the pulse is dropped
+            # (every level is measured twice) instead of pushing from the wrong place
+            if abs(self.theta - start) > self.SHOT_START_TOL_DEG:
+                self.move_skips += 1
+                self.log.append((self._now(), 'shot skipped at {:.0f}'.format(self.theta)))
+                logging.info("calibration: pulse %.0f%% %+.0f skipped, wheel at %.1f degrees instead of %.1f",
+                             level * 100, d, self.theta, start)
+                self._brake()
+                self._settle(0.1, check=False)
+                return
         self._settle(0.15)
         self._kick(d)
         v_run = min(self.V_RUN, math.sqrt(self.a_kick * abs(start)))
@@ -690,6 +754,7 @@ class Calibration:
 
     def _measure(self):
         # Which way ext_force turns this wheel, and the breakaway where it stands
+        self._enter('direction')
         self._report(_("Finding the direction"))
         moved, w = self._ramp(1.0)
         self.sign = _sign(moved)
@@ -700,11 +765,13 @@ class Calibration:
             self.breakaway_max = max(self.breakaway_max, w)
             self._settle(0.15, check=False)
             self._unit(_("Breakaway"))
+            self._enter('breakaway')
             # the other way: away from the nearer lock
             towards_centre = -_sign(self.theta) or -self.sign
             self._breakaway(towards_centre)
             self._unit(_("Breakaway"))
             self.kick = max(self.KICK, min(self.SWEEP_MAX, 2.0 * self.breakaway_max))
+            self._enter('strength')
             # One push towards the centre for the wheel's strength: the movement loops are tuned from it
             self._settle(0.15, check=False)
             self._learn_strength(self._kick(towards_centre))
@@ -728,6 +795,7 @@ class Calibration:
         self._unit(_("Measuring the wheel's strength"))
 
         # Breakaway around the rim
+        self._enter('rim breakaway')
         span = min(270.0, 0.6 * self._usable())
         n = self.BREAKAWAY_ANGLES
         for i in range(n):
@@ -740,13 +808,25 @@ class Calibration:
         self._step(self._move_to, 0.0)
 
         # Pulses at each level, both ways, up then down
+        self._enter('force response')
+        pass_start = pass_s = None
         for rep in range(self.REPEATS):
+            if pass_start is not None:
+                pass_s = self._now() - pass_start
+                if self._now() - self.t0 + 1.1 * pass_s > self.TOTAL_S - 5.0:
+                    # a slow wheel: the pass the time limit would cut off is left out, the run keeps what it has
+                    self.log.append((self._now(), 'pass {} left out (time)'.format(rep + 1)))
+                    logging.warning("calibration: running late (%.0f s, a pass takes %.0f s); the remaining "
+                                    "passes are left out", self._now() - self.t0, pass_s)
+                    break
+            pass_start = self._now()
             levels = wc.KNOTS if rep % 2 == 0 else tuple(reversed(wc.KNOTS))
             for level in levels:
                 for d in (1.0, -1.0):
                     self._step(self._shot, level, d)
                     self._unit(_("Force response {:.0f}%").format(level * 100))
 
+        self._enter('finish')
         self._step(self._move_to, 0.0)
         self._step(self._settle, 0.2, False)
         self._unit(_("Done"))
