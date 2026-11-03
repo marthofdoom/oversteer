@@ -12,6 +12,7 @@ out so a stale value never stays lit.
 import glob
 import logging
 import os
+import select
 import selectors
 import socket
 import threading
@@ -212,6 +213,7 @@ AUTO = 'auto'                                        # the port setting that lis
 FORZA_OWN = range(5200, 5301)
 LOCK_SILENCE = 3.0                                   # s the locked port must be quiet before another port takes over
 BUSY_RETRY = 30.0                                    # s between tries of the Auto ports another app held
+RELAY_BACK = 1.0                                     # s the engine process has to hand the ports back (ffb_process)
 
 
 def auto_ports():
@@ -423,6 +425,9 @@ class Telemetry:
         self._probe = None                # Auto: (socket, until) while LEGACY_PORT is being probed
         self._ports_lock = threading.Lock()   # stop()'s swap against the thread adding or closing a port
         self._ignored_ports = set()       # ports whose dropped packets were logged since the lock was taken
+        self._relay = None                # Countersteer FFB's engine process's relay channel while it receives first
+        self._relay_socks = None          # the sockets it was handed last
+        self._relay_car = None            # the RBR car last told to it
         self.set_shift(shift, shift_rpm, launch)
         self.inputs = inputs
         self.on_limiter = on_limiter
@@ -629,47 +634,168 @@ class Telemetry:
 
     def _run(self):
         selector = self._selector
-        forwarder = self.forwarder
-        while self.running:
-            try:
-                events = selector.select(0.25)
-            except (OSError, ValueError):
-                break                     # closed under us by stop()
-            for key, _mask in events:
-                sock, port = key.fileobj, key.data
-                # A burst costs one select: read until the socket is empty
-                while self.running:
-                    if sock.fileno() < 0:
-                        break             # closed by this loop (LEGACY_PORT let go)
+        try:
+            while self.running:
+                relay = self._relay_sync()
+                if relay is not None:
+                    events = self._relay_read(relay, 0.25)
+                else:
                     try:
-                        data, addr = sock.recvfrom(2048)
-                    except (BlockingIOError, InterruptedError):
-                        break
-                    except OSError as e:
-                        if self.running:
-                            # Never seen on a bound UDP socket: drop that port rather than spin on it
-                            logging.warning("telemetry: UDP %s stops: %s", port, e)
-                            self._close_port(port, selector)
-                        break
-                    if addr[1] == forwarder.port:
-                        continue          # came back from our own send socket (a target that loops): never twice
-                    # In Auto only the locked port's datagrams go on; before the first lock every held port's do
-                    if forwarder.targets and (self._source is None or self._source[0] == port):
-                        forwarder.send(data)
-                    self.handle(time.monotonic(), data, addr, port)
-            if not self.running:
+                        events = selector.select(0.25)
+                    except (OSError, ValueError):
+                        break                     # closed under us by stop()
+                    for key, _mask in events:
+                        self._read_port(key.fileobj, key.data, selector)
+                if not self.running:
+                    break
+                now = time.monotonic()
+                if not events:
+                    self.check_idle(now)
+                    if self.learner is not None:
+                        self.learner.tick(now)
+                    # Fixed mode, and not once the answer is known (a game heard there)
+                    if not self.auto and not self.heard and not self.elsewhere and now >= self._probe_at:
+                        self._probe_at = now + self._probe_gap(now)
+                        self.probe_other_port()
+                if self.auto:
+                    self._auto_tick(now, selector)
+        finally:
+            self._relay_end()
+
+    def _read_port(self, sock, port, selector):
+        """A burst costs one select: read until the socket is empty."""
+        while self.running:
+            if sock.fileno() < 0:
+                break             # closed by this loop (LEGACY_PORT let go)
+            try:
+                data, addr = sock.recvfrom(2048)
+            except (BlockingIOError, InterruptedError):
                 break
-            now = time.monotonic()
-            if not events:
-                self.check_idle(now)
-                if self.learner is not None:
-                    self.learner.tick(now)
-                # Fixed mode, and not once the answer is known (a game heard there)
-                if not self.auto and not self.heard and not self.elsewhere and now >= self._probe_at:
-                    self._probe_at = now + self._probe_gap(now)
-                    self.probe_other_port()
-            if self.auto:
-                self._auto_tick(now, selector)
+            except OSError as e:
+                if self.running:
+                    # Never seen on a bound UDP socket: drop that port rather than spin on it
+                    logging.warning("telemetry: UDP %s stops: %s", port, e)
+                    self._close_port(port, selector)
+                break
+            self._datagram(time.monotonic(), data, addr, port)
+
+    def _datagram(self, now, data, addr, port, relayed=False):
+        forwarder = self.forwarder
+        if addr[1] == forwarder.port:
+            return                # came back from our own send socket (a target that loops): never twice
+        # In Auto only the locked port's datagrams go on; before the first lock every held port's do
+        if forwarder.targets and (self._source is None or self._source[0] == port):
+            forwarder.send(data)
+        if relayed:
+            self.handle(now, data, addr, port, relayed=True)
+        else:
+            self.handle(now, data, addr, port)
+
+    # -- Countersteer FFB's engine process as the first hop (ffb_process) --
+    #
+    # While Countersteer FFB is on and its engine process runs, the engine process receives the game's datagrams
+    # itself: this listener keeps binding the ports (all the choices above stay here), hands the bound sockets over
+    # (the same sockets: the ports never come free in between) and stops reading them; the engine process plays
+    # what it receives and passes every datagram on, with its receive time, over the relay channel, read here
+    # instead of the sockets. Handing them back (the switch off, the engine process gone, stop()): the engine
+    # process closes its copies and marks the end of what it passed on; everything up to the mark is handled
+    # here, then the sockets are read here again. No datagram is read twice and the order is kept.
+
+    def _relay_sync(self):
+        """The relay channel to read this time, None to read the sockets; hands the sockets over or back as the
+        engine process comes and goes, and sends it the ports again when they changed."""
+        ffb = self.ffb
+        channel = getattr(ffb, 'relay_channel', None)
+        wanted = channel() if channel is not None else None
+        current = self._relay
+        if current is not None and wanted is not current:
+            self._relay_back(current)
+            current = None
+        if wanted is None:
+            return None
+        socks = dict(self._socks)
+        if current is None or socks != self._relay_socks:
+            if not ffb.relay_ports(socks):
+                if current is not None:
+                    self._relay_back(current)
+                return None
+            self._relay_socks = socks
+            if current is None:
+                self._relay = wanted
+                self._relay_car = None
+                self._tell_lock()
+                logging.info("telemetry: Countersteer FFB's engine process receives UDP %s first",
+                             ', '.join(str(p) for p in socks) or '-')
+        return self._relay
+
+    def _relay_read(self, relay, timeout, until=None):
+        """Handle what the engine process passed on (waiting up to `timeout` for the first); True if anything came.
+        `until`: a mark to read up to (then returns 'mark'), 'eof' at the channel's end."""
+        got = False
+        deadline = time.monotonic() + timeout
+        while True:
+            wait = max(deadline - time.monotonic(), 0.0) if not got else 0.0
+            try:
+                if not select.select([relay], [], [], wait)[0]:
+                    return got
+                blob = relay.recv(4096)
+            except (BlockingIOError, InterruptedError):
+                continue
+            except (OSError, ValueError):
+                return 'eof'
+            if not blob:
+                return 'eof'
+            item = self._relay_decode(blob)
+            if item is None:
+                continue
+            if item[0] == 'mark':
+                # (not a datagram: the wait goes on, as it would on the sockets)
+                if until is not None and item[1] == until:
+                    return 'mark'
+                continue
+            got = True
+            _kind, t, port, addr, data = item
+            self._datagram(t, data, addr, port, relayed=True)
+            if not self.running and until is None:
+                return got
+
+    @staticmethod
+    def _relay_decode(blob):
+        from .ffb_process import relay_unpack
+        try:
+            return relay_unpack(blob)
+        except Exception:
+            return None
+
+    def _relay_back(self, relay):
+        """Read the sockets here again: the engine process lets go of its copies; what it passed on before is
+        handled first (to its mark, or the channel's end if it is gone)."""
+        self._relay = None
+        self._relay_socks = None
+        ffb = self.ffb
+        token = None
+        give_back = getattr(ffb, 'relay_release', None)
+        if give_back is not None:
+            token = give_back()
+        end = self._relay_read_to(relay, token)
+        if end not in ('mark', 'eof'):
+            logging.warning("telemetry: Countersteer FFB's engine process did not hand the UDP ports back in time")
+        logging.info("telemetry: listening on UDP %s here again", ', '.join(str(p) for p in self._socks) or '-')
+
+    def _relay_read_to(self, relay, token):
+        deadline = time.monotonic() + RELAY_BACK
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            result = self._relay_read(relay, left, until=token if token is not None else -1)
+            if result in ('mark', 'eof'):
+                return result
+
+    def _relay_end(self):
+        relay = self._relay
+        if relay is not None:
+            self._relay_back(relay)
 
     def _probe_gap(self, now):
         # Auto, once a game was heard on LEGACY_PORT: keep looking often, it will be back after its menus
@@ -827,6 +953,7 @@ class Telemetry:
         self.last_packet = 0.0
         self.last_source = None
         self._source = None
+        self._tell_lock()
         self.active_port = None
         self._ignored_ports = set()
         self.learned_max = self.seen_max = 0.0
@@ -846,6 +973,7 @@ class Telemetry:
         passed on until it goes quiet."""
         port = source[0]
         self._source = source
+        self._tell_lock()
         self.active_port = port
         self._released = None
         self._ignored_ports = set()
@@ -874,6 +1002,13 @@ class Telemetry:
         logging.info("telemetry: game %s detected (%d-byte packets, UDP %s)", source[2] or 'unknown', size, port)
         logging.debug("telemetry: game %s sends from %s", source[2] or 'unknown', source[1])
 
+    def _tell_lock(self):
+        """The source locked on to Countersteer FFB's engine process: it plays only that source's packets it
+        receives first (ffb_process)."""
+        relay_lock = getattr(self.ffb, 'relay_lock', None)
+        if relay_lock is not None:
+            relay_lock(self._source)
+
     def _drop(self, port, data):
         """A packet on a port other than the active one: counted, logged
         once per port while the lock lasts, otherwise ignored."""
@@ -887,10 +1022,11 @@ class Telemetry:
                 logging.info("telemetry: UDP %s waits until UDP %s has been quiet for %.0f s", port,
                              self._released[0], LOCK_SILENCE)
 
-    def handle(self, now, data, addr, port=None):
+    def handle(self, now, data, addr, port=None, relayed=False):
         """One datagram from `addr` received at `now` (monotonic seconds) on
         UDP `port` (None: the fixed port): the live path, also driven
-        directly by tests and replays."""
+        directly by tests and replays. `relayed`: it came through Countersteer
+        FFB's engine process, which received it first and has played it."""
         if port is None:
             port = self.port
         recorder = self.recorder
@@ -945,10 +1081,18 @@ class Telemetry:
                 if self._learner_error_at is None or now - self._learner_error_at >= LEARNER_ERROR_EVERY:
                     self._learner_error_at = now
                     logging.exception("rbr car recognition")
+            if relayed:
+                # The engine process decodes RBR's packets itself: the car told here goes to it
+                car = (sample.car, sample.car_name, sample.car_epoch, sample.car_provisional)
+                if car != self._relay_car:
+                    self._relay_car = car
+                    relay_car = getattr(self.ffb, 'relay_car', None)
+                    if relay_car is not None:
+                        relay_car(car)
         rpm, max_rpm, shift = sample.rpm, sample.max_rpm, sample.shift
         self.live = sample
         ffb = self.ffb
-        if ffb is not None:
+        if ffb is not None and not relayed:
             ffb.offer(now, sample)        # O(1), never waits: the engine runs in its own process (ffb_process)
         self.last_packet = now
         if not self.heard:

@@ -31,9 +31,20 @@ same class tests and the replay scripts use in-process; this module is the bound
 - FFB tuning records (ffb_record): the sidecar is written in the engine process, on the capture's clock
   (CLOCK_MONOTONIC is the machine's). Its records never cross the boundary, none are dropped when the GUI stalls, and
   the engine never waits on the GUI.
-- The telemetry listener stays in the GUI process: a sample's trip to the engine still waits for the listener's own
-  turn at the GUI's GIL (the GUI keeps the 1 ms switch interval for it); the engine's passes, writes and the force
-  they play do not."""
+- The game's UDP: while Countersteer FFB is on, the engine process receives it first. The GUI's listener
+  (telemetry.Telemetry) still chooses and binds the ports (Auto, probing, the legacy port, the user's setting) and
+  hands the bound sockets over (SCM_RIGHTS on the control socket: the same sockets, so the ports stay bound and
+  nothing binds twice); the engine process reads them, plays the locked source's samples (the listener tells it
+  which source is locked and RBR's car) and passes every datagram on over the relay channel with its receive time,
+  drop-oldest and counted if the GUI does not read; the listener handles them as if it had read them itself. Handing
+  back (the switch off, a restart, the listener's stop): the engine process closes its copies and sends a mark; the
+  listener handles everything up to the mark, then reads its sockets again. With the switch off, or without an
+  engine process, the listener reads its sockets and offers samples over the data socket as before.
+
+    game --UDP--> [engine process] recv --decode, locked source--> FfbEngine
+                        |  every datagram + receive time (relay, SEQPACKET, drop-oldest)
+                        v
+                  GUI listener: forward targets, capture, learner, LEDs, coach (Telemetry.handle, relayed=True)"""
 import atexit
 import collections
 import ctypes
@@ -110,6 +121,24 @@ def _position_from_spec(spec):
     return position_source(Device(None, dict(spec)))
 
 
+RELAY_DATAGRAM = struct.Struct('<dH4sH')   # receive time (monotonic s), port, sender's IPv4 address and port
+RELAY_MARK = struct.Struct('<q')
+RELAY_PENDING = 8192                     # datagrams the engine process keeps for a GUI that is not reading
+RELAY_READ = 512                         # datagrams read off one port in one pass at most
+
+
+def relay_pack(t, port, addr, data):
+    return b'D' + RELAY_DATAGRAM.pack(t, port, socket.inet_aton(addr[0]), addr[1]) + data
+
+
+def relay_unpack(blob):
+    """('datagram', t, port, (ip, port), data) or ('mark', token)."""
+    if blob[:1] == b'M':
+        return ('mark', RELAY_MARK.unpack_from(blob, 1)[0])
+    t, port, ip, sport = RELAY_DATAGRAM.unpack_from(blob, 1)
+    return ('datagram', t, port, (socket.inet_ntoa(ip), sport), bytes(blob[1 + RELAY_DATAGRAM.size:]))
+
+
 # -- the GUI's side --
 
 CHILD_CODE = ("import sys, pickle, base64; sys.path[:] = pickle.loads(base64.b64decode(sys.argv[1])); "
@@ -121,10 +150,10 @@ class _Child:
     process's sys.path so the package is found wherever it was (the source tree, the Flatpak's /app). Not
     multiprocessing.Process: its spawn runs the launcher script again as __mp_main__."""
 
-    def __init__(self, options, data, ctrl, up):
+    def __init__(self, options, data, ctrl, up, relay=None):
         import base64
         import subprocess
-        fds = (data.fileno(), ctrl.fileno(), up.fileno())
+        fds = (data.fileno(), ctrl.fileno(), up.fileno()) + ((relay.fileno(),) if relay is not None else ())
         options = dict(options, fds=fds)
         argv = [_executable(), '-c', CHILD_CODE, base64.b64encode(pickle.dumps(list(sys.path))).decode(),
                 base64.b64encode(pickle.dumps(options)).decode()]
@@ -213,6 +242,8 @@ class EngineProcess:
         self._data = None                        # the sample socket (GUI end), None while no child runs
         self._ctrl = None
         self._up = None
+        self._relay = None                       # the engine process's relay of the game's datagrams (GUI end)
+        self._relay_token = 0
         self._old = []                           # sockets of a dead child, closed at the next spawn
         self._proc = None
         self._thread = None
@@ -363,6 +394,51 @@ class EngineProcess:
                 return None
         return self._probe[1] if event.wait(timeout) else None
 
+    # -- the engine process receives the game's UDP first (telemetry.Telemetry's relay) --
+
+    def relay_channel(self):
+        """The relay channel to read the game's datagrams from, while the engine process should receive them first:
+        Countersteer FFB on and its engine process running; None otherwise (the listener reads its sockets)."""
+        if self._enabled and self._ready and self._down is None and not self._stopping.is_set():
+            return self._relay
+        return None
+
+    def relay_ports(self, socks):
+        """The listener's bound sockets ({port: socket}) to the engine process, which receives on them from now on
+        (copies of the same sockets: the ports stay bound throughout). False if it could not be sent."""
+        ports = list(socks)
+        fds = [socks[p].fileno() for p in ports]
+        with self._lock:
+            sock = self._ctrl
+            if sock is None:
+                return False
+            self._relay_token += 1
+            try:
+                socket.send_fds(sock, [pickle.dumps(('udp_ports', self._relay_token, ports), PICKLE)], fds)
+                return True
+            except socket.timeout:
+                logging.warning("Countersteer FFB: the engine process takes no requests; stopping it")
+                self._kill()
+            except OSError:
+                pass
+            return False
+
+    def relay_release(self):
+        """The engine process lets go of its copies of the sockets and marks the end of what it relayed; the mark's
+        token, None if it could not be asked."""
+        with self._lock:
+            self._relay_token += 1
+            token = self._relay_token
+            return token if self._send(('udp_ports', token, [])) else None
+
+    def relay_lock(self, source):
+        """The source the listener locked on ((port, address, game) or None): the only one the engine plays."""
+        self._set('udp_lock', ('udp_lock', source))
+
+    def relay_car(self, car):
+        """Richard Burns Rally's car as the listener's learner told it: (car, name, epoch, provisional)."""
+        self._set('udp_car', ('udp_car', car))
+
     # -- FFB tuning records --
 
     def _sampler(self, path, origin, header):
@@ -497,6 +573,7 @@ class EngineProcess:
         data_rx, data_tx = _pair()
         ctrl_rx, ctrl_tx = _pair()
         up_rx, up_tx = _pair()
+        relay_rx, relay_tx = _pair()
         try:
             data_tx.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, DATA_BUFFER)
         except OSError:
@@ -510,9 +587,9 @@ class EngineProcess:
             'localedir': locale.bindtextdomain('oversteer', None),
         }
         try:
-            proc = _Child(options, data_rx, ctrl_rx, up_tx)
+            proc = _Child(options, data_rx, ctrl_rx, up_tx, relay_tx)
         finally:
-            for sock in (data_rx, ctrl_rx, up_tx):
+            for sock in (data_rx, ctrl_rx, up_tx, relay_tx):
                 sock.close()
         data_tx.setblocking(False)
         ctrl_tx.settimeout(CTRL_TIMEOUT)
@@ -520,6 +597,7 @@ class EngineProcess:
         self._proc, self.pid = proc, proc.pid
         self._started_at, self._heard_at, self._ready = now, now, False
         self._up = up_rx
+        self._relay = relay_rx
         with self._lock:
             self._ctrl = ctrl_tx
             for message in list(self._state.values()):
@@ -617,7 +695,8 @@ class EngineProcess:
         with self._lock:
             ctrl, self._ctrl = self._ctrl, None
         up, self._up = self._up, None
-        self._old += [s for s in (data, ctrl, up) if s is not None]
+        relay, self._relay = self._relay, None   # the listener reads it to its end, then its sockets again
+        self._old += [s for s in (data, ctrl, up, relay) if s is not None]
         if proc is not None:
             proc.join(0.1)
             proc.close()
@@ -725,17 +804,26 @@ class _Host:
     """The child's side of the sockets, driven from FfbEngine.loop's wait: one thread does the waiting, the
     requests and the passes."""
 
-    def __init__(self, engine, data, ctrl, up):
+    def __init__(self, engine, data, ctrl, up, relay=None):
         self.engine = engine
-        self.data, self.ctrl, self.up = data, ctrl, up
-        for sock in (data, ctrl, up):
-            sock.setblocking(False)
+        self.data, self.ctrl, self.up, self.relay = data, ctrl, up, relay
+        for sock in (data, ctrl, up, relay):
+            if sock is not None:
+                sock.setblocking(False)
+        self.udp = {}                            # port -> socket: the listener's, while this process receives first
+        self.out = collections.deque()           # what waits for room on the relay channel, in order
+        self.relayed = self.relay_dropped = 0
+        self.lock = None                         # the listener's locked source (port, address, game)
+        self.rbr_car = None                      # (car, name, epoch, provisional) as the listener's learner told it
+        self.engine_seq = 0                      # the arrivals offered to the engine, counted over both feeds
+        self.gui_last = None                     # the listener's number of its last sample offered here
+        from .telemetry_formats import decode_sample
+        self.decode = decode_sample
         self.sig_r, self.sig_w = os.pipe()
         os.set_blocking(self.sig_r, False)
         os.set_blocking(self.sig_w, False)
         self.stop_reason = None
         self.last_ctrl = time.monotonic()
-        self.base = None                         # the listener's number before this child's first sample
         self.recorder = None                     # the FfbSampler running (its worker's)
         self.jobs = None                         # its worker's queue
         self.worker = None
@@ -783,9 +871,12 @@ class _Host:
         if engine._wake.is_set():
             timeout = 0.0
         began = time.monotonic()
+        self._flush()
+        inputs = [self.data, self.ctrl, self.sig_r] + list(self.udp.values())
+        outputs = [self.relay] if self.out else []
         try:
-            readable = select.select([self.data, self.ctrl, self.sig_r], [], [], timeout)[0]
-        except InterruptedError:
+            readable = select.select(inputs, outputs, [], timeout)[0]
+        except (InterruptedError, ValueError, OSError):
             readable = []
         now = time.monotonic()
         if not readable and timeout > 0.0:
@@ -797,6 +888,10 @@ class _Host:
                 pass
         self._control(now)
         self._samples()
+        if self.udp:
+            self._receive([port for port, sock in self.udp.items() if sock in readable])
+        elif self.out:
+            self._flush()
         if now - self.last_ctrl > HEARTBEAT_TIMEOUT:
             self.stop('no word from the GUI for %.1f s' % (now - self.last_ctrl))
 
@@ -818,24 +913,116 @@ class _Host:
             engine.arrived(t, None if packet_id == NO_ID else packet_id)
         blob = blobs[-1]
         t, seq, _packet_id = HEADER.unpack_from(blob)
-        if self.base is None:
-            self.base = seq - len(blobs)         # the listener's count goes on across children: ours starts at 1
-        engine.offer(t, pickle.loads(blob[HEADER.size:]), seq - self.base)
+        # The listener's numbers go on across children and relay spells: the gap since its last counts its arrivals
+        self.engine_seq += len(blobs) if self.gui_last is None else max(seq - self.gui_last, len(blobs))
+        self.gui_last = seq
+        engine.offer(t, pickle.loads(blob[HEADER.size:]), self.engine_seq)
         self.samples += len(blobs)
+
+    # the game's datagrams, received here first
+
+    def _receive(self, ports):
+        """Read the listener's ports that have datagrams: each to the relay (with its receive time), the locked
+        source's decoded samples to the engine (only the newest offered, every one counted)."""
+        decode_sample = self.decode
+        lock, picked = self.lock, []
+        for port in ports:
+            sock = self.udp.get(port)
+            for _ in range(RELAY_READ):
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except (BlockingIOError, InterruptedError):
+                    break
+                except OSError:
+                    break
+                t = time.monotonic()
+                self._queue(relay_pack(t, port, addr, data))
+                if lock is None or lock[0] != port or lock[1] != addr[0]:
+                    continue
+                try:
+                    sample = decode_sample(data)
+                except Exception:
+                    sample = None
+                if sample is not None and sample.game == lock[2]:
+                    picked.append((t, sample))
+        self._flush()
+        if not picked:
+            return
+        engine = self.engine
+        for t, sample in picked[:-1]:
+            engine.arrived(t, getattr(sample, 'packet_id', None))
+        t, sample = picked[-1]
+        car = self.rbr_car
+        if sample.game == 'rbr' and car is not None and car[0] is not None:
+            sample.car, sample.car_name, sample.car_epoch, sample.car_provisional = car
+        self.engine_seq += len(picked)
+        self.gui_last = None                     # the listener's own feed counts afresh when it comes back
+        engine.offer(t, sample, self.engine_seq)
+        self.samples += len(picked)
+
+    def _queue(self, blob):
+        out = self.out
+        if len(out) >= RELAY_PENDING:
+            # The oldest datagram goes (never a mark: the listener waits for those)
+            for i, item in enumerate(out):
+                if item[:1] == b'D':
+                    del out[i]
+                    self.relay_dropped += 1
+                    break
+        out.append(blob)
+
+    def _flush(self):
+        out, relay = self.out, self.relay
+        if relay is None:
+            out.clear()
+            return
+        while out:
+            try:
+                relay.send(out[0])
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError:
+                out.clear()
+                return
+            out.popleft()
+            self.relayed += 1
+
+    def _udp_ports(self, token, ports, fds):
+        """The listener's sockets, replacing the ones held; then the mark: everything relayed before it was received
+        on the old set."""
+        old, self.udp = self.udp, {}
+        for sock in old.values():
+            sock.close()
+        for port, fd in zip(ports, fds):
+            sock = socket.socket(fileno=fd)
+            sock.setblocking(False)
+            self.udp[port] = sock
+        for fd in fds[len(ports):]:
+            os.close(fd)
+        self._queue(b'M' + RELAY_MARK.pack(token))
+        self._flush()
 
     def _control(self, now):
         while True:
             try:
-                blob = self.ctrl.recv(MAX_MESSAGE)
+                blob, fds, _flags, _addr = socket.recv_fds(self.ctrl, MAX_MESSAGE, 64)
             except (BlockingIOError, InterruptedError):
                 return
             except OSError:
-                blob = b''
+                blob, fds = b'', []
             if not blob:
+                for fd in fds:
+                    os.close(fd)
                 self.stop('the GUI closed the control channel')
                 return
             self.last_ctrl = now
-            self._dispatch(pickle.loads(blob))
+            message = pickle.loads(blob)
+            if message[0] == 'udp_ports':
+                self._udp_ports(message[1], message[2], fds)
+                continue
+            for fd in fds:
+                os.close(fd)
+            self._dispatch(message)
 
     def _dispatch(self, message):
         engine, kind = self.engine, message[0]
@@ -854,6 +1041,10 @@ class _Host:
             wheel_owner.set_remote(message[1], message[2])
         elif kind == 'inhibit':
             engine._on_inhibit()
+        elif kind == 'udp_lock':
+            self.lock = None if message[1] is None else tuple(message[1])
+        elif kind == 'udp_car':
+            self.rbr_car = message[1]
         elif kind == 'record':
             self._record_start(*message[1:])
         elif kind == 'record_stop':
@@ -902,7 +1093,8 @@ class _Host:
             return values[min(len(values) - 1, int(len(values) * 0.99))] * 1000.0 if values else None
         return {'samples': self.samples, 'skipped': self.engine.skipped, 'lag_max_ms': self.lag_max * 1000.0,
                 'lag_p99_ms': p99(lags), 'pass_max_ms': self.pass_max * 1000.0, 'pass_p99_ms': p99(passes),
-                'oversleep_max_ms': self.oversleep_max * 1000.0, 'dropped_up': self.dropped_up}
+                'oversleep_max_ms': self.oversleep_max * 1000.0, 'dropped_up': self.dropped_up,
+                'relayed': self.relayed, 'relay_dropped': self.relay_dropped, 'udp_ports': sorted(self.udp)}
 
     # FFB tuning records: the file opened and closed off the engine's thread, by one worker, in order
 
@@ -947,6 +1139,10 @@ class _Host:
         return sampler is not None
 
     def close(self):
+        for sock in self.udp.values():
+            sock.close()                         # (the listener's own copies keep the ports bound)
+        self.udp = {}
+        self._flush()
         if self.jobs is not None:
             self.jobs.put(('stop', None))
             self.jobs.put(None)
@@ -989,11 +1185,11 @@ def _priority():
 def _child_entry(blob):
     import base64
     options = pickle.loads(base64.b64decode(blob))
-    data, ctrl, up = (socket.socket(fileno=fd) for fd in options['fds'])
-    _child_main(data, ctrl, up, options)
+    socks = [socket.socket(fileno=fd) for fd in options['fds']]
+    _child_main(*socks[:3], options, relay=socks[3] if len(socks) > 3 else None)
 
 
-def _child_main(data, ctrl, up, options):
+def _child_main(data, ctrl, up, options, relay=None):
     """The engine process: FfbEngine's passes in this (main) thread until the GUI asks it to stop, closes the control
     channel, stops pinging, or goes (PR_SET_PDEATHSIG); then FfbEngine.stop()."""
     _prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
@@ -1022,7 +1218,7 @@ def _child_main(data, ctrl, up, options):
         kwargs = {k: _resolve(v) for k, v in (options.get('engine') or {}).items()}
         engine = ffb_engine.FfbEngine(**kwargs)
         engine.STALL_DUMPS = options.get('stall_dumps', True)
-        host = _Host(engine, data, ctrl, up)
+        host = _Host(engine, data, ctrl, up, relay)
         logging.root.addHandler(_UpHandler(host))
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(signum, host.on_signal)
