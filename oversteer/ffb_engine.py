@@ -646,6 +646,9 @@ class RackForce:
     KICK_TOTAL = wheel_torque.STEER_BUDGET + KICK_CAP    # share of full scale: the steering force and the kick together
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
                                          # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car)
+    DAMPING_SCALE = 1.0                  # ... but the column damping is played 1:1 like the torque under the knee: at 1:1 the
+                                         # centring loop needs it (slide sim, drive 20261102-220623: 0.17 Nm s/rad in all
+                                         # settles in 0.51 s, 4 % overshoot; the wheel's own 0.055 alone rings, 13 crossings)
     # The aligning torque split (feature flag, off: the driver's local spring `ffb_align` does not exist yet). With
     # it on, force() plays only the residual: the wanted rim torque less the spring the driver will render
     # (ffb_spring.DriverSpring: k clamped to `align_k_limit`, tau_max, slew and fades), through ext_force; the spring's
@@ -2080,7 +2083,7 @@ class FfbEngine:
         if want and not model.align_on:
             model.align_writer = self._align_write
         model.align_on = want
-        stage.column(t, model.impedance(), model.wheel_peak)
+        stage.column(t, model.impedance(), model.wheel_peak, model.DAMPING_SCALE)
 
     def _align_write(self, theta_a_deg, k_fs, tau_fs):
         """RackForce's spring to the driver (its k already carries the overall steering strength, like the rest of the

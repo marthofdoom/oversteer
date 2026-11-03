@@ -475,6 +475,8 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_
     in its position). Returns (settle_s or None, overshoot share of the first error, zero crossings, final error)."""
     result = fit.result
     a_fs, f, beta = result['a_fs'], result['friction'], result['damping']
+    # the column damping the driver adds (ffb_dynamics.column_targets: a total, the wheel's own included)
+    beta = max(beta, fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * fe.RackForce.DAMPING_SCALE * math.pi / 180.0 / peak)
     stick = fit.tau(result['breakaway'])
     lat = delay_s + fit.latency_ms / 1000.0
     delay = int(round(lat / h))
