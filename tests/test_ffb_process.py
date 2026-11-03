@@ -6,6 +6,7 @@ in the GUI still gets the wheel, the FFB record is written by the child, and a G
 child's passes. Nothing here touches a real wheel or /sys."""
 import os
 import pickle
+import select
 import signal
 import socket
 import subprocess
@@ -462,3 +463,33 @@ def test_a_gil_heavy_gui_does_not_hold_up_the_childs_passes(tmp_path, proxy):
     assert stats['oversleep_max_ms'] < 5.0               # and no wait overslept
     assert stats['lag_p99_ms'] < 5.0                     # the newest sample taken within a few ms of its offer
     assert p.status.active                               # it kept playing throughout
+
+
+def test_the_host_wait_wakes_on_game_ffb_raw_and_otherwise_on_its_timeout():
+    r, w = os.pipe()
+    os.set_blocking(r, False)
+
+    engine = fe.FfbEngine()
+    engine.fd, engine.woke = True, None
+    engine.raw_wait = lambda: (r, select.POLLIN) if engine.fd else None
+    engine.raw_woke = lambda now: setattr(engine, 'woke', now)
+    host, data, ctrl, up = _host(engine)
+    began = time.monotonic()
+    threading.Timer(0.05, os.write, (w, b'x')).start()
+    host.wait(2.0)
+    assert engine.woke is not None and engine.woke - began < 1.0     # the upload, not the timeout
+    os.read(r, 8)
+    engine.woke = None
+    began = time.monotonic()
+    host.wait(0.05)                                                  # nothing: the timeout
+    assert engine.woke is None and time.monotonic() - began >= 0.04
+    data.send(fp.HEADER.pack(0.1, 1, fp.NO_ID) + pickle.dumps(acr(0.1)))
+    began = time.monotonic()
+    host.wait(2.0)                                                   # a sample wakes it beside the fd
+    assert time.monotonic() - began < 1.0 and engine._slot is not None
+    engine.fd = False
+    host.wait(0.01)                                                  # no notification: the select path
+    for sock in (data, ctrl, up, host.data, host.ctrl, host.up):
+        sock.close()
+    os.close(r)
+    os.close(w)

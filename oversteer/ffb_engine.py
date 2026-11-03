@@ -87,6 +87,7 @@ import faulthandler
 import logging
 import math
 import os
+import select
 import sys
 import threading
 import time
@@ -1663,6 +1664,50 @@ class _CsbRate:
         return self._moved_at is not None and now - self._moved_at <= self.MOVING
 
 
+class _Wake(threading.Event):
+    """The engine's wake: an Event that also writes a pipe once wait_fd is asked for, so one poll() can wait on
+    it and on game_ffb_raw's fd together."""
+
+    def __init__(self):
+        super().__init__()
+        self._pipe = None
+
+    def pipe(self):
+        """The read end, created on first use; readable while the Event is set."""
+        if self._pipe is None:
+            r, w = os.pipe()
+            os.set_blocking(r, False)
+            os.set_blocking(w, False)
+            self._pipe = (r, w)
+            if self.is_set():
+                self._poke()
+        return self._pipe[0]
+
+    def _poke(self):
+        try:
+            os.write(self._pipe[1], b'x')
+        except OSError:
+            pass                         # full: already readable
+
+    def set(self):
+        super().set()
+        if self._pipe is not None:
+            self._poke()
+
+    def clear(self):
+        super().clear()
+        if self._pipe is not None:
+            try:
+                os.read(self._pipe[0], 512)
+            except OSError:
+                pass
+
+    def close(self):
+        pipe, self._pipe = self._pipe, None
+        for fd in pipe or ():
+            os.close(fd)
+
+
 class DriverReplace:
     """The driver's replace-mode attributes of one wheel (its sysfs
     directory): ext_force and game_const_scale each through one file kept
@@ -1674,6 +1719,7 @@ class DriverReplace:
         self._fd = None
         self._raw_fd = None
         self._scale_fd = None
+        self._notify = None              # game_ffb_raw wakes poll(): None not yet tried, False it does not
 
     def _file(self, name):
         return os.path.join(self.path, name)
@@ -1733,12 +1779,35 @@ class DriverReplace:
         """ext_force's ceiling, % of full scale after the gain."""
         return self._int('ext_force_cap')
 
+    NOTIFY_EVENTS = select.POLLPRI | select.POLLERR      # what sysfs_notify wakes on game_ffb_raw
+
     def read_raw(self):
-        """game_ffb_raw as (level, count, id)."""
+        """game_ffb_raw as (level, count, id). The read at offset 0 also re-arms the driver's notification."""
         if self._raw_fd is None:
             self._raw_fd = os.open(self._file('game_ffb_raw'), os.O_RDONLY)
         level, count, effect = os.pread(self._raw_fd, 64, 0).split()[:3]
+        if self._notify and self._ready(0):
+            self._notify = False         # still signalled after the re-arming read: poll() tells nothing here
         return int(level), int(count), int(effect)
+
+    def _ready(self, timeout):
+        poller = select.poll()
+        poller.register(self._raw_fd, self.NOTIFY_EVENTS)
+        return bool(poller.poll(timeout))
+
+    def notify_fd(self):
+        """(fd, events) to poll() for an upload to game_ffb_raw, or None where the driver does not notify (the
+        caller keeps polling by time). Tried once: armed by a read, then it must not be signalled at once."""
+        if self._notify is None:
+            self._notify = False
+            try:
+                if self._raw_fd is None:
+                    self._raw_fd = os.open(self._file('game_ffb_raw'), os.O_RDONLY)
+                os.pread(self._raw_fd, 64, 0)
+                self._notify = not self._ready(0)
+            except (OSError, ValueError):
+                pass
+        return (self._raw_fd, self.NOTIFY_EVENTS) if self._notify else None
 
     def force(self, value):
         if self._fd is None:
@@ -1895,7 +1964,7 @@ class FfbEngine:
         self._source_type = beamng_source
         self._slot = None                # (seq, arrival time, sample): the newest, written by the listener only
         self._seq = 0
-        self._wake = threading.Event()
+        self._wake = _Wake()
         self._enabled_req = False        # GUI requests, applied on the engine thread
         self._path_req = None
         self._usb_id = None
@@ -1990,6 +2059,9 @@ class FfbEngine:
         self._released_at = None
         self._raw_count = None
         self._raw_at = None              # when game_ffb_raw's count last moved
+        self._raw_wake_at = None         # monotonic: game_ffb_raw's notification woke the wait, not yet read
+        self._raw_lags = []              # s: wake to read of each notified game_ffb_raw read, this take-over
+        self._raw_reads = 0              # game_ffb_raw reads this take-over
         self._raw_id = None
         self._raw_id_at = None           # when its effect id last changed
         self._raw_error = False
@@ -2215,10 +2287,54 @@ class FfbEngine:
             self._quick_release('quit', self._clock())
             if self._driver is not None:
                 self._driver.close()
+            self._wake.close()
             self._stop_source()
 
     def _run(self):
-        self.loop(self._wake.wait)
+        self.loop(self._wait)
+
+    def raw_wait(self):
+        """(fd, events) whose wake means game_ffb_raw was uploaded, while the force is read each pass and the
+        driver notifies; else None (the passes keep to their timeout)."""
+        driver = self._driver
+        notify = getattr(driver, 'notify_fd', None)
+        if notify is None or not self.classifier.has_game_ffb_raw or not self._fast():
+            return None
+        return notify()
+
+    def raw_woke(self, now):
+        """The wait ended on game_ffb_raw's notification at `now` (monotonic s)."""
+        if self._raw_wake_at is None:
+            self._raw_wake_at = now
+
+    def _wait(self, timeout):
+        """loop's wait in the engine thread: the Event, and game_ffb_raw's fd when it notifies."""
+        watch = self.raw_wait()
+        if watch is None:
+            return self._wake.wait(timeout)
+        if self._wake.is_set():
+            return True
+        poller = select.poll()
+        poller.register(self._wake.pipe(), select.POLLIN)
+        poller.register(watch[0], watch[1])
+        try:
+            events = poller.poll(timeout * 1000.0)
+        except (InterruptedError, OSError):
+            return self._wake.is_set()
+        if any(fd == watch[0] for fd, _ in events):
+            self.raw_woke(time.monotonic())
+        return self._wake.is_set()
+
+    def _log_raw_lag(self):
+        """Once per take-over: how long after the notification the force was read."""
+        lags, reads = self._raw_lags, self._raw_reads
+        self._raw_lags, self._raw_reads, self._raw_wake_at = [], 0, None
+        if not lags:
+            return
+        lags.sort()
+        logging.info("Countersteer FFB: game_ffb_raw wake to read: median %.2f ms, p99 %.2f ms (%d of %d reads woken)",
+                     lags[len(lags) // 2] * 1000.0, lags[min(len(lags) - 1, int(len(lags) * 0.99))] * 1000.0,
+                     len(lags), reads)
 
     def loop(self, wait):
         """The passes until stop(): `wait(timeout)` returns at a sample or a request (the thread's Event; in the engine
@@ -2407,6 +2523,7 @@ class FfbEngine:
                 self._dyn_apply()
             self._raw_count = self._raw_at = self._raw_id = self._raw_id_at = None
             self._raw_counts.clear()
+            self._raw_lags, self._raw_reads, self._raw_wake_at = [], 0, None
             self.raw_rate = self.classifier.raw_rate = self._rbr_level = None
             self._rbr_new_at = self._rbr_sample = self._gains_at = None
             self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
@@ -2594,6 +2711,11 @@ class FfbEngine:
             return None, False
         try:
             level, count, effect = driver.read_raw()
+            read_at = time.monotonic()
+            self._raw_reads += 1
+            if self._raw_wake_at is not None:
+                self._raw_lags.append(read_at - self._raw_wake_at)
+                self._raw_wake_at = None
         except (OSError, ValueError) as e:
             if not self._raw_error:
                 self._raw_error = True
@@ -3455,6 +3577,7 @@ class FfbEngine:
         self._restore_scale(now)
         self._let_go()
         if was:
+            self._log_raw_lag()
             self._released_at = now
             if playing or self.last_stop is None:
                 self.last_stop = reason
