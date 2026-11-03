@@ -380,11 +380,12 @@ def feed(engine, t, seconds, **kw):
     return t
 
 
-def test_the_default_column_damping_writes_64_percent_of_the_real_columns(tmp_path):
+def test_the_default_column_damping_writes_rho_squared_times_the_real_columns(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
-    assert engine.model.damping_pct == 64
-    assert int(open(path + '/ffb_dyn_damping').read()) == round(0.64 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 2.1) * 1e6)
+    assert engine.model.damping_pct == 100
+    scale = engine.model.rho() ** 2
+    assert int(open(path + '/ffb_dyn_damping').read()) == round(scale * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 2.1) * 1e6)
     assert fd.column_targets(0.3, 2.1, damping_scale=0.64)[0] == round(0.64 * 1413)
 
 

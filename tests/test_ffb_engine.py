@@ -1305,6 +1305,25 @@ def test_a_late_ext_force_write_with_samples_waiting_is_a_warning(tmp_path, capl
     assert not any('telemetry paused' in r.getMessage() for r in caplog.records)
 
 
+def test_keep_alive_rewrites_in_a_telemetry_gap_count_as_writes_for_the_late_write_check(tmp_path, caplog):
+    # capture 20261103-152713: ext_force was rewritten every ~30 ms through a 130 ms telemetry gap, and the sample that
+    # ended the gap was reported as a write 130 ms after the last one
+    engine, path = engine_on(tmp_path)
+    t = run(engine, 0.0, 1.0)
+    engine._phase = 'on'
+    engine._late_at = -fe.LATE_LOG_EVERY
+    engine._write_mono = time.monotonic() - 0.13       # the last sample's write, 130 ms ago
+    engine._written_at = t - 0.13
+    engine._arrived_at = t - 0.13
+    for i in range(4):                                 # the rewrites through the gap
+        engine._rewrite(t - 0.1 + i * 0.03)
+    assert time.monotonic() - engine._write_mono < 0.05
+    engine._arrived_at = t + 0.001                     # the sample that ends the gap
+    with caplog.at_level('INFO'):
+        engine._out(t + 0.001, 1000.0)
+    assert not any('engine late' in r.getMessage() or 'telemetry paused' in r.getMessage() for r in caplog.records)
+
+
 def test_a_late_ext_force_write_with_no_sample_since_is_an_info_pause(tmp_path, caplog):
     engine, path = engine_on(tmp_path)
     t = run(engine, 0.0, 1.0)

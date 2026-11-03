@@ -542,7 +542,7 @@ def test_a_one_sided_puddle_pulls_only_with_drive_pull_on():
     s = fsample(ay=0.0, cs=0.0, puddle=(1.0, 0.0, 0.0, 0.0))
     m_f = 1400.0 * 0.53
     pull = on.pull_scrub() * 0.15 * m_f * 9.81 / 2.0
-    assert on.pull_scrub() == pytest.approx(ffb_kick.SCRUB * 0.35)
+    assert on.pull_scrub() == pytest.approx(fe.PULL_SCRUB * on.pull_level)
     assert on._front(s, None, on.pull_scrub()) == pytest.approx(pull)
     assert on._front(fsample(ay=0.0, cs=0.0, puddle=(0.0, 1.0, 0.0, 0.0)), None, on.pull_scrub()) == pytest.approx(-pull)
     assert off._front(s, None, off.pull_scrub()) == 0.0

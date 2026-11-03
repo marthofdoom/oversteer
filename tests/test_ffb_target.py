@@ -452,18 +452,20 @@ def test_the_classic_driver_from_column_has_no_hydraulic_top_end(street):
     assert abs(rack.rim_torque(sample_at(550.0))) < wheel_torque.HYD_TOP_NM
 
 
-def test_drive_pull_plays_the_physical_scrub_couple_at_its_level_in_both_mappings_and_is_off_by_default():
+def test_drive_pull_plays_the_physical_scrub_couple_at_its_level_in_both_mappings_and_is_on_at_100_by_default():
     s = sample_at(100.0)
     s.tyre_fx = (800.0, -800.0, 0.0, 0.0)
     for mapping in ('classic', 'knee'):
         rack = rack_for(2.1)
         rack.mapping, rack.assist = mapping, 0.0                  # (unassisted: the torque is the column's)
         rack.scrub = 0.02                                         # the learnt scrub is never played
-        assert rack.pull_on is False and rack.pull_scrub() == 0.0
+        assert rack.pull_on is True and rack.pull_scrub() == pytest.approx(fe.PULL_SCRUB)
+        rack.pull_on = False
+        assert rack.pull_scrub() == 0.0
         plain = rack.rim_torque(s) * rack.ratio
         rack.pull_on, rack.pull_level = True, 0.35
-        assert rack.pull_scrub() == pytest.approx(0.35 * fe.SCRUB)
-        assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * fe.SCRUB * 1600.0)
+        assert rack.pull_scrub() == pytest.approx(0.35 * fe.PULL_SCRUB)
+        assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * fe.PULL_SCRUB * 1600.0)
 
 
 def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
@@ -476,24 +478,26 @@ def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
     split = rack.align(s)
     assert seen[-1][1] == pytest.approx(0.30 * split['k'] * 0.8 / 2.1)
     rack.mapping = 'knee'
-    assert rack.damping_scale() == fe.RackForce.DAMPING_SCALE
+    assert rack.damping_scale() == pytest.approx(fe.RackForce.DAMPING_SCALE * rack.rho() ** 2)
     rack.mapping = 'classic'
     assert rack.damping_scale() == rack.impedance() == 0.30
 
 
-def test_column_damping_defaults_to_64_and_sets_the_knee_mappings_damping_scale_clamped_to_0_100():
+def test_column_damping_defaults_to_100_and_the_knee_mappings_damping_scale_is_pct_times_rho_squared_clamped_to_0_100():
     from oversteer.model import Model
-    assert fe.OVERALL_COLUMN_DAMPING == 64 and fe.RackForce.DAMPING_SCALE == 0.64
-    assert Model._texture_defaults(True)['countersteer_column_damping'] == 64
+    assert fe.OVERALL_COLUMN_DAMPING == 100 and fe.RackForce.DAMPING_SCALE == 1.0
+    assert Model._texture_defaults(True)['countersteer_column_damping'] == 100
     engine = fe.FfbEngine()
     engine._requests(0.0)
-    assert engine.model.damping_pct == 64 and engine.model.damping_scale() == pytest.approx(0.64)
+    rho2 = engine.model.rho() ** 2
+    assert 0.0 < rho2 < 1.0
+    assert engine.model.damping_pct == 100 and engine.model.damping_scale() == pytest.approx(rho2)
     engine.set_column_damping(25)
     engine._requests(0.0)
-    assert engine.model.damping_scale() == pytest.approx(0.25)
+    assert engine.model.damping_scale() == pytest.approx(0.25 * rho2)
     engine.set_column_damping(250)
     engine._requests(0.0)
-    assert engine.model.damping_scale() == 1.0
+    assert engine.model.damping_scale() == pytest.approx(rho2)
     engine.set_column_damping(-5)
     engine._requests(0.0)
     assert engine.model.damping_scale() == 0.0
@@ -501,22 +505,23 @@ def test_column_damping_defaults_to_64_and_sets_the_knee_mappings_damping_scale_
     assert engine.model.damping_scale() == engine.model.impedance()
 
 
-def test_the_model_clamps_the_column_damping_setting_to_0_100_and_defaults_it_to_64():
+def test_the_model_clamps_the_column_damping_setting_to_0_100_and_defaults_it_to_100():
     from oversteer.model import Model
     model = Model.__new__(Model)
     model.data, model.ui = {}, None
     model.set_if_changed = lambda key, value: model.data.update({key: value}) or True
-    assert model.get_countersteer_column_damping() == 64
+    assert model.get_countersteer_column_damping() == 100
     model.set_countersteer_column_damping(150)
     assert model.get_countersteer_column_damping() == 100
     model.set_countersteer_column_damping(-3)
     assert model.get_countersteer_column_damping() == 0
 
 
-def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_knee_with_the_drive_pull_off():
+def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_knee_with_the_drive_pull_and_kick_on_at_100():
     from oversteer.model import Model
     engine = fe.FfbEngine()
-    assert engine.model.mapping == 'knee' and engine.model.pull_on is False
+    assert engine.model.mapping == 'knee' and engine.model.pull_on is True and engine.model.pull_level == 1.0
+    assert engine.model.kick_on is True and engine.model.kick_level == 1.0
     engine.set_mapping('classic')                    # the profile INI's countersteer_mapping = classic
     engine._requests(0.0)
     assert engine.model.mapping == 'classic' and engine.model.classic()
@@ -527,9 +532,13 @@ def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_kne
     engine._requests(0.0)
     assert engine.model.pull_on and engine.model.pull_level == 0.5
     data = Model._texture_defaults(True)
-    assert data['countersteer_mapping'] == 'knee' and data['countersteer_drive_pull'] is False
-    assert data['countersteer_drive_pull_level'] == 35
-    assert fe.OVERALL_MAPPING == 'knee' and fe.OVERALL_PULL is False and fe.OVERALL_PULL_LEVEL == 35
+    assert data['countersteer_mapping'] == 'knee' and data['countersteer_drive_pull'] is True
+    assert data['countersteer_drive_pull_level'] == 100
+    assert data['countersteer_kick'] is True and data['countersteer_kick_level'] == 100
+    assert fe.OVERALL_MAPPING == 'knee' and fe.OVERALL_PULL is True and fe.OVERALL_PULL_LEVEL == 100
+    m = Model.__new__(Model)                         # a profile with the kick on and no level: the level default applies
+    m.data = {'countersteer_kick': True}
+    assert m.get_countersteer_kick() is True and m.get_countersteer_kick_level() == 100
 
 
 # -- hand force: the car's torque scaled by rim / car wheel diameter --
