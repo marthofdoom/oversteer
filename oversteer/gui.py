@@ -1109,26 +1109,27 @@ class Gui:
     CALIBRATE_SETTLE = 0.6          # the proxy notices a changed calibration file within a quarter second
 
     def _handbrake_source_range(self, proxied):
-        """(min, max) the handbrake source declares, from the proxy's
-        status, or read from its device node when an older daemon does not
-        publish it."""
+        """((min, max) or None, reason or None): the range the handbrake
+        source declares, from the proxy's status, or read from its device
+        node when an older daemon does not publish it. The reason says
+        which lookup failed."""
         from .proxy.manager import ProxyManager
         status = ProxyManager.read_status() or {}
         proxy = next((p for p in status.get('proxies', []) if p['id'] == proxied[0]), None)
         if proxy is None:
-            return None
+            return None, _("the proxy service does not report the combined device")
         axes = proxy.get('source_axes') or {}
         found = axes.get('{}:{}'.format(proxied[1], proxied[2]))
         if found:
-            return tuple(found)
+            return tuple(found), None
         path = (proxy.get('sources') or {}).get(proxied[1])
         try:
             from evdev import InputDevice
             info = InputDevice(path).absinfo(proxied[2])
-            return (info.min, info.max)
+            return (info.min, info.max), None
         except Exception as e:
             logging.debug("handbrake source range: %s", e)
-            return None
+            return None, _("the proxy status has no range for it and its device node could not be read ({})").format(e)
 
     def _handbrake_status(self, proxied):
         from .proxy.manager import ProxyManager
@@ -1150,17 +1151,25 @@ class Gui:
             return _("The handbrake is being calibrated."), None
         if wine_running():
             return _("A game is running under Wine or Proton. Close it first."), None
-        source_range = self._handbrake_source_range(proxied)
+        proxy = self._handbrake_status(proxied)
+        # a daemon that predates the run-time channel is running: it needs the one-time update first
+        needs_update = proxy is not None and not proxy.get('runtime_calibration')
+        if needs_update and runtime_only:
+            return _("The combined device needs a one-time update from the window (Calibrate under the handbrake bar) before the handbrake can be calibrated here."), None
         mapping = next((m for m in spec.mappings if m.source == proxied[1]
                         and m.from_code == proxied[2]), None)
-        if source_range is None or mapping is None:
-            return _("Could not read the handbrake's range. Restart the combined device once and try again."), None
-        proxy = self._handbrake_status(proxied) or {}
-        live = bool(proxy.get('runtime_calibration'))
+        source_range = None
+        if not needs_update:           # the updated daemon publishes it; an old one hides the node from us
+            source_range, why = self._handbrake_source_range(proxied)
+            if source_range is None:
+                return _("Could not read the handbrake's range: {}. Restart the combined device once and try again.").format(why), None
+        if mapping is None:
+            return _("The handbrake's mapping is not in the combined device."), None
+        live = proxy is not None and bool(proxy.get('runtime_calibration'))
         if runtime_only and not live:
-            return _("Update the combined device once from the Devices tab (Calibrate handbrake in the window) first."), None
+            return _("The proxy service is not running."), None
         return None, {'proxied': proxied, 'spec': spec, 'axis': axis, 'range': source_range,
-                      'mapping': mapping, 'live': live}
+                      'mapping': mapping, 'live': live, 'needs_update': needs_update}
 
     def handbrake_calibration_state(self):
         """For the web page: whether the handbrake can be calibrated, the
@@ -1322,9 +1331,12 @@ class Gui:
     def calibrate_handbrake(self):
         """The Calibrate button: guide the user through five seconds of
         sampling, then apply (at run time when the service supports it)."""
-        reason, _ctx = self._handbrake_calibration_check(False)
+        reason, ctx = self._handbrake_calibration_check(False)
         if reason:
             self.ui.error_dialog(_("Cannot calibrate the handbrake."), reason)
+            return
+        if ctx['needs_update']:
+            self._update_for_handbrake_calibration(ctx['spec'])
             return
         if not self.ui.confirmation_dialog(_("Release the handbrake. When you press OK, "
                 "pull it fully and release it again within five seconds.")):
@@ -1345,6 +1357,54 @@ class Gui:
                 self.ui.info_dialog(_("Handbrake calibrated."), self.hb_cal_message)
             return False
         GLib.timeout_add(int((self.CALIBRATE_SECONDS + self.CALIBRATE_SETTLE) * 1000) + 100, finish)
+
+    UPDATE_WAIT = 20.0              # seconds for the restarted daemon to publish its status
+
+    def _update_for_handbrake_calibration(self, spec):
+        """The running daemon predates run-time calibration: reinstall the
+        combined device once (pkexec), wait for the new daemon's status,
+        then carry on with the calibration."""
+        from .proxy import install
+        from .proxy.manager import ProxyManager, user_dir
+        import tempfile
+        if not self.ui.confirmation_dialog(_("The combined device needs a one-time update to calibrate the handbrake "
+                "(password prompt, restarts it once; no game may be running).")):
+            return
+        os.makedirs(user_dir(), 0o700, exist_ok=True)
+        candidate = tempfile.mkdtemp(prefix='.candidate-', dir=user_dir())
+        spec.save(os.path.join(candidate, spec.id + '.json'))
+        self.combine_busy = True
+        self.ui.set_combine_busy(True, _("Updating…"))
+        proxy_id = self._proxied_handbrake()[0]
+
+        def work():
+            ready = False
+            try:
+                code = install.install(spec_dirs=[candidate])
+            except Exception:
+                logging.exception("handbrake calibration update")
+                code = -1
+            if code == 0:
+                deadline = time.monotonic() + self.UPDATE_WAIT
+                while time.monotonic() < deadline and not ready:
+                    status = ProxyManager.read_status() or {}
+                    proxy = next((p for p in status.get('proxies', []) if p['id'] == proxy_id), None)
+                    ready = bool(proxy and proxy.get('runtime_calibration') and proxy.get('source_axes'))
+                    if not ready:
+                        time.sleep(0.25)
+            self.ui.safe_call(self._handbrake_update_done, code, candidate, spec, ready)
+
+        Thread(target=work, daemon=True).start()
+
+    def _handbrake_update_done(self, code, candidate, spec, ready):
+        self._combine_done(code, candidate, [spec])
+        if code != 0:
+            return
+        if not ready:
+            self.ui.error_dialog(_("Cannot calibrate the handbrake."),
+                    _("The updated combined device did not report its status in time. Try Calibrate again in a moment."))
+            return
+        self.calibrate_handbrake()
 
     def _install_spec(self, spec, what):
         """Write `spec` as a candidate and reinstall through pkexec."""

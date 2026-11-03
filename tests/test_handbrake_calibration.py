@@ -325,3 +325,45 @@ def test_one_tick_resends_after_a_service_restart(monkeypatch, tmp_path):
     status['proxies'][0]['calibration'] = {}
     Gui._resend_handbrake_calibration(fake, proxied)
     assert len(sent) == 1
+
+
+def _check_fake(monkeypatch, proxy, spec):
+    from types import SimpleNamespace
+    from oversteer.gui import Gui
+    from oversteer.proxy import manager
+    from oversteer.proxy.manager import ProxyManager
+    status = {'pid': 1, 'proxies': [proxy]}
+    monkeypatch.setattr(ProxyManager, 'read_status', staticmethod(lambda: status))
+    monkeypatch.setattr(manager, 'wine_running', lambda: False)
+    proxied = ('t', 'handbrake1', ecodes.ABS_THROTTLE, False)
+    fake = SimpleNamespace(hb_cal=None, combine_busy=False, device=object(), handbrake_axis=(ecodes.ABS_RZ, 0, 255),
+            _proxied_handbrake=lambda: proxied, _load_combined_spec=lambda: spec)
+    fake._handbrake_status = lambda p: Gui._handbrake_status(fake, p)
+    fake._handbrake_source_range = lambda p: Gui._handbrake_source_range(fake, p)
+    return Gui, fake
+
+
+def test_old_daemon_goes_to_the_update_flow_not_a_range_error(monkeypatch):
+    spec = ProxySpec.from_dict(_spec())
+    Gui, fake = _check_fake(monkeypatch, {'id': 't', 'sources': {'handbrake1': '/dev/null-nope'}}, spec)
+    reason, ctx = Gui._handbrake_calibration_check(fake, False)
+    assert reason is None and ctx['needs_update'] and not ctx['live']
+    reason, ctx = Gui._handbrake_calibration_check(fake, True)         # the web page names the window
+    assert ctx is None and 'from the window' in reason
+
+
+def test_new_daemon_calibrates_directly(monkeypatch):
+    spec = ProxySpec.from_dict(_spec())
+    proxy = {'id': 't', 'runtime_calibration': True, 'source_axes': {'handbrake1:%d' % ecodes.ABS_THROTTLE: [0, 65535]}}
+    Gui, fake = _check_fake(monkeypatch, proxy, spec)
+    for runtime_only in (False, True):
+        reason, ctx = Gui._handbrake_calibration_check(fake, runtime_only)
+        assert reason is None and not ctx['needs_update'] and ctx['live'] and ctx['range'] == (0, 65535)
+
+
+def test_new_daemon_without_a_range_says_which_lookup_failed(monkeypatch):
+    spec = ProxySpec.from_dict(_spec())
+    proxy = {'id': 't', 'runtime_calibration': True, 'sources': {'handbrake1': '/nonexistent'}}
+    Gui, fake = _check_fake(monkeypatch, proxy, spec)
+    reason, ctx = Gui._handbrake_calibration_check(fake, False)
+    assert ctx is None and 'device node could not be read' in reason
