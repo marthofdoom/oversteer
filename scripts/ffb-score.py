@@ -2,7 +2,7 @@
 """Score one recorded drive against the current Countersteer FFB code, offline (library: scripts/ffb_score.py).
 
     scripts/ffb-score.py DRIVE [--json OUT.json] [--hz N] [--wheel FILE] [--friction-comp PCT] [--derate X]
-                         [--align-on|--align-off] [--limit N] [--events N] [--label NAME]
+                         [--align-on|--align-off] [--mapping classic|knee] [--limit N] [--events N] [--label NAME]
     scripts/ffb-score.py --compare A.json B.json
 
 DRIVE: ~/.cache/ffb-slip/dump.npz (the default) or a "Record for FFB tuning" capture (.ovcap.gz). Prints the compact
@@ -29,6 +29,7 @@ def main():
     ap.add_argument('--derate', type=float, default=1.0, help="the driver's thermal derate (default 1)")
     ap.add_argument('--align-on', dest='align', action='store_true', default=None, help="engine's aligning split on")
     ap.add_argument('--align-off', dest='align', action='store_false', help="engine's aligning split off")
+    ap.add_argument('--mapping', choices=('classic', 'knee'), default=None, help="the steering mapping (default: the engine's, classic)")
     ap.add_argument('--limit', type=int, default=None, help="only the first N rows (quick looks)")
     ap.add_argument('--events', type=int, default=24, help="slides to simulate (default 24)")
     ap.add_argument('--label', default='', help="a name for the report's first line")
@@ -42,7 +43,7 @@ def main():
         return 2
     drive = fs.load_drive(args.drive, args.limit)
     result = fs.score(drive, hz=args.hz, wheel_path=args.wheel, friction_comp=args.friction_comp, derate=args.derate,
-                      align_on=args.align, events=args.events)
+                      align_on=args.align, events=args.events, mapping=args.mapping)
     print(fs.report(result, args.label))
     if args.json:
         with open(args.json, 'w') as f:

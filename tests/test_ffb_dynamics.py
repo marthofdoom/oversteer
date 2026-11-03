@@ -193,6 +193,7 @@ def rack(peak=2.1):
     r = fe.RackForce()
     r.LEARNS = False
     r.wheel_peak = peak
+    r.mapping = 'knee'
     r.reset('acr/x')
     r._align.s[0] = 1e4
     r.ratio_known = r.lock_known = True
@@ -382,7 +383,7 @@ def feed(engine, t, seconds, **kw):
 def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
-    want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, damping_scale=engine.model.DAMPING_SCALE)
+    want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, damping_scale=engine.model.damping_scale())
     assert (int(open(path + '/ffb_dyn_damping').read()), int(open(path + '/ffb_dyn_friction').read())) == want
     assert want[1] >= 500
     engine.set_enabled(False)

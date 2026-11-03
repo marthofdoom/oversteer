@@ -68,6 +68,7 @@ def rack_for(peak=None, assist=None, ratio=None):
     rack = fe.RackForce()
     rack.LEARNS = False
     rack.wheel_peak = peak
+    rack.mapping = 'knee'
     rack.reset('acr/x')
     if assist is not None:
         rack.assist = assist
@@ -406,3 +407,94 @@ def test_the_game_curve_is_followed_not_stacked_and_the_ini_modes_decide(tmp_pat
 def test_without_a_detection_the_model_is_applied():
     rack = rack_for(2.1)
     assert rack._assist.state is None and rack.power_steering() == 'model'
+
+
+# -- the steering mapping: classic (the uniform impedance scale) or the knee --
+
+def classic_rack(peak=None):
+    rack = rack_for(peak)
+    rack.mapping = 'classic'
+    return rack
+
+
+def test_the_classic_share_is_the_old_uniform_scale_and_does_not_depend_on_the_cars_p99():
+    outs = []
+    for p99 in (573.0, 867.0):
+        rack = classic_rack(2.1)
+        rack.p99 = p99
+        got = []
+        for nm in (20.0, 85.0, 200.0, 550.0, 2000.0, -300.0):
+            s = sample_at(nm)
+            torque = ffb_carprops.driver_from_column(nm / rack.ratio, 25.0, rack.assist * ffb_carprops.power_settings()[1], False)
+            want = max(-0.75, min(0.75, fe.RackForce.CLASSIC_SCALE * torque / 2.1))        # the old formula, s frozen
+            assert rack.force(s) == pytest.approx(want * fe.FULL, abs=1.0)
+            got.append(rack.force(s))
+        outs.append(got)
+    assert outs[0] == outs[1]
+    assert fe.RackForce.CLASSIC_SCALE == 0.30
+
+
+def test_the_classic_strength_scales_the_uniform_share_and_the_budget_clamps_it():
+    rack = classic_rack(2.1)
+    base = rack.force(sample_at(85.0))
+    rack.strength = 1.3
+    assert rack.force(sample_at(85.0)) == pytest.approx(1.3 * base, abs=1.0)
+    assert abs(rack.force(sample_at(3000.0))) == pytest.approx(0.75 * fe.FULL, abs=1.0)
+
+
+def test_the_classic_driver_from_column_has_no_hydraulic_top_end():
+    assert ffb_carprops.driver_from_column(3000.0, 25.0, 1.0, False) > wheel_torque.HYD_TOP_NM
+    assert ffb_carprops.driver_from_column(3000.0, 25.0, 1.0) < wheel_torque.HYD_TOP_NM
+    assert ffb_carprops.driver_slope(400.0, 25.0, 1.0, False) > ffb_carprops.driver_slope(400.0, 25.0, 1.0)
+    rack = classic_rack()
+    assert abs(rack.rim_torque(sample_at(550.0))) > wheel_torque.HYD_TOP_NM
+    rack.mapping = 'knee'
+    assert abs(rack.rim_torque(sample_at(550.0))) < wheel_torque.HYD_TOP_NM
+
+
+def test_drive_pull_plays_the_physical_scrub_couple_at_its_level_in_both_mappings_and_is_off_by_default():
+    s = sample_at(100.0)
+    s.tyre_fx = (800.0, -800.0, 0.0, 0.0)
+    for mapping in ('classic', 'knee'):
+        rack = rack_for(2.1)
+        rack.mapping, rack.assist = mapping, 0.0                  # (unassisted: the torque is the column's)
+        rack.scrub = 0.02                                         # the learnt scrub is never played
+        assert rack.pull_on is False and rack.pull_scrub() == 0.0
+        plain = rack.rim_torque(s) * rack.ratio
+        rack.pull_on, rack.pull_level = True, 0.35
+        assert rack.pull_scrub() == pytest.approx(0.35 * fe.SCRUB)
+        assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * fe.SCRUB * 1600.0)
+
+
+def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
+    rack = classic_rack(2.1)
+    s = slipping(-300.0, 0.05, 0.3)
+    seen = []
+    rack.align_on, rack.align_writer = True, lambda theta_a, k, tau: seen.append((theta_a, k, tau))
+    rack.strength = 0.8
+    rack.force(s)
+    split = rack.align(s)
+    assert seen[-1][1] == pytest.approx(0.30 * split['k'] * 0.8 / 2.1)
+    rack.mapping = 'knee'
+    assert rack.damping_scale() == fe.RackForce.DAMPING_SCALE
+    rack.mapping = 'classic'
+    assert rack.damping_scale() == rack.impedance() == 0.30
+
+
+def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_knee_with_the_drive_pull_off():
+    from oversteer.model import Model
+    engine = fe.FfbEngine()
+    assert engine.model.mapping == 'knee' and engine.model.pull_on is False
+    engine.set_mapping('classic')                    # the profile INI's countersteer_mapping = classic
+    engine._requests(0.0)
+    assert engine.model.mapping == 'classic' and engine.model.classic()
+    engine.set_mapping('knee')
+    engine._requests(0.0)
+    assert engine.model.mapping == 'knee'
+    engine.set_drive_pull(True, 50)
+    engine._requests(0.0)
+    assert engine.model.pull_on and engine.model.pull_level == 0.5
+    data = Model._texture_defaults(True)
+    assert data['countersteer_mapping'] == 'knee' and data['countersteer_drive_pull'] is False
+    assert data['countersteer_drive_pull_level'] == 35
+    assert fe.OVERALL_MAPPING == 'knee' and fe.OVERALL_PULL is False and fe.OVERALL_PULL_LEVEL == 35

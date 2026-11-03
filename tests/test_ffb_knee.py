@@ -1,5 +1,5 @@
-"""The 1:1 mapping with a knee (wheel_torque.rim_share), the hydraulic top end (ffb_carprops) and the gated kickback
-(ffb_engine.Kickback). Nothing here touches a real wheel or /sys."""
+"""The 1:1 mapping with a knee (wheel_torque.rim_share), the hydraulic top end (ffb_carprops) and the steering mapping's
+modes (ffb_engine.RackForce). Nothing here touches a real wheel or /sys."""
 import math
 import random
 
@@ -77,80 +77,3 @@ def test_the_assisted_driver_torque_never_passes_the_top_and_round_trips():
         tc, h = 20.0, 1e-4
         d = (cp.driver_from_column(tc + h, speed, 1.0) - cp.driver_from_column(tc - h, speed, 1.0)) / (2 * h)
         assert cp.driver_slope(tc, speed, 1.0) == pytest.approx(d, rel=1e-3)
-
-
-# -- the kickback --
-
-def front(t, dfx=0.0, angle=0.0, loads=(3000.0, 3000.0), speed=25.0, car='acr/x'):
-    s = Sample(6000.0, 7500.0, gear=3, speed=speed, car=car, game='acr')
-    s.tyre_fx = (dfx / 2.0, -dfx / 2.0, 0.0, 0.0)
-    s.tyre_load = loads + (3000.0, 3000.0)
-    s.contact_normal = ((0.0, 1.0, 0.0), (math.sin(angle), math.cos(angle), 0.0), (0.0, 1.0, 0.0), (0.0, 1.0, 0.0))
-    return s
-
-
-def run_kick(samples, rate=60.0):
-    kick = fe.Kickback()
-    out, gates = [], []
-    for i, s in enumerate(samples):
-        out.append(kick.update(i / rate, s, 'acr/x', 13.0, lambda: 0.3))
-        gates.append(kick.gate)
-    return out, gates
-
-
-def test_the_kick_gate_stays_closed_on_steady_gravel():
-    rng = random.Random(1)
-    samples = [front(0, dfx=rng.uniform(-600.0, 600.0), angle=rng.uniform(-0.03, 0.03),
-                     loads=(2500.0 + rng.uniform(-400, 400), 2500.0 + rng.uniform(-400, 400))) for _ in range(600)]
-    out, gates = run_kick(samples)
-    assert max(gates) == 0.0 and out == [0.0] * 600
-
-
-def test_the_kick_gate_opens_on_a_one_sided_step_holds_and_fades():
-    samples = [front(0) for _ in range(30)]
-    samples += [front(0, dfx=3000.0, angle=0.3) for _ in range(30)]               # a kerb: one normal steps, Fx differs
-    samples += [front(0, dfx=3000.0, angle=0.3) for _ in range(60)]
-    out, gates = run_kick(samples)
-    assert max(gates[:30]) == 0.0
-    opened = next(i for i, g in enumerate(gates) if g > 0.0)
-    assert 30 <= opened <= 32 and gates[opened] == 1.0
-    assert all(g == 1.0 for g in gates[opened:opened + 9])                          # held 0.15 s
-    assert gates[opened + 9 + 6] < 1.0 and gates[opened + 40] == 0.0                # faded over 0.10 s, then closed
-    fast = [o for o in out[30:50] if o]
-    assert fast and max(abs(o) for o in fast) > 0.0
-    # the couple c = -SCRUB (Fx_FL - Fx_FR) / ratio steps negative: the first fast part has c's sign, and it dies away
-    assert fast[0] < 0.0 and abs(out[opened + 20]) < abs(max(out, key=abs))
-
-
-def test_the_kick_opens_on_a_lift_onset_and_needs_the_fx_step_and_speed():
-    lift = [front(0)] * 20 + [front(0, dfx=2500.0, loads=(80.0, 3500.0))] * 20
-    assert max(run_kick(lift)[1]) == 1.0
-    no_step = [front(0)] * 20 + [front(0, dfx=500.0, angle=0.3, loads=(80.0, 3500.0))] * 20
-    assert max(run_kick(no_step)[1]) == 0.0
-    slow = [front(0, speed=3.0)] * 20 + [front(0, dfx=3000.0, angle=0.3, speed=3.0)] * 20
-    assert max(run_kick(slow)[1]) == 0.0
-
-
-def test_a_gap_or_a_new_car_resets_the_kick():
-    kick = fe.Kickback()
-    for i in range(20):
-        kick.update(i / 60.0, front(0), 'acr/x', 13.0, lambda: 0.3)
-    for i in range(20, 24):
-        kick.update(i / 60.0, front(0, dfx=3000.0, angle=0.3), 'acr/x', 13.0, lambda: 0.3)
-    assert kick.gate == 1.0
-    kick.update(1.0, front(0), 'acr/x', 13.0, lambda: 0.3)                          # a 0.7 s gap
-    assert kick.gate == 0.0
-    for i in range(4):
-        kick.update(1.1 + i / 60.0, front(0, dfx=3000.0, angle=0.3), 'acr/x', 13.0, lambda: 0.3)
-    kick.update(1.2, front(0), 'acr/y', 13.0, lambda: 0.3)                          # another car
-    assert kick.gate == 0.0
-
-
-def test_the_kick_is_nothing_without_assist_and_is_capped_in_the_rack():
-    out, _ = run_kick([front(0)] * 20 + [front(0, dfx=3000.0, angle=0.3)] * 30)
-    assert max(abs(o) for o in out) > 0.0
-    samples = [front(0)] * 20 + [front(0, dfx=3000.0, angle=0.3)] * 30
-    kick = fe.Kickback()
-    assert all(kick.update(i / 60.0, s, 'acr/x', 13.0, lambda: 1.0) == 0.0 for i, s in enumerate(samples))
-    rack = fe.RackForce()
-    assert rack.KICK_CAP == 0.15 and rack.KICK_TOTAL == pytest.approx(0.90)
