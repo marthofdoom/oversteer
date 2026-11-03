@@ -1152,3 +1152,63 @@ def test_with_the_games_own_assist_curve_the_spring_follows_that_curve(speed, al
     # and it is the model the played torque uses, not our boost curve's
     r2 = rack()
     assert split['k'] != pytest.approx(_model_nm(r2, speed, alpha)['k'], rel=0.02)
+
+
+# -- the engine off: no pump, no assist --
+
+def _rpm_sample(t, rpm, game='acr', alpha=0.04):
+    s = slip_sample(t, alpha=alpha)
+    s.rpm, s.game = rpm, game
+    return s
+
+
+def _run_rpm(r, t, seconds, rpm, game='acr', dt=0.005):
+    end = t + seconds
+    while t < end:
+        r.feed(t, _rpm_sample(t, rpm, game), None)
+        t += dt
+    return t
+
+
+def test_the_engine_off_ramps_the_assist_to_nothing_over_half_a_second_and_it_returns():
+    r = rack()
+    t = _run_rpm(r, 0.0, 1.0, 3000.0)
+    assert r.engine_known and r.assist_level() == pytest.approx(1.0)
+    s = _rpm_sample(t, 0.0)
+    assisted = r.rim_torque(s)
+    k_assisted = r.align(s)['k']
+    t = _run_rpm(r, t, 0.3, 0.0)                                        # the debounce
+    assert r.assist_level() == pytest.approx(1.0, abs=0.02)
+    t = _run_rpm(r, t, 0.25, 0.0)
+    assert r.assist_level() == pytest.approx(0.5, abs=0.05)
+    assert r.power_steering() == 'model'
+    t = _run_rpm(r, t, 0.35, 0.0)
+    assert r.assist_level() == 0.0 and r.power_steering() == 'off'
+    s = _rpm_sample(t, 0.0)
+    assert abs(r.rim_torque(s)) < abs(assisted)
+    r.assist = 0.0
+    k_unassisted = r.align(s)['k']
+    r.assist = fe.RackForce.ASSIST
+    assert r.align(s)['k'] == pytest.approx(k_unassisted) and k_unassisted > k_assisted
+    t = _run_rpm(r, t, 0.6, 3000.0)
+    assert r.assist_level() == pytest.approx(1.0) and r.power_steering() == 'model'
+
+
+def test_a_single_zero_rpm_packet_is_ignored_and_beamng_never_counts():
+    r = rack()
+    t = _run_rpm(r, 0.0, 1.0, 3000.0)
+    r.feed(t, _rpm_sample(t, 0.0), None)
+    t = _run_rpm(r, t + 0.005, 1.0, 3000.0)
+    assert r.assist_level() == pytest.approx(1.0)
+    b = rack()
+    _run_rpm(b, 0.0, 2.0, 0.0, game='beamng-ffb')
+    assert b.assist_level() == pytest.approx(1.0) and not b.engine_known
+
+
+def test_the_rim_torque_at_the_end_of_the_ramp_is_the_unassisted_column_torque():
+    r = rack()
+    s = _rpm_sample(0.0, 0.0)
+    t = _run_rpm(r, 0.0, 1.5, 0.0)
+    off = r.rim_torque(s)
+    r.assist = 0.0
+    assert off == pytest.approx(r.rim_torque(s))

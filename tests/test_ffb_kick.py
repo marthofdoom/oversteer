@@ -117,6 +117,9 @@ class Rack(SimpleNamespace):
     def power_steering(self):
         return 'model'
 
+    def assist_level(self):
+        return 1.0
+
     def classic(self):
         return False
 

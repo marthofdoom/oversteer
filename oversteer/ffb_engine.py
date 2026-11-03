@@ -628,6 +628,9 @@ class RackForce:
     ALIGN_K_RANGE = (300.0, 20000.0)     # the per-car learnt stiffness is held in this (dump cars: 650-9100 linear)
     ALIGN_MIN_N = 600.0                  # samples of weight before the learnt stiffness replaces the prior
     ALIGN_EPS = 1e-3                     # rad: under this slip the small-signal stiffness is used
+    ENGINE_OFF_RPM = 50.0                # rpm under which the engine is off (the power steering pump with it: no assist) ...
+    ENGINE_OFF_S = 0.3                   # ... for this long (a single zero packet is not an engine stop)
+    ASSIST_RAMP_S = 0.5                  # s the assist takes to fade out when the engine stops, and back in
 
     def __init__(self):
         self.learner = None
@@ -658,6 +661,10 @@ class RackForce:
         self._ratio_l = ffb_carprops.RatioLearner()
         self._ratio_since = 0.0
         self._ratio_logged = False
+        self.engine_known = False                        # a game with rpm has fed (BeamNG's CSB1 rpm is always 0: not used)
+        self._boost = 1.0                                # the assist's share: 1 running, 0 with the engine off
+        self._off_since = None
+        self._engine_at = None
         self._spring = ffb_spring.DriverSpring()
         self._spring_at = None
         self._now = 0.0
@@ -682,6 +689,30 @@ class RackForce:
         """The most of full scale the output may be: RIM_SAFE_NM at the rim on a wheel with a known peak."""
         peak = self.wheel_peak
         return min(1.0, self.RIM_SAFE_NM / peak) if peak else 1.0
+
+    def _engine(self, t, sample):
+        """Engine state from the rpm (ACR, Forza, RBR): under ENGINE_OFF_RPM for ENGINE_OFF_S, the boost ramps to 0
+        over ASSIST_RAMP_S (the assist is hydraulic: no engine, no pump); it returns the same way. BeamNG is left out."""
+        last, self._engine_at = self._engine_at, t
+        dt = 0.0 if last is None else min(max(t - last, 0.0), 1.0)
+        rpm = getattr(sample, 'rpm', None)
+        off = False
+        if getattr(sample, 'game', None) != 'beamng-ffb' and rpm is not None and math.isfinite(rpm):
+            self.engine_known = True
+            if rpm < self.ENGINE_OFF_RPM:
+                if self._off_since is None:
+                    self._off_since = t
+                off = t - self._off_since >= self.ENGINE_OFF_S
+            else:
+                self._off_since = None
+        else:
+            self._off_since = None
+        step = dt / self.ASSIST_RAMP_S
+        self._boost = max(0.0, self._boost - step) if off else min(1.0, self._boost + step)
+
+    def assist_level(self):
+        """The assist class multiplier: countersteer_assist_strength times the engine's share (0 with the engine off)."""
+        return ffb_carprops.power_settings()[1] * self._boost
 
     def _track(self, mz, dt):
         """The p99 of |front torque| (moving samples), a diagnostic."""
@@ -720,6 +751,7 @@ class RackForce:
             self.reset(sample.car)
         dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
         self._last = self._now = t
+        self._engine(t, sample)
         mz = self._torque(sample)
         if raw is not None and new:
             self._raw_at = t
@@ -947,7 +979,7 @@ class RackForce:
         stiffness = self.align_stiffness()
         column = -stiffness * self._sat(alpha) / ratio
         source = self.power_steering()
-        cls = 0.0 if source == 'off' else self.assist * ffb_carprops.power_settings()[1]
+        cls = 0.0 if source == 'off' else self.assist * self.assist_level()
         speed = getattr(sample, 'speed', None)
         hyd = not self.classic()
         curve = self._assist.curve(self.p99) if source == 'game' else None
@@ -997,8 +1029,8 @@ class RackForce:
         """Where the assist comes from now: 'game' (the game's force has it: its curve is followed), 'model' (ours)
         or 'off' (column torque), by countersteer_power_steering (auto / on / off) and the detector."""
         mode = ffb_carprops.power_settings()[0]
-        if mode == 'off':
-            return 'off'
+        if mode == 'off' or self._boost <= 0.0:
+            return 'off'                 # (a stopped engine: the column torque; during the ramp the scaled class slides to it)
         if mode == 'auto' and self._assist.state:
             return 'game'
         return 'model'
@@ -1031,7 +1063,7 @@ class RackForce:
         source = self.power_steering()
         if source == 'off':
             return ffb_carprops.driver_from_column(mz / ratio, speed, 0.0, hyd)
-        cls *= ffb_carprops.power_settings()[1]
+        cls *= self.assist_level()
         if source == 'game':
             curve = self._assist.curve(self.p99)
             if curve:
@@ -1043,7 +1075,8 @@ class RackForce:
         curve scaled so the car's p99 lands where our class model puts it (rim_torque and align share it)."""
         target = ffb_carprops.driver_from_column(self.p99 / ratio, self.GAME_SHAPE_SPEED, cls, hyd)
         level = target / (self.p99 * ffb_carprops.game_shape(self.p99, curve))
-        return math.copysign(level * abs(mz) * ffb_carprops.game_shape(mz, curve), mz)
+        game = math.copysign(level * abs(mz) * ffb_carprops.game_shape(mz, curve), mz)
+        return mz / ratio + self._boost * (game - mz / ratio)       # (the engine stopping fades the curve back to the column)
 
     def classic(self):
         """The classic steering mapping is on (the INI's countersteer_mapping = classic)."""
@@ -1081,7 +1114,7 @@ class RackForce:
         twice the knee's torque so the compression stays gentle."""
         ratio = self.ratio if ratio is None else ratio
         cls = self.assist if assist is None else assist
-        cls = 0.0 if ffb_carprops.power_settings()[0] == 'off' else cls * ffb_carprops.power_settings()[1]
+        cls = 0.0 if ffb_carprops.power_settings()[0] == 'off' else cls * self.assist_level()
         if cls > 0.0:
             return wheel_torque.HYD_TOP_NM
         peak = self.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
@@ -1466,6 +1499,8 @@ class RbrRack(RackForce):
     def feed(self, t, sample, level, new=True):
         """A telemetry sample with the game's raw level now (None if none fresh): the sign latch."""
         last, self._sign_at = self._sign_at, t
+        if sample is not None:
+            self._engine(t, sample)
         if self.direction is not None or level is None or sample is None:
             return
         dt = 0.0 if last is None else min(max(t - last, 0.0), 0.1)
@@ -1503,7 +1538,7 @@ class RbrRack(RackForce):
         hyd = not self.classic()
         if self.power_steering() == 'off':
             return ffb_carprops.driver_from_column(self.column, speed, 0.0, hyd)
-        return ffb_carprops.driver_from_column(self.column, speed, self.ASSIST * ffb_carprops.power_settings()[1], hyd)
+        return ffb_carprops.driver_from_column(self.column, speed, self.ASSIST * self.assist_level(), hyd)
 
 
 class ForzaRack(RackForce):
@@ -1640,6 +1675,7 @@ class ForzaRack(RackForce):
             self.reset(sample.car)
         dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
         self._last = self._now = t
+        self._engine(t, sample)
         speed = sample.speed if ffb_forza.finite(sample.speed) else 0.0
         self.moving = speed > (self.MOVING_OFF if self.moving else self.MOVING_ON)
         self._track_yaw(t, sample)
@@ -2692,6 +2728,8 @@ class FfbEngine:
         frame_ok = self._frame_ok(t, sample, stage) if stage.can_align() else False
         if stage.can_align() and self.align_note is None and not (model.ratio_known and model.lock_known):
             self.align_note = _("steering lock not learnt yet: the aligning spring is off")
+        if self.align_note is None and model._boost < 1.0:
+            self.align_note = _("engine off: unassisted steering")
         want = stage.can_align() and model.align_ready() and frame_ok \
             and self._w >= 1.0 and not self._handback      # (while gliding between the levels the spring would add its own)
         if model.align_on and not want:
