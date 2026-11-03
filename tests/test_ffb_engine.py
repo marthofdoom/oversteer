@@ -4,6 +4,7 @@ classifier's states and transitions, the fit and the strength, the crossfades, e
 game_ffb_level 100, stall detection, the wheel's owner, and an engine that can never hold up the telemetry
 listener. Nothing here touches a real wheel or /sys."""
 import math
+import os
 import threading
 import time
 
@@ -252,6 +253,123 @@ def test_a_few_samples_without_mz_do_not_drop_it():
     assert v.reason == 'no-mz'
 
 
+def _flat_after_live(live_s, flat_s, mz=0.0, wiggle=0.0):
+    """A stream with live Mz for live_s, then Mz that stays at `mz` (+- wiggle, a tiny texture) for flat_s."""
+    out = stream(live_s)
+    t0 = out[-1][0] + 1 / HZ
+    for i in range(int(flat_s * HZ)):
+        t = t0 + i / HZ
+        s = acr(t)
+        v = mz + wiggle * math.sin(2 * math.pi * 37.0 * t)
+        s.tyre_mz = (v / 2, v / 2, 0.1, 0.1)
+        out.append((t, s))
+    return out
+
+
+def test_small_but_moving_mz_is_not_flat_a_stream_that_stopped_sending_it_is():
+    # ACR's front Mz at low lateral force: tiny (well under MZ_FLAT in a second) but never identical
+    assert classify(stream(3.0, rate_mz=0.5, texture=0.05))[1].reason != 'mz-flat'
+    # never live and not changing at all: flat after a second
+    assert classify(stream(2.5, rate_mz=0.0, texture=0.0))[1].reason == 'mz-flat'
+
+
+def classify_live(samples):
+    """classify(), with the verdict asked for every 0.1 s as the engine does (the classifier learns that Mz was live
+    from the verdicts)."""
+    c = fe.SupportClassifier()
+    c.has_game_ffb_raw = True
+    nxt = 0.0
+    for t, s in samples:
+        c.feed(t, s)
+        if t >= nxt:
+            nxt = t + 0.1
+            c.verdict(t)
+    return c, c.verdict(samples[-1][0])
+
+
+def test_a_stream_that_has_shown_mz_needs_ten_seconds_of_unchanging_values_to_be_flat():
+    assert classify_live(_flat_after_live(2.0, 5.0))[1].reason == 'ok'            # a quiet straight, identical values
+    assert classify_live(_flat_after_live(2.0, 9.0))[1].reason == 'ok'
+    assert classify_live(_flat_after_live(2.0, 11.5))[1].reason == 'mz-flat'
+    # tiny Mz that still moves (a texture of 0.1 Nm) is not unchanging however long it lasts
+    assert classify_live(_flat_after_live(2.0, 15.0, wiggle=0.1))[1].reason != 'mz-flat'
+    # and it recovers when it moves again
+    samples = _flat_after_live(2.0, 11.5) + stream(1.5, t0=14.0)
+    assert classify_live(samples)[1].reason == 'ok'
+
+
+CAPTURE = os.path.expanduser('~/.var/app/io.github.berarma.Oversteer/data/oversteer/captures/20261102-192230.ovcap.gz')
+
+
+@pytest.mark.skipif(not os.path.exists(CAPTURE), reason="marth's ACR drive capture is not here")
+def test_marths_acr_drive_is_never_called_mz_flat_while_driving():
+    from oversteer.telemetry_capture import read_capture
+    _meta, records = read_capture(CAPTURE)
+    c = fe.SupportClassifier()
+    c.has_game_ffb_raw = True
+    flat, nxt = 0, 0.0
+    for t, _arrival, data in records:
+        s = decode_sample(data)
+        if s is None:
+            continue
+        c.note(t, s.packet_id)
+        c.feed(t, s)
+        if t >= nxt:
+            nxt = t + 0.1
+            if (s.speed or 0.0) > fe.MIN_SPEED and c.verdict(t).reason == 'mz-flat':
+                flat += 1
+    assert flat == 0
+
+
+# -- the lock stop --
+
+def _hold(stop, t, pos, steer=1.0, lock=270.0, seconds=0.15):
+    """The force once the wheel has stayed at `pos` for a while (the speed's low-pass has settled)."""
+    f = 0.0
+    for _ in range(int(seconds / 0.003)):
+        f = stop.force(t, steer, pos, lock)
+        t += 0.003
+    return f / fe.FULL, t
+
+
+def test_the_lock_stop_pushes_back_past_the_lock_and_not_inside_it():
+    stop = fe.LockStop()
+    for i, pos in enumerate([0.0, 100.0, -200.0, 269.9, -269.9, 270.0]):
+        assert _hold(stop, i, pos)[0] == 0
+    forces, t = [], 10.0
+    for depth in range(0, 10):
+        f, t = _hold(stop, t, 270.0 + depth)
+        forces.append(f)
+    assert all(a <= b for a, b in zip(forces, forces[1:]))              # smooth onset, growing with the depth
+    assert forces[0] == 0 and 0 < forces[1] < 0.04 and forces[-1] >= 0.5
+    assert max(forces) <= fe.LockStop.MAX + 1e-9
+    # the other side pushes the other way (positive ext_force: toward decreasing ABS_X, back from the high side)
+    assert _hold(fe.LockStop(), 0.0, -280.0)[0] < 0 < _hold(fe.LockStop(), 0.0, 280.0)[0]
+    assert _hold(fe.LockStop(), 0.0, 400.0)[0] == pytest.approx(fe.LockStop.MAX)
+
+
+def test_the_lock_stop_waits_for_a_measured_lock():
+    stop = fe.LockStop()
+    assert _hold(stop, 0.0, 300.0, lock=None)[0] == 0 and not stop.active
+
+
+def test_a_wheel_pushed_past_the_lock_is_stopped_and_settles_without_bouncing_far_back():
+    stop = fe.LockStop()
+    pos, vel, t = 260.0, 200.0, 0.0                                     # deg, deg/s: thrown at the lock
+    a_fs = 6000.0                                                       # deg/s^2 per full scale (a wheel's inertia)
+    push = 0.3 * fe.FULL                                                # the hands' / the game's force outward
+    deepest = lowest = 0.0
+    for _ in range(int(2.0 / 0.002)):
+        f = stop.force(t, 1.0, pos, 270.0)
+        vel += a_fs * (push - f) / fe.FULL * 0.002
+        pos += vel * 0.002
+        t += 0.002
+        deepest, lowest = max(deepest, pos - 270.0), min(lowest, pos - 270.0)
+    assert 5.0 < deepest < 50.0                                         # resisted: the 44 degrees it went before
+    assert lowest > -15.0                                               # no bounce across the range
+    assert 0.0 < pos - 270.0 < 12.0 and abs(vel) < 5.0                  # at rest where the spring balances the push
+
+
 # -- the force: fit against the game's raw force, strength --
 
 def fitted(seconds=8.0, raw_sign=1.0, raw=True, **kw):
@@ -288,6 +406,38 @@ def test_it_waits_for_the_games_force_and_for_corners():
     assert not fitted(seconds=2.0).ready                     # under MIN_TIME
     model = fitted(rate_mz=10.0)                              # straight-line Mz: no corners yet
     assert not model.ready and model.waiting == 'corners'
+
+
+def test_samples_at_the_games_lock_are_left_out_of_the_fit_and_the_keep_check():
+    # ACR's lock-stop force is in the wheel's force but not in telemetry: at |steer| >= 0.97 raw is garbage
+    model = fitted()
+    assert model.ready
+    for t, s in stream(3.0, t0=20.0):
+        s.steer = 1.0
+        model.feed(t, s, -fe.FULL / 2)                       # nonsense raw, the lock-stop force
+    assert model.ready and model.fit > 0.95                   # not dropped by the keep check, fit unmoved
+    assert model.moving_time == pytest.approx(fitted().moving_time)
+
+
+def test_the_games_minimum_force_floor_is_learnt_and_carries_no_information():
+    floor = 1965
+    model = fe.RackForce()
+    n = 0
+    for t, s in stream(20.0):
+        raw = game_raw(s)
+        if n % 4 == 0:                                       # a quarter of the uploads sit at the floor (+-1965 / 1967)
+            raw = math.copysign(floor + (n // 4) % 3, raw)
+        n += 1
+        model.feed(t, s, raw, new=True)
+    assert model.floor is not None and abs(model.floor - floor) <= 3
+    before = model.moving_time
+    s = acr(30.0)
+    model.feed(30.0, s, float(floor), new=True)
+    assert model.moving_time == before                       # at the floor: no information for the fit
+    model.feed(30.01, acr(30.01), 5000.0, new=True)
+    assert model.moving_time > before
+    # a game with no such floor learns none
+    assert fitted(seconds=20.0).floor is None
 
 
 def test_a_game_force_against_mz_is_refused():

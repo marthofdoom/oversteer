@@ -356,15 +356,16 @@ def feed(engine, t0, seconds, rnd, **kw):
 
 
 def _original_play(self, t, sample):
-    """FfbEngine._play before the texture (master e87ab6d), to check it bit for bit."""
-    g = self._gain(t)
-    value = int(round(self.model.force(sample) * g))
-    self._driver.force(value)
-    self.writes += 1
-    self._last_value = value
-    if self._phase == 'out' and g <= 0.0:
-        self._phase = 'idle'
-        self._let_go()
+    """FfbEngine._play without the texture (the steering force, its strength and lock stop, the glide and the
+    output path as they are now), to check that texture off adds nothing."""
+    self._dyn_play(t, sample)
+    ours = self.model.force(sample) * self._strength + self._lock_stop_force(t, sample)
+    w = self._glide(t)
+    if w >= 1.0:
+        self._out(t, ours)
+    else:
+        game = self._game_level(sample)
+        self._out(t, game + w * (ours - game))
 
 
 def run_engine(tmp_path, name, level, play=None, off_at=None, monkeypatch=None):
