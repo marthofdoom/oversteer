@@ -1185,7 +1185,7 @@ def test_the_engine_off_ramps_the_assist_to_nothing_over_half_a_second_and_it_re
     t = _run_rpm(r, t, 0.35, 0.0)
     assert r.assist_level() == 0.0 and r.power_steering() == 'off'
     s = _rpm_sample(t, 0.0)
-    assert abs(r.rim_torque(s)) < abs(assisted)
+    assert abs(r.rim_torque(s)) > abs(assisted)                         # no boost: the driver feels the whole column torque
     r.assist = 0.0
     k_unassisted = r.align(s)['k']
     r.assist = fe.RackForce.ASSIST
