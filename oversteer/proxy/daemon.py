@@ -7,16 +7,23 @@ places such a copy in /usr/local/lib/oversteer-proxy).
 """
 
 import logging
+import os
 import signal
 import sys
 import time
 
+from .calibration import CALIBRATION_DIR
 from .manager import ProxyManager, BUILTIN_DIR, SYSTEM_DIR, STATUS_FILE
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     manager = ProxyManager(dirs=[BUILTIN_DIR, SYSTEM_DIR], status_file=STATUS_FILE)
+    try:        # the app hands calibrations over here (calibration.py); every local user may write
+        os.makedirs(CALIBRATION_DIR, exist_ok=True)
+        os.chmod(CALIBRATION_DIR, 0o1777)
+    except OSError as e:
+        logging.warning("calibration directory: %s", e)
     manager.start()
     stop = {'now': False}
 

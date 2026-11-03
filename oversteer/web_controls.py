@@ -28,7 +28,7 @@ RANGE_MIN = 40                                  # the GTK range scale's lower en
 LEVELS = ('spring_level', 'damper_level', 'friction_level', 'rumble_level')
 REV_MODES = ('auto', 'percent', 'rpm')
 SHIFT_LIMITS = {'percent': (50, 100), 'rpm': (1000, 25000)}
-ACTIONS = ('reset_ffb', 'load_profile', 'save_profile', 'try_effect')
+ACTIONS = ('reset_ffb', 'load_profile', 'save_profile', 'try_effect', 'calibrate_handbrake')
 EFFECTS = ('constant', 'spring', 'damper', 'friction', 'rumble')
 # Countersteer FFB (its own tab): number settings and the range the GTK scale has; the texture parts are switches
 COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, 100), 'countersteer_texture': (0, 100),
@@ -108,6 +108,7 @@ class Bridge:
         self.schedule = schedule
         self.timeout = timeout
         self.caps = {}
+        self.handbrake = None                   # calibration state, read on the main thread
         self.countersteer = None                # the light and the read-only lines, read on the main thread
 
     # -- what the server asks --
@@ -133,6 +134,11 @@ class Bridge:
         """Read what only the device can say. Main thread; the app calls it
         every few seconds while the page is served, and after a change."""
         c = self.controller
+        try:
+            self.handbrake = c.handbrake_calibration_state()
+        except Exception as e:
+            logging.debug("web controls: no handbrake state: %s", e)
+            self.handbrake = None
         device = getattr(c, 'device', None)
         self._refresh_countersteer()
         try:
@@ -382,6 +388,14 @@ class Bridge:
             # The device directly: the window's try_effect answers a failure with a dialog on the desktop
             if not controller.device.play_demo(arg, on_error=lambda e: logging.warning("web effect: %s", e)):
                 raise Rejected(409, "This device has no force feedback")
+        elif action == 'calibrate_handbrake':
+            if arg not in ('start', 'done', 'cancel'):
+                raise Rejected(400, "unknown step")
+            error = {'start': controller.handbrake_calibration_begin,
+                     'done': controller.handbrake_calibration_finish,
+                     'cancel': controller.handbrake_calibration_cancel}[arg]()
+            if error:
+                raise Rejected(409, error)
         elif action == 'load_profile':
             if not isinstance(arg, str) or arg not in self.profiles():
                 raise Rejected(400, "unknown profile")
@@ -463,6 +477,13 @@ class Bridge:
             number('rev_leds_shift', low, high, 50 if unit == 'rpm' else 1, mode != 'auto', unit)
             settings['rev_leds_launch'] = {'value': model.get_rev_leds_launch(), 'enabled': True}
         out['countersteer'] = self.countersteer
+        hb = dict(self.handbrake) if self.handbrake else None
+        if hb is not None:
+            cal = getattr(c, 'hb_cal', None)         # the live bar moves faster than the refresh
+            if cal is not None:
+                hb.update(running=True, ready=False, live=cal['live'])
+            hb['message'] = getattr(c, 'hb_cal_message', None)
+        out['handbrake'] = hb
         flag('countersteer_ffb')
         on = bool(data.get('countersteer_ffb'))
         for key, (low, high) in COUNTERSTEER_NUMBERS.items():

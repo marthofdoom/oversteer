@@ -2725,6 +2725,32 @@ function buildControls() {
   pedals.appendChild(reg(Object.assign(mkSeg("Combine pedals", "Two pedals on one axis: for old games and flight simulators.",
     [[0, "None"], [1, "Accel + Brakes"], [2, "Accel + Clutch"]], (v) => change("combine_pedals", v)), {key: "combine_pedals"})));
   for (const name of ["clutch", "brakes", "accelerator"]) pedals.appendChild(reg(mkPedal(name)));
+  pedals.appendChild(reg(mkHandbrake()));
+}
+
+// Handbrake calibration: release, pull fully, release, with the live bar
+function mkHandbrake() {
+  const root = el("div", null, "row"), head = el("div", null, "row-h"), msg = el("div", null, "hint"), btns = el("div", null, "btns");
+  const bar = el("div", null, "bar"), fill = el("div");
+  bar.appendChild(fill);
+  head.appendChild(el("span", "Handbrake", "name"));
+  const start = el("button", "Calibrate", "btn ghost"), done = el("button", "Done", "btn"), cancel = el("button", "Cancel", "btn ghost");
+  for (const b of [start, done, cancel]) b.type = "button";
+  start.addEventListener("click", () => act("calibrate_handbrake", "start"));
+  done.addEventListener("click", () => act("calibrate_handbrake", "done"));
+  cancel.addEventListener("click", () => act("calibrate_handbrake", "cancel"));
+  btns.append(start, done, cancel);
+  root.append(head, bar, msg, btns);
+  return {root, update: (spec, can, state) => {
+    const hb = state && state.handbrake;
+    root.hidden = !hb;
+    if (!hb) return;
+    start.hidden = hb.running; done.hidden = cancel.hidden = !hb.running;
+    start.disabled = !can || !hb.ready;
+    fill.style.width = Math.round(100 * hb.live) + "%";
+    msg.textContent = hb.running ? "Release the handbrake, pull it fully, then release it, and press Done."
+      : hb.message || hb.reason || "Learns where the handbrake rests and how far it travels. Takes about five seconds; no game may be running.";
+  }};
 }
 
 function buildFfb() {

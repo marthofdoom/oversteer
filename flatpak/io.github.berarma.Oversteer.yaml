@@ -22,6 +22,7 @@ finish-args:
   - --share=network
   # Devices tab: state of the proxy service and its installed specs
   - --filesystem=/run/oversteer:ro
+  - --filesystem=/run/oversteer/calibration
   - --filesystem=host-etc
   # Devices tab: install the proxy service on the host (flatpak-spawn --host + pkexec)
   - --talk-name=org.freedesktop.Flatpak
