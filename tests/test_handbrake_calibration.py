@@ -181,3 +181,84 @@ def test_learn_refuses_bad_sequences():
         hbcal.learn(held, 5.0, False, 0, 65535, 0, 65535)            # not released at the end
     with pytest.raises(hbcal.CalibrationError):
         hbcal.learn([(0, 1)], 5.0, False, 0, 65535, 0, 65535)       # no readings
+
+
+# --- calibrating mode and ownership --------------------------------------
+
+def _device():
+    from oversteer.proxy.device import ProxyDevice
+
+    class Info:
+        min, max = 0, 65535
+
+    class Src:
+        path = "/dev/null"
+        absinfo = {ecodes.ABS_THROTTLE: Info()}
+
+    dev = ProxyDevice(ProxySpec.from_dict(_spec()))
+    dev.sources['handbrake1'] = Src()
+    return dev, Src()
+
+
+NAME = "handbrake1:%d" % ecodes.ABS_THROTTLE
+
+
+def test_calibrating_passes_raw_and_restores_the_previous_values():
+    dev, src = _device()
+    rule = dev.spec.mappings[0]
+    dev._auto_invert[('handbrake1', ecodes.ABS_THROTTLE)] = False
+    dev.apply_calibration({NAME: {"low": 20000.0, "high": 60000.0, "dead": 0.03}})
+    assert dev._normalise(rule, src, 10000) == 0                       # below the old low
+    dev.apply_calibration({NAME: {"calibrating": True}})
+    assert dev._normalise(rule, src, 10000) == pytest.approx(10000 / 65535)     # the true range
+    assert dev._normalise(rule, src, 65535) == 1
+    # cancel: the app writes the previous entry again
+    dev.apply_calibration({NAME: {"low": 20000.0, "high": 60000.0, "dead": 0.03}})
+    assert (rule.low, rule.high) == (20000.0, 60000.0)
+    # new values after a calibration replace them
+    dev.apply_calibration({NAME: {"calibrating": True}})
+    dev.apply_calibration({NAME: {"low": 9000.0, "high": 50000.0, "dead": 0.03}})
+    assert (rule.low, rule.high) == (9000.0, 50000.0)
+    assert not dev.calibrating
+
+
+def test_calibrating_times_out_to_the_saved_values_and_to_uncalibrated():
+    dev, src = _device()
+    rule = dev.spec.mappings[0]
+    dev.apply_calibration({NAME: {"low": 20000.0, "high": 60000.0, "dead": 0.03}})
+    dev.apply_calibration({NAME: {"calibrating": True}})
+    assert rule.low is None
+    dev._restore_expired(10 ** 9)
+    assert (rule.low, rule.high) == (20000.0, 60000.0)
+    dev, src = _device()                                               # nothing saved: back to the declared range
+    rule = dev.spec.mappings[0]
+    dev.apply_calibration({NAME: {"calibrating": True}})
+    dev._restore_expired(10 ** 9)
+    assert rule.low is None
+
+
+def test_only_root_or_the_installing_user_may_calibrate(tmp_path):
+    d = str(tmp_path)
+    calibration.write("t", {NAME: {"low": 1000, "high": 60000, "dead": 0.03}}, d)
+    path = calibration.path_for("t", d)
+    mine = os.getuid()
+    assert calibration.read(path, {mine}) is not None
+    assert calibration.read(path, {mine + 1, 0}) is None               # someone else's file
+    uid_file = tmp_path / "uid"
+    assert calibration.allowed_uids(str(uid_file)) == {0}              # none recorded: root only
+    uid_file.write_text("%d\n" % (mine + 1))
+    assert calibration.allowed_uids(str(uid_file)) == {0, mine + 1}
+
+
+def test_device_ignores_a_file_of_another_user(tmp_path):
+    dev, _src = _device()
+    dev.calibration_dir = str(tmp_path)
+    dev.calibration_uid_file = str(tmp_path / "nouid")                # nobody recorded: only root's files
+    calibration.write(dev.spec.id, {NAME: {"low": 1000, "high": 60000, "dead": 0.03}}, dev.calibration_dir)
+    dev._check_calibration(now=1.0)
+    assert dev.spec.mappings[0].low is None
+    (tmp_path / "nouid").write_text("%d\n" % os.getuid())
+    calibration.write(dev.spec.id, {NAME: {"low": 1000, "high": 60000, "dead": 0.03}}, dev.calibration_dir)    # rewritten
+    dev._calibration_next = 0
+    dev._check_calibration(now=2.0)
+    assert dev.spec.mappings[0].low == 1000.0

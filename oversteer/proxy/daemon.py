@@ -19,9 +19,9 @@ from .manager import ProxyManager, BUILTIN_DIR, SYSTEM_DIR, STATUS_FILE
 def main():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     manager = ProxyManager(dirs=[BUILTIN_DIR, SYSTEM_DIR], status_file=STATUS_FILE)
-    try:        # the app hands calibrations over here (calibration.py); every local user may write
+    try:        # the app hands calibrations over here (calibration.py); write-only for users, files checked by owner
         os.makedirs(CALIBRATION_DIR, exist_ok=True)
-        os.chmod(CALIBRATION_DIR, 0o1777)
+        os.chmod(CALIBRATION_DIR, 0o1733)
     except OSError as e:
         logging.warning("calibration directory: %s", e)
     manager.start()

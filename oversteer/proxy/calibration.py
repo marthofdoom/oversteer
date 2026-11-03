@@ -8,19 +8,28 @@ file, applies it to the matching mappings:
 
     {"handbrake1:6": {"low": 5600, "high": 59000, "dead": 0.03}}
 
-The directory is writable by every local user (sticky, like /tmp), so the
-daemon only takes what cannot do harm: a regular file it opens without
-following links, small, numbers only, a travel of at least MIN_SPAN of the
-source's range, clamped into that range. The proxy never moves low or high
-by itself."""
+`{"handbrake1:6": {"calibrating": true}}` makes the proxy pass that axis
+through raw (no range, no dead band) while the app measures the true
+travel; the previous values come back when the next file no longer says so,
+or after CALIBRATING_SECONDS if the app went away.
+
+The directory is writable by local users (sticky, write-only), so the
+daemon takes a file only from root or the user who installed the service
+(UID_FILE, written at install time), and then only what cannot do harm: a
+regular file it opens without following links, small, numbers only, a
+travel of at least MIN_SPAN of the source's range, clamped into that range.
+The proxy never moves low or high by itself."""
 
 import json
+import logging
 import math
 import os
 import stat
 import tempfile
 
 CALIBRATION_DIR = '/run/oversteer/calibration'
+UID_FILE = '/etc/oversteer/calibration.uid'     # the installing user, written by install.py
+CALIBRATING_SECONDS = 90.0
 MAX_BYTES = 4096
 MIN_SPAN = 0.05          # of the source's declared range
 
@@ -47,9 +56,21 @@ def write(proxy_id, entries, directory=CALIBRATION_DIR):
         raise
 
 
-def read(path):
+def allowed_uids(uid_file=UID_FILE):
+    """{0, the installing user}; just root when none was recorded."""
+    allowed = {0}
+    try:
+        with open(uid_file) as f:
+            allowed.add(int(f.read().strip()))
+    except (OSError, ValueError):
+        pass
+    return allowed
+
+
+def read(path, uids=None):
     """The entries in the file, validated, or None when there is nothing
-    usable. Never raises on bad content."""
+    usable. Never raises on bad content. With `uids`, only a file owned by
+    one of them is taken."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
@@ -57,6 +78,9 @@ def read(path):
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+            return None
+        if uids is not None and info.st_uid not in uids:
+            logging.warning("calibration file %s ignored: owned by uid %d", path, info.st_uid)
             return None
         with os.fdopen(fd, 'rb', closefd=False) as f:
             data = json.loads(f.read(MAX_BYTES + 1).decode('utf-8'))
@@ -68,6 +92,9 @@ def read(path):
         return None
     entries = {}
     for key, value in data.items():
+        if isinstance(value, dict) and value.get('calibrating') is True:
+            entries[str(key)] = {'calibrating': True}
+            continue
         try:
             low, high = float(value['low']), float(value['high'])
             dead = float(value.get('dead', 0.03))

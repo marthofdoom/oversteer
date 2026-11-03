@@ -1104,6 +1104,7 @@ class Gui:
         Thread(target=work, daemon=True).start()
 
     CALIBRATE_SECONDS = 5.0
+    CALIBRATE_SETTLE = 0.6          # the proxy notices a changed calibration file within a quarter second
 
     def _handbrake_source_range(self, proxied):
         """(min, max) the handbrake source declares, from the proxy's
@@ -1186,7 +1187,13 @@ class Gui:
         if reason:
             return reason
         code, out_min, out_max = ctx['axis']
-        cal = dict(ctx, samples=[], start=time.monotonic(), live=0.0, gtk=gtk)
+        # the proxy passes the axis through raw while the travel is measured, then takes the new one
+        if ctx['live']:
+            try:
+                self._push_handbrake_calibration(ctx['proxied'][0], ctx['spec'], calibrating=ctx['mapping'])
+            except OSError as e:
+                return _("Could not reach the proxy: {}").format(e.strerror or e)
+        cal = dict(ctx, samples=[], start=time.monotonic() + self.CALIBRATE_SETTLE, live=0.0, gtk=gtk, raw=ctx['live'])
         self.hb_cal = cal
         self.hb_cal_message = None
 
@@ -1194,7 +1201,7 @@ class Gui:
             if getattr(self, 'hb_cal', None) is not cal:
                 return False
             value = self.device.axis_value(code)
-            if value is not None:
+            if value is not None and time.monotonic() >= cal['start']:
                 cal['samples'].append((time.monotonic() - cal['start'], value))
                 cal['live'] = min(1.0, max(0.0, (value - out_min) / float(out_max - out_min)))
             # the web page can wait for Done; nobody who walked away leaves it sampling
@@ -1204,6 +1211,7 @@ class Gui:
                     return False
                 self.hb_cal = None
                 self.hb_cal_message = _("Handbrake calibration timed out.")
+                self._restore_handbrake(cal)
                 return False
             return True
         cal['timer'] = GLib.timeout_add(20, tick)
@@ -1215,8 +1223,17 @@ class Gui:
             if not cal.get('expired'):
                 GLib.source_remove(cal['timer'])
             self.hb_cal = None
+            self._restore_handbrake(cal)
         self.hb_cal_message = None
         return None
+
+    def _restore_handbrake(self, cal):
+        """Back to the calibration the spec holds (or none)."""
+        if cal.get('raw'):
+            try:
+                self._push_handbrake_calibration(cal['proxied'][0], cal['spec'])
+            except OSError as e:
+                logging.warning("handbrake calibration restore: %s", e)
 
     def handbrake_calibration_finish(self, wait_for_install=False):
         """Learn from the samples and apply. Returns an error text or None;
@@ -1231,13 +1248,15 @@ class Gui:
         proxied, mapping, spec = cal['proxied'], cal['mapping'], cal['spec']
         src_min, src_max = cal['range']
         duration = time.monotonic() - cal['start'] if not cal['gtk'] else self.CALIBRATE_SECONDS
-        if duration < 2.0:
-            return _("Pull the handbrake first, then press Done.")
-        current = (mapping.low, mapping.high, mapping.dead) if mapping.low is not None else None
+        # raw: the axis was the sensor's own range, whatever the spec held
+        current = (mapping.low, mapping.high, mapping.dead) if mapping.low is not None and not cal['raw'] else None
         try:
+            if duration < 2.0:
+                raise hbcal.CalibrationError(_("Pull the handbrake first, then press Done."))
             low, high = hbcal.learn(cal['samples'], duration, proxied[3],
                     src_min, src_max, out_min, out_max, current)
         except hbcal.CalibrationError as e:
+            self._restore_handbrake(cal)
             return str(e)
         span = float(src_max - src_min)
         rest, full = (high, low) if proxied[3] else (low, high)
@@ -1263,12 +1282,15 @@ class Gui:
         self.hb_cal_message = text
         return None
 
-    def _push_handbrake_calibration(self, proxy_id, spec):
+    def _push_handbrake_calibration(self, proxy_id, spec, calibrating=None):
         """Send every calibrated mapping of the combined spec to the running
-        proxy (proxy.calibration)."""
+        proxy (proxy.calibration); `calibrating` is the mapping to have
+        passed through raw instead."""
         from .proxy import calibration
         entries = {'{}:{}'.format(m.source, m.from_code): {'low': m.low, 'high': m.high, 'dead': m.dead}
                    for m in spec.mappings if m.low is not None}
+        if calibrating is not None:
+            entries['{}:{}'.format(calibrating.source, calibrating.from_code)] = {'calibrating': True}
         calibration.write(proxy_id, entries)
 
     def _resend_handbrake_calibration(self, proxied):
@@ -1316,7 +1338,7 @@ class Gui:
             elif self.hb_cal_message:
                 self.ui.info_dialog(_("Handbrake calibrated."), self.hb_cal_message)
             return False
-        GLib.timeout_add(int(self.CALIBRATE_SECONDS * 1000) + 100, finish)
+        GLib.timeout_add(int((self.CALIBRATE_SECONDS + self.CALIBRATE_SETTLE) * 1000) + 100, finish)
 
     def _install_spec(self, spec, what):
         """Write `spec` as a candidate and reinstall through pkexec."""
