@@ -28,7 +28,7 @@ SCRUB = 0.0155                           # m: the physical scrub radius (ffb_eng
 KICK_K = 0.20                            # share of the couple's step (1 - boost slope) the driver feels (the old K_FAST)
 KICK_CAP = 0.25                          # share of full scale the pulse may add (rally setups keep steady cornering under the
                                          # peak: headroom for the spikes; the 12 ms rise and 60 ms decay keep the thermal mean small)
-TOTAL_CAP = wheel_torque.STEER_BUDGET + KICK_CAP   # the steering share plus the pulse is clamped here: 1.00, full scale
+TOTAL_CAP = 1.0                          # the steering share plus the pulse is clamped here: full scale
 OVERALL_KICK = False                     # "Kickback" default
 OVERALL_KICK_LEVEL = 50                  # ... and its level, % of the amplitude
 

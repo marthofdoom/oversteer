@@ -1158,7 +1158,7 @@ class RackForce:
                 else:
                     k_fs = split['k'] * rho * wheel_torque.rim_share_slope(torque * rho, self.wheel_peak, self.strength,
                                                                            x_top, self.knee) * self.strength / peak
-                tau = wheel_torque.STEER_BUDGET
+                tau = wheel_torque.TOP
                 theta_a, theta = split['theta_a_deg'], split['theta_deg']
                 if self.wheel_range:
                     # the wheel's own position frame: the game maps the wheel's travel to steer -1..1, so one degree

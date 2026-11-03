@@ -428,9 +428,9 @@ def physics(tr):
         else:
             share = np.array([wheel_torque.rim_share(r * q, p, 1.0, x * q, wheel_torque.KNEE) if np.isfinite(r) and np.isfinite(x) else np.nan
                               for r, p, x, q in zip(tr['rim_model'], peak, tr['x_top'], tr['rho'])])
-        exp = np.clip(share, -wheel_torque.STEER_BUDGET, wheel_torque.STEER_BUDGET)
+        exp = np.clip(share, -wheel_torque.TOP, wheel_torque.TOP)
         exp = np.clip(exp, -ceiling, ceiling)
-        budget = sel & (np.abs(share) >= wheel_torque.STEER_BUDGET - 1e-9)
+        budget = sel & (np.abs(share) >= wheel_torque.TOP - 1e-9)
         game_src = sel & (tr['source'] == 'game')
         rev = sel & tr['reverse']
         free = sel & ~budget & ~game_src & ~rev
@@ -637,7 +637,7 @@ def safety(tr):
         return {'note': "never ready"}
     sh, base, tex, inten = tr['shaped'][ready], tr['base'][ready], tr['tex'][ready], tr['intended'][ready]
     out['clip_share'] = float(np.mean(np.abs(inten) >= fm.CLIP_AT))
-    out['budget_share'] = float(np.mean(np.abs(base) >= wheel_torque.STEER_BUDGET - 1e-3))
+    out['budget_share'] = float(np.mean(np.abs(base) >= wheel_torque.TOP - 1e-3))
     out['peak_abs_fs'] = float(np.max(np.abs(sh)))
     # thermal: the driver's 90 s mean square (a gap over a second counts as 0 output)
     th = R.thermal_mean(tr['t'], np.where(ready, tr['shaped'], 0.0))

@@ -12,12 +12,12 @@ NM = (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 3.7)
 
 
 def test_the_knee_plays_1_to_1_and_compresses_above_it():
-    assert wt._gamma(0.5, 3.7, 2.1) == pytest.approx(0.263, abs=0.002)
+    assert wt._gamma(0.5, 3.7, 2.1) == pytest.approx(0.413, abs=0.002)
     got = [wt.rim_share(x, 2.1, 1.0, 3.7, 0.5) for x in NM]
-    assert got == pytest.approx([0.238, 0.476, 0.590, 0.638, 0.677, 0.710, 0.739, 0.750], abs=0.003)
-    assert wt._gamma(0.4, 3.7, 2.1) == pytest.approx(0.356, abs=0.002)
+    assert got == pytest.approx([0.238, 0.476, 0.628, 0.713, 0.782, 0.844, 0.899, 0.920], abs=0.003)
+    assert wt._gamma(0.4, 3.7, 2.1) == pytest.approx(0.490, abs=0.002)
     got = [wt.rim_share(x, 2.1, 1.0, 3.7, 0.4) for x in NM]
-    assert got == pytest.approx([0.238, 0.455, 0.543, 0.602, 0.652, 0.696, 0.735, 0.750], abs=0.003)
+    assert got == pytest.approx([0.238, 0.463, 0.587, 0.679, 0.759, 0.830, 0.895, 0.920], abs=0.003)
 
 
 def test_below_the_knee_it_is_a_straight_line_and_the_slope_is_continuous_at_it():
