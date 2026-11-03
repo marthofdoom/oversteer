@@ -11,6 +11,7 @@ import pytest
 
 from oversteer import ffb_dynamics as fd
 from oversteer import ffb_engine as fe
+from oversteer import ffb_carprops as cp
 from oversteer import ffb_record, wheel_calibration as wcal, wheel_torque
 from oversteer.telemetry_formats import Sample
 
@@ -466,6 +467,102 @@ def test_the_lock_stop_resists_the_wheel_past_the_games_lock_and_is_silent_insid
     assert active and 0.4 * fe.FULL <= push <= fe.LockStop.MAX * fe.FULL * engine._strength
     push_other, _ = settle(-1.0, -285.0)
     assert push_other < 0 < push
+    engine.stop()
+
+
+def _store_slope(engine, slope, wheel_range=900.0, sens='unset'):
+    sens = engine._dyn.sensitivity if sens == 'unset' else sens
+    cp.STORE.set_frame(engine.model.car, wheel_range, sens, slope)
+
+
+def _push_at(engine, t, raw_deg, steer=1.0, seconds=0.3):
+    """Feed samples with the wheel held at `raw_deg`; (time, the lock stop's push, active)."""
+    end = t + seconds
+    while t < end:
+        s = tfe.acr(t)
+        s.tyre_slip_angle, s.pos, s.forward = (0.04, 0.04, 0, 0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+        s.steer = steer
+        POS.raw = int(round((raw_deg / 900.0 + 0.5) * 65535))
+        tfe.upload(tfe.game_raw(s))
+        engine.offer(t, s)
+        engine.step(t)
+        t += 1.0 / tfe.HZ
+    return t, engine._lock_stop_force(t, s), engine._lock_stop.active
+
+
+def test_a_stored_slope_enables_the_lock_stop_at_once_but_not_the_spring(tmp_path):
+    path = dyn_wheel(tmp_path)
+    engine, t = playing_engine(path)
+    assert not engine._frame.ok
+    _store_slope(engine, 0.6)
+    engine._prov_key = None                                             # (a new session reads the store)
+    t, push, active = _push_at(engine, t, 285.0)                        # 15 degrees past the stored lock (270)
+    assert not engine._frame.ok and active and push > 0.4 * fe.FULL * 0.5
+    _, inside, active = _push_at(engine, t, 200.0, steer=0.8)
+    assert inside == 0 and not active
+    m = engine.model
+    m.ratio_known = m.lock_known = True
+    m._align.s[0] = 1e4
+    assert not m.align_on and m.wheel_slope == 1.0                      # the spring waits for the live check
+    engine.stop()
+
+
+def test_a_slope_stored_for_another_range_or_sensitivity_is_not_used(tmp_path):
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    _store_slope(engine, 0.6, wheel_range=540.0)
+    _store_slope(engine, 0.6, sens=80)
+    engine._prov_key = None
+    _, push, active = _push_at(engine, t, 285.0)
+    assert push == 0 and not active and engine._prov is None
+    engine.stop()
+
+
+def test_a_stored_slope_outside_the_sane_range_is_rejected(tmp_path):
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    for bad in (0.2, 2.5, -0.6):
+        _store_slope(engine, bad)
+        assert cp.STORE.get_frame(engine.model.car, 900.0, engine._dyn.sensitivity) is None
+    engine.stop()
+
+
+def test_a_live_slope_that_disagrees_drops_the_stored_one_and_logs_once(tmp_path, caplog):
+    POS.scale = 0.6
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    _store_slope(engine, 0.9)                                           # the wheel setup changed meanwhile
+    engine._prov_key = None
+    t, push, _active = _push_at(engine, t, 285.0, seconds=0.1)
+    assert push == 0 and engine._prov == 0.9                            # provisional: lock 405, 285 is inside
+    engine._frame.reset(); engine._pos_cache = None
+    with caplog.at_level('INFO'):
+        t = feed(engine, t, 6.0)
+        engine._lock_stop_force(t, tfe.acr(t))
+    assert engine._frame.ok and engine._prov is None
+    assert len([r for r in caplog.records if 'stored value dropped' in r.getMessage()]) == 1
+    assert cp.STORE.get_frame(engine.model.car, 900.0, engine._dyn.sensitivity) == pytest.approx(0.6, abs=0.02)
+    t, push, active = _push_at(engine, t, 285.0, seconds=0.1)           # the live lock (270) now holds
+    assert active and push > 0
+    engine.stop()
+
+
+def test_a_live_slope_of_the_other_sign_drops_the_stored_one(tmp_path):
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    _store_slope(engine, 0.6)
+    engine._prov_key = None
+    engine._lock_slope(engine._dyn)
+    assert engine._prov == 0.6
+    engine._frame.ok, engine._frame.slope = True, -0.6
+    assert engine._lock_slope(engine._dyn) == -0.6 and engine._prov is None
+    assert cp.STORE.get_frame(engine.model.car, 900.0, engine._dyn.sensitivity) is None
+    engine.stop()
+
+
+def test_a_live_slope_that_agrees_keeps_it_and_a_passing_check_stores_the_slope(tmp_path):
+    POS.scale = 0.6
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    t = feed(engine, t, 6.0)
+    assert engine._frame.ok
+    engine._lock_stop_force(t, tfe.acr(t))
+    assert cp.STORE.get_frame(engine.model.car, 900.0, engine._dyn.sensitivity) == pytest.approx(0.6, abs=0.02)
     engine.stop()
 
 

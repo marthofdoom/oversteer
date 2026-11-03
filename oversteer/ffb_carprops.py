@@ -72,6 +72,7 @@ ASSIST_SAT = 100.0                       # Nm at the column: the assist's limit 
 SAT_ORDER = 4
 P99_RANGE = (5.0, 4000.0)                # Nm: the front steering torque's p99 kept per car
 SAVE_P99_STEP = 0.03                     # a p99 moved this share from what was saved is worth saving
+FRAME_SLOPE_RANGE = (0.3, 2.0)           # the wheel's position per expected degree kept per car (ffb_dynamics.FrameCheck.SLOPE)
 LOCK_RANGE = (0.3, 0.8)                  # rad: the road wheels' steering lock per unit of steer, kept in this
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
 
@@ -81,7 +82,9 @@ class Store:
     the learnt p99 of the front steering torque (Nm, `p99`, a diagnostic) and the steering ratio and power-assist
     class the rim torque is worked out with (`ratio`, `assist`: 1.0 = a road / rally car's power steering, 0.0 =
     unassisted; absent = the defaults below, set_rack() for a refined one) and the road wheels' steering lock (`lock`,
-    rad, centre to full lock of the game's -1..1 steer; RatioLearner)."""
+    rad, centre to full lock of the game's -1..1 steer; RatioLearner), and the verified wheel mapping (`frame`:
+    {"range|sensitivity": slope}, the wheel's position per degree of the game's steering: it depends on the wheel's
+    range and sensitivity as well as the car; ffb_dynamics.FrameCheck)."""
 
     def __init__(self):
         self.path = None                 # None: the data folder's file
@@ -89,6 +92,7 @@ class Store:
         self._p99 = {}
         self._rack = {}
         self._steer_lock = {}
+        self._frame = {}
         self._dirty = False
         self._lock = threading.Lock()
         self._saved = {}                 # what the file holds, to tell what changed
@@ -101,7 +105,7 @@ class Store:
     def _load(self):
         if self._cars is None:
             self._cars = {}
-            self._p99, self._rack, self._steer_lock = {}, {}, {}
+            self._p99, self._rack, self._steer_lock, self._frame = {}, {}, {}, {}
             try:
                 with open(self._file()) as f:
                     for car, v in json.load(f).items():
@@ -120,6 +124,12 @@ class Store:
                         lock = v.get('lock')
                         if isinstance(lock, (int, float)) and math.isfinite(lock) and LOCK_RANGE[0] <= lock <= LOCK_RANGE[1]:
                             self._steer_lock[car] = float(lock)
+                        frames = v.get('frame')
+                        if isinstance(frames, dict):
+                            for key, slope in frames.items():
+                                if isinstance(key, str) and isinstance(slope, (int, float)) and math.isfinite(slope) \
+                                        and FRAME_SLOPE_RANGE[0] <= slope <= FRAME_SLOPE_RANGE[1]:
+                                    self._frame.setdefault(car, {})[key] = float(slope)
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 pass
             self._saved = dict(self._cars)
@@ -170,6 +180,37 @@ class Store:
                 self._dirty = True
             self._steer_lock[car] = float(lock)
 
+    @staticmethod
+    def _frame_key(wheel_range, sensitivity):
+        return "%g|%s" % (wheel_range, sensitivity)
+
+    def get_frame(self, car, wheel_range, sensitivity):
+        """The verified wheel mapping (slope) kept for the car under this wheel range and sensitivity, None if none
+        (or one outside FRAME_SLOPE_RANGE)."""
+        if car is None or not wheel_range:
+            return None
+        with self._lock:
+            self._load()
+            slope = self._frame.get(car, {}).get(self._frame_key(wheel_range, sensitivity))
+        return slope if slope is not None and FRAME_SLOPE_RANGE[0] <= slope <= FRAME_SLOPE_RANGE[1] else None
+
+    def set_frame(self, car, wheel_range, sensitivity, slope):
+        """Keeps a verified slope (written with the car's next put); None drops it. Out-of-range slopes are not kept."""
+        if car is None or not wheel_range:
+            return
+        key = self._frame_key(wheel_range, sensitivity)
+        with self._lock:
+            self._load()
+            frames = self._frame.setdefault(car, {})
+            if slope is None:
+                if frames.pop(key, None) is not None:
+                    self._dirty = True
+            elif FRAME_SLOPE_RANGE[0] <= slope <= FRAME_SLOPE_RANGE[1]:
+                old = frames.get(key)
+                if old is None or abs(old - slope) > 0.02 * old:
+                    self._dirty = True
+                frames[key] = float(slope)
+
     def put(self, car, trail, scrub, force=False, p99=None):
         """The car's learnt values; written when they moved enough and SAVE_EVERY s have passed (or `force`)."""
         if car is None:
@@ -199,6 +240,8 @@ class Store:
                     data[c]['ratio'], data[c]['assist'] = self._rack[c]
                 if c in self._steer_lock:
                     data[c]['lock'] = round(self._steer_lock[c], 4)
+                if self._frame.get(c):
+                    data[c]['frame'] = {k: round(x, 4) for k, x in self._frame[c].items()}
         if ASYNC:
             threading.Thread(target=self._write, args=(data,), daemon=True).start()
         else:
