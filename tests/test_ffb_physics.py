@@ -69,8 +69,8 @@ def acr():
 def test_acr_replay_follows_finalff(acr):
     _d, _rep, _cases, fit = acr
     # the boost curve bends finalFF's linear shape (monotone, but not linear): R^2 0.90 where a linear scale gave 0.97
-    assert fit['r2_moving'] > 0.88 and fit['r_moving'] > 0.94
-    assert 0.65 < fit['p50_p90_p99_ours'][2] <= 0.75      # the scaled rim torque on a G29-class wheel: p99 about 70 %, within the budget
+    assert fit['r2_moving'] > 0.80 and fit['r_moving'] > 0.90      # (the knee's compression bends it further from finalFF's line)
+    assert 0.55 < fit['p50_p90_p99_ours'][2] <= 0.75      # the 1:1 / compressed rim torque on a G29-class wheel: p99 within the budget
     assert abs(fit['lag_s']) < 0.1                     # (snapshots 0.26 s apart: a lag under ~0.1 s is not resolved)
     assert fit['clip_share_ours'] < 0.003                # the hard clamp at the budget (75 %): nothing reaches full scale
     assert fit['ready_share'] > 0.95
@@ -105,17 +105,17 @@ def test_acr_level_and_thermal_headroom_in_normal_driving(acr):
 
 
 @needs_dump
-def test_each_cars_impedance_scale_puts_its_p99_near_70_percent_on_the_g29(acr):
+def test_the_knee_mapping_plays_the_drive_inside_the_budget_on_the_g29(acr):
     d, rep, _c, _fit = acr
     moving = d['speed'] / 3.6 > fe.MIN_SPEED
     out = np.abs(rep['force']) / FULL
-    assert 0.6 < np.percentile(out[moving], 99) <= 0.75
+    assert 0.55 < np.percentile(out[moving], 99) <= 0.75
     scales = [float(np.median(rep['scale'][moving & (d['seg'] == seg)])) for seg in np.unique(d['seg'])
               if (moving & (d['seg'] == seg)).sum() > 20]
-    assert all(0.1 < s < 1.0 for s in scales) and 0.3 < np.median(scales) < 0.6       # the report: s about 0.35-0.5
+    assert all(s == fe.RackForce.COLUMN_SCALE for s in scales)                         # the column scale is frozen
     assert np.mean(out[moving] >= 0.7499) < 0.02                                       # the clamp is rare
     p50, p90, p99 = np.percentile(out[moving], [50, 90, 99])
-    assert p99 - p90 > 0.2 and p90 > 2.5 * p50                                         # p90-p99 not squashed
+    assert p99 > p90 > 1.5 * p50                                                       # p90-p99 not squashed
 
 
 @needs_dump

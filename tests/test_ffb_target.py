@@ -111,7 +111,7 @@ def test_on_centre_and_at_the_limit_torques_are_a_real_cars():
     easy = abs(rack.rim_torque(sample_at(85.0)))
     limit = abs(rack.rim_torque(sample_at(550.0)))
     assert 0.4 <= easy <= 1.2
-    assert 3.5 <= limit <= 6.0
+    assert 2.5 <= limit < wheel_torque.HYD_TOP_NM          # (the hydraulic top end bends it under 3.7)
     assert abs(rack.rim_torque(sample_at(10.0))) < 0.3          # near the centre almost nothing
 
 
@@ -124,40 +124,48 @@ def test_the_boost_curve_follows_the_measured_steering():
     assert 10.0 / mid - 1.0 == pytest.approx(5.0, abs=2.0)
     assert ffb_carprops.driver_slope(0.5, 30.0) > ffb_carprops.driver_slope(0.5, 3.0)       # (zone 1.0 vs 0.3 Nm)
     slopes = [ffb_carprops.driver_slope(tc, 30.0) for tc in (5.0, 20.0, 50.0, 150.0)]
-    assert slopes[-1] > 5 * slopes[1] and slopes[-1] > 0.5                                 # past saturation the driver feels it
+    assert slopes[0] > slopes[1] > slopes[2] > slopes[3] > 0.0                             # the hydraulic top end flattens it for good
 
 
-def test_the_uniform_impedance_scale_puts_the_cars_p99_at_70_percent_and_is_one_for_a_strong_wheel():
+def test_the_column_scale_is_frozen_on_the_g29_class_and_the_car_tops_out_at_the_budget():
     rack = rack_for(2.1)
     rack.p99 = 550.0
-    t99 = abs(rack.rim_torque(sample_at(550.0)))
-    s = rack.impedance()
-    assert s == pytest.approx(0.7 * 2.1 / t99) and 0.2 < s < 0.6
-    assert force_at(rack, 550.0) == pytest.approx(0.7, abs=0.01)
-    # a strong wheel plays the car 1:1
+    assert rack.impedance() == fe.RackForce.COLUMN_SCALE == 0.30
+    rack.p99 = 250.0
+    assert rack.impedance() == 0.30                                  # (the learnt p99 no longer moves it)
+    assert rack_for(None).impedance() == 0.30 and rack_for(2.5).impedance() == 0.30
+    assert rack_for(10.0).impedance() == 1.0
+    # an assisted car's driver torque tops out at the hydraulic limit: that lands at the budget
+    assert rack.top_torque() == wheel_torque.HYD_TOP_NM
+    assert force_at(rack, 550.0) == pytest.approx(0.7, abs=0.06) and force_at(rack, 550.0) < wheel_torque.STEER_BUDGET
+    # a strong wheel plays the car 1:1 in Nm
     strong = rack_for(10.0)
     strong.p99 = 550.0
-    assert strong.impedance() == 1.0
-    assert force_at(strong, 550.0) == pytest.approx(t99 / 10.0)
-    # a car with a lighter p99 needs less shrinking
-    rack.p99 = 250.0
-    assert rack.impedance() > s
+    assert force_at(strong, 550.0) == pytest.approx(abs(strong.rim_torque(sample_at(550.0))) / 10.0)
+    # an unassisted car's top is its p99 (at least twice the knee's torque)
+    plain = rack_for(2.1, assist=0.0, ratio=13.0)
+    plain.p99 = 390.0
+    assert plain.top_torque() == pytest.approx(30.0)
+    plain.p99 = 5.0
+    assert plain.top_torque() == pytest.approx(2.1)               # 2 x the knee's torque at least
 
 
-def test_the_played_share_is_in_proportion_to_the_rim_torque_and_clamps_hard_at_the_budget():
+def test_the_played_share_is_1_to_1_up_to_the_knee_and_clamps_hard_at_the_budget():
     rack = rack_for(2.1)
     rack.p99 = 550.0
-    s = rack.impedance()
-    for nm in (30.0, 85.0, 200.0, 300.0):
-        assert force_at(rack, nm) == pytest.approx(s * abs(rack.rim_torque(sample_at(nm))) / 2.1, rel=1e-6)   # uniform
+    for nm in (10.0, 30.0, 85.0):
+        rim = abs(rack.rim_torque(sample_at(nm)))
+        assert rim / 2.1 < rack.knee
+        assert force_at(rack, nm) == pytest.approx(rim / 2.1, rel=1e-6)                       # 1:1 in Nm
+    rack.strength = 0.5
+    assert force_at(rack, 85.0) == pytest.approx(0.5 * abs(rack.rim_torque(sample_at(85.0))) / 2.1, rel=1e-6)
+    rack.strength = 1.0
     shares = [force_at(rack, nm) for nm in range(0, 4000, 5)]
     assert all(b >= a for a, b in zip(shares, shares[1:]))
-    assert max(shares) == wheel_torque.STEER_BUDGET                 # a hard clamp: no knee under it
-    assert force_at(rack, 5000.0) == wheel_torque.STEER_BUDGET
+    assert max(shares) == pytest.approx(wheel_torque.STEER_BUDGET, abs=0.005) and max(shares) <= wheel_torque.STEER_BUDGET
+    assert force_at(rack, 5000.0) == pytest.approx(wheel_torque.STEER_BUDGET, abs=0.005)       # (the driver torque tends to 3.7 Nm)
     below = [x for x in shares if x < wheel_torque.STEER_BUDGET]
-    assert max(b - a for a, b in zip(below, below[1:])) < 0.03       # (no step either: the assist saturating steepens it a little)
-    p90, p99 = force_at(rack, 240.0), force_at(rack, 550.0)
-    assert p99 - p90 > 0.2                                           # the p90-p99 range keeps its shape
+    assert max(b - a for a, b in zip(below, below[1:])) < 0.06       # (no step either: 5 Nm of kingpin torque near the centre is 0.05)
 
 
 def test_an_unknown_wheel_counts_as_the_g29_class():
@@ -168,7 +176,7 @@ def test_a_strong_wheel_plays_the_same_nm_and_never_passes_the_ceiling():
     weak, strong = rack_for(2.1), rack_for(20.0)
     nm = abs(strong.rim_torque(sample_at(300.0)))
     assert force_at(strong, 300.0) == pytest.approx(nm / 20.0, rel=1e-6)
-    assert force_at(strong, 300.0) < force_at(weak, 300.0)
+    assert force_at(strong, 300.0) < force_at(weak, 300.0) + 1e-9
     unassisted = rack_for(20.0, assist=0.0)
     assert force_at(unassisted, 5000.0) == pytest.approx(fe.RackForce.RIM_SAFE_NM / 20.0, rel=0.001)
 
@@ -314,8 +322,7 @@ def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_
         rack._now += 0.005
         resid = rack.force(s)
     split = rack.align(s)
-    scale = rack.impedance()
-    k_fs = scale * split['k'] / 20.0
+    k_fs = split['k'] * wheel_torque.rim_share_slope(rack.rim_torque(s), 20.0, 1.0, rack.top_torque(), rack.knee) / 20.0
     assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, wheel_torque.STEER_BUDGET))
     spring = ffb_spring.DriverSpring()
     for _ in range(200):

@@ -63,6 +63,9 @@ def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_
     # an unknown wheel counts as the G29's 2.1 Nm; the figures stay in the driver's range
     assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 2.1)
     assert fd.column_targets(50.0, 2.1) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
+    # the damping's own scale (1:1 with the torque under the knee): the friction keeps the impedance scale
+    d, f = fd.column_targets(0.3, 2.1, (470, 670, 500, 1250, 5000), damping_scale=1.0)
+    assert d == round(0.17 * math.pi / 180 / 2.1 * 1e6) > 470 and f == round(0.75 * 0.3 / 2.1 * 1e4)
 
 
 def test_the_alignment_target_is_in_wheel_position_units_with_abs_xs_sign():
@@ -231,8 +234,8 @@ def test_the_spring_is_worked_out_in_the_wheels_own_position_frame():
     g = 450.0 / (r.lock * r.ratio * 180.0 / math.pi)
     theta_a, k, tau = seen[-1]
     assert theta_a == pytest.approx(max(-450.0, min(450.0, car['theta_a_deg'] * g)))
-    scale = r.impedance()
-    assert k == pytest.approx(scale * car['k'] / 2.1 / g)
+    slope = wheel_torque.rim_share_slope(r.rim_torque(s), 2.1, 1.0, r.top_torque(), r.knee)
+    assert k == pytest.approx(slope * car['k'] / 2.1 / g)
     # steer 1 at the lock puts the zero-slip angle at the wheel's own steer * range / 2, whatever the car's lock
     s = slip_sample(0.01, steer=0.5, alpha=0.0)
     r._now = 0.01
@@ -379,7 +382,7 @@ def feed(engine, t, seconds, **kw):
 def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
-    want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak)
+    want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, damping_scale=engine.model.DAMPING_SCALE)
     assert (int(open(path + '/ffb_dyn_damping').read()), int(open(path + '/ffb_dyn_friction').read())) == want
     assert want[1] >= 500
     engine.set_enabled(False)

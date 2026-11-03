@@ -1,7 +1,9 @@
 import configparser
 import logging
 
-STRENGTH_MIN = 10                    # Countersteer's overall steering strength, % (a force of 0 is the switch)
+STRENGTH_MIN = 0                     # Countersteer's overall steering strength, %
+STRENGTH_MAX = 130
+KNEE_MIN, KNEE_MAX = 30, 60          # "1:1 up to": the share of the wheel's peak torque played 1:1 in Nm, %
 
 
 def N_(text):
@@ -71,6 +73,8 @@ class Model:
         'apply_on_plug': None,
         'countersteer_ffb': None,
         'countersteer_strength': None,
+        'countersteer_knee': None,
+        'countersteer_kick': None,
         'countersteer_texture': None,
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
@@ -120,6 +124,8 @@ class Model:
         'apply_on_plug': 'boolean',
         'countersteer_ffb': 'boolean',
         'countersteer_strength': 'integer',
+        'countersteer_knee': 'integer',
+        'countersteer_kick': 'boolean',
         'countersteer_texture': 'integer',
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
@@ -231,10 +237,12 @@ class Model:
     def _texture_defaults(cls, supported):
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
-        from .ffb_engine import OVERALL_STRENGTH as OVERALL
+        from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_KICK
         from .ffb_texture import LEVEL
-        # The overall Countersteer force in % of the calibrated wheel's range
+        # The overall Countersteer force in % of the car's real steering torque, and where it stops being played 1:1
         data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
+                'countersteer_knee': int(round(OVERALL_KNEE * 100)) if supported else None,
+                'countersteer_kick': OVERALL_KICK if supported else None,
                 'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
         for part in cls.TEXTURE_PARTS:
             data['countersteer_texture_' + part] = True if supported else None
@@ -411,7 +419,9 @@ class Model:
             if data[key] is not None:
                 data[key] = min(max(data[key], 0), 100)
         if data['countersteer_strength'] is not None:
-            data['countersteer_strength'] = min(max(data['countersteer_strength'], STRENGTH_MIN), 100)
+            data['countersteer_strength'] = min(max(data['countersteer_strength'], STRENGTH_MIN), STRENGTH_MAX)
+        if data['countersteer_knee'] is not None:
+            data['countersteer_knee'] = min(max(data['countersteer_knee'], KNEE_MIN), KNEE_MAX)
 
         self.data = data
         self.save_reference_values()
@@ -673,8 +683,8 @@ class Model:
         return bool(self.data['countersteer_ffb'])
 
     def set_countersteer_strength(self, value):
-        """Countersteer's own steering force, STRENGTH_MIN..100 % of the calibrated wheel's range."""
-        value = min(max(int(value), STRENGTH_MIN), 100)
+        """Countersteer's own steering force, STRENGTH_MIN..STRENGTH_MAX % of the car's real steering torque."""
+        value = min(max(int(value), STRENGTH_MIN), STRENGTH_MAX)
         if self.set_if_changed('countersteer_strength', value) and self.ui is not None:
             self.ui.controller.apply_countersteer_strength()
 
@@ -682,6 +692,27 @@ class Model:
         from .ffb_engine import OVERALL_STRENGTH as OVERALL
         value = self.data.get('countersteer_strength')
         return int(round(OVERALL * 100)) if value is None else value
+
+    def set_countersteer_knee(self, value):
+        """The share of the wheel's peak torque the steering force is played 1:1 in Nm up to, KNEE_MIN..KNEE_MAX %."""
+        value = min(max(int(value), KNEE_MIN), KNEE_MAX)
+        if self.set_if_changed('countersteer_knee', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_knee()
+
+    def get_countersteer_knee(self):
+        from .ffb_engine import OVERALL_KNEE
+        value = self.data.get('countersteer_knee')
+        return int(round(OVERALL_KNEE * 100)) if value is None else value
+
+    def set_countersteer_kick(self, value):
+        """The kickback (a gated jolt on one-sided events) on or off."""
+        if self.set_if_changed('countersteer_kick', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_kick()
+
+    def get_countersteer_kick(self):
+        from .ffb_engine import OVERALL_KICK
+        value = self.data.get('countersteer_kick')
+        return OVERALL_KICK if value is None else bool(value)
 
     def set_countersteer_texture(self, value):
         """The texture's master level, 0..100 %."""
@@ -978,6 +1009,8 @@ class Model:
         self.ui.set_apply_on_plug(data['apply_on_plug'])
         self.ui.set_countersteer_ffb(data['countersteer_ffb'])
         self.ui.set_countersteer_strength(data['countersteer_strength'])
+        self.ui.set_countersteer_knee(data['countersteer_knee'])
+        self.ui.set_countersteer_kick(data['countersteer_kick'])
         self.ui.set_countersteer_texture(data['countersteer_texture'],
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])

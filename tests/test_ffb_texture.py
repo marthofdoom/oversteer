@@ -541,7 +541,7 @@ def test_countersteer_settings_in_the_profile(tmp_path):
     assert fresh.get_countersteer_strength() == 60 and fresh.get_countersteer_texture()[1]['engine'] is False
     (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\ncountersteer_strength = 3\n')
     fresh.load(str(tmp_path / 'old.ini'))
-    assert fresh.data['countersteer_strength'] == 10 and fresh.data['countersteer_texture_engine'] is True
+    assert fresh.data['countersteer_strength'] == 3 and fresh.data['countersteer_texture_engine'] is True
     assert Model(FakeDevice(), None).data['countersteer_strength'] is None
 
 
@@ -553,7 +553,7 @@ def test_strength_scales_the_rack_force_only(tmp_path):
     assert engine._strength == 0.5
     engine.set_strength(500)
     engine.step(0.01)
-    assert engine._strength == 1.0
+    assert engine._strength == 1.3                      # 130 % at most
     assert engine.car_properties() is None or len(engine.car_properties()) == 3
 
 

@@ -20,7 +20,7 @@ import logging
 import os
 import threading
 
-from .model import Model, STRENGTH_MIN
+from .model import Model, STRENGTH_MIN, STRENGTH_MAX, KNEE_MIN, KNEE_MAX
 
 PEDALS = Model.PEDAL_RESPONSES
 RANGE_PRESETS = (270, 360, 540, 720, 900)
@@ -31,10 +31,11 @@ SHIFT_LIMITS = {'percent': (50, 100), 'rpm': (1000, 25000)}
 ACTIONS = ('reset_ffb', 'load_profile', 'save_profile', 'try_effect', 'calibrate_handbrake')
 EFFECTS = ('constant', 'spring', 'damper', 'friction', 'rumble')
 # Countersteer FFB (its own tab): number settings and the range the GTK scale has; the texture parts are switches
-COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, 100), 'countersteer_texture': (0, 100),
+COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, STRENGTH_MAX), 'countersteer_knee': (KNEE_MIN, KNEE_MAX),
+                        'countersteer_texture': (0, 100),
                         'countersteer_linearity': (0, 100), 'countersteer_lightness': (0, 100)}
 COUNTERSTEER_TOGGLES = ('countersteer_column', 'countersteer_align', 'countersteer_friction_removal')
-COUNTERSTEER_FLAGS = ('countersteer_ffb',) + COUNTERSTEER_TOGGLES + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
+COUNTERSTEER_FLAGS = ('countersteer_ffb', 'countersteer_kick') + COUNTERSTEER_TOGGLES + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
 # Greyed in the GTK window while force feedback is off (GtkUi.set_ffb_enabled)
 NEEDS_FFB = ('ff_gain', 'app_gain', 'inertia_mode') + LEVELS
 
@@ -490,6 +491,7 @@ class Bridge:
             number(key, low, high, enabled=on)
         for key in COUNTERSTEER_TOGGLES:
             flag(key, on)
+        flag('countersteer_kick', on)
         for part in model.TEXTURE_PARTS:
             flag('countersteer_texture_' + part, on)
         combined = bool(data.get('combine_pedals'))

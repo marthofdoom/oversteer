@@ -181,7 +181,7 @@ def _mean(a, b):
 def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
     """Drive the engine's classes with the drive. Returns a dict of numpy arrays, one entry per REAL row."""
     keys = ('t', 'ready', 'speed', 'ay', 'steer', 'alpha_f', 'alpha_r', 'sr_f', 'brake', 'load', 'game', 'base',
-            'tex', 'intended', 'shaped', 'rim_engine', 'rim_model', 'scale', 'peak', 'ceiling', 'reverse', 'source',
+            'tex', 'intended', 'shaped', 'rim_engine', 'rim_model', 'scale', 'x_top', 'peak', 'ceiling', 'reverse', 'source',
             'theta', 'theta_a', 'ratio', 'trail', 'scrub', 'cls', 'stiff', 'lock', 'seg')
     rec = {k: [] for k in keys}
     with _sandbox():
@@ -238,6 +238,7 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
                 rec['rim_engine'].append(math.nan if rim is None else rim)
                 rec['rim_model'].append(_first_principles_rim(s, rack, cls))
                 rec['scale'].append(rack.impedance())
+                rec['x_top'].append(rack.top_torque())
                 rec['peak'].append(peak)
                 rec['ceiling'].append(rack._ceiling())
                 vel = s.vel
@@ -253,7 +254,7 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
                 rec['stiff'].append(rack.align_stiffness())
                 rec['lock'].append(rack.lock)
             else:
-                for k in ('rim_engine', 'rim_model', 'scale', 'peak', 'ceiling', 'theta', 'theta_a', 'ratio', 'trail',
+                for k in ('rim_engine', 'rim_model', 'scale', 'x_top', 'peak', 'ceiling', 'theta', 'theta_a', 'ratio', 'trail',
                           'scrub', 'cls', 'stiff', 'lock'):
                     rec[k].append(math.nan)
                 rec['reverse'].append(False)
@@ -277,7 +278,7 @@ def _first_principles_rim(s, rack, cls):
     if fy is not None:
         tq -= rack.trail * (fy[0] + fy[1])
     if fx is not None:
-        tq -= rack.scrub * (fx[0] - fx[1])
+        tq -= max(fe.SCRUB, fe.SCRUB_MIN) * (fx[0] - fx[1])      # (the physical scrub the engine plays)
     if not math.isfinite(tq):
         return math.nan
     return cp.driver_from_column(tq / rack.ratio, s.speed, cls)
@@ -390,10 +391,11 @@ def physics(tr):
     sel = ready & np.isfinite(tr['rim_model'])
     peak, scale, ceiling = tr['peak'], tr['scale'], tr['ceiling']
     with np.errstate(invalid='ignore'):
-        share = scale * tr['rim_model'] / peak
+        share = np.array([wheel_torque.rim_share(r, p, 1.0, x, wheel_torque.KNEE) if np.isfinite(r) and np.isfinite(x) else np.nan
+                          for r, p, x in zip(tr['rim_model'], peak, tr['x_top'])])
         exp = np.clip(share, -wheel_torque.STEER_BUDGET, wheel_torque.STEER_BUDGET)
         exp = np.clip(exp, -ceiling, ceiling)
-        budget = sel & (np.abs(share) >= wheel_torque.STEER_BUDGET)
+        budget = sel & (np.abs(share) >= wheel_torque.STEER_BUDGET - 1e-9)
         game_src = sel & (tr['source'] == 'game')
         rev = sel & tr['reverse']
         free = sel & ~budget & ~game_src & ~rev
@@ -466,13 +468,15 @@ def wheel(tr, fit):
     return out
 
 
-def _sim_slide(rack, fit, theta0, theta_a, speed, cls, scale, peak, align_on, k_limit, delay_s, seconds, h=0.002):
+def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_limit, delay_s, seconds, h=0.002):
     """A released wheel (steering wheel degrees) at theta0 under the model's restoring torque toward theta_a, through
     the driver's shaping and the fitted wheel. The engine's part sees the state `delay_s` late (the telemetry loop);
     with align_on the driver's spring (ffb_spring.DriverSpring) renders the engine-subtracted part locally (no delay
     in its position). Returns (settle_s or None, overshoot share of the first error, zero crossings, final error)."""
     result = fit.result
     a_fs, f, beta = result['a_fs'], result['friction'], result['damping']
+    # the column damping the driver adds (ffb_dynamics.column_targets: a total, the wheel's own included)
+    beta = max(beta, fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * fe.RackForce.DAMPING_SCALE * math.pi / 180.0 / peak)
     stick = fit.tau(result['breakaway'])
     lat = delay_s + fit.latency_ms / 1000.0
     delay = int(round(lat / h))
@@ -503,14 +507,14 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, scale, peak, align_on, k_
             return None
         # the model's rim torque -> share of full scale (the engine's chain without the budget ceiling's reverse bits)
         torque = al['model']
-        share = wheel_torque.rim_share(torque, peak, scale)
+        share = wheel_torque.rim_share(torque, peak, 1.0, x_top, wheel_torque.KNEE)
         cmd = share
         if align_on:
-            k_fs = scale * al['k'] / peak
+            k_fs = al['k'] * wheel_torque.rim_share_slope(torque, peak, 1.0, x_top, wheel_torque.KNEE) / peak
             tau = wheel_torque.STEER_BUDGET
             cmd -= spring_e.force(al['theta_a_deg'], al['theta_deg'], k_fs, tau, k_limit, h)
             al_now = split(theta)
-            k_now = scale * al_now['k'] / peak
+            k_now = al_now['k'] * wheel_torque.rim_share_slope(al_now['model'], peak, 1.0, x_top, wheel_torque.KNEE) / peak
             cmd += spring_d.force(al_now['theta_a_deg'], theta, k_now, tau, k_limit, h)
         u = fit.command(min(max(cmd, -1.0), 1.0))
         tq = fit.tau(u)
@@ -559,7 +563,7 @@ def dynamics(tr, fit, events=24, seconds=3.0, delay_s=0.020):
             # the car's stiffness as the drive learnt it
             rack.align_stiffness = (lambda v: (lambda: v))(float(tr['stiff'][i]))
             res = _sim_slide(rack, fit, float(tr['theta'][i]), float(tr['theta_a'][i]), float(tr['speed'][i]),
-                             float(tr['cls'][i]), float(tr['scale'][i]), float(tr['peak'][i]), bool(tr['align_on']),
+                             float(tr['cls'][i]), float(tr['x_top'][i]), float(tr['peak'][i]), bool(tr['align_on']),
                              float(tr['align_k_limit']), delay_s, seconds)
             if res is not None:
                 rows.append(res)

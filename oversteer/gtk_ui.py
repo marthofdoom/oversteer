@@ -1217,11 +1217,20 @@ class GtkUi:
         self._build_countersteer_page()
 
     COUNTERSTEER_STRENGTH_TOOLTIP = ("How strong Countersteer's own steering force is. 100 % = the car's real steering "
-                                     "torque at the rim: light on a straight, a few Nm in hard cornering, played "
-                                     "1:1 on your wheel's peak torque and softly limited so a quarter of the "
-                                     "wheel's range stays free for road texture and impacts. It does not depend on "
-                                     "the global gain or on the game's own FFB setting. Lower it if the wheel feels "
-                                     "heavy or runs warm. 100 % by default. Saved with the profile.")
+                                     "torque played 1:1 in Nm up to the \"1:1 up to\" share of your wheel's peak "
+                                     "torque and compressed above it, a quarter of the wheel's range kept free for "
+                                     "road texture and impacts. 0 to 130 %. It does not depend on the global gain or "
+                                     "on the game's own FFB setting. Lower it if the wheel feels heavy or runs warm. "
+                                     "100 % by default. Saved with the profile.")
+    COUNTERSTEER_KNEE_TOOLTIP = ("The share of your wheel's peak torque up to which the car's steering torque is played "
+                                 "1:1 in Nm. Above it the torque is compressed so the car's top torque lands at three "
+                                 "quarters of the wheel's range. Lower: a stronger squeeze of the heavy moments, more "
+                                 "headroom; higher: more of the car's real weight, less room at the top. 30 to 60 %, "
+                                 "50 % by default. Saved with the profile.")
+    COUNTERSTEER_KICK_TOOLTIP = ("A real power steering lets a kerb strike, a lifted inside wheel or a dirt edge "
+                                 "jolt the wheel for a moment before the assist follows. On: Countersteer plays that "
+                                 "jolt, only on such one-sided events and never louder than 15 % of the wheel's "
+                                 "range. Off: the steering force only. On by default. Saved with the profile.")
     COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
                                  "in the others.")
     COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
@@ -1250,7 +1259,7 @@ class GtkUi:
                                    "The calibration line is what the wheel calibration measured. The learnt lines "
                                    "are what Countersteer works out for the car you are driving (the steering "
                                    "ratio from its yaw rate, the caster trail and scrub radius from its tyre forces, "
-                                   "the impedance scale from its torque against your wheel's peak, and whether the "
+                                   "the column feel's scale for your wheel, and whether the "
                                    "car has power steering from its force against speed). Motor heat is the "
                                    "driver's own estimate; hands and live friction show once the driver measures them.")
     COUNTERSTEER_COLUMN_TOOLTIP = ("A real steering column has damping and friction that follow the car. On: "
@@ -1301,7 +1310,7 @@ class GtkUi:
             _("Countersteer FFB"), _(self.COUNTERSTEER_TOOLTIP), switched)
         self.countersteer_page_switch.set_sensitive(False)
         steering.add(row)
-        strong = self._response_scale(10, 100, 10)
+        strong = self._response_scale(0, 130, 10)
         strong.set_size_request(160, -1)
         strong.connect('value-changed',
                        lambda w: self.controller.model.set_countersteer_strength(int(w.get_value())))
@@ -1309,6 +1318,17 @@ class GtkUi:
         self._dependent_rows.append(self._setting_row(
             _("Steering strength"), None, _(self.COUNTERSTEER_STRENGTH_TOOLTIP), (self._response_row(strong),)))
         steering.add(self._dependent_rows[-1])
+        knee = self._response_scale(30, 60, 5)
+        knee.set_size_request(160, -1)
+        knee.connect('value-changed', lambda w: self.controller.model.set_countersteer_knee(int(w.get_value())))
+        self.countersteer_knee = knee
+        self._dependent_rows.append(self._setting_row(
+            _("1:1 up to"), None, _(self.COUNTERSTEER_KNEE_TOOLTIP), (self._response_row(knee),)))
+        steering.add(self._dependent_rows[-1])
+        row, self.countersteer_kick = self._switch_row(
+            _("Kickback"), _(self.COUNTERSTEER_KICK_TOOLTIP), lambda state: self.controller.model.set_countersteer_kick(state))
+        self._dependent_rows.append(row)
+        steering.add(row)
         self.countersteer_toggles = {}
         for key, title, tooltip in (
                 ('column', _("Real column feel"), self.COUNTERSTEER_COLUMN_TOOLTIP),
@@ -1382,11 +1402,25 @@ class GtkUi:
                 switch.set_active(bool(value))
 
     def set_countersteer_strength(self, value):
-        """The overall steering strength, 10..100 (None where the driver has no replace mode)."""
+        """The overall steering strength, 0..130 (None where the driver has no replace mode)."""
         if not hasattr(self, 'countersteer_strength') or value is None:
             return
         if int(self.countersteer_strength.get_value()) != int(value):
             self.countersteer_strength.set_value(int(value))
+
+    def set_countersteer_knee(self, value):
+        """The "1:1 up to" share, 30..60 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_knee') or value is None:
+            return
+        if int(self.countersteer_knee.get_value()) != int(value):
+            self.countersteer_knee.set_value(int(value))
+
+    def set_countersteer_kick(self, value):
+        """The kickback switch (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_kick') or value is None:
+            return
+        if self.countersteer_kick.get_active() != bool(value):
+            self.countersteer_kick.set_active(bool(value))
 
     def set_countersteer_texture(self, level, parts):
         """The texture's level (0..100, None where the driver has no replace mode) and parts."""
