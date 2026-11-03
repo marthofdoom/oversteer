@@ -216,7 +216,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
 
 /* -- the sub-tabs: a bar in thumb reach on a phone; a rail on a phone on its side; tabs on a laptop -- */
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4, 1fr);
+  backdrop-filter: blur(10px); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(5, 1fr);
   padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .nav button { height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: var(--dim); position: relative; }
@@ -227,7 +227,7 @@ footer { color: var(--faint); font-size: 11.5px; margin: 18px 2px 0; }
 /* a phone on its side: the rail replaces the bottom bar, the dash beside the cards */
 @media (orientation: landscape) and (max-height: 520px) {
   :root { --top-h: 40px; }
-  .nav { top: 0; right: auto; width: calc(var(--rail-w) + env(safe-area-inset-left)); grid-template-columns: 1fr; grid-template-rows: repeat(4, 1fr);
+  .nav { top: 0; right: auto; width: calc(var(--rail-w) + env(safe-area-inset-left)); grid-template-columns: 1fr; grid-template-rows: repeat(5, 1fr);
     border-top: 0; border-right: 1px solid var(--line); padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .nav button { height: auto; }
   .nav button[aria-selected="true"]::before { top: 30%; bottom: 30%; left: 0; right: auto; width: 2.5px; height: auto; }
@@ -450,6 +450,7 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
       <button type="button" role="tab" data-tab="telemetry" aria-selected="false">Telemetry</button>
       <button type="button" role="tab" data-tab="controls" aria-selected="false">Controls</button>
       <button type="button" role="tab" data-tab="ffb" aria-selected="false">FFB</button>
+      <button type="button" role="tab" data-tab="cs" aria-selected="false">Countersteer</button>
     </div>
     <button type="button" class="icon-btn" id="wake" title="Keep this screen on while the page is open"><span class="sun"></span><span class="sr" id="wake-text">Screen</span></button>
   </div>
@@ -649,7 +650,12 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
     <div class="ctl-grid" id="ctl-grid-ffb"><div id="ffb-a"></div><div id="ffb-b"></div></div>
   </section>
 
-  <footer>Anyone on your network can read this page (plain HTTP). Changing wheel settings, on the Controls and FFB tabs, needs Allow changes from the web page in Oversteer and a paired browser.</footer>
+  <section id="tab-cs" class="view" aria-label="Countersteer FFB" hidden>
+    <div id="cs-note"></div>
+    <div class="ctl-grid" id="ctl-grid-cs"><div id="cs-a"></div><div id="cs-b"></div></div>
+  </section>
+
+  <footer>Anyone on your network can read this page (plain HTTP). Changing wheel settings, on the Controls, FFB and Countersteer tabs, needs Allow changes from the web page in Oversteer and a paired browser.</footer>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -669,6 +675,10 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
   <button type="button" role="tab" data-tab="ffb" aria-selected="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
     FFB
+  </button>
+  <button type="button" role="tab" data-tab="cs" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v4M5.6 17.5 9 15.5M18.4 17.5 15 15.5"/><circle cx="12" cy="12" r="1.5"/></svg>
+    Countersteer
   </button>
 </nav>
 <script>
@@ -700,8 +710,8 @@ async function get(path) {
 
 // -- the sub-tabs: Coaching and Telemetry; the hash keeps the view over a refresh --
 
-const TABS = ["coaching", "telemetry", "controls", "ffb"];
-const TABNAMES = {coaching: "Coaching", telemetry: "Telemetry", controls: "Controls", ffb: "FFB"};
+const TABS = ["coaching", "telemetry", "controls", "ffb", "cs"];
+const TABNAMES = {coaching: "Coaching", telemetry: "Telemetry", controls: "Controls", ffb: "FFB", cs: "Countersteer FFB"};
 let tab = null, tabChosen = false;
 function showTab(name, chosen) {
   if (!TABS.includes(name)) name = "coaching";
@@ -2726,15 +2736,9 @@ function buildFfb() {
   main.appendChild(reg(T("True inertia effects", "Off plays inertia as a damper, like the Windows driver.", "inertia_mode")));
   main.appendChild(reg(mkEffects()));
   const cs = mkPanel(a, "Countersteer FFB");
-  cs.appendChild(reg(mkCsStatus()));
+  cs.appendChild(reg(mkCsStatus(false)));
   cs.appendChild(reg(T("Countersteer FFB", "Our own steering force from the game's telemetry; it takes over only while the light is green.", "countersteer_ffb")));
-  cs.appendChild(reg(S("Steering strength", percent, "100 % = the car's real steering torque at the rim, played 1:1 on the wheel's peak and softly limited to leave a quarter of its range for texture and impacts. Independent of the global gain and of the game's FFB setting. Lower it if the wheel feels heavy or runs warm.", "countersteer_strength")));
-  cs.appendChild(reg(S("Texture", percent, "Small vibrations on top of the steering force.", "countersteer_texture")));
-  for (const [part, label] of [["road", "Road"], ["impact", "Landings"], ["lock", "Front lock"], ["engine", "Engine"]])
-    cs.appendChild(reg(T("Texture: " + label, null, "countersteer_texture_" + part)));
-  const game = mkPanel(a, "Countersteer, game-specific");
-  game.appendChild(reg(S("RBR linearity", percent, "Richard Burns Rally only: how much of the game's force curve is undone.", "countersteer_linearity")));
-  game.appendChild(reg(S("Forza understeer lightness", percent, "Forza Horizon only: how much lighter the wheel gets as the front tyres run out of grip.", "countersteer_lightness")));
+  cs.appendChild(el("div", "Steering, texture, game-specific settings and the wheel correction are on the Countersteer tab.", "hint"));
   const effects = mkPanel(a, "Effect strength");
   effects.appendChild(reg(S("Spring effect gain", percent, "How hard the game's springs can pull.", "spring_level")));
   effects.appendChild(reg(S("Damper effect gain", percent, "Resistance that grows with how fast the wheel turns.", "damper_level")));
@@ -2752,12 +2756,42 @@ function buildFfb() {
   leds.appendChild(reg(T("Learn the limiter at each launch", "Clutch in, handbrake up, throttle floored at the start.", "rev_leds_launch")));
 }
 
-// Countersteer FFB: the light with its reason, then the learnt car, the wheel's motor heat and the calibration
-function mkCsStatus() {
+// The Countersteer tab: status, steering, texture, game-specific and the wheel correction (the same groups as the window)
+function buildCs() {
+  const a = $("cs-a"), b = $("cs-b");
+  const tip = (row, hint) => { row.root.title = hint; return row; };
+  const S = (name, fmt, hint, key) => tip(Object.assign(mkSlider(name, fmt, hint, (v) => change(key, v)), {key}), hint);
+  const T = (name, hint, key) => tip(Object.assign(mkSwitch(name, hint, (on) => change(key, on)), {key}), hint);
+  const percent = (v) => v + " %";
+  $("cs-note").appendChild(reg(mkNotice()));
+  a.appendChild(reg(mkProfile()));
+  const status = mkPanel(a, "Status");
+  status.appendChild(reg(mkCsStatus(true)));
+  const steer = mkPanel(a, "Steering");
+  steer.appendChild(reg(T("Countersteer FFB", "Our own steering force from the game's telemetry; it takes over only while the light is green.", "countersteer_ffb")));
+  steer.appendChild(reg(S("Steering strength", percent, "100 % = the car's real steering torque at the rim, played 1:1 on the wheel's peak and softly limited to leave a quarter of its range for texture and impacts. Independent of the global gain and of the game's FFB setting. Lower it if the wheel feels heavy or runs warm. 100 % by default.", "countersteer_strength")));
+  steer.appendChild(reg(T("Real column feel", "The car's own column damping and friction, sent to the driver so the wheel carries its weight and settles like the car's. On by default.", "countersteer_column")));
+  steer.appendChild(reg(T("Local alignment spring", "The tyres' self-aligning pull played as a spring inside the driver: the wheel self-steers with about 4 ms response. Off: telemetry only. On by default.", "countersteer_align")));
+  steer.appendChild(reg(T("Friction removal", "Takes the wheel's own friction out of the feel: lighter than a real column. Off by default.", "countersteer_friction_removal")));
+  const tex = mkPanel(b, "Texture");
+  tex.appendChild(reg(S("Texture", percent, "Small vibrations on top of the steering force, under 8 % of the wheel's full force at 100 %. 30 % by default.", "countersteer_texture")));
+  for (const [part, label] of [["road", "Road"], ["impact", "Landings"], ["lock", "Front lock"], ["engine", "Engine"]])
+    tex.appendChild(reg(T("Texture: " + label, null, "countersteer_texture_" + part)));
+  const game = mkPanel(b, "Game-specific");
+  game.appendChild(reg(S("RBR linearity", percent, "Richard Burns Rally only: how much of the game's force curve is undone. 70 % by default.", "countersteer_linearity")));
+  game.appendChild(reg(S("Forza understeer lightness", percent, "Forza Horizon only: how much lighter the wheel gets as the front tyres run out of grip. 100 % by default.", "countersteer_lightness")));
+  const corr = mkPanel(b, "Wheel correction");
+  corr.appendChild(reg(mkCsCalibration()));
+  corr.appendChild(el("div", "Correction, dither, soft clip, friction compensation and the Calibrate button are in the window on the Countersteer FFB tab.", "hint"));
+}
+
+// Countersteer FFB: the light with its reason; in full, the learnt car, the wheel and the calibration too
+function mkCsStatus(full) {
   const root = el("div", null, "row"), line = el("div", null, "cs-light"), lamp = el("span", null, "lamp"), why = el("div", null, "why");
-  const car = el("div", null, "cs-info"), wheel = el("div", null, "cs-info"), cal = el("div", null, "cs-info");
+  const car = el("div", null, "cs-info"), wheel = el("div", null, "cs-info");
   line.append(lamp, why);
-  root.append(line, car, wheel, cal);
+  root.append(line);
+  if (full) root.append(car, wheel);
   const row = {root};
   row.update = (spec, can, state) => {
     const cs = state && state.countersteer;
@@ -2765,9 +2799,21 @@ function mkCsStatus() {
     if (!cs) return;
     lamp.className = "lamp " + cs.light;
     why.textContent = cs.text;
-    car.textContent = cs.car; wheel.textContent = cs.wheel; cal.textContent = cs.calibration;
+    car.textContent = cs.car; wheel.textContent = cs.wheel;
   };
   return row;
+}
+
+// What the wheel calibration measured
+function mkCsCalibration() {
+  const root = el("div", null, "row"), cal = el("div", null, "cs-info");
+  root.appendChild(cal);
+  root.title = "What the wheel calibration measured (dead zone, force curve, friction, inertia, latency).";
+  return {root, update: (spec, can, state) => {
+    const cs = state && state.countersteer;
+    root.hidden = !cs;
+    if (cs) cal.textContent = cs.calibration;
+  }};
 }
 
 // Try-effect buttons and the reset
@@ -2811,7 +2857,7 @@ function applyState(state) {
 }
 function render() {
   const state = CTL.state, can = canWrite();
-  $("ctl-grid-controls").hidden = $("ctl-grid-ffb").hidden = !(state && state.device);
+  $("ctl-grid-controls").hidden = $("ctl-grid-ffb").hidden = $("ctl-grid-cs").hidden = !(state && state.device);
   for (const row of CTL.rows) {
     const spec = row.key && state ? state.settings[row.key] : null;
     row.update(row.key ? spec : null, can, state);
@@ -2834,13 +2880,14 @@ async function ctlPoll() {
   CTL.timer = setTimeout(ctlPoll, CTL.failed ? 3000 : 1000);
 }
 function ctlShown(name) {
-  CTL.on = name === "controls" || name === "ffb";
+  CTL.on = name === "controls" || name === "ffb" || name === "cs";
   if (CTL.on) ctlPoll();
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && CTL.on) ctlPoll(); });
 
 buildControls();
 buildFfb();
+buildCs();
 {
   // A pairing link: ?pair=<code>. The code is kept out of the address bar and the history at once
   const q = new URLSearchParams(location.search), code = q.get("pair");

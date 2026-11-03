@@ -787,7 +787,7 @@ def test_calibrating_needs_the_driver_and_a_yes(tmp_path, monkeypatch):
     assert confirm.startswith('Hands off the wheel: it will turn by itself.')
 
 
-def test_the_ffb_tab_rows(tmp_path):
+def test_the_wheel_correction_rows(tmp_path):
     gi = pytest.importorskip('gi')
     gi.require_version('Gtk', '3.0')
     from gi.repository import Gtk
@@ -802,12 +802,8 @@ def test_the_ffb_tab_rows(tmp_path):
                                     set_wheel_soft_clip=lambda v: calls.append(('clip', v)),
                                     set_wheel_friction_comp=lambda v: calls.append(('comp', v)))
     listbox = Gtk.ListBox()
-    row = Gtk.ListBoxRow()
-    ui.autocenter_persistent = Gtk.Switch()
-    row.add(ui.autocenter_persistent)
-    listbox.add(row)
-    ui._build_wheel_calibration()
-    assert len(listbox.get_children()) == 6
+    ui._build_wheel_calibration(listbox)                         # the Countersteer FFB tab's "Wheel correction" list
+    assert len(listbox.get_children()) == 5
     assert not ui.calibrate_button.get_sensitive()
     assert 'new-lg4ff' in ui.calibrate_button.get_tooltip_text()
     ui.set_wheel_calibration(True, None, False)

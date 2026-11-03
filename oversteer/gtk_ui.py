@@ -66,7 +66,6 @@ class GtkUi:
         self._build_wheel_launch_options()
         self._build_ffb_meter()
         self._build_countersteer_ffb()
-        self._build_wheel_calibration()
 
     def reset_view(self):
         self.new_profile_name_entry.hide()
@@ -1042,13 +1041,9 @@ class GtkUi:
                  "corrects the force in every game so it grows evenly from the lightest to the strongest effect. "
                  "The wheel turns by itself while it runs.")
 
-    def _build_wheel_calibration(self):
-        """Rows under the centring spring in the Force Feedback tab: the calibration button and its result,
-        the correction switch, dither and soft clip (wheel_calibration.py)."""
-        anchor = self._row_of(self.autocenter_persistent)
-        if anchor is None or anchor.get_parent() is None:
-            return
-        listbox = anchor.get_parent()
+    def _build_wheel_calibration(self, listbox):
+        """Rows of the Countersteer FFB tab's "Wheel correction" list: the calibration button and its result,
+        the correction switch, dither, soft clip and friction compensation (wheel_calibration.py)."""
         self.calibrate_button = Gtk.Button(label=_("Calibrate wheel"))
         self.calibrate_button.connect('clicked', lambda w: self.controller.start_calibration())
         self.calibration_status = self._status_label()
@@ -1091,11 +1086,8 @@ class GtkUi:
                       "the wheel moving. High values make the centre feel notchy (the force jumps as it changes "
                       "side). 0: off."),
             controls=(self.wheel_friction_comp,)))
-        index = anchor.get_index() + 1
         for row in rows:
-            listbox.insert(row, index)
-            index += 1
-            row.show_all()
+            listbox.add(row)
         self.calibration_dialog = None
         self.set_wheel_calibration(False, None, False)
 
@@ -1180,7 +1172,7 @@ class GtkUi:
 
     def _build_countersteer_ffb(self):
         """The "Countersteer FFB" row under the Force feedback switch: a
-        status light, the reason under the title, the switch."""
+        status light, the reason under the title, the switch; the rest is on the Countersteer FFB tab."""
         anchor = self._row_of(self.ffb_enabled)
         if anchor is None or anchor.get_parent() is None:
             return
@@ -1200,7 +1192,12 @@ class GtkUi:
         anchor.get_parent().insert(row, anchor.get_index() + 1)
         row.show_all()
         self._countersteer_polling = False
-        self._build_countersteer_texture(row)
+        pointer = self._setting_row(_("More Countersteer settings"),
+                                    _("Steering, texture, game-specific settings and the wheel correction are on the "
+                                      "Countersteer FFB tab."))
+        anchor.get_parent().insert(pointer, row.get_index() + 1)
+        pointer.show_all()
+        self._build_countersteer_page()
 
     COUNTERSTEER_STRENGTH_TOOLTIP = ("How strong Countersteer's own steering force is. 100 % = the car's real steering "
                                      "torque at the rim: light on a straight, a few Nm in hard cornering, played "
@@ -1232,27 +1229,88 @@ class GtkUi:
                                       "the game. 100 % by default. Saved with the "
                                       "profile.")
 
-    COUNTERSTEER_INFO_TOOLTIP = ("Read only. The caster trail and scrub radius Countersteer has learnt for the car "
-                                 "you are driving (the real steering geometry the force is built on), and, where "
-                                 "the driver reports it, how hard the wheel's motors have been working and whether "
-                                 "it is holding the force back to protect them.")
+    COUNTERSTEER_STATUS_TOOLTIP = ("Read only. The light and its reason are measured live from what the game sends. "
+                                   "The calibration line is what the wheel calibration measured. The learnt lines "
+                                   "are what Countersteer works out for the car you are driving (the steering "
+                                   "ratio from its yaw rate, the caster trail and scrub radius from its tyre forces, "
+                                   "the impedance scale from its torque against your wheel's peak, and whether the "
+                                   "car has power steering from its force against speed). Motor heat is the "
+                                   "driver's own estimate; hands and live friction show once the driver measures them.")
+    COUNTERSTEER_COLUMN_TOOLTIP = ("A real steering column has damping and friction that follow the car. On: "
+                                   "Countersteer sends the car's own column damping and friction to the driver so "
+                                   "the wheel carries its weight and settles like the car's. Off: only the "
+                                   "steering force. On by default: it is what makes the feel one piece.")
+    COUNTERSTEER_ALIGN_TOOLTIP = ("The self-aligning pull of the front tyres, played as a spring inside the driver "
+                                  "instead of a force sent from here, so the wheel self-steers with about 4 ms "
+                                  "response rather than the telemetry's 15 to 30 ms. Off: the telemetry plays it "
+                                  "alone. On by default; turn it off if the centre feels nervous.")
+    COUNTERSTEER_FRICTION_REMOVAL_TOOLTIP = ("Takes the wheel's own friction out of the feel: lighter than a real "
+                                             "column, and the lightest forces get through. Off by default because "
+                                             "a real car's column has that friction; turn it on if the wheel feels "
+                                             "sticky.")
 
-    def _build_countersteer_texture(self, anchor):
-        """The texture's rows under the Countersteer FFB row (shown while it is on):
-        the master level and a check box per part."""
+    def _page_list(self, page, title, subtitle=None):
+        listbox = self._list()
+        self._section(page, title, listbox, subtitle)
+        return listbox
+
+    def _build_countersteer_page(self):
+        """The Countersteer FFB tab: status, steering, texture, game-specific settings and the wheel correction,
+        in framed lists like the other tabs, after the Force Feedback tab."""
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        page.set_border_width(12)
+        self._dependent_rows = []
+
+        status = self._page_list(page, _("Status"))
+        self.countersteer_page_light = Gtk.DrawingArea()
+        self.countersteer_page_light.set_size_request(14, 14)
+        self.countersteer_page_light.connect('draw', self._draw_countersteer_light)
+        self.countersteer_page_light.connect('map', self._start_countersteer_poll)
+        self.countersteer_page_status = self._status_label()
+        status.add(self._setting_row(_("Countersteer FFB"), None, _(self.COUNTERSTEER_TOOLTIP),
+                                     (self.countersteer_page_light,), self.countersteer_page_status))
+        self.countersteer_lines = {}
+        for key, title in (('calibration', _("Wheel calibration")), ('car', _("Learnt for this car")),
+                           ('wheel', _("Wheel"))):
+            self.countersteer_lines[key] = self._status_label()
+            status.add(self._setting_row(title, None, _(self.COUNTERSTEER_STATUS_TOOLTIP), (),
+                                         self.countersteer_lines[key]))
+
+        steering = self._page_list(page, _("Steering"))
+        def switched(state):
+            self._show_countersteer_texture(state)
+            self.controller.model.set_countersteer_ffb(state)
+        row, self.countersteer_page_switch = self._switch_row(
+            _("Countersteer FFB"), _(self.COUNTERSTEER_TOOLTIP), switched)
+        self.countersteer_page_switch.set_sensitive(False)
+        steering.add(row)
         strong = self._response_scale(10, 100, 10)
         strong.set_size_request(160, -1)
         strong.connect('value-changed',
                        lambda w: self.controller.model.set_countersteer_strength(int(w.get_value())))
         self.countersteer_strength = strong
-        strength = self._setting_row(_("Steering strength"), None, _(self.COUNTERSTEER_STRENGTH_TOOLTIP),
-                                     (self._response_row(strong),))
+        self._dependent_rows.append(self._setting_row(
+            _("Steering strength"), None, _(self.COUNTERSTEER_STRENGTH_TOOLTIP), (self._response_row(strong),)))
+        steering.add(self._dependent_rows[-1])
+        self.countersteer_toggles = {}
+        for key, title, tooltip in (
+                ('column', _("Real column feel"), self.COUNTERSTEER_COLUMN_TOOLTIP),
+                ('align', _("Local alignment spring"), self.COUNTERSTEER_ALIGN_TOOLTIP),
+                ('friction_removal', _("Friction removal"), self.COUNTERSTEER_FRICTION_REMOVAL_TOOLTIP)):
+            row, switch = self._switch_row(
+                title, _(tooltip), lambda state, key=key: getattr(self.controller.model, 'set_countersteer_' + key)(state))
+            self.countersteer_toggles[key] = switch
+            self._dependent_rows.append(row)
+            steering.add(row)
+
+        texture = self._page_list(page, _("Texture"))
         scale = self._response_scale(0, 100, 10)
         scale.set_size_request(160, -1)
         scale.connect('value-changed', lambda w: self.controller.model.set_countersteer_texture(int(w.get_value())))
         self.countersteer_texture = scale
-        level = self._setting_row(_("Texture"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP),
-                                  (self._response_row(scale),))
+        self._dependent_rows.append(self._setting_row(_("Texture"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP),
+                                                      (self._response_row(scale),)))
+        texture.add(self._dependent_rows[-1])
         boxes = []
         self.countersteer_texture_parts = {}
         for part, label in self.COUNTERSTEER_TEXTURE_PARTS:
@@ -1261,37 +1319,50 @@ class GtkUi:
                         self.controller.model.set_countersteer_texture_part(part, w.get_active()))
             self.countersteer_texture_parts[part] = box
             boxes.append(box)
-        parts = self._setting_row(_("Texture parts"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP), tuple(boxes))
-        game = self._setting_row(_("Game-specific"), _("Each setting below works in its own game only"),
-                                 _(self.COUNTERSTEER_GAME_TOOLTIP))
+        self._dependent_rows.append(self._setting_row(_("Texture parts"), None, _(self.COUNTERSTEER_TEXTURE_TOOLTIP),
+                                                      tuple(boxes)))
+        texture.add(self._dependent_rows[-1])
+
+        game = self._page_list(page, _("Game-specific"), _("Each setting below works in its own game only"))
         linear = self._response_scale(0, 100, 10)
         linear.set_size_request(160, -1)
         linear.connect('value-changed',
                        lambda w: self.controller.model.set_countersteer_linearity(int(w.get_value())))
         self.countersteer_linearity = linear
-        linearity = self._setting_row(_("RBR linearity"), None, _(self.COUNTERSTEER_LINEARITY_TOOLTIP),
-                                      (self._response_row(linear),))
+        self._dependent_rows.append(self._setting_row(_("RBR linearity"), None, _(self.COUNTERSTEER_LINEARITY_TOOLTIP),
+                                                      (self._response_row(linear),)))
+        game.add(self._dependent_rows[-1])
         light = self._response_scale(0, 100, 10)
         light.set_size_request(160, -1)
         light.connect('value-changed',
                       lambda w: self.controller.model.set_countersteer_lightness(int(w.get_value())))
         self.countersteer_lightness = light
-        lightness = self._setting_row(_("Forza understeer lightness"), None, _(self.COUNTERSTEER_LIGHTNESS_TOOLTIP),
-                                      (self._response_row(light),))
-        self.countersteer_car_info, self.countersteer_wheel_info = self._status_label(), self._status_label()
-        info = self._setting_row(_("Learnt car and wheel"), None, _(self.COUNTERSTEER_INFO_TOOLTIP),
-                                 (self.countersteer_car_info, self.countersteer_wheel_info))
-        parent = anchor.get_parent()
-        self.countersteer_texture_rows = (strength, level, parts, game, linearity, lightness, info)
-        for i, row in enumerate(self.countersteer_texture_rows):
-            parent.insert(row, anchor.get_index() + 1 + i)
-            row.show_all()
-            row.set_no_show_all(True)
-            row.set_visible(False)
+        self._dependent_rows.append(self._setting_row(_("Forza understeer lightness"), None,
+                                                      _(self.COUNTERSTEER_LIGHTNESS_TOOLTIP),
+                                                      (self._response_row(light),)))
+        game.add(self._dependent_rows[-1])
+
+        self._build_wheel_calibration(self._page_list(page, _("Wheel correction")))
+
+        self.main_notebook.insert_page(self._scrolled(page), Gtk.Label(label=_("Countersteer FFB")),
+                                       self.COUNTERSTEER_TAB_POSITION)
+        self._countersteer_page = page
+        page.show_all()
+        self._show_countersteer_texture(False)
 
     def _show_countersteer_texture(self, on):
-        for row in getattr(self, 'countersteer_texture_rows', ()):
-            row.set_visible(bool(on))
+        """The settings that act through Countersteer are greyed out while it is off."""
+        for row in getattr(self, '_dependent_rows', ()):
+            row.set_sensitive(bool(on))
+
+    def set_countersteer_toggles(self, column, align, friction_removal):
+        """Real column feel, local alignment spring and friction removal (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_toggles'):
+            return
+        for key, value in (('column', column), ('align', align), ('friction_removal', friction_removal)):
+            switch = self.countersteer_toggles[key]
+            if value is not None and switch.get_active() != bool(value):
+                switch.set_active(bool(value))
 
     def set_countersteer_strength(self, value):
         """The overall steering strength, 10..100 (None where the driver has no replace mode)."""
@@ -1329,11 +1400,11 @@ class GtkUi:
         """The switch: None where the driver has no replace mode (insensitive, the tooltip says why)."""
         if not hasattr(self, 'countersteer_switch'):
             return
-        switch = self.countersteer_switch
-        switch.set_sensitive(value is not None)
-        switch.set_tooltip_text(_(self.COUNTERSTEER_NO_DRIVER) if value is None else None)
-        if value is not None and switch.get_active() != bool(value):
-            switch.set_active(bool(value))
+        for switch in (self.countersteer_switch, self.countersteer_page_switch):
+            switch.set_sensitive(value is not None)
+            switch.set_tooltip_text(_(self.COUNTERSTEER_NO_DRIVER) if value is None else None)
+            if value is not None and switch.get_active() != bool(value):
+                switch.set_active(bool(value))
         self._show_countersteer_texture(bool(value))
 
     def _start_countersteer_poll(self, *args):
@@ -1343,17 +1414,20 @@ class GtkUi:
             GLib.timeout_add(self.COUNTERSTEER_MS, self._poll_countersteer)
 
     def _poll_countersteer(self):
-        if not self.countersteer_light.get_mapped():
+        if not (self.countersteer_light.get_mapped() or self.countersteer_page_light.get_mapped()):
             self._countersteer_polling = False
             return False
-        car, wheel = self.controller.countersteer_info()
-        self.countersteer_car_info.set_text(car)
-        self.countersteer_wheel_info.set_text(wheel)
+        if self.countersteer_page_light.get_mapped():
+            for key, text in self.controller.countersteer_details().items():
+                if self.countersteer_lines[key].get_text() != text:
+                    self.countersteer_lines[key].set_text(text)
         shown = self.controller.countersteer_view()
         if shown != self._countersteer_shown:
             self._countersteer_shown = shown
             self.countersteer_status.set_text(shown[1])
+            self.countersteer_page_status.set_text(shown[1])
             self.countersteer_light.queue_draw()
+            self.countersteer_page_light.queue_draw()
         return True
 
     def _draw_countersteer_light(self, area, cr):
@@ -1479,6 +1553,7 @@ class GtkUi:
 
     HOTKEYS_TAB_POSITION = 3        # after Tools (Telemetry then goes in front of it)
     TELEMETRY_TAB_POSITION = 3
+    COUNTERSTEER_TAB_POSITION = 2   # after Force Feedback
 
     @staticmethod
     def _row_of(widget):

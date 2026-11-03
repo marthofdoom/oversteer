@@ -30,10 +30,11 @@ REV_MODES = ('auto', 'percent', 'rpm')
 SHIFT_LIMITS = {'percent': (50, 100), 'rpm': (1000, 25000)}
 ACTIONS = ('reset_ffb', 'load_profile', 'save_profile', 'try_effect')
 EFFECTS = ('constant', 'spring', 'damper', 'friction', 'rumble')
-# Countersteer FFB (FFB tab): number settings and the range the GTK scale has; the texture parts are switches
+# Countersteer FFB (its own tab): number settings and the range the GTK scale has; the texture parts are switches
 COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, 100), 'countersteer_texture': (0, 100),
                         'countersteer_linearity': (0, 100), 'countersteer_lightness': (0, 100)}
-COUNTERSTEER_FLAGS = ('countersteer_ffb',) + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
+COUNTERSTEER_TOGGLES = ('countersteer_column', 'countersteer_align', 'countersteer_friction_removal')
+COUNTERSTEER_FLAGS = ('countersteer_ffb',) + COUNTERSTEER_TOGGLES + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
 # Greyed in the GTK window while force feedback is off (GtkUi.set_ffb_enabled)
 NEEDS_FFB = ('ff_gain', 'app_gain', 'inertia_mode') + LEVELS
 
@@ -151,13 +152,11 @@ class Bridge:
             self.caps = {}
 
     def _refresh_countersteer(self):
-        """The FFB tab's light and lines (the engine's status, the learnt car, the driver's motor heat: sysfs)."""
+        """The Countersteer FFB tab's light and lines (the engine's status, the learnt car, the driver's motor heat: sysfs)."""
         c = self.controller
         try:
             light, text = c.countersteer_view()
-            car, wheel = c.countersteer_info()
-            self.countersteer = {'light': light, 'text': text, 'car': car, 'wheel': wheel,
-                                 'calibration': c.wheel_calibration_text()}
+            self.countersteer = dict(c.countersteer_details(), light=light, text=text)
         except Exception as e:
             logging.debug("web controls: no Countersteer status: %s", e)
             self.countersteer = None
@@ -330,6 +329,8 @@ class Bridge:
                 group = key
             elif key.startswith('countersteer_texture'):
                 group = 'countersteer_texture'
+            elif key in COUNTERSTEER_TOGGLES:
+                group = 'countersteer_toggles'
             elif key.startswith('rev_leds'):
                 group = 'rev_leds' if key != 'rev_leds_launch' else 'rev_options'
             else:
@@ -349,6 +350,8 @@ class Bridge:
                 elif group == 'countersteer_texture':
                     ui.set_countersteer_texture(data['countersteer_texture'],
                                                 {part: data['countersteer_texture_' + part] for part in model.TEXTURE_PARTS})
+                elif group == 'countersteer_toggles':
+                    ui.set_countersteer_toggles(*(data[k] for k in COUNTERSTEER_TOGGLES))
                 elif group == 'ffb_enabled':
                     pass                               # the model has already told the window
                 else:
@@ -458,6 +461,8 @@ class Bridge:
         on = bool(data.get('countersteer_ffb'))
         for key, (low, high) in COUNTERSTEER_NUMBERS.items():
             number(key, low, high, enabled=on)
+        for key in COUNTERSTEER_TOGGLES:
+            flag(key, on)
         for part in model.TEXTURE_PARTS:
             flag('countersteer_texture_' + part, on)
         combined = bool(data.get('combine_pedals'))

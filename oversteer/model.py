@@ -78,6 +78,9 @@ class Model:
         'countersteer_texture_engine': None,
         'countersteer_linearity': None,
         'countersteer_lightness': None,
+        'countersteer_column': None,
+        'countersteer_align': None,
+        'countersteer_friction_removal': None,
     }
 
     types = {
@@ -124,6 +127,9 @@ class Model:
         'countersteer_texture_engine': 'boolean',
         'countersteer_linearity': 'integer',
         'countersteer_lightness': 'integer',
+        'countersteer_column': 'boolean',
+        'countersteer_align': 'boolean',
+        'countersteer_friction_removal': 'boolean',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -235,6 +241,10 @@ class Model:
         data['countersteer_linearity'] = LINEARITY if supported else None
         # Forza Horizon: how much of the add-on's lightening is played (ffb_addon)
         data['countersteer_lightness'] = int(round(STRENGTH * 100)) if supported else None
+        # The driver's column damping/friction and local alignment spring (on), friction removal (off)
+        data['countersteer_column'] = True if supported else None
+        data['countersteer_align'] = True if supported else None
+        data['countersteer_friction_removal'] = False if supported else None
         return data
 
     def pedal_bit(self, name):
@@ -704,6 +714,30 @@ class Model:
         value = self.data.get('countersteer_lightness')
         return int(round(STRENGTH * 100)) if value is None else value
 
+    def set_countersteer_column(self, value):
+        """Real column feel: the car's column damping and friction in the driver."""
+        if self.set_if_changed('countersteer_column', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_texture()
+
+    def get_countersteer_column(self):
+        return self.data.get('countersteer_column') is not False
+
+    def set_countersteer_align(self, value):
+        """The driver-local alignment spring."""
+        if self.set_if_changed('countersteer_align', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_texture()
+
+    def get_countersteer_align(self):
+        return self.data.get('countersteer_align') is not False
+
+    def set_countersteer_friction_removal(self, value):
+        """Friction removal: lighter than a real column."""
+        if self.set_if_changed('countersteer_friction_removal', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_texture()
+
+    def get_countersteer_friction_removal(self):
+        return bool(self.data.get('countersteer_friction_removal'))
+
     def get_countersteer_texture(self):
         """(level 0..1, {part: on}) for the engine."""
         from .ffb_texture import LEVEL
@@ -958,6 +992,8 @@ class Model:
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])
         self.ui.set_countersteer_lightness(data['countersteer_lightness'])
+        self.ui.set_countersteer_toggles(data['countersteer_column'], data['countersteer_align'],
+                                         data['countersteer_friction_removal'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()
