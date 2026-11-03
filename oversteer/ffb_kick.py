@@ -29,8 +29,8 @@ KICK_K = 0.20                            # share of the couple's step (1 - boost
 KICK_CAP = 0.25                          # share of full scale the pulse may add (rally setups keep steady cornering under the
                                          # peak: headroom for the spikes; the 12 ms rise and 60 ms decay keep the thermal mean small)
 TOTAL_CAP = 1.0                          # the steering share plus the pulse is clamped here: full scale
-OVERALL_KICK = False                     # "Kickback" default
-OVERALL_KICK_LEVEL = 50                  # ... and its level, % of the amplitude
+OVERALL_KICK = True                      # "Kickback" default
+OVERALL_KICK_LEVEL = 100                 # ... and its level, % of the amplitude (100 = the physically derived KICK_K)
 
 
 class Kick:

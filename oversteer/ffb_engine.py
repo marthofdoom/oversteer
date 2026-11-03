@@ -151,9 +151,9 @@ OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
 FORZA_CAR_WHEEL_MM = 375.0               # Forza's default car steering wheel (the profile's countersteer_car_wheel_mm wins once set)
-OVERALL_PULL = False                     # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
-OVERALL_PULL_LEVEL = 35                  # ... and its level, % of the physical scrub radius
-OVERALL_COLUMN_DAMPING = 64              # "Column damping" default: % of the real steering column's damping the knee mapping plays
+OVERALL_PULL = True                      # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
+OVERALL_PULL_LEVEL = 100                 # ... and its level, % of the physical scrub radius (100 = physically correct)
+OVERALL_COLUMN_DAMPING = 100             # "Column damping" default: 100 % = the real column's damping in hand force, rho^2 x COLUMN_DAMPING_NMS_RAD
                                          # (rho^2 for a 279 mm rim on a 350 mm car wheel: a column's damping is torque per rad/s, and
                                          # the hand feels it as torque / radius while the rim turns as radius, so it scales as rho^2)
 FULL = 32767                             # ext_force full scale (an FF_CONSTANT level at 0x4000)
@@ -410,7 +410,9 @@ def front_mz(sample):
 # names) was not decodable, and the dump has no surface input (grip 0 throughout), so one trail serves every car
 # and surface; 27 mm is also a typical rally-car mechanical trail.
 CASTER_TRAIL = 0.027                    # m
-SCRUB = 0.0155                          # m: the physical scrub radius; the steering force plays it only as "Drive pull" (pull_scrub)
+SCRUB = 0.0155                          # m: the physical scrub radius (the Kickback's amplitude)
+PULL_SCRUB = 0.0094                     # m: Drive pull at 100 %: ACR's own (finalFF fit on 20261103-152713: 9.4 mm; in ACR the
+                                        # pull is ~5 % of the force, mostly 5-150 Hz; 15.5 mm came from another drive)
 
 
 # The pneumatic trail the steering force believes: tp = -Mz / Fy of the front pair, kept within [TP_MIN, TP_MAX] m
@@ -588,9 +590,9 @@ class RackForce:
                                          # 'knee' = 1:1 up to a knee; 'classic' = the uniform impedance scale (share =
                                          # CLASSIC_SCALE x strength x torque / peak, clamped at the budget, no hydraulic
                                          # top end, damping at the same scale)
-    pull_on = False                      # "Drive pull": the scrub couple of the drive's left/right split in the force ...
+    pull_on = OVERALL_PULL               # "Drive pull": the scrub couple of the drive's left/right split in the force ...
     pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the physical SCRUB
-    kick_on = False                      # "Kickback": the onset pulse of the scrub couple (ffb_kick) ...
+    kick_on = ffb_kick.OVERALL_KICK      # "Kickback": the onset pulse of the scrub couple (ffb_kick) ...
     kick_level = ffb_kick.OVERALL_KICK_LEVEL / 100.0   # ... at this share of its amplitude
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
                                          # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car)
@@ -603,7 +605,7 @@ class RackForce:
                                          # 20261103-112548), too much resistance. Sweep there: 100 %: overshoot 1 % median /
                                          # 5 % worst, drag 0.91 Nm; 60 %: total 0.102 Nm s/rad, settle 0.59 s, overshoot 7 % /
                                          # 19 %, 2 crossings (the default); 50 %: 11 % / 26 %
-    damping_pct = OVERALL_COLUMN_DAMPING # the setting as applied (%); DAMPING_SCALE stays the default
+    damping_pct = OVERALL_COLUMN_DAMPING # the setting as applied (%): 100 = physically correct (damping_scale() = pct/100 * rho^2); DAMPING_SCALE stays the default
     # The aligning torque split (feature flag, off: the driver's local spring `ffb_align` does not exist yet). With
     # it on, force() plays only the residual: the wanted rim torque less the spring the driver will render
     # (ffb_spring.DriverSpring: k clamped to `align_k_limit`, tau_max, slew and fades), through ext_force; the spring's
@@ -1085,8 +1087,8 @@ class RackForce:
         return self.mapping == 'classic'
 
     def pull_scrub(self):
-        """The scrub radius (m) the steering force plays: SCRUB times the Drive pull level, 0 with it off."""
-        return SCRUB * self.pull_level if self.pull_on else 0.0
+        """The scrub radius (m) the steering force plays: PULL_SCRUB times the Drive pull level, 0 with it off."""
+        return PULL_SCRUB * self.pull_level if self.pull_on else 0.0
 
     def rim_mm(self):
         """The wheel's rim diameter in mm: the user's, else the table's, else the G29's."""
@@ -1099,8 +1101,8 @@ class RackForce:
 
     def damping_scale(self):
         """The column damping's scale: the impedance scale in the classic mapping, the "Column damping" share (damping_pct,
-        60 % by default) of the real column's in the knee one."""
-        return self.impedance() if self.classic() else self.damping_pct / 100.0
+        100 % by default) of the real column's in hand force in the knee one: pct/100 * rho^2 (100 % is physically correct)."""
+        return self.impedance() if self.classic() else self.damping_pct / 100.0 * self.rho() ** 2
 
     def impedance(self, ratio=None, assist=None):
         """The scale of the column's damping, friction and stiffness sent to the driver (ffb_dynamics.column_targets):
@@ -3158,6 +3160,7 @@ class FfbEngine:
             self._last_value = value
             self.writes += 1
             self._written_at = now
+            self._write_mono = time.monotonic() if self._phase == 'on' else None   # (the late-write check measures every write)
             if ffb_record.current is not None:
                 ffb_record.log(now, 'ext_force', value)
             if self._dyn is not None:

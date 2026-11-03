@@ -1230,19 +1230,19 @@ class GtkUi:
                                  "50 % by default. Saved with the profile.")
     COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, as a share of a real steering column's. Lower "
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
-                                    "after a slide. 64 % by default (the rim over the car's wheel, squared).")
+                                    "after a slide. 100 % is the physically correct value (the real column's, in the force your hands feel) and the default.")
     COUNTERSTEER_RIM_TOOLTIP = ("Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
                                  "acts on the steering through the scrub radius; the game's own force has it. On: "
                                  "Countersteer plays that pull, unfiltered, at the level below. Off: the steering "
-                                 "force without it. Off by default. Saved with the profile.")
+                                 "force without it. On by default. Saved with the profile.")
     COUNTERSTEER_PULL_LEVEL_TOOLTIP = ("How much of the physical scrub radius the drive pull is played at, 0 to 100 %. "
-                                       "35 % by default. Saved with the profile.")
+                                       "100 % is the physically correct value and the default. Saved with the profile.")
     COUNTERSTEER_KICK_TOOLTIP = ("A short tug at the moment a kerb, a lifted inside wheel or a dirt edge hits one front "
                                  "wheel, in the direction the new drag pulls, easing back to nothing and never past "
-                                 "it. Off by default. Saved with the profile.")
-    COUNTERSTEER_KICK_LEVEL_TOOLTIP = ("How strong the kickback's tug is, 0 to 100 % of its amplitude. 50 % by "
-                                       "default. Saved with the profile.")
+                                 "it. On by default. Saved with the profile.")
+    COUNTERSTEER_KICK_LEVEL_TOOLTIP = ("How strong the kickback's tug is, 0 to 100 % of its amplitude. 100 % is the "
+                                       "physically correct value and the default. Saved with the profile.")
     COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
                                  "in the others.")
     COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
