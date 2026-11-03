@@ -146,7 +146,7 @@ def test_a_suspension_reset_or_nan_never_spikes_it():
     assert all(math.isfinite(v) and abs(v) <= ft.RoadTexture.CAP * FULL for v in values)
 
 
-def landing(t_air=0.3, t_land=1.0, seconds=2.0, left=6000.0, right=6000.0, normal_step=False):
+def landing(t_air=0.3, t_land=1.0, seconds=2.0, left=6000.0, right=6000.0, normal_step=False, fx=None):
     """Rolling, airborne (no front load) from t_air to t_land, then down hard (loads to left/right)."""
     out = []
     for i in range(int(seconds * HZ)):
@@ -159,7 +159,11 @@ def landing(t_air=0.3, t_land=1.0, seconds=2.0, left=6000.0, right=6000.0, norma
             k = min((t - t_land) / 0.02, 1.0)
             load = (k * left, k * right, 2500.0, 2500.0)
             normal = UP
-        out.append(car(load=load, normal=normal))
+        s = car(load=load, normal=normal)
+        if fx is not None:               # (Fx_FL, Fx_FR) from touchdown on; before it the wheels roll free
+            s.tyre_fx = fx if t >= t_land else (0.0, 0.0, 0.0, 0.0)
+            s.tyre_fx = (s.tyre_fx[0], s.tyre_fx[1], 0.0, 0.0)
+        out.append(s)
     return out
 
 
@@ -168,19 +172,44 @@ def test_a_landing_gives_one_zero_area_pulse():
     values = [impact.step(DT, s) for s in landing()]
     assert impact.count == 1
     assert max(abs(v) for v in values) <= ft.ImpactPulse.CAP * FULL
-    assert max(abs(v) for v in values) > 0.25 * ft.ImpactPulse.CAP * FULL
+    assert max(abs(v) for v in values) > 0.1 * ft.ImpactPulse.CAP * FULL
     # Zero area: the pulse's sum is a small part of its size times its length
     area = sum(values) * DT
     assert abs(area) < 0.01 * max(abs(v) for v in values) * ft.ImpactPulse.LENGTH
     # Starts from nothing (no step)
     start = next(i for i, v in enumerate(values) if v != 0.0)
-    assert abs(values[start]) < 0.2 * max(abs(v) for v in values)
-    # The wheel that came down harder sets its direction
-    a = ft.ImpactPulse()
-    b = ft.ImpactPulse()
-    va = [a.step(DT, s) for s in landing(left=9000.0, right=4000.0)]
-    vb = [b.step(DT, s) for s in landing(left=4000.0, right=9000.0)]
-    assert next(v for v in va if abs(v) > 50) == pytest.approx(-next(v for v in vb if abs(v) > 50))
+    assert abs(values[start]) < 0.6 * max(abs(v) for v in values)     # a half-sine, 18 ms long: one 3 ms step in
+
+
+def pulse(**kw):
+    impact = ft.ImpactPulse()
+    return [impact.step(DT, s) for s in landing(**kw)], impact
+
+
+def test_the_pulse_pushes_the_way_the_fx_step_says_with_a_thin_return():
+    left, _ = pulse(fx=(-1500.0, 0.0))               # the left front drags: Fx_FL - Fx_FR steps by -1500
+    right, _ = pulse(fx=(0.0, -1500.0))
+    first = next(v for v in left if abs(v) > 50)
+    assert first > 0 and next(v for v in right if abs(v) > 50) < 0     # sign of -SCRUB * step
+    peak = max(abs(v) for v in left)
+    lead = [v for v in left if v > 0]
+    back = [v for v in left if v < 0]
+    assert max(lead) == peak                         # the largest lobe is the one with the sign
+    assert abs(min(back)) <= 0.25 * peak             # the return is spread thin
+    assert len(back) * DT >= 0.08                    # ... over at least 80 ms
+    assert abs(sum(left) * DT) < 0.03 * peak * ft.ImpactPulse.LENGTH
+    assert peak <= ft.ImpactPulse.CAP * FULL
+    assert [v for v in right if v != 0][0] < 0 and -min(right) == pytest.approx(peak)
+
+
+def test_without_an_fx_step_the_pulse_is_symmetric_and_smaller():
+    signed, _ = pulse(fx=(-1500.0, 0.0))
+    for fx in (None, (-50.0, 0.0)):                  # no Fx at all, or a step under FX_STEP
+        neutral, impact = pulse(fx=fx)
+        assert impact.count == 1
+        assert max(neutral) == pytest.approx(-min(neutral), rel=0.05)
+        assert max(neutral) == pytest.approx(ft.ImpactPulse.NEUTRAL * max(signed), rel=0.05)
+        assert abs(sum(neutral) * DT) < 0.03 * max(neutral) * ft.ImpactPulse.LENGTH
 
 
 def test_ordinary_bumps_do_not_jolt_and_pulses_are_rate_limited():

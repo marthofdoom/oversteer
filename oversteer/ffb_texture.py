@@ -15,7 +15,8 @@ Four parts, each from the sample in hand (ACR through bridge version 5,
 - impact: a landing or a hit, from the front wheels' load rising by more
   than its mean within 35 ms, either out of the air (the load under 15 %
   of its mean first) or with the contact normals stepping (a ledge, a
-  rock): one pulse, rate-limited, of a zero-area shape (it never pulls).
+  rock): one pulse, rate-limited, of zero net area (it never pulls): a short half-sine toward the wheel
+  that came down (the step of Fx_FL - Fx_FR gives the side) and a slow return.
 - lock: the front wheels locking under braking (slip ratio past 0.3 with
   the brake on): a 40 Hz sine only while they lock. From the wheels'
   speed against the car's (1 - wheel speed / speed, a ratio whatever the
@@ -145,11 +146,13 @@ class RoadTexture:
 
 
 class ImpactPulse:
-    """A landing or a hit: one pulse p(a) = A (e a / tau) e^(-a / tau)
-    sin(w a + phi) with phi = pi - 2 atan(w tau), which starts at 0 and has
-    zero area (the integral of t e^(-t/tau) e^(i(wt + phi)) is
-    e^(i phi) / (1/tau - i w)^2, real for that phi, and its sine part is 0).
-    Its envelope peaks at A at a = tau; it is cut at LENGTH."""
+    """A landing or a hit: one pulse of zero net area. Its direction is the step of Fx_FL - Fx_FR at the event
+    (the landing wheel's spin-up drag pulls the rack toward that wheel: the sign of the front torque's scrub term,
+    -SCRUB * (Fx_FL - Fx_FR), with SCRUB > 0): a one-sided half-sine of LEAD s, then a slow half-sine of RETURN s
+    the other way with the same area, so the opposite part is spread thin (its peak LEAD / RETURN of the first
+    lobe). Without a step of at least FX_STEP N (or without Fx) the sign is not known: a symmetric pair of
+    half-sines, NEUTRAL of the size. (The earlier damped 25 Hz zero-area shape had its largest lobe against its
+    sign, and the sign was chance: audit of 20261102-235822.)"""
 
     WINDOW = 0.035                       # s: the load rise is measured over this
     RISE = 1.0                           # front load rising by its mean (x1) within WINDOW ...
@@ -158,14 +161,13 @@ class ImpactPulse:
     MEAN_TAU = 2.0                       # s: the front load's mean
     MIN_LOAD = 500.0                     # N: no mean this low is a car on its wheels
     HOLD = 0.4                           # s from one pulse to the next at the soonest
-    TAU = 0.03                           # s
-    FREQ = 25.0                          # Hz
-    LENGTH = 10 * TAU                    # the envelope is 0.1 % of its peak there
+    LEAD = 0.018                         # s: the first lobe
+    RETURN = 0.10                        # s: the slow return (peak LEAD / RETURN of the first lobe)
+    LENGTH = LEAD + RETURN
+    FX_STEP = 150.0                      # N: the step of Fx_FL - Fx_FR that gives the pulse a direction
+    NEUTRAL = 0.5                        # share of the size of the symmetric pulse without one
     CAP = 0.05
     LOW = 0.3                            # share of the cap at RISE; full at RISE + 2
-
-    W = 2.0 * math.pi * FREQ
-    PHI = math.pi - 2.0 * math.atan(W * TAU)
 
     def __init__(self):
         self._car = None
@@ -173,7 +175,7 @@ class ImpactPulse:
         self.count = 0                   # pulses (tests, the log)
 
     def reset(self):
-        self._window = []                # (t, front load, FL, FR, normal) over WINDOW
+        self._window = []                # (t, front load, FL, FR, normal, Fx_FL - Fx_FR or None) over WINDOW
         self._mean = None
         self._last = None
         self._t = 0.0
@@ -194,6 +196,8 @@ class ImpactPulse:
                 size = math.sqrt(sum(x * x for x in n))
                 if size > 1e-6:
                     normal = tuple(x / size for x in n)
+        fx = _finite(sample.tyre_fx, 2) if getattr(sample, 'tyre_fx', None) is not None else None
+        couple = fx[0] - fx[1] if fx is not None else None
         if load is not None:
             front = max(load[0], 0.0) + max(load[1], 0.0)
             if front > 1e6:              # past any car: a glitch (NaN, a reset)
@@ -203,7 +207,7 @@ class ImpactPulse:
         else:
             self._mean = front if self._mean is None else self._mean + (front - self._mean) * dt / (self.MEAN_TAU + dt)
             window = self._window
-            window.append((t, front, load[0], load[1], normal))
+            window.append((t, front, load[0], load[1], normal, couple))
             while window[0][0] < t - self.WINDOW:
                 window.pop(0)
             self._detect(t, front, load)
@@ -227,24 +231,36 @@ class ImpactPulse:
         if not (landing or edge):
             return
         share = min(max(self.LOW + (1.0 - self.LOW) * (rise - self.RISE) / 2.0, self.LOW), 1.0)
-        # Its direction from the wheel that came down harder (the sign of a short pulse is felt, not read)
-        left = load[0] - min(w[2] for w in window)
-        right = load[1] - min(w[3] for w in window)
-        sign = 1.0 if left >= right else -1.0
-        self._pulse = (t, sign * share * self.CAP * FULL)
+        # Its direction from the step of Fx_FL - Fx_FR over the window (the largest departure from its start): the
+        # landing wheel's spin-up drag, sign -SCRUB * step like the front torque's scrub term
+        sign = 0.0
+        couples = [w[5] for w in window]
+        if couples[0] is not None:
+            steps = [c - couples[0] for c in couples if c is not None]
+            step = max(steps, key=abs)
+            if abs(step) >= self.FX_STEP:
+                sign = -1.0 if step > 0 else 1.0
+        self._pulse = (t, sign, share * self.CAP * FULL)
         self._last = t
         self.count += 1
 
     def _value(self, t):
         if self._pulse is None:
             return 0.0
-        start, amplitude = self._pulse
+        start, sign, amplitude = self._pulse
         age = t - start
         if age >= self.LENGTH:
             self._pulse = None
             return 0.0
-        x = age / self.TAU
-        return amplitude * math.e * x * math.exp(-x) * math.sin(self.W * age + self.PHI)
+        if sign == 0.0:                  # direction unknown: two equal lobes, one each way
+            amplitude *= self.NEUTRAL
+            if age < self.LEAD:
+                return amplitude * math.sin(math.pi * age / self.LEAD)
+            return -amplitude * math.sin(math.pi * (age - self.LEAD) / self.LEAD) if age < 2 * self.LEAD else 0.0
+        if age < self.LEAD:
+            return sign * amplitude * math.sin(math.pi * age / self.LEAD)
+        # Same area as the first lobe, over RETURN
+        return -sign * amplitude * (self.LEAD / self.RETURN) * math.sin(math.pi * (age - self.LEAD) / self.RETURN)
 
 
 class LockCue:
