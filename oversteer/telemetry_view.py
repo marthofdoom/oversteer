@@ -515,10 +515,14 @@ def capture_status(on, listening, folder, summary, cap_gb, error=None, dropped=0
     if not listening:
         lines.append(_("Nothing is listening: turn on the rev lights or \"Learn from game telemetry\"."))
     if ffb is True:
-        lines.append(_("Recording for FFB tuning at the full rate: it stops after 20 minutes or 250 MB."))
+        from .telemetry_capture import FFB_MAX_BYTES, FFB_MAX_SECONDS
+        lines.append(_("Recording for FFB tuning at the full rate: it stops after {} minutes or {} MB.").format(
+            round(FFB_MAX_SECONDS / 60), round(FFB_MAX_BYTES / 1e6)))
     elif ffb:
+        from .telemetry_capture import FFB_MAX_BYTES, FFB_MAX_SECONDS
         lines.append(_("FFB tuning recording ended (the {} limit): recording is at the usual rate again.").format(
-            _("20 minute") if ffb == 'time' else _("250 MB")))
+            _("{} minute").format(round(FFB_MAX_SECONDS / 60)) if ffb == 'time'
+            else _("{} MB").format(round(FFB_MAX_BYTES / 1e6))))
     if dropped:
         lines.append(_("{} packets were lost: the disk was too slow.").format(dropped))
     return '\n'.join(lines)
@@ -534,6 +538,7 @@ PREFERENCES = (
     ('telemetry_web_control', 'telemetry_web_control', False),      # wheel settings changeable from the page
     ('telemetry_capture_on', 'telemetry_capture', False),
     ('telemetry_capture_cap', 'telemetry_capture_cap', 1),       # GB
+    ('ffb_tuning_on', 'telemetry_ffb_tuning', False),             # "Record for FFB tuning", taken up by each new recorder
     ('telemetry_forward', 'telemetry_forward', ''),               # "Forward to": comma-separated host:port
     ('diagnostics_debug', 'diagnostics_debug', False),           # debug lines in the log file
 )

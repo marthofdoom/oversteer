@@ -13,6 +13,7 @@ from . import steam_options
 from .telemetry import AUTO, DEFAULT_PORT, PORT_PRESETS, PORT_MIN, PORT_MAX, parse_port
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
 from . import telemetry_plot
+from .telemetry_capture import FFB_MAX_BYTES, FFB_MAX_SECONDS
 from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, sob_gain, splits_row, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
@@ -2062,9 +2063,9 @@ class GtkUi:
         row, self.telemetry_ffb_tuning = self._switch_row(
             _("Record for FFB tuning"),
             _("Save everything at the full rate the game sends it (several times the usual size), for tuning the "
-              "force feedback. It stops by itself after 20 minutes or 250 MB, then recording goes back to the "
+              "force feedback. It stops by itself after {} minutes or {} MB, then recording goes back to the "
               "usual rate; those captures are never deleted for space. Works only while recording is on, and "
-              "starts off every time Oversteer starts."),
+              "is remembered between starts.").format(round(FFB_MAX_SECONDS / 60), round(FFB_MAX_BYTES / 1e6)),
             lambda state: self._ffb_syncing or self.controller.set_ffb_tuning(state))
         self._ffb_syncing = False
         self.telemetry_ffb_tuning.set_sensitive(False)

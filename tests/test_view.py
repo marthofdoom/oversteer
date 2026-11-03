@@ -157,6 +157,9 @@ def test_capture_status():
     assert text.startswith('Recording to /data/captures (3 captures, 45 MB of 2 GB, 1 labelled).')
     assert 'Nothing is listening' in view.capture_status(True, False, '/c', (0, 0, 0), 1)
     assert '7 packets were lost' in view.capture_status(True, True, '/c', (0, 0, 0), 1, dropped=7)
+    assert 'stops after 60 minutes or 600 MB' in view.capture_status(True, True, '/c', (0, 0, 0), 1, ffb=True)
+    assert 'the 60 minute limit' in view.capture_status(True, True, '/c', (0, 0, 0), 1, ffb='time')
+    assert 'the 600 MB limit' in view.capture_status(True, True, '/c', (0, 0, 0), 1, ffb='size')
     assert view.capture_status(True, True, '/c', (0, 0, 0), 1, error='No space left').startswith(
         'Recording stopped: No space left.')
 
@@ -165,10 +168,11 @@ def test_preferences_round_trip():
     defaults = view.read_preferences({})
     assert defaults == {'telemetry_learn': False, 'telemetry_web_on': False, 'telemetry_web_port': 5301,
                         'telemetry_web_bind': 'lan', 'telemetry_web_control': False, 'telemetry_capture_on': False,
-                        'telemetry_capture_cap': 1, 'telemetry_forward': '', 'diagnostics_debug': False}
+                        'telemetry_capture_cap': 1, 'ffb_tuning_on': False, 'telemetry_forward': '',
+                        'diagnostics_debug': False}
     chosen = dict(defaults, telemetry_learn=True, telemetry_web_on=True, telemetry_web_port=8080,
                   telemetry_web_bind='local', telemetry_web_control=True, telemetry_capture_on=True,
-                  telemetry_capture_cap=5, diagnostics_debug=True)
+                  telemetry_capture_cap=5, ffb_tuning_on=True, diagnostics_debug=True)
     written = view.write_preferences(chosen)
     assert written['telemetry_web'] == '1' and written['telemetry_capture_cap'] == '5'
     assert view.read_preferences(written) == chosen
