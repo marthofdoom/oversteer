@@ -147,6 +147,10 @@ def test_off_and_level_zero_give_exactly_the_input():
     assert all(v == 0.2 for v in drive_share(rack(level=0.0), Kick(), 0.2))
 
 
+def test_the_kick_headroom_reaches_full_scale():
+    assert KICK_CAP == 0.25 and abs(TOTAL_CAP - 1.0) < 1e-9
+
+
 def test_the_pulse_is_capped_and_the_total_clamped():
     r = rack(level=1.0, strength=10.0)
     out = drive_share(r, Kick(), 0.0)

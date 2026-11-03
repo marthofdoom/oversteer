@@ -82,7 +82,7 @@ RESTART_DELAYS = (1.0, 3.0, 10.0)        # s before each restart of a child that
 HEALTHY = 60.0                           # s of life after which a death counts as the first again
 CTRL_TIMEOUT = 0.1                       # s a control message may wait for room (a child that hung)
 SETTERS = ('set_enabled', 'set_dynamics', 'set_position_source', 'set_wheel_result', 'set_texture', 'set_linearity',
-           'set_lightness', 'set_strength', 'set_knee', 'set_mapping', 'set_forza_model', 'set_drive_pull', 'set_kick', 'set_column_damping', 'set_rim_mm', 'set_car_wheel_mm', 'set_device')
+           'set_lightness', 'set_strength', 'set_knee', 'set_mapping', 'set_forza_model', 'set_drive_pull', 'set_kick', 'set_column_damping', 'set_rim_mm', 'set_car_wheel_mm', 'set_power_class', 'set_device')
 PR_SET_PDEATHSIG = 1
 PR_SET_NAME = 15
 
@@ -348,6 +348,9 @@ class EngineProcess:
 
     def set_car_wheel_mm(self, value):
         self._call('set_car_wheel_mm', value)
+
+    def set_power_class(self, name):
+        self._call('set_power_class', name)
 
     def set_device(self, path):
         self._path = path
@@ -1101,7 +1104,7 @@ class _Host:
         e = self.engine
         return {'enabled': e._enabled_req, 'path': e._path_req, 'usb_id': e.usb_id, 'strength': e._strength_req,
                 'knee': e._knee_req, 'mapping': e._mapping_req, 'forza_model': e._forza_model_req, 'pull': e._pull_req,
-                'kick': getattr(e, '_kick_req', None), 'damping': e._damping_req, 'rim': e._rim_req, 'car_wheel': e._car_wheel_req, 'lightness': e._lightness_req, 'linearity': e._linearity_req,
+                'kick': getattr(e, '_kick_req', None), 'damping': e._damping_req, 'rim': e._rim_req, 'car_wheel': e._car_wheel_req, 'power_class': e._power_class_req, 'lightness': e._lightness_req, 'linearity': e._linearity_req,
                 'texture': None if e._texture_req is None else e._texture_req[1:], 'dynamics': e._dyn_req,
                 'wheel': e._wheel_req, 'position': e._pos_req is not None and e._pos_req[0] is not None,
                 'remote': dict(wheel_owner._remote), 'recording': ffb_record.current is not None,

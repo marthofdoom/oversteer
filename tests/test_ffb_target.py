@@ -442,7 +442,7 @@ def test_the_classic_strength_scales_the_uniform_share_and_the_budget_clamps_it(
     assert abs(rack.force(sample_at(3000.0))) == pytest.approx(0.75 * fe.FULL, abs=1.0)
 
 
-def test_the_classic_driver_from_column_has_no_hydraulic_top_end():
+def test_the_classic_driver_from_column_has_no_hydraulic_top_end(street):
     assert ffb_carprops.driver_from_column(3000.0, 25.0, 1.0, False) > wheel_torque.HYD_TOP_NM
     assert ffb_carprops.driver_from_column(3000.0, 25.0, 1.0) < wheel_torque.HYD_TOP_NM
     assert ffb_carprops.driver_slope(400.0, 25.0, 1.0, False) > ffb_carprops.driver_slope(400.0, 25.0, 1.0)

@@ -52,7 +52,7 @@ def test_a_car_within_the_budget_is_played_1_to_1_clamped_and_the_strength_acts_
     assert wt.rim_share(1.0, 2.1, 0.0, 3.7) == 0.0
 
 
-def test_the_hydraulic_top_end():
+def test_the_hydraulic_top_end(street):
     got = [cp.driver_from_column(x, 25.0, 0.0) for x in (2.0, 3.0)]
     assert got == [2.0, 3.0]                                                       # unassisted: untouched
     for x, want in ((2.0, 1.91), (3.0, 2.39), (4.0, 2.67), (6.0, 2.98), (9.0, 3.20)):
@@ -77,3 +77,28 @@ def test_the_assisted_driver_torque_never_passes_the_top_and_round_trips():
         tc, h = 20.0, 1e-4
         d = (cp.driver_from_column(tc + h, speed, 1.0) - cp.driver_from_column(tc - h, speed, 1.0)) / (2 * h)
         assert cp.driver_slope(tc, speed, 1.0) == pytest.approx(d, rel=1e-3)
+
+
+def test_the_rally_top_end_is_7_and_street_3_7_and_off_is_unassisted():
+    assert cp.power_class() == 'rally' and cp.hyd_top() == 7.0 and wt.HYD_TOP_NM == 7.0
+    assert (cp.HYD_K, cp.HYD_R) == (3.0, 4.0)
+    assert cp.driver_from_column(1e6, 25.0, 1.0) < 7.0 and cp.driver_from_column(1e6, 25.0, 1.0) > 6.99
+    assert cp._hyd(2.9) == 2.9                                                     # the low and mid range are the road curve's
+    rally_low = cp.driver_from_column(3.0, 25.0, 1.0)
+    assert cp.set_power_class('street') == 'street' and cp.hyd_top() == 3.7 and wt.HYD_TOP_NM == 3.7
+    assert cp.driver_from_column(1e6, 25.0, 1.0) < 3.7
+    assert cp.driver_from_column(3.0, 25.0, 1.0) == pytest.approx(rally_low, abs=0.5)   # (the same boost curve underneath)
+    assert cp.set_power_class('off') == 'off'
+    assert cp.power_settings()[0] == 'off'                                         # unassisted: the column torque is played
+    assert cp.set_power_class('bogus') == 'rally'
+
+
+def test_the_top_torque_follows_the_class():
+    rack = fe.RackForce()
+    rack.assist = 1.0
+    rack._boost = 1.0
+    assert rack.top_torque() == 7.0
+    cp.set_power_class('street')
+    assert rack.top_torque() == 3.7
+    cp.set_power_class('off')
+    assert rack.top_torque() != 3.7 and rack.top_torque() != 7.0                    # unassisted: its own p99-based top

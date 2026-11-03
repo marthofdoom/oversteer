@@ -98,6 +98,7 @@ from . import car_data
 from . import ffb_carprops
 from . import ffb_dynamics
 from . import ffb_forza
+from . import ffb_handforce
 from . import ffb_kick
 from . import ffb_record
 from . import ffb_spring
@@ -578,6 +579,7 @@ class RackForce:
     RIM_SAFE_NM = 10.0                   # hard ceiling on the torque at the rim whatever the car and the wheel
     wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the 2.1 Nm class
     rim_user = None                      # mm: the user's rim diameter (the profile's), None: the table's
+    last_torque = None                   # Nm: the rim torque force() worked out last (ffb_handforce)
     wheel_rim = None                     # mm: the wheel's rim diameter (wheel_torque.rim_mm), None unknown: DEFAULT_RIM_MM
     car_wheel_mm = wheel_torque.CAR_WHEEL_MM   # mm: the car's steering wheel (the profile INI's countersteer_car_wheel_mm)
     strength = 1.0                       # the overall steering strength (the engine's), applied inside rim_share
@@ -645,11 +647,11 @@ class RackForce:
         if self.learner is not None and self.car is not None:
             ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True, p99=self.p99)
         self.car = car
-        self.trail, self.scrub = CASTER_TRAIL, SCRUB
+        self.trail, self.scrub = ffb_carprops.default_trail(CASTER_TRAIL), SCRUB    # (rally class: 37 mm until learnt)
         self.learner = None
         if self.LEARNS:
             kept = ffb_carprops.STORE.get(car) if car is not None else None
-            self.trail, self.scrub = kept or (CASTER_TRAIL, SCRUB)
+            self.trail, self.scrub = kept or (ffb_carprops.default_trail(CASTER_TRAIL), SCRUB)
             self.learner = ffb_carprops.TorqueLearner(self.trail, self.scrub)
         self.scale = self.FF_SCALE
         stored = ffb_carprops.STORE.get_p99(car) if car is not None and self.LEARNS else None
@@ -1116,7 +1118,7 @@ class RackForce:
         cls = self.assist if assist is None else assist
         cls = 0.0 if ffb_carprops.power_settings()[0] == 'off' else cls * self.assist_level()
         if cls > 0.0:
-            return wheel_torque.HYD_TOP_NM
+            return ffb_carprops.hyd_top()
         peak = self.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
         return max(abs(self.p99 / ratio), 2.0 * self.knee * peak)
 
@@ -1131,6 +1133,7 @@ class RackForce:
         torque = self.rim_torque(sample, held[0], None, held[2], held[3]) if held is not None else self.rim_torque(sample)
         if torque is None:
             return 0
+        self.last_torque = torque                # (for the hand-force summary: the car's torque this sample)
         ratio, assist = (held[2], held[3]) if held is not None else (None, None)
         peak = self.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
         classic = self.classic()
@@ -1600,7 +1603,7 @@ class ForzaRack(RackForce):
         return 'model'
 
     def top_torque(self, ratio=None, assist=None):
-        return wheel_torque.HYD_TOP_NM
+        return ffb_carprops.hyd_top()
 
     def _both_puddles(self, sample):
         pud = sample.puddle
@@ -2065,6 +2068,7 @@ class FfbEngine:
         self._damping_req = None         # "Column damping" (% of the real column's) from the GUI
         self._rim_req = None             # the wheel's rim diameter (mm, 0: the table's) from the GUI
         self._car_wheel_req = None       # the car's steering wheel diameter (mm, profile INI only) from the GUI
+        self._power_class_req = None     # the assist class (rally / street / off, profile INI only) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
         self._dyn_req = (True, True, False)     # column feel, local aligning spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
@@ -2158,6 +2162,9 @@ class FfbEngine:
         self._stalls = collections.deque()      # times of the recent stall / soft releases
         self._backoff_until = None
         self._taken_skipped = 0          # self.skipped at the take-over (the release log says how many since)
+        self._hand = ffb_handforce.HandForce()   # this drive's hand force in N (logged at the hand-back)
+        self._hand_t = None              # the last sample time counted in it
+        self._hand_last = ''             # the previous drive's summary (the next take-over's line says it)
         self._lag = 0.0                  # s the engine was behind the newest sample when it took it
         self._verdict = Verdict('none', 'no-telemetry', None, 0.0, None)
         self._status_at = None
@@ -2282,6 +2289,12 @@ class FfbEngine:
         """The car's steering wheel diameter in mm, 280..420: the hand-force scale rho is the wheel's
         rim over it."""
         self._car_wheel_req = min(max(float(value), wheel_torque.CAR_WHEEL_RANGE[0]), wheel_torque.CAR_WHEEL_RANGE[1])
+        self._wake.set()
+
+    def set_power_class(self, name):
+        """The assist class (profile INI only, countersteer_power_class): 'rally' (default, hydraulic top end 7.0 Nm),
+        'street' (3.7 Nm) or 'off' (unassisted); anything else is rally."""
+        self._power_class_req = name if name in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
         self._wake.set()
 
     def car_properties(self):
@@ -2562,6 +2575,8 @@ class FfbEngine:
                 self.forza_rack.car_wheel_mm = FORZA_CAR_WHEEL_MM
         if self._forza_model_req is not None:
             self._forza_model = self._forza_model_req
+        if self._power_class_req is not None and self._power_class_req != ffb_carprops.power_class():
+            ffb_carprops.set_power_class(self._power_class_req)
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2996,7 +3011,9 @@ class FfbEngine:
     def _play(self, t, sample):
         self._dyn_play(t, sample)
         self.model.strength = self._strength      # (inside the rim mapping: the steering force is not scaled again)
-        ours = self.model.force(sample) + self._lock_stop_force(t, sample)
+        base = self.model.force(sample)
+        self._hand_note(self.model, sample, base, t)
+        ours = base + self._lock_stop_force(t, sample)
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
         texture = self.texture.force(t, sample, ours)
         w = self._glide(t)
@@ -3005,6 +3022,31 @@ class FfbEngine:
         else:
             game = self._game_level(sample)
             self._out(t, game + w * (ours - game) + w * texture)
+
+    def _hand_note(self, rack, sample, base, t):
+        """Count this sample's played force (`base`, ext_force units) and the car's model force in the drive's hand-force
+        quantiles (ffb_handforce): both as the force at the wheel's rim."""
+        last, self._hand_t = self._hand_t, t
+        if last is None or sample is None or not 0.0 < t - last < 0.5:
+            return
+        case = ffb_handforce.sample_case(sample, MIN_SPEED)
+        if case is None or rack.last_torque is None:
+            return
+        peak = rack.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
+        self._hand.add(case, base / FULL * peak, rack.last_torque * rack.rho(), rack.rim_mm(), t - last)
+
+    def _takeover_extra(self):
+        """(the assist class, the previous drive's hand-force summary or '') for the take-over log lines."""
+        return ffb_carprops.power_class(), '; last drive: ' + self._hand_last if self._hand_last else ''
+
+    def _hand_report(self):
+        """' ; hand force ...' for the drive just ended (once: the summary starts over), '' when nothing was counted."""
+        text = self._hand.take()
+        self._hand_t = None
+        if text:
+            self._hand_last = text
+            return '; ' + text
+        return ''
 
     def _shape(self, t, force):
         """Spike gate and slew on the force (before the fade). A jump of over SPIKE of full scale from the last
@@ -3225,7 +3267,10 @@ class FfbEngine:
         sample, rack = self._rbr_sample, self.rbr_rack
         self._dyn_play(now, sample)
         rack.strength = self._strength
-        ours = rack.force(sample) + self._lock_stop_force(now, sample)
+        base = rack.force(sample)
+        if sample is not None:
+            self._hand_note(rack, sample, base, now)
+        ours = base + self._lock_stop_force(now, sample)
         if sample is not None and sample is not self._rbr_tex_sample:      # the texture steps with the telemetry
             self._rbr_tex_sample = sample
             self._rbr_tex = self.texture.force(self._last_t if self._last_t is not None else now, sample, ours)
@@ -3388,6 +3433,7 @@ class FfbEngine:
         rack._now = now
         if sample is not self._fz_force_sample:
             self._fz_force_sample, self._fz_force = sample, rack.force(sample)
+            self._hand_note(rack, sample, self._fz_force, now)
         limit = FULL * rack._ceiling()
         ours = self.forza_filter.step(now, self._fz_force) + rack.kick_force(sample)
         ours = min(max(ours, -limit), limit) + self._lock_stop_force(now, sample)
@@ -3545,28 +3591,31 @@ class FfbEngine:
         self._played_mode = self._mode
         self._w, self._glide_at, self._handback, self._soft_since = 0.0, None, False, None
         self._hold_f, self._hold_at, self._taken_skipped = 1.0, None, self.skipped
+        self._hand.reset()
+        self._hand_t = None
         self._read_gains()
         if self._mode == 'rbr':
             k = self.rbr_rack
             p99 = k.tau_p99()
             logging.info("Countersteer FFB: replacing Richard Burns Rally's force with its column torque through our chain "
                          "(game uploads %s/s; car %s, S %s, column torque p99 %s Nm so far, hand-force scale %.2f "
-                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, texture %s)",
+                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, texture %s, countersteer_power_class %s%s)",
                          'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, self.rbr.car,
                          'unknown (100 assumed)' if self.rbr.s is None else '%.1f' % self.rbr.s,
                          'none' if p99 is None else '%.1f' % p99, k.rho(), k.rim_mm(), k.car_wheel_mm,
-                         k.knee * 100.0, k.damping_pct, self.texture.describe())
+                         k.knee * 100.0, k.damping_pct, self.texture.describe(), *self._takeover_extra())
             self._dyn_start(t)
             return
         if self._mode == 'forza-rack':
             k = self.forza_rack
             logging.info("Countersteer FFB: replacing Forza Horizon's force with our own from the car's motion through our chain "
                          "(%.0f packets/s, game uploads %s/s; car %s, mass %.0f kg (%s), hand-force scale %.2f (%.0f/%.0f mm), "
-                         "1:1 up to %.0f %%, column damping %.0f %%, drive pull %s, kickback %s, texture %s)",
+                         "1:1 up to %.0f %%, column damping %.0f %%, drive pull %s, kickback %s, texture %s, countersteer_power_class %s%s)",
                          self._verdict.rate, 'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, k.car, k.mass,
                          'learnt' if k.mass_l.known else 'prior', k.rho(), k.rim_mm(), k.car_wheel_mm, k.knee * 100.0,
                          k.damping_pct, '%.0f %%' % (k.pull_level * 100.0) if k.pull_on else 'off',
-                         '%.0f %%' % (k.kick_level * 100.0) if k.kick_on else 'off', self.texture.describe())
+                         '%.0f %%' % (k.kick_level * 100.0) if k.kick_on else 'off', self.texture.describe(),
+                         *self._takeover_extra())
             self._dyn_start(t)
             return
         if self._mode == 'beamng':
@@ -3580,7 +3629,7 @@ class FfbEngine:
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, rim model %.1f:1 assist %.1f wheel %.1f Nm (car p99 %.0f Nm), "
-                     "mapping %s, hand-force scale %.2f (%.0f/%.0f mm), 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s)", self._verdict.game, self._verdict.rate,
+                     "mapping %s, hand-force scale %.2f (%.0f/%.0f mm), 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s, countersteer_power_class %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,
@@ -3590,7 +3639,8 @@ class FfbEngine:
                      '%.0f %%' % (m.pull_level * 100.0) if m.pull_on else 'off',
                      '%.0f %%' % (m.kick_level * 100.0) if m.kick_on else 'off',
                      m.damping_pct, self.texture.describe(),
-                     "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '')
+                     "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '',
+                     *self._takeover_extra())
         self._dyn_start(t)
 
     def _read_gains(self):
@@ -3617,11 +3667,11 @@ class FfbEngine:
         self._released_at = t
         self.last_stop = reason
         if detail is None:
-            logging.info("Countersteer FFB: handing the force back (%s)", reason)
+            logging.info("Countersteer FFB: handing the force back (%s)%s", reason, self._hand_report())
         else:
             logging.info("Countersteer FFB: handing the force back (%s: %s; engine skipped %d samples since the "
-                         "take-over, %.0f ms behind)", reason, detail, self.skipped - self._taken_skipped,
-                         self._lag * 1000.0)
+                         "take-over, %.0f ms behind)%s", reason, detail, self.skipped - self._taken_skipped,
+                         self._lag * 1000.0, self._hand_report())
         if soft:
             self._note_stall(t)
 
@@ -3653,7 +3703,7 @@ class FfbEngine:
             self._released_at = now
             if playing or self.last_stop is None:
                 self.last_stop = reason
-            logging.info("Countersteer FFB: the game's force is back (%s)", reason)
+            logging.info("Countersteer FFB: the game's force is back (%s)%s", reason, self._hand_report())
             if reason == 'stall' and playing:
                 self._note_stall(now)
 
