@@ -13,6 +13,10 @@ boost slope) (driver Nm), then an exponential decay with DECAY. It never crosses
 only raise the amplitude in the same direction; an opposite one is ignored until the pulse is under REVERSE_OK of
 its amplitude. A pulse ends under END of its amplitude; the next fresh one waits GAP more. A gap in the samples
 or a new car resets it.
+
+A caller with no Fx and contact normals (Forza) injects its own trigger: `update(..., trigger=dfx)` takes `dfx`, the
+step of Fx_FL - Fx_FR (N, signed), for the event in place of the Fx and contact-normal test; `share` asks the rack's
+`kick_trigger(sample)` for it (None: no event, and then the Fx and normal test runs as usual).
 """
 import collections
 import math
@@ -97,21 +101,25 @@ class Kick:
             return self._v0 + (self._amp - self._v0) * 0.5 * (1.0 - math.cos(math.pi * tau / self.RISE))
         return self._amp * math.exp(-(tau - self.RISE) / self.DECAY)
 
-    def update(self, t, sample, car, ratio, slope):
+    def update(self, t, sample, car, ratio, slope, trigger=None):
         """The pulse (driver Nm, signed like the front torque) for this sample. `slope`: a callable returning the boost
-        curve's slope at the sample's column torque (called only when a trigger is taken)."""
+        curve's slope at the sample's column torque (called only when a trigger is taken). `trigger`: an injected
+        step of Fx_FL - Fx_FR (N) standing for the event; given, the sample's own Fx and normals are not looked at."""
         if car != self._car or self._t is None or not 0.0 <= t - self._t <= self.SAMPLE_GAP:
             self.reset()
             self._car = car
         self._t = t
-        fx = getattr(sample, 'tyre_fx', None)
-        try:
-            dfx = fx[0] - fx[1]
-        except (TypeError, IndexError):
-            dfx = math.nan
-        if not math.isfinite(dfx):
-            return self._value(t)
-        step = self._step(t, sample, dfx)
+        if trigger is not None:
+            step = trigger if math.isfinite(trigger) and trigger else None
+        else:
+            fx = getattr(sample, 'tyre_fx', None)
+            try:
+                dfx = fx[0] - fx[1]
+            except (TypeError, IndexError):
+                dfx = math.nan
+            if not math.isfinite(dfx):
+                return self._value(t)
+            step = self._step(t, sample, dfx)
         y = self._value(t)
         if self._active and t - self._t0 >= self.RISE and abs(y) < self.END * abs(self._amp):
             self._active = False
@@ -159,7 +167,8 @@ class Kick:
             c = 0.0 if rack.power_steering() == 'off' else cls * ffb_carprops.power_settings()[1]
             return ffb_carprops.driver_slope(mz / ratio, speed, c, not rack.classic())
 
-        nm = self.update(rack._now, sample, rack.car, ratio, slope)
+        kick_trigger = getattr(rack, 'kick_trigger', None)
+        nm = self.update(rack._now, sample, rack.car, ratio, slope, kick_trigger(sample) if kick_trigger else None)
         add = max(-KICK_CAP, min(KICK_CAP, nm / peak * rack.strength * level))
         if add == 0.0:
             return share
@@ -168,4 +177,7 @@ class Kick:
 
 def rack_front_torque(rack, sample):
     from . import ffb_engine
+    front = getattr(rack, '_front', None)
+    if front is not None:
+        return front(sample, rack.trail, 0.0)
     return ffb_engine.front_torque(sample, rack.trail, 0.0, clamp=True)

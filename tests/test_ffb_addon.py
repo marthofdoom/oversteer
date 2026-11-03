@@ -132,6 +132,7 @@ def engine_on(tmp_path, enabled=True, raw=True, strength=None, app_gain=False, s
         with open(path + '/app_gain', 'w') as f:
             f.write('1\n')
     engine = fe.FfbEngine(driver=RecordingDriver, beamng_source=None)
+    engine.set_forza_model(False)                # (these tests are the add-on's: countersteer_forza_model = 0)
     engine.set_device(path)
     engine.set_enabled(enabled)
     if strength is not None:

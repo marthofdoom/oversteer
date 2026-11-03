@@ -660,6 +660,7 @@ class Gui:
         self.ffb_engine.set_texture(*self.model.get_countersteer_texture())
         self.apply_countersteer_strength()
         self.apply_countersteer_mapping()
+        self.apply_countersteer_forza_model()
         self.apply_countersteer_knee()
         self.apply_countersteer_column_damping()
         self.apply_countersteer_rim_mm()
@@ -677,6 +678,10 @@ class Gui:
     def apply_countersteer_mapping(self):
         """The steering mapping (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_mapping(self.model.get_countersteer_mapping())
+
+    def apply_countersteer_forza_model(self):
+        """Forza Horizon's force: ours through the chain or the lightened game force (profile INI only) to the engine."""
+        self.ffb_engine.set_forza_model(self.model.get_countersteer_forza_model())
 
     def apply_countersteer_knee(self):
         """The "1:1 up to" share of the wheel's peak (FFB tab, under the Countersteer switch) to the engine."""

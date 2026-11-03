@@ -78,6 +78,7 @@ class Model:
         'countersteer_strength': None,
         'countersteer_knee': None,
         'countersteer_mapping': None,
+        'countersteer_forza_model': None,
         'countersteer_drive_pull': None,
         'countersteer_drive_pull_level': None,
         'countersteer_kick': None,
@@ -136,6 +137,7 @@ class Model:
         'countersteer_strength': 'integer',
         'countersteer_knee': 'integer',
         'countersteer_mapping': 'string',
+        'countersteer_forza_model': 'boolean',
         'countersteer_drive_pull': 'boolean',
         'countersteer_drive_pull_level': 'integer',
         'countersteer_kick': 'boolean',
@@ -255,13 +257,14 @@ class Model:
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_MAPPING, OVERALL_PULL, OVERALL_PULL_LEVEL, \
-            OVERALL_COLUMN_DAMPING
+            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL
         from .ffb_kick import OVERALL_KICK, OVERALL_KICK_LEVEL
         from .ffb_texture import LEVEL
         # The overall Countersteer force in % of the car's real steering torque, and where it stops being played 1:1
         data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
                 'countersteer_knee': int(round(OVERALL_KNEE * 100)) if supported else None,
                 'countersteer_mapping': OVERALL_MAPPING if supported else None,
+                'countersteer_forza_model': OVERALL_FORZA_MODEL if supported else None,
                 'countersteer_drive_pull': OVERALL_PULL if supported else None,
                 'countersteer_drive_pull_level': OVERALL_PULL_LEVEL if supported else None,
                 'countersteer_kick': OVERALL_KICK if supported else None,
@@ -755,6 +758,17 @@ class Model:
         from .ffb_engine import OVERALL_MAPPING
         value = self.data.get('countersteer_mapping')
         return value if value in MAPPINGS else OVERALL_MAPPING
+
+    def set_countersteer_forza_model(self, value):
+        """Forza Horizon (profile INI only, no control): True plays Countersteer's own force through the ACR chain, False keeps the
+        game's force lightened by the add-on."""
+        if self.set_if_changed('countersteer_forza_model', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_forza_model()
+
+    def get_countersteer_forza_model(self):
+        from .ffb_engine import OVERALL_FORZA_MODEL
+        value = self.data.get('countersteer_forza_model')
+        return OVERALL_FORZA_MODEL if value is None else bool(value)
 
     def set_countersteer_column_damping(self, value):
         """The share of a real steering column's damping the knee mapping plays, 0..100 %."""
