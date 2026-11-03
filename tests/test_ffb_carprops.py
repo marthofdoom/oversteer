@@ -213,6 +213,34 @@ def test_the_ratio_waits_for_evidence_and_ignores_hard_cornering_and_standing():
     assert learner.lock() is None
 
 
+def test_the_ratio_ignores_understeer_and_driven_wheels():
+    # gravel: the car does not turn as steered (front slip angle) and the driven wheels spin: no Ackermann angle
+    learner = cp.RatioLearner()
+    for i in range(6000):
+        steer = 0.3 * math.sin(i / 100.0 * 1.3)
+        learner.add(steer, 0.02 * steer, 20.0, 0.01, alpha=0.08, wheels=(20.0, 20.0, 20.0, 20.0))        # understeer
+        learner.add(steer, 0.02 * steer, 20.0, 0.01, alpha=0.01, wheels=(20.0, 20.0, 24.0, 24.0))        # wheelspin
+    assert learner.sxx == 0.0 and learner.lock() is None
+    lock = 0.4
+    for i in range(6000):
+        steer = 0.08 * math.sin(i / 100.0 * 1.3)
+        learner.add(steer, 8.0 * steer * lock / cp.WHEELBASE, 8.0, 0.01, alpha=0.01, wheels=(8.0, 8.0, 8.1, 7.9))
+    assert learner.lock() == pytest.approx(lock, rel=0.02)
+
+
+def test_a_lock_outside_the_physical_range_is_not_believed_or_loaded(tmp_path):
+    learner = cp.RatioLearner()
+    _drive_ratio(learner, 0.0422)                                       # what gravel understeer once gave
+    assert learner.lock() is None
+    path = tmp_path / 'props.json'
+    path.write_text(json.dumps({'acr/Skoda Fabia RS Rally2': {'trail': 0.05, 'scrub': 0.03, 'lock': 0.0422},
+                                'acr/other': {'trail': 0.03, 'scrub': 0.02, 'lock': 0.45}}))
+    cp.STORE.use(str(path))
+    assert cp.STORE.get_lock('acr/Skoda Fabia RS Rally2') is None       # discarded: relearnt
+    assert cp.STORE.get_lock('acr/other') == 0.45
+    assert json.loads(path.read_text())['acr/Skoda Fabia RS Rally2']['lock'] == 0.0422      # the file is left alone
+
+
 def test_the_engine_learns_the_lock_and_the_ratio_and_keeps_them(tmp_path):
     cp.STORE.use(str(tmp_path / 'props.json'))
     cp.ASYNC = False

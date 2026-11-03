@@ -356,6 +356,7 @@ def playing_engine(path):
     engine.step(0.0)
     t = tfe.run(engine, 0.0, 8.0)
     assert engine._phase in ('in', 'on')
+    engine._frame.reset()                # (the check is fed from the start; tfe.run's wheel does not follow the steering)
     return engine, t
 
 
@@ -428,6 +429,44 @@ def ready_engine(path):
     m.ratio_known = m.lock_known = True
     m._align.s[0] = 1e4
     return engine, m, t
+
+
+def test_the_frame_check_is_fed_and_the_slope_known_before_the_ratio_gate_opens(tmp_path):
+    POS.scale = 0.6
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    m = engine.model
+    assert not (m.ratio_known and m.lock_known)                         # the spring's gate is shut ...
+    t = feed(engine, t, 6.0)
+    assert not m.align_on
+    assert engine._frame.ok and engine._frame.slope == pytest.approx(0.6, abs=0.02)      # ... the slope is there
+    engine.stop()
+
+
+def test_the_lock_stop_resists_the_wheel_past_the_games_lock_and_is_silent_inside_it(tmp_path):
+    POS.scale = 0.6                                                     # the game's lock: 270 of the 450 degrees
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    t = feed(engine, t, 6.0)
+    assert engine._frame.ok
+    def settle(steer, raw_deg, seconds=0.3):
+        nonlocal t
+        end = t + seconds
+        while t < end:
+            s = tfe.acr(t)
+            s.tyre_slip_angle, s.pos, s.forward = (0.04, 0.04, 0, 0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+            s.steer = steer
+            POS.raw = int(round((raw_deg / 900.0 + 0.5) * 65535))
+            tfe.upload(tfe.game_raw(s))
+            engine.offer(t, s)
+            engine.step(t)
+            t += 1.0 / tfe.HZ
+        return engine._lock_stop_force(t, s), engine._lock_stop.active
+    inside, active = settle(0.9, -243.0)                                # inside the lock
+    assert inside == 0 and not active
+    push, active = settle(1.0, 285.0)                                   # 15 degrees past it on the +ABS_X side
+    assert active and 0.4 * fe.FULL <= push <= fe.LockStop.MAX * fe.FULL * engine._strength
+    push_other, _ = settle(-1.0, -285.0)
+    assert push_other < 0 < push
+    engine.stop()
 
 
 def test_an_inverted_axis_keeps_the_spring_off_and_says_why(tmp_path, caplog):
@@ -822,6 +861,7 @@ def _drive_with_node(tmp_path, invert):
     engine.set_enabled(True)
     engine.step(0.0)
     t = tfe.run(engine, 0.0, 8.0)
+    engine._frame.reset()                # (fed from the start, while the node did not follow the steering)
     m = engine.model
     m.ratio_known = m.lock_known = True
     m._align.s[0] = 1e4

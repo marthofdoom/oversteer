@@ -124,6 +124,10 @@ CSB_RATE = 200.0                         # BeamNG: CSB1 packets per second of th
 CSB_HOLD_RATE = 150.0
 MZ_FLAT = 1.0                            # Nm: front Mz spanning less over the moving window is flat
 MZ_MOVING_MIN = 50                       # moving samples in the window to judge Mz on
+MZ_STILL = 0.01                          # Nm: front Mz that moves less than this is not being sent (a real Mz, ACR's tiny
+                                         # one at low lateral force too, always moves more over a second)
+MZ_STILL_FIRST = 1.0                     # s of unchanging Mz (moving) that call a stream flat that never showed it live
+MZ_STILL_LIVE = 10.0                     # ... and one that did: a quiet straight is not a stream that stopped sending
 MZ_MISSING_RUN = 10                      # samples in a row without Mz (30 ms at 333/s) before it counts as gone
 
 OVERALL_STRENGTH = 1.0                   # "Steering strength" default: Countersteer's own force as the model gives it
@@ -190,6 +194,9 @@ class SupportClassifier:
         self._mz_seen = False                  # this stream has sent front Mz
         self._mz_missing = 0                   # samples in a row without it
         self.mz_live = None                    # Mz judged live (True) or flat (False); None not yet
+        self._mz_ever_live = False             # the stream has shown Mz spanning MZ_FLAT in a window
+        self._still_anchor = None              # (mz, since): the moving Mz the run of unchanging values started at
+        self._moving_at = None                 # when the last moving sample came
 
     def feed(self, t, sample, arrivals=1):
         game = sample.game
@@ -215,6 +222,10 @@ class SupportClassifier:
             if mz is not None:
                 self._mz_max.push(t, mz)
                 self._mz_min.push(t, -mz)
+                anchor = self._still_anchor
+                if anchor is None or abs(mz - anchor[0]) > MZ_STILL or t - (self._moving_at or t) > WINDOW / 2:
+                    self._still_anchor = (mz, t)
+            self._moving_at = t
         self._expire(t)
 
     def note(self, t, packet_id):
@@ -328,7 +339,17 @@ class SupportClassifier:
         if self._moving >= MZ_MOVING_MIN:
             top, bottom = self._mz_max.max(), self._mz_min.max()
             if top is not None:
-                self.mz_live = top + bottom >= MZ_FLAT       # max - min
+                # Live when it spans MZ_FLAT; flat only when the values really do not change (the stream is not
+                # sending Mz): ACR's front Mz is tiny at low lateral force and on straights, but never identical.
+                # A stream that has shown Mz must stay unchanging for MZ_STILL_LIVE before it is called flat.
+                if top + bottom >= MZ_FLAT:                  # max - min
+                    self.mz_live = self._mz_ever_live = True
+                elif self._still_anchor is not None and self._moving_at - self._still_anchor[1] >= \
+                        (MZ_STILL_LIVE if self._mz_ever_live else MZ_STILL_FIRST):
+                    self.mz_live = False
+                elif self.mz_live is False and self._still_anchor is not None \
+                        and self._moving_at - self._still_anchor[1] < MZ_STILL_FIRST:
+                    self.mz_live = True                      # it moves again, if only a little
         # Standing or slow: the last verdict on Mz stands (a stop at a start line keeps the force)
         if self.mz_live is None:
             return Verdict('add-on', 'drive', game, rate, gap_ms)
@@ -500,6 +521,12 @@ class RackForce:
     RAW_STALE_P99 = 0.15                 # or this share of the car's p99 of |front torque|, whichever is more)
     STALE_FREEZES = True                 # stale raw freezes the fit until uploads return (False: the fit starts again)
     LOW_SLIP = 0.05                      # rad: front slip angle under this counts for the centring hint
+    LOCK_STEER = 0.97                    # |steer| at or over: at the game's lock. ACR adds a lock-stop force to the wheel's
+                                         # that telemetry lacks, so those samples say nothing about the fit or the keep check
+    FLOOR_LOW, FLOOR_MAX = 300, 4000     # |raw| between which uploads are counted for the game's minimum-force floor
+    FLOOR_TOL = 3                        # a level this near the floor's is at it (ACR's sits at 1965 and 1967)
+    FLOOR_SHARE = 0.08                   # the most common small |level| is the floor when it is this share of uploads
+    FLOOR_MIN = 300                      # uploads at that level, and in all, before a floor is believed
     LEARNS = True                        # the car's trail and scrub are learnt from the game's force (ffb_carprops)
     POOLED_P99 = 540.0                   # Nm: p99 of |front torque| over marth's dump (per car 233-857), the prior
     PRIOR_S = 120.0                      # s of weight the prior counts for
@@ -537,6 +564,9 @@ class RackForce:
     def __init__(self):
         self.learner = None
         self.car = None
+        self.floor = None                # |raw| the game sends as its minimum force (ACR: 6 % of full scale), None unknown
+        self._floor_counts = collections.Counter()
+        self._floor_uploads = 0
         self.reset()
 
     def reset(self, car=None):
@@ -626,6 +656,7 @@ class RackForce:
             self._raw_at = t
             if mz is not None:
                 self._mz_at_raw = mz
+            self._count_floor(raw)
         if mz is None or not (sample.speed or 0.0) > MIN_SPEED:
             return                       # standing: a game may well stop uploading a force that does not change
         self._track(mz, dt)
@@ -645,6 +676,9 @@ class RackForce:
             return                       # the fit is frozen until the game uploads again
         if self._stale:
             self._stale = False          # uploads are back: the frozen fit is judged again
+        steer = getattr(sample, 'steer', None)
+        if (steer is not None and abs(steer) >= self.LOCK_STEER) or (self.floor is not None and abs(abs(raw) - self.floor) <= self.FLOOR_TOL):
+            return                       # at the game's lock (its stop force is not in telemetry) or at its minimum force: no information
         self.moving_time += dt
         self._long.add(mz, raw, dt, abs(raw) < self.RAW_CLIPPED)
         if abs(raw) < self.RAW_CLIPPED:
@@ -654,11 +688,37 @@ class RackForce:
             self._learn(sample, raw, dt)
         self._judge(t)
 
+    def _count_floor(self, raw):
+        """The game's minimum-force floor: ACR's raw uploads sit at one |level| (6 % of full scale, its "minimum
+        force" setting; 1965 and 1967 in marth's drive) for a large share of the time. The |level| with the most
+        uploads within FLOOR_TOL of it is the floor once that is FLOOR_SHARE of the uploads."""
+        self._floor_uploads += 1
+        level = abs(int(raw))
+        if self.FLOOR_LOW <= level < self.FLOOR_MAX:
+            self._floor_counts[level] += 1
+        if self._floor_uploads % 256 or self._floor_uploads < self.FLOOR_MIN:
+            return
+        counts, tol = self._floor_counts, self.FLOOR_TOL
+        best, best_n = None, 0
+        for level in counts:
+            n = sum(counts.get(level + d, 0) for d in range(-tol, tol + 1))
+            if n > best_n:
+                best, best_n = level, n
+        self.floor = best if best is not None and best_n >= max(self.FLOOR_SHARE * self._floor_uploads, self.FLOOR_MIN / 2) \
+            else None
+        if self._floor_uploads >= 65536:             # a game setting, kept for the session: the tallies halve
+            self._floor_uploads //= 2
+            for k in list(counts):
+                counts[k] //= 2
+                if not counts[k]:
+                    del counts[k]
+
     def _learn_ratio(self, sample, dt):
         """The road wheels' lock and, where the car table gives the steering wheel's lock, the overall steering ratio
         (ffb_carprops.RatioLearner), looked at once a second; the ratio slews."""
         learner = self._ratio_l
-        learner.add(getattr(sample, 'steer', None), getattr(sample, 'yaw_rate', None), sample.speed, dt)
+        learner.add(getattr(sample, 'steer', None), getattr(sample, 'yaw_rate', None), sample.speed, dt,
+                    self._slip(sample), getattr(sample, 'wheel_speed', None) or getattr(sample, 'wheel_rot', None))
         self._ratio_since += dt
         if self._ratio_since < 1.0:
             return
@@ -1332,6 +1392,67 @@ FH_REARM = 0.3                           # s after a release before the add-on s
                                          # muted, so no crossfade to protect: only no flapping)
 
 
+class LockStop:
+    """Our own steering-lock stop for ACR (a real rack has a mechanical one). ACR's force to the wheel carries a
+    lock-stop force that telemetry lacks, so with Countersteer playing nothing stops the wheel at the game's lock
+    (on marth's 900 degree wheel it went 14 and 44 degrees past it). Beyond the game's lock angle in the wheel's
+    own frame (the range / 2 times FrameCheck's measured slope; until the check has one, the position where the
+    steering input reached STEER_FROM) a stiff spring grows with a smooth onset (quadratic over the first ONSET
+    degrees), with damping on the wheel's speed so it does not bounce, bounded to MAX of full scale. Nothing
+    inside the lock. Returns ext_force units (positive pushes toward decreasing ABS_X); the position is ABS_X in
+    degrees from the centre (positive toward increasing ABS_X)."""
+
+    STEER_FROM = 0.99                    # |steer| from which the lock is taken to be reached (no measured slope yet)
+    STEER_OFF = 0.97                     # ... and below which it is forgotten
+    ONSET = 3.0                          # degrees past the lock over which the spring comes in
+    K = 0.075                            # share of full scale per degree past the lock (0.6 at 8 degrees)
+    DAMP = 0.005                         # share of full scale per degree/s (about critical for a light wheel: the driver's
+                                         # default inertia 670 gives 0.0045); applied both ways, the sum never pulls outward
+    MAX = 0.6                            # share of full scale: the most it pushes
+    VEL_TAU = 0.015                      # s: the speed's low-pass
+    GAP = 0.1                            # s between samples past which the speed starts again
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._prev = None                # (t, pos)
+        self.vel = 0.0                   # degrees per second, smoothed
+        self._ref = None                 # |pos| the lock was taken at while the slope is unknown
+        self.active = False
+
+    def force(self, t, steer, pos, lock_deg=None):
+        """The push at time `t` (ext_force units). `lock_deg`: the game's lock in wheel degrees when known."""
+        prev, self._prev = self._prev, (t, pos)
+        if pos is None or not math.isfinite(pos):
+            self.vel, self.active = 0.0, False
+            return 0.0
+        if prev is None or not 0.0 < t - prev[0] <= self.GAP:
+            self.vel = 0.0
+        else:
+            dt = t - prev[0]
+            self.vel += (((pos - prev[1]) / dt) - self.vel) * (dt / (self.VEL_TAU + dt))
+        if lock_deg is None:
+            saturated = steer is not None and math.isfinite(steer)
+            if saturated and abs(steer) < self.STEER_OFF:
+                self._ref = None
+            elif saturated and abs(steer) >= self.STEER_FROM and self._ref is None:
+                self._ref = abs(pos)
+            lock_deg = self._ref
+        if lock_deg is None:
+            self.active = False
+            return 0.0
+        over = abs(pos) - lock_deg
+        if over <= 0.0:
+            self.active = False
+            return 0.0
+        self.active = True
+        side = math.copysign(1.0, pos)
+        spring = self.K * over * min(over / self.ONSET, 1.0)
+        push = spring + self.DAMP * self.vel * side
+        return side * min(max(push, 0.0), self.MAX) * FULL
+
+
 class FfbEngine:
     """The engine thread (see the module's docstring).
 
@@ -1382,6 +1503,8 @@ class FfbEngine:
         self._frame = ffb_dynamics.FrameCheck()
         self._frame_range = None
         self._frame_sens = None          # the driver's sensitivity the check was fed under
+        self._lock_stop = LockStop()
+        self._pos_cache = None           # (t, measured degrees, raw frame) of the last wheel position read
         self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
         self.align_note = None           # why the alignment spring is not played (the info line shows it)
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
@@ -1719,6 +1842,29 @@ class FfbEngine:
         if stage is not None:
             stage.start(t)
 
+    def _wheel_position(self, t, stage):
+        """(degrees from the centre in the driver's raw frame, converted): the wheel's position now (read once per
+        time `t`), None when it can't be read; `converted` False when a bent (sensitivity) position has no raw
+        frame to be taken back to."""
+        cache = self._pos_cache
+        if cache is not None and cache[0] == t and cache[2] == stage.range:
+            return cache[1], cache[3]
+        measured, converted = None, True
+        if self._pos_src is not None and stage.range:
+            try:
+                raw = self._pos_src()
+            except Exception:
+                raw = None
+            if raw is not None:
+                half = stage.range / 2.0
+                measured = raw / 65535.0 * stage.range - half
+                sens = stage.sensitivity
+                if sens is not None and sens != ffb_dynamics.SENSITIVITY_LINEAR:
+                    unbent = ffb_dynamics.sensitivity_inverse(measured / half, sens)
+                    measured, converted = (None, False) if unbent is None else (unbent * half, True)
+        self._pos_cache = (t, measured, stage.range, converted)
+        return measured, converted
+
     def _frame_ok(self, t, sample, stage):
         """The wheel's measured position follows the game's steering (FrameCheck), judged from the moving samples
         while the spring is off; False (and a note, a log line once) when it does not or cannot be seen."""
@@ -1738,22 +1884,14 @@ class FfbEngine:
         bent = sens is not None and sens != ffb_dynamics.SENSITIVITY_LINEAR
         check.linear = bent
         steer = getattr(sample, 'steer', None)
-        if self._pos_src is not None and stage.range and steer is not None and math.isfinite(steer) \
-                and (sample.speed or 0.0) > MIN_SPEED:
-            try:
-                raw = self._pos_src()
-            except Exception:
-                raw = None
-            if raw is not None:
-                half = stage.range / 2.0
-                measured = raw / 65535.0 * stage.range - half
-                if bent:
-                    unbent = ffb_dynamics.sensitivity_inverse(measured / half, sens)
-                    measured = None if unbent is None else unbent * half
-                if measured is None:
-                    check.reset()
-                else:
-                    check.feed(t, steer, -steer * half, measured)
+        if steer is not None and math.isfinite(steer) and abs(steer) < RackForce.LOCK_STEER \
+                and (sample.speed or 0.0) > MIN_SPEED:      # at the lock the wheel goes past the game's: no pair
+            half = (stage.range or 0.0) / 2.0
+            measured, converted = self._wheel_position(t, stage)
+            if not converted:
+                check.reset()
+            elif measured is not None:
+                check.feed(t, steer, -steer * half, measured)
         if self._pos_src is None:
             self.align_note = _("wheel position unavailable: the alignment spring stays off")
         elif check.failed():
@@ -1786,7 +1924,9 @@ class FfbEngine:
             self._slope_logged = True
             logging.info("Countersteer FFB: wheel mapping: %.2f x the game's steering", slope)
         # (align_ready includes the rack force's own gate: the game's raw force agrees with our sign)
-        want = stage.can_align() and model.align_ready() and self._frame_ok(t, sample, stage) \
+        # (the check is fed whatever the ratio gate says: the slope serves the lock stop as well)
+        frame_ok = self._frame_ok(t, sample, stage) if stage.can_align() else False
+        want = stage.can_align() and model.align_ready() and frame_ok \
             and self._w >= 1.0 and not self._handback      # (while gliding between the levels the spring would add its own)
         if model.align_on and not want:
             stage.align_off(t)
@@ -1977,6 +2117,21 @@ class FfbEngine:
                 self._w = min(self._w + dt / GLIDE_IN, 1.0)
         return self._w
 
+    def _lock_stop_force(self, t, sample):
+        """The lock stop's push (LockStop), at the overall strength and inside the rim ceiling; 0 when the wheel's
+        position can't be read or the car is not ACR."""
+        stop, stage = self._lock_stop, self._dyn
+        if self._played_mode != 'acr' or stage is None or not stage.range:
+            stop.reset()
+            return 0.0
+        pos, _converted = self._wheel_position(t, stage)
+        lock_deg = None
+        if self._frame.ok and self._frame.slope:
+            lock_deg = stage.range / 2.0 * self._frame.slope        # (at or past the range: the wheel's own stop)
+        push = stop.force(t, getattr(sample, 'steer', None), pos, lock_deg) * self._strength
+        limit = FULL * self.model._ceiling()
+        return min(max(push, -limit), limit)
+
     def _game_level(self, sample):
         """The game's own force now in ext_force units as the fit has it (the scale times the front torque)."""
         torque = self.model._torque(sample)
@@ -1986,7 +2141,7 @@ class FfbEngine:
 
     def _play(self, t, sample):
         self._dyn_play(t, sample)
-        ours = self.model.force(sample) * self._strength
+        ours = self.model.force(sample) * self._strength + self._lock_stop_force(t, sample)
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
         texture = self.texture.force(t, sample, ours)
         w = self._glide(t)

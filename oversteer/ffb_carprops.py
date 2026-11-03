@@ -72,7 +72,7 @@ ASSIST_SAT = 100.0                       # Nm at the column: the assist's limit 
 SAT_ORDER = 4
 P99_RANGE = (5.0, 4000.0)                # Nm: the front steering torque's p99 kept per car
 SAVE_P99_STEP = 0.03                     # a p99 moved this share from what was saved is worth saving
-LOCK_RANGE = (0.02, 1.2)                 # rad: the road wheels' steering lock per unit of steer, kept in this
+LOCK_RANGE = (0.3, 0.8)                  # rad: the road wheels' steering lock per unit of steer, kept in this
 MIN_A = 0.05                             # share of the strength hint: a fit with a lower Mz weight says nothing
 
 
@@ -295,6 +295,9 @@ WHEELBASE = 2.6                          # m: ASSUMED (a rally / GT car's 2.5-2.
                                          # in it is an error of x % in the learnt lock and ratio
 RATIO_MIN_SPEED = 8.0                    # m/s
 RATIO_MAX_AY = 2.0                       # m/s^2: lateral acceleration under which the understeer gradient is negligible
+RATIO_MAX_ALPHA = 0.03                   # rad: front slip angle under which the Ackermann angle holds (on gravel the low
+                                         # lateral acceleration samples are understeer: the lock came out 0.04 rad)
+RATIO_ROLL = 0.04                        # front and rear wheel speeds within this share of each other: free-rolling
 RATIO_MIN_SXX = 0.1                      # unit^2 s of steer evidence before the lock is believed
 RATIO_SLEW = 0.1                         # ratio units per second at most
 
@@ -323,7 +326,16 @@ class RatioLearner:
     def __init__(self):
         self.sxx = self.sxy = 0.0
 
-    def add(self, steer, yaw, speed, dt):
+    def add(self, steer, yaw, speed, dt, alpha=None, wheels=None):
+        """`alpha`: the mean front slip angle (rad) and `wheels`: the four wheels' tread speeds, when the game gives
+        them; samples with a front slip angle of RATIO_MAX_ALPHA or more, or driven or braked wheels (front and
+        rear speeds apart by RATIO_ROLL), are left out."""
+        if alpha is not None and not abs(alpha) < RATIO_MAX_ALPHA:
+            return
+        if wheels is not None and len(wheels) >= 4 and all(math.isfinite(w) for w in wheels):
+            front, rear = abs(wheels[0] + wheels[1]) / 2.0, abs(wheels[2] + wheels[3]) / 2.0
+            if abs(front - rear) > RATIO_ROLL * max(front, rear, 1e-6):
+                return
         if not (dt > 0.0 and speed is not None and speed >= RATIO_MIN_SPEED and steer is not None and yaw is not None
                 and math.isfinite(steer) and math.isfinite(yaw) and math.isfinite(speed)):
             return
