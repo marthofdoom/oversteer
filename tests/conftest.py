@@ -64,3 +64,17 @@ def _own_ffb_car_props(tmp_path):
     yield
     ffb_carprops.STORE.use(None)
     ffb_carprops.ASYNC = True
+
+
+@pytest.fixture(autouse=True)
+def _rally_power_class():
+    """The assist class is process-wide (ffb_carprops.set_power_class): every test starts on the default, rally."""
+    ffb_carprops.set_power_class(None)
+    yield
+    ffb_carprops.set_power_class(None)
+
+
+@pytest.fixture
+def street():
+    """The street class (top end 3.7 Nm): for the tests whose numbers are the commuter car's."""
+    ffb_carprops.set_power_class('street')

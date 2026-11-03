@@ -16,9 +16,20 @@ STEER_BUDGET = 0.75                      # share of full scale the steering torq
 P99_TARGET = 0.70                        # share of full scale the car's p99 driver torque was scaled to land at (impedance_scale)
 KNEE = 0.50                              # share of the wheel's peak played 1:1 in Nm ("1:1 up to"; valid KNEE_RANGE)
 KNEE_RANGE = (0.30, 0.60)
-TOP = STEER_BUDGET                       # share the compression lands the car's top torque at
+TOP = 0.92                               # share the compression lands the car's top torque at (knee mapping): 1 - the
+                                         # texture's 0.08 cap, so texture never clips; JND steps above the knee 7.9 against 5.3
+                                         # at 0.75, no derating on marth's captures (~/.cache/ffb-compress); STEER_BUDGET is
+                                         # the classic mapping's clamp only
 C_U0 = 0.25                              # the compression's early-bend width in the log domain, as a share of ln(TOP / knee)
-HYD_TOP_NM = 3.7                         # Nm: the top of an assisted car's driver torque (ffb_carprops.HYD_K + HYD_R)
+
+
+def __getattr__(name):
+    """HYD_TOP_NM: the top of an assisted car's driver torque (Nm), the active assist class's asymptote
+    (ffb_carprops.hyd_top(): 7.0 rally, 3.7 street)."""
+    if name == 'HYD_TOP_NM':
+        from . import ffb_carprops
+        return ffb_carprops.hyd_top()
+    raise AttributeError(name)
 
 # usb id: (peak torque Nm, usable)
 PEAK_NM = {

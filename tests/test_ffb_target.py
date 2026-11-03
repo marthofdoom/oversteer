@@ -138,7 +138,7 @@ def test_the_column_scale_is_frozen_on_the_g29_class_and_the_car_tops_out_at_the
     assert rack_for(10.0).impedance() == 1.0
     # an assisted car's driver torque tops out at the hydraulic limit: that lands at the budget
     assert rack.top_torque() == wheel_torque.HYD_TOP_NM
-    assert force_at(rack, 550.0) == pytest.approx(0.7, abs=0.06) and force_at(rack, 550.0) < wheel_torque.STEER_BUDGET
+    assert force_at(rack, 550.0) == pytest.approx(0.79, abs=0.02) and force_at(rack, 550.0) < wheel_torque.TOP
     # a strong wheel plays the car 1:1 in Nm
     strong = rack_for(10.0)
     strong.p99 = 550.0
@@ -163,9 +163,9 @@ def test_the_played_share_is_1_to_1_up_to_the_knee_and_clamps_hard_at_the_budget
     rack.strength = 1.0
     shares = [force_at(rack, nm) for nm in range(0, 4000, 5)]
     assert all(b >= a for a, b in zip(shares, shares[1:]))
-    assert max(shares) == pytest.approx(wheel_torque.STEER_BUDGET, abs=0.005) and max(shares) <= wheel_torque.STEER_BUDGET
-    assert force_at(rack, 5000.0) == pytest.approx(wheel_torque.STEER_BUDGET, abs=0.005)       # (the driver torque tends to 3.7 Nm)
-    below = [x for x in shares if x < wheel_torque.STEER_BUDGET]
+    assert max(shares) == pytest.approx(wheel_torque.TOP, abs=0.005) and max(shares) <= wheel_torque.TOP
+    assert force_at(rack, 5000.0) == pytest.approx(wheel_torque.TOP, abs=0.005)       # (the driver torque tends to 3.7 Nm)
+    below = [x for x in shares if x < wheel_torque.TOP]
     assert max(b - a for a, b in zip(below, below[1:])) < 0.06       # (no step either: 5 Nm of kingpin torque near the centre is 0.05)
 
 
@@ -188,10 +188,10 @@ def test_an_unassisted_car_passes_the_column_torque():
     assert rack.rim_torque(sample_at(-130.0)) == pytest.approx(-10.0)
 
 
-def test_the_steering_budget_leaves_the_texture_its_quarter():
+def test_the_steering_budget_leaves_the_texture_its_reserve():
     rack = rack_for(2.1)
     steering = force_at(rack, 5000.0) * fe.FULL
-    assert fe.FULL - steering >= 0.24 * fe.FULL
+    assert fe.FULL - steering >= 0.079 * fe.FULL
     # the texture's own limit is FULL - |steering|: still room for its cap at the budget's edge
     assert fe.FULL - steering > ffb_texture.TOTAL_CAP * fe.FULL
 
@@ -324,10 +324,10 @@ def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_
         resid = rack.force(s)
     split = rack.align(s)
     k_fs = split['k'] * rack.rho() * wheel_torque.rim_share_slope(rack.rim_torque(s) * rack.rho(), 20.0, 1.0, rack.top_torque() * rack.rho(), rack.knee) / 20.0
-    assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, wheel_torque.STEER_BUDGET))
+    assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, wheel_torque.TOP))
     spring = ffb_spring.DriverSpring()
     for _ in range(200):
-        want = spring.force(split['theta_a_deg'], split['theta_deg'], k_fs, wheel_torque.STEER_BUDGET, rack.align_k_limit, 0.005)
+        want = spring.force(split['theta_a_deg'], split['theta_deg'], k_fs, wheel_torque.TOP, rack.align_k_limit, 0.005)
     assert resid == pytest.approx(plain - fe.FULL * want, rel=1e-6)
     assert abs(resid) < abs(plain)
     rack.align_k_limit = 0.0                                           # a driver that allows no spring: all through ext_force
@@ -442,7 +442,7 @@ def test_the_classic_strength_scales_the_uniform_share_and_the_budget_clamps_it(
     assert abs(rack.force(sample_at(3000.0))) == pytest.approx(0.75 * fe.FULL, abs=1.0)
 
 
-def test_the_classic_driver_from_column_has_no_hydraulic_top_end():
+def test_the_classic_driver_from_column_has_no_hydraulic_top_end(street):
     assert ffb_carprops.driver_from_column(3000.0, 25.0, 1.0, False) > wheel_torque.HYD_TOP_NM
     assert ffb_carprops.driver_from_column(3000.0, 25.0, 1.0) < wheel_torque.HYD_TOP_NM
     assert ffb_carprops.driver_slope(400.0, 25.0, 1.0, False) > ffb_carprops.driver_slope(400.0, 25.0, 1.0)
@@ -546,7 +546,7 @@ def test_rho_is_the_rims_over_the_cars_wheel_and_the_table_knows_the_logitech_ri
 
 def test_one_nm_of_car_torque_plays_rho_over_the_peak_below_the_knee_and_x_top_still_lands_at_top():
     rack = rack_for(2.1, assist=0.0, ratio=1.0)
-    rack.p99 = 0.0
+    rack.p99 = 30.0                                                      # (a top above TOP * peak / rho, so the compression acts)
     s = sample_at(0.0)
     rack.rim_torque = lambda sample, *a, **k: 1.0
     assert rack.force(s) / fe.FULL == pytest.approx(rack.rho() / 2.1)

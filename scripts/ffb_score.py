@@ -36,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 from oversteer import ffb_carprops as cp  # noqa: E402
 from oversteer import ffb_engine as fe  # noqa: E402
+from oversteer import ffb_handforce as fh  # noqa: E402
 from oversteer import ffb_metrics as fm  # noqa: E402
 from oversteer import ffb_spring  # noqa: E402
 from oversteer import ffb_texture as ft  # noqa: E402
@@ -182,7 +183,7 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None, mapp
     """Drive the engine's classes with the drive. Returns a dict of numpy arrays, one entry per REAL row."""
     keys = ('t', 'ready', 'speed', 'ay', 'steer', 'alpha_f', 'alpha_r', 'sr_f', 'brake', 'load', 'game', 'base',
             'tex', 'intended', 'shaped', 'rim_engine', 'rim_model', 'scale', 'x_top', 'peak', 'ceiling', 'reverse', 'source',
-            'rho', 'theta', 'theta_a', 'ratio', 'trail', 'scrub', 'cls', 'stiff', 'lock', 'seg')
+            'rho', 'rim_mm', 'last_torque', 'theta', 'theta_a', 'ratio', 'trail', 'scrub', 'cls', 'stiff', 'lock', 'seg')
     rec = {k: [] for k in keys}
     with _sandbox():
         rack = fe.RackForce()
@@ -243,6 +244,8 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None, mapp
                 rec['x_top'].append(rack.top_torque())
                 rec['peak'].append(peak)
                 rec['rho'].append(rack.rho())
+                rec['rim_mm'].append(rack.rim_mm())
+                rec['last_torque'].append(math.nan if rack.last_torque is None else rack.last_torque)
                 rec['ceiling'].append(rack._ceiling())
                 vel = s.vel
                 rec['reverse'].append(bool(vel is not None and vel[0] is not None and vel[0] < -fe.REVERSE_SPEED))
@@ -257,7 +260,7 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None, mapp
                 rec['stiff'].append(rack.align_stiffness())
                 rec['lock'].append(rack.lock)
             else:
-                for k in ('rim_engine', 'rim_model', 'scale', 'x_top', 'peak', 'rho', 'ceiling', 'theta', 'theta_a', 'ratio', 'trail',
+                for k in ('rim_engine', 'rim_model', 'scale', 'x_top', 'peak', 'rho', 'rim_mm', 'last_torque', 'ceiling', 'theta', 'theta_a', 'ratio', 'trail',
                           'scrub', 'cls', 'stiff', 'lock'):
                     rec[k].append(math.nan)
                 rec['reverse'].append(False)
@@ -385,8 +388,30 @@ def case_masks(tr):
             'airborne': air, 'landing': landing, 'all_moving': moving}
 
 
+def hand_force(tr):
+    """The force in the hand (rim torque in Nm and as a force in N, torque / (rim_mm / 2000)) of the played G29 force and the
+    car's model force (the rim torque times rho), p50 / p90 at cruise, cornering and the limit (ffb_handforce's cases)."""
+    ready, speed = tr['ready'], tr['speed']
+    played_nm = tr['base'] * tr['peak']          # (base is already a share of full scale)
+    model_nm = tr['last_torque'] * tr['rho']
+    rim = tr['rim_mm']
+    case = np.array([fh.case_of(sp, ay, af) if rd and sp > fe.MIN_SPEED else None
+                     for rd, sp, ay, af in zip(ready, speed, tr['ay'], tr['alpha_f'])], dtype=object)
+    out = {}
+    for name in fh.CASES:
+        sel = (case == name) & np.isfinite(played_nm) & np.isfinite(model_nm) & np.isfinite(rim)
+        row = {'rows': int(sel.sum())}
+        for kind, nm in (('played', played_nm), ('model', model_nm)):
+            for unit, v in (('nm', np.abs(nm[sel])), ('n', np.abs(fh.newtons(nm[sel], rim[sel])))):
+                for q in (50, 90):
+                    row['%s_%s_p%d' % (kind, unit, q)] = float(np.percentile(v, q)) if v.size else None
+        out[name] = row
+    return out
+
+
 def physics(tr):
     out = {}
+    out['hand_force'] = hand_force(tr)
     ready = tr['ready']
     n_ready = int(ready.sum())
     out['playing_rows'] = n_ready
@@ -403,9 +428,9 @@ def physics(tr):
         else:
             share = np.array([wheel_torque.rim_share(r * q, p, 1.0, x * q, wheel_torque.KNEE) if np.isfinite(r) and np.isfinite(x) else np.nan
                               for r, p, x, q in zip(tr['rim_model'], peak, tr['x_top'], tr['rho'])])
-        exp = np.clip(share, -wheel_torque.STEER_BUDGET, wheel_torque.STEER_BUDGET)
+        exp = np.clip(share, -wheel_torque.TOP, wheel_torque.TOP)
         exp = np.clip(exp, -ceiling, ceiling)
-        budget = sel & (np.abs(share) >= wheel_torque.STEER_BUDGET - 1e-9)
+        budget = sel & (np.abs(share) >= wheel_torque.TOP - 1e-9)
         game_src = sel & (tr['source'] == 'game')
         rev = sel & tr['reverse']
         free = sel & ~budget & ~game_src & ~rev
@@ -612,7 +637,7 @@ def safety(tr):
         return {'note': "never ready"}
     sh, base, tex, inten = tr['shaped'][ready], tr['base'][ready], tr['tex'][ready], tr['intended'][ready]
     out['clip_share'] = float(np.mean(np.abs(inten) >= fm.CLIP_AT))
-    out['budget_share'] = float(np.mean(np.abs(base) >= wheel_torque.STEER_BUDGET - 1e-3))
+    out['budget_share'] = float(np.mean(np.abs(base) >= wheel_torque.TOP - 1e-3))
     out['peak_abs_fs'] = float(np.max(np.abs(sh)))
     # thermal: the driver's 90 s mean square (a gap over a second counts as 0 output)
     th = R.thermal_mean(tr['t'], np.where(ready, tr['shaped'], 0.0))
@@ -662,8 +687,16 @@ def safety(tr):
 
 
 def score(drive, hz=50.0, wheel_path=WHEEL, friction_comp=0, derate=1.0, wheel_peak=None, texture_level=None,
-          align_on=None, events=24, mapping=None, column_damping=None):
-    """Everything, as one JSON-able dict."""
+          align_on=None, events=24, mapping=None, column_damping=None, power_class=None):
+    """Everything, as one JSON-able dict. `power_class` (rally / street / off) sets the assist class for this scoring."""
+    if power_class is not None:
+        kept = cp.power_class()
+        cp.set_power_class(power_class)
+        try:
+            return score(drive, hz, wheel_path, friction_comp, derate, wheel_peak, texture_level, align_on, events, mapping,
+                         column_damping)
+        finally:
+            cp.set_power_class(kept)
     notes = list(drive.notes)
     tr = run(drive, hz=hz, wheel_peak=wheel_peak, texture_level=texture_level, align_on=align_on,
              mapping=mapping)
@@ -729,6 +762,16 @@ def report(r, title=''):
                                                 else p.get('lag_note', '-')))
     else:
         lines.append('PHYSICS  ' + p.get('note', '-'))
+    hf = p.get('hand_force')
+    if hf:
+        lines.append('  hand force, p50/p90 (played G29 | car model; Nm at the rim, N at the rim)')
+        for name in fh.CASES:
+            row = hf[name]
+            lines.append('  %-16s %7d  played %s/%s Nm %s/%s N | model %s/%s Nm %s/%s N' % (
+                name, row['rows'], _f(row['played_nm_p50'], '%.2f'), _f(row['played_nm_p90'], '%.2f'),
+                _f(row['played_n_p50'], '%.1f'), _f(row['played_n_p90'], '%.1f'),
+                _f(row['model_nm_p50'], '%.2f'), _f(row['model_nm_p90'], '%.2f'),
+                _f(row['model_n_p50'], '%.1f'), _f(row['model_n_p90'], '%.1f')))
     if 'tracking_rms_fs' in w:
         lines.append('WHEEL    tracking rms %s FS (above the dead zone %s), worst %s, bias %s; dead zone %.1f %% of rows, '
                      'below friction (%s) %.1f %%; delivered/intended %s; delay %s ms%s' % (

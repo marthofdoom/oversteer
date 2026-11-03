@@ -1,6 +1,7 @@
 import configparser
 import logging
 
+from . import ffb_carprops
 from . import wheel_torque
 
 STRENGTH_MIN = 0                     # Countersteer's overall steering strength, %
@@ -86,6 +87,7 @@ class Model:
         'countersteer_column_damping': None,
         'countersteer_rim_mm': None,
         'countersteer_car_wheel_mm': None,
+        'countersteer_power_class': None,
         'countersteer_texture': None,
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
@@ -145,6 +147,7 @@ class Model:
         'countersteer_column_damping': 'integer',
         'countersteer_rim_mm': 'integer',
         'countersteer_car_wheel_mm': 'integer',
+        'countersteer_power_class': 'string',
         'countersteer_texture': 'integer',
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
@@ -272,6 +275,7 @@ class Model:
                 'countersteer_column_damping': OVERALL_COLUMN_DAMPING if supported else None,
                 'countersteer_rim_mm': 0 if supported else None,       # 0: from the wheel table
                 'countersteer_car_wheel_mm': int(wheel_torque.CAR_WHEEL_MM) if supported else None,
+                'countersteer_power_class': ffb_carprops.DEFAULT_POWER_CLASS if supported else None,
                 'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
         for part in cls.TEXTURE_PARTS:
             data['countersteer_texture_' + part] = True if supported else None
@@ -800,6 +804,17 @@ class Model:
         device = getattr(self, 'device', None)
         table = wheel_torque.rim_mm(getattr(device, 'usb_id', None))
         return int(round(table or wheel_torque.DEFAULT_RIM_MM))
+
+    def set_countersteer_power_class(self, value):
+        """The assist class, rally / street / off (profile INI only, no control): see ffb_carprops.POWER_CLASSES."""
+        value = str(value).strip().lower()
+        value = value if value in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
+        if self.set_if_changed('countersteer_power_class', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_power_class()
+
+    def get_countersteer_power_class(self):
+        value = str(self.data.get('countersteer_power_class') or '').strip().lower()
+        return value if value in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
 
     def set_countersteer_car_wheel_mm(self, value):
         """The car's steering wheel diameter in mm, 280..420: the hand-force scale is the

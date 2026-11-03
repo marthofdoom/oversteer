@@ -332,8 +332,41 @@ def _assist(mag, speed, assist):
     return raw * q ** (-1.0 / SAT_ORDER), slope * q ** (-1.0 / SAT_ORDER - 1.0)
 
 
-HYD_K = 1.5                              # Nm: the hydraulic top end: the driver's torque follows the boost curve 1:1 up to here ...
-HYD_R = 2.2                              # Nm: ... then bends toward HYD_K + HYD_R = 3.7 Nm (the rack runs out of assist flow)
+# The assist class: (HYD_K, HYD_R) of the hydraulic top end. 'rally' (the default) keeps the road curve's low and mid
+# range and runs to 7.0 Nm (marth's WRC research: cruise about 0.5 Nm, corners 2-3 Nm, a held maximum 6-8 Nm, no damping
+# or isolation filters); 'street' is the commuter's 3.7 Nm top; 'off' is unassisted (the column torque). INI only.
+POWER_CLASSES = ('rally', 'street', 'off')
+DEFAULT_POWER_CLASS = 'rally'
+_CLASS_HYD = {'rally': (3.0, 4.0), 'street': (1.5, 2.2), 'off': (1.5, 2.2)}
+_power_class = DEFAULT_POWER_CLASS
+HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top end: the driver's torque follows the boost curve 1:1
+                                         # up to HYD_K, then bends toward HYD_K + HYD_R (the rack runs out of assist flow)
+
+
+def set_power_class(name):
+    """Make `name` (rally / street / off; anything else: rally) the active assist class; returns the class in effect."""
+    global _power_class, HYD_K, HYD_R
+    _power_class = name if name in POWER_CLASSES else DEFAULT_POWER_CLASS
+    HYD_K, HYD_R = _CLASS_HYD[_power_class]
+    return _power_class
+
+
+def power_class():
+    return _power_class
+
+
+RALLY_TRAIL = 0.037                      # m: the rally prior for the caster trail: high positive caster, the wheel snaps back
+                                         # fast (what ACR learnt for the Fabia); the street prior is ffb_engine.CASTER_TRAIL
+
+
+def default_trail(street_trail):
+    """The caster trail (m) used where none has been learnt: RALLY_TRAIL on the rally class, else `street_trail`."""
+    return RALLY_TRAIL if _power_class == 'rally' else street_trail
+
+
+def hyd_top():
+    """The active class's asymptote of the driver's torque (Nm): HYD_K + HYD_R."""
+    return HYD_K + HYD_R
 
 
 def _hyd(x):
@@ -742,14 +775,14 @@ def power_settings():
             from xdg.BaseDirectory import xdg_config_home
             path = os.path.join(xdg_config_home, 'oversteer', 'config.ini')
         except ImportError:
-            return ('auto', 1.0)
+            return _off_class(('auto', 1.0))
     try:
         st = os.stat(path)
         stamp = (path, st.st_mtime_ns, st.st_size)
     except OSError:
         stamp = (path, None, None)
     if _ini['stamp'] == stamp:
-        return _ini['value']
+        return _off_class(_ini['value'])
     mode, strength = 'auto', 1.0
     if stamp[1] is not None:
         parser = configparser.ConfigParser(interpolation=None)
@@ -764,4 +797,9 @@ def power_settings():
         except (configparser.Error, OSError, ValueError):
             pass
     _ini['stamp'], _ini['value'] = stamp, (mode, strength)
-    return _ini['value']
+    return _off_class(_ini['value'])
+
+
+def _off_class(value):
+    """The INI's (mode, strength), with the power class 'off' (countersteer_power_class) forcing the mode to 'off'."""
+    return ('off', value[1]) if _power_class == 'off' else value

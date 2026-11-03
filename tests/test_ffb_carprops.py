@@ -37,7 +37,7 @@ def test_each_car_converges_to_its_own_trail_and_scrub(trail, scrub):
     assert rack.ready
 
 
-def test_a_fresh_car_starts_at_the_pooled_values_and_moves_slowly():
+def test_a_fresh_car_starts_at_the_pooled_values_and_moves_slowly(street):
     rack = drive(fe.RackForce(), 0.008, 0.012, 2.0)
     assert fe.CASTER_TRAIL - 0.008 > fe.CASTER_TRAIL - rack.trail >= 0          # on its way, not there
     assert fe.CASTER_TRAIL - rack.trail <= cp.TRAIL_SLEW * 2.0 + 1e-9           # the slew limit holds
@@ -54,7 +54,7 @@ def test_the_car_values_are_kept_and_come_back():
     rack = drive(fe.RackForce(), 0.040, 0.030, 60.0, car='acr/a')
     learnt = rack.trail
     rack.reset('acr/b')                                          # another car: saved on the way out
-    assert rack.trail == fe.CASTER_TRAIL
+    assert rack.trail == cp.RALLY_TRAIL                          # (the rally class's prior until it is learnt)
     data = json.load(open(cp.STORE.path))
     assert data['acr/a']['trail'] == pytest.approx(learnt, abs=1e-4)
     cp.STORE.use(cp.STORE.path)                                  # a new run reads the file
@@ -67,7 +67,7 @@ def test_beamng_learns_nothing():
     assert fe.BeamNGRack().learner is None
 
 
-def test_a_sample_without_front_forces_does_not_move_it():
+def test_a_sample_without_front_forces_does_not_move_it(street):
     rack = fe.RackForce()
     s, raw = car_sample(0.008, 0.01, random.Random(2))
     s.tyre_fx = None
@@ -109,7 +109,7 @@ def test_a_long_straight_keeps_what_was_learnt():
     assert rack.trail == pytest.approx(trail, abs=0.0005) and rack.scrub == pytest.approx(scrub, abs=0.0005)
 
 
-def test_the_strength_fit_is_not_thrown_by_the_trail_stepping():
+def test_the_strength_fit_is_not_thrown_by_the_trail_stepping(street):
     rack = drive(fe.RackForce(), 0.008, 0.012, 90.0)           # the trail walks from 27 to 8 mm on the way
     assert rack.scale == pytest.approx(30.0, rel=0.07)         # (1 mm/s against a 10 s window: harmless; the rest
     # is the ridge's 1.6 mm of trail still to come, which moves the ratio fit by 5 %)
@@ -294,3 +294,12 @@ def test_without_the_rear_slip_the_old_gates_still_leave_a_gravel_drive_unlearnt
 def test_the_identity_with_the_wrong_sign_is_not_believed():
     learner = _drive_slides(cp.RatioLearner(), math.radians(27.2), sign=-1.0)
     assert learner.lock() is None
+
+
+def test_the_caster_prior_follows_the_class_and_the_learner_overrides_it():
+    assert cp.RALLY_TRAIL == 0.037 and fe.RackForce().trail == 0.037
+    cp.set_power_class('street')
+    assert fe.RackForce().trail == fe.CASTER_TRAIL == 0.027
+    cp.set_power_class('rally')
+    rack = drive(fe.RackForce(), 0.010, 0.012, 60.0)             # a car whose force wants a short trail: learnt away from 37 mm
+    assert rack.trail < 0.037 - 0.003

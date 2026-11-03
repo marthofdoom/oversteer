@@ -119,6 +119,7 @@ def test_the_setters_reach_the_child_and_the_status_comes_back(tmp_path, proxy):
     p.set_column_damping(45)
     p.set_rim_mm(300)
     p.set_car_wheel_mm(400)
+    p.set_power_class('street')
     p.set_lightness(70)
     p.set_linearity(30)
     p.set_texture(0.5, {'road': True, 'kerb': False})
@@ -131,7 +132,7 @@ def test_the_setters_reach_the_child_and_the_status_comes_back(tmp_path, proxy):
     assert got['enabled'] is True and got['path'] == path and got['usb_id'] == '046d:c24f'
     assert got['strength'] == 90 and got['knee'] == 45 and got['mapping'] == 'classic'
     assert got['pull'] == (True, 40.0) and got['kick'] == (True, 60.0) and got['damping'] == 45.0
-    assert got['rim'] == 300.0 and got['car_wheel'] == 400.0
+    assert got['rim'] == 300.0 and got['car_wheel'] == 400.0 and got['power_class'] == 'street'
     assert got['lightness'] == 70 and got['linearity'] == 30
     assert got['texture'] == (0.5, {'road': True, 'kerb': False})
     assert got['dynamics'] == (False, True, True) and got['wheel'] == {'damping': 1}

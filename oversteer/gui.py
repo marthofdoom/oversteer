@@ -665,6 +665,7 @@ class Gui:
         self.apply_countersteer_column_damping()
         self.apply_countersteer_rim_mm()
         self.apply_countersteer_car_wheel_mm()
+        self.apply_countersteer_power_class()
         self.apply_countersteer_drive_pull()
         self.apply_countersteer_kick()
         self.apply_countersteer_linearity()
@@ -694,6 +695,10 @@ class Gui:
     def apply_countersteer_rim_mm(self):
         """The wheel's rim diameter (FFB tab; 0: the table's) to the engine."""
         self.ffb_engine.set_rim_mm(self.model.get_countersteer_rim_mm_setting())
+
+    def apply_countersteer_power_class(self):
+        """The assist class (profile INI only: rally / street / off) to the engine."""
+        self.ffb_engine.set_power_class(self.model.get_countersteer_power_class())
 
     def apply_countersteer_car_wheel_mm(self):
         """The car's steering wheel diameter (FFB tab) to the engine."""
@@ -795,7 +800,7 @@ class Gui:
                 except Exception:
                     pass
                 from . import ffb_carprops
-                if ffb_carprops.power_settings()[0] == 'off':
+                if ffb_carprops.power_settings()[0] == 'off' or self.model.get_countersteer_power_class() == 'off':
                     parts.append(_("power steering: off in the INI"))
                 else:
                     parts.append(_("power steering: detected") if model.assist > 0.5 else _("power steering: absent"))
