@@ -3,8 +3,10 @@ synthetic OVST v5 streams with the game's own force as the driver's game_ffb_raw
 classifier's states and transitions, the fit and the strength, the crossfades, every stop path writing
 game_ffb_level 100, stall detection, the wheel's owner, and an engine that can never hold up the telemetry
 listener. Nothing here touches a real wheel or /sys."""
+import logging
 import math
 import os
+import select
 import threading
 import time
 
@@ -1343,3 +1345,112 @@ def test_rim_torque_uses_the_clamped_mz():
     spike = tyre_sample(949.0, -8627.0)
     plain = tyre_sample(fe.TP_MAX * 8627.0, -8627.0)         # exactly at the limit
     assert model.rim_torque(spike) == pytest.approx(model.rim_torque(plain))
+
+
+# -- the event-driven game_ffb_raw intake --
+
+class NotifyDriver(FakeDriver):
+    """A pipe standing in for sysfs_notify: a byte written is the driver's upload wake-up (POLLIN, as a pipe
+    reports it); read_raw drains it, the way the read at offset 0 re-arms."""
+
+    def __init__(self, path):
+        super().__init__(path)
+        self.r, self.w = os.pipe()
+        self.NOTIFY_EVENTS = select.POLLIN
+
+    def notify_fd(self):
+        return self.r, self.NOTIFY_EVENTS
+
+    def read_raw(self):
+        try:
+            os.read(self.r, 64)
+        except BlockingIOError:
+            pass
+        return super().read_raw()
+
+
+class SilentDriver(FakeDriver):
+    """A driver or fake with no way to be notified."""
+    notify_fd = None
+
+
+def notified_engine(tmp_path, driver=NotifyDriver):
+    path = wheel(tmp_path)
+    engine = fe.FfbEngine(driver=driver)
+    engine.set_device(path)
+    engine.set_enabled(True)
+    engine.step(0.0)
+    engine._wake.clear()
+    engine.classifier.has_game_ffb_raw = True
+    engine._fast = lambda: True
+    if driver is NotifyDriver:
+        os.set_blocking(engine._driver.r, False)
+    return engine
+
+
+def test_a_game_ffb_raw_upload_wakes_the_wait_and_its_read_lag_is_logged(tmp_path, caplog):
+    engine = notified_engine(tmp_path)
+    driver = engine._driver
+    began = time.monotonic()
+    threading.Timer(0.05, os.write, (driver.w, b'x')).start()
+    engine._wait(2.0)
+    assert 0.03 < time.monotonic() - began < 1.0           # woken by the upload, not the 2 s timeout
+    assert engine._raw_wake_at is not None
+    upload(1000)
+    engine._raw(time.monotonic())
+    assert engine._raw_wake_at is None and len(engine._raw_lags) == 1 and engine._raw_reads == 1
+    engine._raw(time.monotonic())                          # a read without a wake: counted, no lag
+    assert len(engine._raw_lags) == 1 and engine._raw_reads == 2
+    engine._phase = 'on'
+    with caplog.at_level(logging.INFO):
+        engine._release('test', 0.0)
+    assert any('wake to read: median' in r.message and '1 of 2 reads' in r.message for r in caplog.records)
+    assert engine._raw_lags == [] and engine._raw_reads == 0
+
+
+def test_the_other_wake_still_ends_the_wait_beside_game_ffb_raw(tmp_path):
+    engine = notified_engine(tmp_path)
+    began = time.monotonic()
+    threading.Timer(0.05, engine._wake.set).start()
+    assert engine._wait(2.0)
+    assert time.monotonic() - began < 1.0 and engine._raw_wake_at is None
+    engine._wake.clear()
+    assert not engine._wait(0.02)                          # neither: the pass period ends it
+    engine._wake.set()
+    assert engine._wait(2.0)                               # already set: at once
+    engine._wake.close()
+
+
+def test_without_notification_the_wait_falls_back_to_its_timeout(tmp_path):
+    engine = notified_engine(tmp_path, driver=SilentDriver)
+    assert engine.raw_wait() is None
+    began = time.monotonic()
+    assert not engine._wait(0.05)
+    assert time.monotonic() - began >= 0.04
+    threading.Timer(0.02, engine._wake.set).start()
+    assert engine._wait(2.0)
+    engine._wake.close()
+
+
+def test_no_fd_is_watched_when_the_force_is_not_read_each_pass(tmp_path):
+    engine = notified_engine(tmp_path)
+    assert engine.raw_wait() is not None
+    engine._fast = lambda: False
+    assert engine.raw_wait() is None
+
+
+def test_the_real_driver_detects_notification_and_gives_up_when_stuck(tmp_path):
+    path = wheel(tmp_path)
+    driver = fe.DriverReplace(path)
+    fd, events = driver.notify_fd()                        # a plain file is never signalled: treated as armed
+    assert events == select.POLLPRI | select.POLLERR and driver.read_raw() == (0, 0, -1)
+    stuck = fe.DriverReplace(path)
+    stuck._ready = lambda timeout: True                    # signalled again right after the re-arming read
+    assert stuck.notify_fd() is None
+    quiet = fe.DriverReplace(path)
+    assert quiet.notify_fd() is not None
+    quiet._ready = lambda timeout: True
+    quiet.read_raw()
+    assert quiet.notify_fd() is None                       # and a later stuck read switches it off
+    for d in (driver, stuck, quiet):
+        d.close()

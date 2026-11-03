@@ -886,11 +886,18 @@ class _Host:
         self._flush()
         inputs = [self.data, self.ctrl, self.sig_r] + list(self.udp.values())
         outputs = [self.relay] if self.out else []
+        watch = engine.raw_wait()
         try:
-            readable = select.select(inputs, outputs, [], timeout)[0]
+            if watch is None:
+                readable = select.select(inputs, outputs, [], timeout)[0]
+            else:
+                readable = self._poll(inputs, outputs, watch, timeout)
         except (InterruptedError, ValueError, OSError):
             readable = []
         now = time.monotonic()
+        if watch is not None and watch[0] in readable:
+            engine.raw_woke(now)
+            readable.remove(watch[0])
         if not readable and timeout > 0.0:
             self.oversleep_max = max(self.oversleep_max, now - began - timeout)
         if self.sig_r in readable:
@@ -906,6 +913,25 @@ class _Host:
             self._flush()
         if now - self.last_ctrl > HEARTBEAT_TIMEOUT:
             self.stop('no word from the GUI for %.1f s' % (now - self.last_ctrl))
+
+    @staticmethod
+    def _poll(inputs, outputs, watch, timeout):
+        """select's readable list, by poll() so game_ffb_raw's fd (watch: fd, events: POLLPRI|POLLERR) can be
+        waited on too; the fd itself is in the list when it was signalled."""
+        poller = select.poll()
+        for sock in inputs:
+            poller.register(sock, select.POLLIN)
+        for sock in outputs:
+            poller.register(sock, select.POLLOUT)
+        poller.register(watch[0], watch[1])
+        fds = {sock.fileno() if hasattr(sock, 'fileno') else sock: sock for sock in inputs}
+        readable = []
+        for fd, event in poller.poll(timeout * 1000.0):
+            if fd == watch[0]:
+                readable.append(fd)
+            elif fd in fds and event & ~select.POLLOUT:
+                readable.append(fds[fd])
+        return readable
 
     def _samples(self):
         engine = self.engine
