@@ -47,6 +47,11 @@ SHAPING = ('ffb_lut', 'ffb_deadband', 'ffb_dither', 'ffb_soft_clip')
 # it is there, put back after. (ffb_thermal_limit is left on: a run's duty, mean force^2 about 0.04 over any
 # 90 s, is far below it.)
 OPTIONAL_ATTRS = ('ffb_output_cap',)
+# The driver's virtual steering dynamics (new-lg4ff ffb_dyn_*, ffb_align), where it has them: they play in replace mode,
+# so the run writes them off (0 / "0 0 0") and puts back what they were. ffb_align reads a 4th field (k_limit) that
+# is not written back.
+DYN_ATTRS = ('ffb_dyn_damping', 'ffb_dyn_friction', 'ffb_align')
+DYN_OFF = {'ffb_dyn_damping': '0', 'ffb_dyn_friction': '0', 'ffb_align': '0 0 0'}
 # What a crash record puts back first even while Countersteer FFB plays (the engine needs the cap, gain and range
 # back; the forces and the correction wait until the wheel is free)
 PARTIAL_RESTORE = ('ext_force_cap', 'ffb_output_cap', 'gain', 'range', 'autocenter')
@@ -348,6 +353,12 @@ class Calibration:
                 self.saved[name] = io.read(name)
             except (OSError, KeyError, ValueError):
                 pass                        # an older driver
+        for name in DYN_ATTRS:
+            try:
+                value = io.read(name)
+            except (OSError, KeyError, ValueError):
+                continue                    # an older driver
+            self.saved[name] = ' '.join(str(value).split()[:3]) if name == 'ffb_align' else str(value).strip()
         self.saved['gain'] = io.get_gain()
         self.saved['autocenter'] = io.get_autocenter()
         self.saved['range'] = io.get_range()
@@ -363,6 +374,9 @@ class Calibration:
         io.write('ffb_deadband', '0')
         io.write('ffb_dither', '0')
         io.write('ffb_soft_clip', '0')
+        for name in DYN_ATTRS:
+            if name in self.saved:
+                io.write(name, DYN_OFF[name])
         if self.saved.get('ffb_output_cap') is not None:
             io.write('ffb_output_cap', '100')
         max_range = io.max_range()
@@ -1172,7 +1186,7 @@ def restore_saved(io, saved, asked=None, only=None):
     if only is None:
         attempt(io.force, 0)
         attempt(io.write, 'game_ffb_level', '100')
-    for name in SHAPING + ('ext_force_cap',) + OPTIONAL_ATTRS:
+    for name in SHAPING + ('ext_force_cap',) + OPTIONAL_ATTRS + DYN_ATTRS:
         if saved.get(name) is not None and (only is None or name in only):
             attempt(io.write, name, saved[name])
     for key, setter in (('gain', io.set_gain), ('range', io.set_range), ('autocenter', io.set_autocenter)):
@@ -1678,15 +1692,16 @@ def compensated_deadband(result, percent=0):
     return max(0, min(deadband, ceiling))
 
 
-def compensated_lut(result, percent):
+def compensated_lut(result, percent, friction=None):
     """The ffb_lut for a stored result with `percent` of the measured Coulomb friction cancelled: the torque is
     built for the request x as c + (1 - c) * x (c = share * friction, a share of the full-scale torque), so the
     smallest force just about overcomes the friction and full scale stays full scale. c is at most
     FRICTION_COMP_CAP of the torque at the breakaway command (past that the wheel would move by itself) and
-    the share at most FRICTION_COMP_MAX_PERCENT. Without a usable curve or friction, the plain LUT."""
+    the share at most FRICTION_COMP_MAX_PERCENT. Without a usable curve or friction, the plain LUT. `friction`
+    (a share of full scale) replaces the measured one: the driver's live re-identification (ffb_dyn_live)."""
     lut = result['lut']
     share = _clamped_int(percent, 0, FRICTION_COMP_MAX_PERCENT) / 100.0
-    friction = _share(result.get('friction'))
+    friction = _share(result.get('friction') if friction is None else friction)
     breakaway = _share(result.get('breakaway'))
     if not share or friction is None or breakaway is None:
         return list(lut)
@@ -1707,26 +1722,27 @@ def compensated_lut(result, percent):
     return new if wc.plausible_lut(new) else list(lut)
 
 
-def correction_values(entry):
+def correction_values(entry, live_friction=None):
     """{attribute: text} to write for a store entry: the LUT and deadband (with any friction compensation)
     when the correction is on and the entry is valid, identity and 0 otherwise; the dither and soft clip as
-    chosen."""
+    chosen. `live_friction` (share of full scale, from the driver's ffb_dyn_live) stands in for the measured friction
+    in the friction compensation."""
     entry = entry if isinstance(entry, dict) else {}
     use = bool(entry.get('use')) and valid_entry(entry)
     result = entry.get('result') if use else None
     return {
-        'ffb_lut': ' '.join(str(v) for v in compensated_lut(result, entry.get('friction_comp'))) if use else 'identity',
+        'ffb_lut': ' '.join(str(v) for v in compensated_lut(result, entry.get('friction_comp'), live_friction)) if use else 'identity',
         'ffb_deadband': str(compensated_deadband(result, entry.get('friction_comp'))) if use else '0',
         'ffb_dither': '1' if entry.get('dither') is True else '0',
         'ffb_soft_clip': str(_clamped_int(entry.get('soft_clip'), 0, 100)),
     }
 
 
-def apply_correction(write, entry):
+def apply_correction(write, entry, live_friction=None):
     """Write an entry's correction with write(name, text); False if anything failed (a broken entry writes
     identity and 0)."""
     try:
-        values = correction_values(entry)
+        values = correction_values(entry, live_friction)
     except Exception as e:
         logging.warning("wheel correction: %s", e)
         values = correction_values({})
@@ -1757,4 +1773,17 @@ def summary(result):
     if result.get('partial'):
         text += ' ' + _("(the time ran out in \"{}\": only the first pass was measured)").format(
             result.get('timed_out_in') or '')
+    return text
+
+
+def apply_dyn_wheel(write, entry):
+    """Write an entry's measured wheel (damping, inertia, friction, breakaway, latency) to the driver's
+    ffb_dyn_wheel with write(name, text), for its virtual steering dynamics; the text, or None when the entry has no
+    usable figures. A driver without the attribute raises OSError from write: the caller skips it."""
+    from . import ffb_dynamics
+    values = ffb_dynamics.wheel_values(entry.get('result') if isinstance(entry, dict) else None)
+    if values is None:
+        return None
+    text = ffb_dynamics.wheel_text(values)
+    write('ffb_dyn_wheel', text)
     return text

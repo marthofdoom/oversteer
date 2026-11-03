@@ -541,6 +541,18 @@ class Device:
         except (OSError, ValueError, IndexError):
             return None
 
+    def get_ffb_hands(self):
+        """The driver's ffb_hands as (torque in per mille of full scale, hands on), read only; None when the
+        driver has no such attribute (an older one) or it does not read as numbers."""
+        from .ffb_dynamics import Dynamics
+        return Dynamics(self.dev_path).hands() if self.dev_path else None
+
+    def get_ffb_dyn_live(self):
+        """The driver's ffb_dyn_live as (friction in 1e-4 FS, damping in uFS per deg/s, seconds of samples), read
+        only; None when absent or unreadable. 0.0 seconds: not enough samples yet (the figures are ffb_dyn_wheel's)."""
+        from .ffb_dynamics import Dynamics
+        return Dynamics(self.dev_path).live() if self.dev_path else None
+
     TIMER_MSECS_FILE = "/sys/module/hid_logitech_new/parameters/timer_msecs"
 
     def get_ffb_tick_ms(self):

@@ -78,6 +78,9 @@ class Model:
         'countersteer_texture_engine': None,
         'countersteer_linearity': None,
         'countersteer_lightness': None,
+        'countersteer_column': None,
+        'countersteer_align': None,
+        'countersteer_friction_removal': None,
     }
 
     types = {
@@ -124,6 +127,9 @@ class Model:
         'countersteer_texture_engine': 'boolean',
         'countersteer_linearity': 'integer',
         'countersteer_lightness': 'integer',
+        'countersteer_column': 'boolean',
+        'countersteer_align': 'boolean',
+        'countersteer_friction_removal': 'boolean',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -219,6 +225,7 @@ class Model:
         }
 
     TEXTURE_PARTS = ('road', 'impact', 'lock', 'engine')
+    DYNAMICS_KEYS = {'countersteer_column': True, 'countersteer_align': True, 'countersteer_friction_removal': False}
 
     @classmethod
     def _texture_defaults(cls, supported):
@@ -235,6 +242,10 @@ class Model:
         data['countersteer_linearity'] = LINEARITY if supported else None
         # Forza Horizon: how much of the add-on's lightening is played (ffb_addon)
         data['countersteer_lightness'] = int(round(STRENGTH * 100)) if supported else None
+        # The driver's virtual steering dynamics (ffb_dynamics): the car's column feel and the local alignment spring
+        # on, friction removal (a column lighter than the wheel's own) off
+        for key, on in cls.DYNAMICS_KEYS.items():
+            data[key] = on if supported else None
         return data
 
     def pedal_bit(self, name):
@@ -703,6 +714,19 @@ class Model:
         from .ffb_addon import STRENGTH
         value = self.data.get('countersteer_lightness')
         return int(round(STRENGTH * 100)) if value is None else value
+
+    def set_countersteer_dynamics(self, key, value):
+        """One of the driver's virtual steering dynamics switches (DYNAMICS_KEYS): column feel, local alignment
+        spring, friction removal."""
+        if key not in self.DYNAMICS_KEYS:
+            raise KeyError(key)
+        if self.set_if_changed(key, bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_dynamics()
+
+    def get_countersteer_dynamics(self):
+        """(column feel, local alignment spring, friction removal) for the engine."""
+        return tuple(bool(self.data.get(key)) if self.data.get(key) is not None else default
+                     for key, default in self.DYNAMICS_KEYS.items())
 
     def get_countersteer_texture(self):
         """(level 0..1, {part: on}) for the engine."""
