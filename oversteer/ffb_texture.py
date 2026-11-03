@@ -46,13 +46,20 @@ telemetry arrives at 60 a second would have it 16 ms late and alias the
 road band, so it needs its own parts (or none) first. Richard Burns Rally:
 the road part from the strut velocity (susp_vel, FL minus FR) and the impact
 from the tyre load, stepped with each telemetry sample; no lock part (it has
-no wheel speeds); the engine hum from the rpm."""
+no wheel speeds); the engine hum from the rpm.
+
+Forza Horizon ('forza-fh', ForzaCues): its telemetry is 60 a second, so the parts that live above 20 Hz are made by
+oscillators the engine steps every pass (1 ms) from the newest sample, and the sample-driven ones are band-limited to
+20 Hz: the road from the FL - FR travel rate, 4 to 20 Hz only; the surface (surface_rumble) as 20 to 40 Hz noise; a
+rumble strip under a front wheel as a sawtooth at the speed over the strip pitch (to 70 Hz); landings from the
+suspension travel (all four under 0.02 of travel, then the fronts rising). No lock part. The engine hum is the same."""
 import math
 
 FULL = 32767                             # ext_force full scale (ffb_engine.FULL)
 
-TEXTURE_GAMES = ('acr', 'rbr')           # the games it is tuned for (the hook for others)
-NO_LOCK_GAMES = ('rbr',)                 # ... of which these send no wheel speeds: the lock part is off
+TEXTURE_GAMES = ('acr', 'rbr', 'forza-fh')   # the games it is tuned for (the hook for others)
+NO_LOCK_GAMES = ('rbr', 'forza-fh')      # ... of which these send no wheel speeds (or are made differently): the lock part is off
+FORZA_GAMES = ('forza-fh',)              # ... and these are Forza's, 60 a second (ForzaCues)
 SUSP_VEL_GAMES = ('rbr',)                # ... and these send the strut velocity itself (no travel to differentiate)
 
 PARTS = ('road', 'impact', 'lock', 'engine')
@@ -126,8 +133,9 @@ class RoadTexture:
     V_REF = 0.25                         # m/s band-passed for tanh(1) of the cap
     CAP = 0.04
 
-    def __init__(self):
-        self._hp1, self._hp2, self._lp = _HighPass(self.HP_HZ), _HighPass(self.HP_HZ), _LowPass(self.LP_HZ)
+    def __init__(self, hp_hz=None, lp_hz=None):
+        self._hp1, self._hp2 = _HighPass(hp_hz or self.HP_HZ), _HighPass(hp_hz or self.HP_HZ)
+        self._lp = _LowPass(lp_hz or self.LP_HZ)
         self.reset()
 
     def reset(self):
@@ -274,6 +282,144 @@ class ImpactPulse:
             return sign * amplitude * math.sin(math.pi * age / self.LEAD)
         # Same area as the first lobe, over RETURN
         return -sign * amplitude * (self.LEAD / self.RETURN) * math.sin(math.pi * (age - self.LEAD) / self.RETURN)
+
+
+class ForzaImpact(ImpactPulse):
+    """A landing in Forza, from the suspension travel (susp_norm, 0..1 of the travel): all four wheels under AIR for
+    AIR_TIME s is airborne; when one comes down and the fronts' mean travel then rises by RISE_MIN within ARM s, one
+    pulse (ImpactPulse's shape, no known direction: the symmetric pair), rate-limited by HOLD. Stepped every pass
+    (`dt`), judged on each new sample (`sdt`: the sample interval)."""
+
+    AIR = 0.02
+    AIR_TIME = 0.05
+    ARM = 0.15                           # s after touching down in which the fronts' rise counts
+    RISE_MIN = 0.02                      # of the travel, from one sample to the next
+    RISE_REF = 0.20                      # the rise for the full cap
+
+    def reset(self):
+        super().reset()
+        self._air = 0.0
+        self._armed = None               # time until which a rise of the fronts is a landing
+        self._front = None
+
+    def step(self, dt, sample, new=False, sdt=0.0):
+        if sample.car != self._car:
+            self._car = sample.car
+            self.reset()
+        self._t += dt
+        if new:
+            self._detect_forza(sdt, sample)
+        return self._value(self._t)
+
+    def _detect_forza(self, sdt, sample):
+        t = self._t
+        travel = _finite(sample.susp_norm, 4)
+        if travel is None:
+            self._air, self._armed, self._front = 0.0, None, None
+            return
+        front = 0.5 * (travel[0] + travel[1])
+        before, self._front = self._front, front
+        if max(travel) < self.AIR:
+            self._air += sdt
+            return
+        if self._air >= self.AIR_TIME:
+            self._armed = t + self.ARM   # down again after a flight
+        self._air = 0.0
+        if self._armed is None or t > self._armed or before is None:
+            return
+        rise = front - before
+        if rise < self.RISE_MIN or (self._last is not None and t - self._last < self.HOLD):
+            return
+        share = min(max(self.LOW + (1.0 - self.LOW) * rise / self.RISE_REF, self.LOW), 1.0)
+        self._pulse = (t, 0.0, share * self.CAP * FULL)
+        self._last = t
+        self._armed = None
+        self.count += 1
+
+
+class ForzaCues:
+    """Forza Horizon's road, surface, kerb and landings (see the module's docstring), for a stream of 60 a second.
+
+    - road: RoadTexture on the travel (FL - FR rate), 4 to 20 Hz, from each new sample, then a low-pass each pass so the
+      60/s staircase does not buzz.
+    - surface: noise in 20 to 40 Hz (a sum of SURFACE_HZ sines), amplitude surface_rumble (the fronts' mean) x
+      min(1, speed / SURFACE_SPEED), at most SURFACE_CAP of full scale.
+    - kerb: a front wheel's rumble flag on: a sawtooth at speed / KERB_PITCH Hz (at most KERB_MAX_HZ) of KERB_CAP.
+    - landings: ForzaImpact.
+    The oscillators run on the engine's pass time, so the 60/s packets only set their amplitude and rate."""
+
+    SURFACE_CAP = 0.02
+    SURFACE_SPEED = 15.0                 # m/s at which the surface is at full amplitude
+    SURFACE_HZ = (21.3, 24.7, 28.1, 31.9, 35.2, 38.6)
+    KERB_CAP = 0.03
+    KERB_PITCH = 0.45                    # m
+    KERB_MAX_HZ = 70.0
+    ENV_TAU = 0.02                       # s: the surface and kerb envelopes
+    ROAD_SMOOTH_HZ = 30.0
+    GAP = 0.1                            # s between samples past which the road starts again
+
+    def __init__(self):
+        self.road = RoadTexture(4.0, 20.0)
+        self.impact = ForzaImpact()
+        self._smooth = _LowPass(self.ROAD_SMOOTH_HZ)
+        self.reset()
+
+    def reset(self):
+        self.road.reset()
+        self.impact.reset()
+        self._smooth.reset()
+        self._sample = self._gt = None
+        self._road = 0.0
+        self._surface_target = 0.0
+        self._kerb_target = 0.0
+        self._kerb_hz = 0.0
+        self._surface_env = self._kerb_env = 0.0
+        self._surface_phase = [i * 1.7 for i in range(len(self.SURFACE_HZ))]
+        self._kerb_phase = 0.0
+        self.kerb_hz = 0.0               # Hz as played (tests, the log)
+
+    def _targets(self, sample):
+        speed = sample.speed if _finite_num(sample.speed) else 0.0
+        rumble = _finite(sample.surface_rumble, 2)
+        level = 0.5 * (rumble[0] + rumble[1]) if rumble is not None else 0.0
+        self._surface_target = min(max(level, 0.0) * min(speed / self.SURFACE_SPEED, 1.0), self.SURFACE_CAP)
+        flags = sample.rumble
+        self._kerb_target = 1.0 if flags is not None and len(flags) > 1 and (flags[0] or flags[1]) else 0.0
+        if self._kerb_target:
+            self._kerb_hz = min(max(speed, 0.0) / self.KERB_PITCH, self.KERB_MAX_HZ)
+
+    def step(self, t, dt, sample):
+        """(road part, landing part) in ext_force units for the pass `dt` after the last."""
+        new = sample is not self._sample
+        sdt = 0.0
+        if new:
+            gt = sample.game_time if _finite_num(sample.game_time) else t
+            last, self._gt, self._sample = self._gt, gt, sample
+            sdt = None if last is None else gt - last
+            if sdt is None or not 0.0 < sdt <= self.GAP:
+                self.road.reset()
+                self._road = 0.0
+                sdt = 0.0
+            else:
+                self._road = self.road.step(sdt, sample)
+            self._targets(sample)
+        k = dt / (self.ENV_TAU + dt)
+        self._surface_env += (self._surface_target - self._surface_env) * k
+        self._kerb_env += (self._kerb_target - self._kerb_env) * k
+        total = self._smooth.step(self._road, dt)
+        if self._surface_env > 1e-6:
+            noise = 0.0
+            for i, hz in enumerate(self.SURFACE_HZ):
+                self._surface_phase[i] = (self._surface_phase[i] + 2.0 * math.pi * hz * dt) % (2.0 * math.pi)
+                noise += math.sin(self._surface_phase[i])
+            total += FULL * self._surface_env * min(max(noise / 3.0, -1.0), 1.0)
+        if self._kerb_env > 1e-6:
+            self._kerb_phase = (self._kerb_phase + self._kerb_hz * dt) % 1.0
+            self.kerb_hz = self._kerb_hz
+            total += self.KERB_CAP * FULL * self._kerb_env * (2.0 * self._kerb_phase - 1.0)
+        else:
+            self.kerb_hz = 0.0
+        return total, self.impact.step(dt, sample, new, sdt)
 
 
 class LockCue:
@@ -476,6 +622,7 @@ class Texture:
     def __init__(self):
         self.road, self.impact, self.lock = RoadTexture(), ImpactPulse(), LockCue()
         self.engine = EngineHum()
+        self.forza = ForzaCues()
         self._env = 0.0                  # the limiter's peak follower of |sum|
         self._dc = _HighPass(DC_HZ)
         self.level = LEVEL               # requests (the GUI's thread); read here per sample
@@ -508,6 +655,7 @@ class Texture:
         self.impact.reset()
         self.lock.reset()
         self.engine.reset()
+        self.forza.reset()
         self._env = 0.0
         self._dc.reset()
         self._last = self._since = None
@@ -540,10 +688,14 @@ class Texture:
         moving = min(max((speed - MIN_SPEED) / MIN_SPEED, 0.0), 1.0)
         onset = min((t - self._since) / ONSET, 1.0)
         # The road, the landings and the lock need the car rolling; the engine's idle shake does not
-        lock = 0.0 if sample.game in NO_LOCK_GAMES else gains['lock'] * self.lock.step(dt, sample)
-        total = (gains['road'] * self.road.step(dt, sample) + gains['impact'] * self.impact.step(dt, sample)
-                 + lock) * moving \
-            + gains['engine'] * self.engine.step(dt, sample)
+        if sample.game in FORZA_GAMES:
+            road, impact = self.forza.step(t, dt, sample)
+            total = (gains['road'] * road + gains['impact'] * impact) * moving + gains['engine'] * self.engine.step(dt, sample)
+        else:
+            lock = 0.0 if sample.game in NO_LOCK_GAMES else gains['lock'] * self.lock.step(dt, sample)
+            total = (gains['road'] * self.road.step(dt, sample) + gains['impact'] * self.impact.step(dt, sample)
+                     + lock) * moving \
+                + gains['engine'] * self.engine.step(dt, sample)
         steering = abs(steering) if math.isfinite(steering) else 0.0
         total = self._dc.step(total, dt)
         # Within the headroom left by the steering force, so the engine's clamp never cuts one side

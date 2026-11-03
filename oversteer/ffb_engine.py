@@ -67,6 +67,11 @@ Three parts:
   constant force that is not the steering force (Forza on the
   spring/damper only); on app_gain too with ext_force (with the scale the
   game's FF_GAIN and ours apply to the same force).
+- ForzaRack (with countersteer_forza_model on, the default; ffb_forza): Forza Horizon plays Countersteer's own force through
+  the ACR chain. Forza sends no tyre forces, so the front kingpin torque is Newton's (the learnt mass, a_y and the yaw
+  acceleration, the pneumatic trail fading with the combined slip), through the boost curve and hand-force mapping, the 60/s
+  packets rebuilt by a low-pass that follows the packet rate (ffb_forza.OutputFilter), column damping, lock stop, texture
+  and Kickback beside it. The game's force (game_ffb_raw) is only a safety check. Off, ForzaLightness above.
 - Texture (ffb_texture): small vibrations from the same samples (road,
   landings, front lock), added on top of RackForce's force before the
   clamp and the fade gain, very low by default. ACR only for now.
@@ -91,6 +96,7 @@ from . import wheel_owner
 from . import car_data
 from . import ffb_carprops
 from . import ffb_dynamics
+from . import ffb_forza
 from . import ffb_kick
 from . import ffb_record
 from . import ffb_spring
@@ -141,6 +147,8 @@ OVERALL_STRENGTH = 1.0                   # "Steering strength" default: Counters
 STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied inside wheel_torque.rim_share before the mapping
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
+OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
+FORZA_CAR_WHEEL_MM = 375.0               # Forza's default car steering wheel (the profile's countersteer_car_wheel_mm wins once set)
 OVERALL_PULL = False                     # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
 OVERALL_PULL_LEVEL = 35                  # ... and its level, % of the physical scrub radius
 OVERALL_COLUMN_DAMPING = 64              # "Column damping" default: % of the real steering column's damping the knee mapping plays
@@ -968,6 +976,15 @@ class RackForce:
             return 'game'
         return 'model'
 
+    def _front(self, sample, trail, scrub):
+        """The kingpin torque (Nm) the chain starts from: the front tyres' Mz plus the caster and scrub terms
+        (front_torque, Mz limited to the implied trail); None without Mz. A game without tyre forces overrides it."""
+        return front_torque(sample, trail, scrub, clamp=True)
+
+    def kick_trigger(self, sample):
+        """An injected Kickback event (the step of Fx_FL - Fx_FR, N) for ffb_kick, None: the Fx and contact-normal test."""
+        return None
+
     def rim_torque(self, sample, trail=None, scrub=None, ratio=None, assist=None):
         """The driver's torque at the rim (Nm, signed like the front torque) for this sample, None without Mz.
         Our boost curve (class `assist` x countersteer_assist_strength) where the game's force has no assist;
@@ -978,7 +995,7 @@ class RackForce:
         # per-car scrub (self.scrub) is no longer played, it only serves the fit and the cross-check
         scrub = self.pull_scrub() if scrub is None else scrub
         hyd = not self.classic()
-        mz = front_torque(sample, trail, scrub, clamp=True)
+        mz = self._front(sample, trail, scrub)
         if mz is None:
             return None
         ratio = self.ratio if ratio is None else ratio
@@ -1096,12 +1113,17 @@ class RackForce:
                 share -= self._spring.force(theta_a, theta, k_fs, tau, self.align_k_limit, dt)
                 if self.align_writer is not None:
                     self.align_writer(theta_a, k_fs, tau)
-        share = self._kick.share(self, sample, share, ratio, assist)
+        share = self._kicked(sample, share, ratio, assist)
         limit = FULL * self._ceiling()
         vel = getattr(sample, 'vel', None)
         if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:
             limit = min(limit, FULL * REVERSE_MAX)
         return min(max(FULL * share, -limit), limit)
+
+
+    def _kicked(self, sample, share, ratio, assist):
+        """The steering share plus Kickback's pulse (ffb_kick)."""
+        return self._kick.share(self, sample, share, ratio, assist)
 
 
 class BeamNGRack(RackForce):
@@ -1451,6 +1473,160 @@ class RbrRack(RackForce):
         return ffb_carprops.driver_from_column(self.column, speed, self.ASSIST * ffb_carprops.power_settings()[1], hyd)
 
 
+class ForzaRack(RackForce):
+    """Forza Horizon through the same chain as ACR: the front kingpin torque from Newton (ffb_forza: Forza sends no
+    tyre forces) goes through the boost curve (driver_from_column, assist class 1.0), the hand-force mapping (rho,
+    knee, budget, RIM_SAFE_NM: RackForce.force, unchanged), and the engine plays the output filter (ffb_forza.OutputFilter),
+    column damping, lock stop, texture and Kickback beside it.
+
+    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), m the car's learnt mass (MassLearner, per car,
+      ffb_carprops.STORE; 1400 kg until learnt), rdot the yaw rate's central difference over the game's clock (known one
+      packet late: the difference is centred on the packet before the newest). A puddle under both fronts halves tp; one
+      under a single front adds Drive pull's couple, scrub x PULL_FRACTION m_f g / 2 (only while Drive pull is on, as the
+      scrub passed in is 0 otherwise).
+    - Constants: ratio 14 (no lock table), the car's wheel FORZA_CAR_WHEEL_MM (the profile's countersteer_car_wheel_mm wins
+      once the user has set one), assist 1.0, power steering always the model's. Nothing is learnt from the game's force
+      (LEARNS False: no TorqueLearner, AssistDetector, game-shaped assist or fit gate).
+    - Ready: the car moving (hysteresis) and known. The game's force, where fresh, is a safety check only: r(game_ffb_raw,
+      torque) at REVERSED_FIT or less over TAU s refuses ('mismatch', the engine says 'forza-mismatch').
+    - Kickback: the onset of a rumble strip under one front wheel, or of a puddle under one, is an event for ffb_kick with
+      a synthetic step of Fx_FL - Fx_FR of KICK_FRACTION m_f g / 2 (the wheel on that side loses forward force); the pulse
+      is added after the output filter (kick_force), so its edge stays sharp."""
+
+    LEARNS = False
+    STEER_RATIO = 14.0
+    ASSIST = 1.0
+    car_wheel_mm = FORZA_CAR_WHEEL_MM
+    MOVING_ON = MIN_SPEED                # m/s to start ...
+    MOVING_OFF = 0.3                     # ... and to stay
+    YAW_GAP = 0.1                        # s: yaw-rate samples further apart than this give no rdot
+    KICK_FRACTION = 0.3                  # of m_f g / 2: the synthetic step of Fx_FL - Fx_FR at a one-sided onset
+    PULL_FRACTION = 0.15                 # of m_f g / 2: a one-sided puddle's sustained drag difference
+    TRIGGER_HOLD = 0.1                   # s: an event not taken by Kickback in this long is dropped
+    MASS_SAVE_EVERY = 1.0                # s between hands of the learnt mass to the store
+    PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
+
+    @property
+    def mass(self):
+        return self.mass_l.mass
+
+    def reset(self, car=None):
+        stored = ffb_carprops.STORE.get_mass(car) if car is not None else None
+        self.mass_l = ffb_forza.MassLearner(stored)
+        self._yaw = collections.deque(maxlen=3)         # (game time, yaw rate)
+        self.rdot = 0.0
+        self._sides = (0, 0)                            # the one-sided rumble / puddle now (+1 FL, -1 FR)
+        self._trigger = None                            # (time, step of Fx_FL - Fx_FR)
+        self._mass_saved = None
+        self.moving = False
+        super().reset(car)
+        self.ratio, self.assist = self.STEER_RATIO, self.ASSIST
+        self.ratio_known = True
+
+    def _restart(self):
+        super()._restart()
+        self._corr = _Moments(self.TAU)
+        self.waiting = 'wait'
+
+    def power_steering(self):
+        return 'model'
+
+    def top_torque(self, ratio=None, assist=None):
+        return wheel_torque.HYD_TOP_NM
+
+    def _both_puddles(self, sample):
+        pud = sample.puddle
+        return pud is not None and len(pud) > 1 and bool(pud[0]) and bool(pud[1])
+
+    def _front(self, sample, trail=None, scrub=None):
+        """Newton's kingpin torque (ffb_forza), None without the acceleration. `scrub`: Drive pull's radius (m)."""
+        accel = sample.accel
+        if accel is None or len(accel) < 2 or not ffb_forza.finite(accel[1]):
+            return None
+        bl = ffb_forza.front_share(sample.drivetrain)
+        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot)
+        cs = sample.combined_slip
+        s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
+            and ffb_forza.finite(cs[1]) else 0.0
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0)
+        if scrub:
+            pud = sample.puddle
+            if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):
+                # the drag of the puddled side: Fx on that wheel falls, -scrub x (Fx_FL - Fx_FR) turns it into torque
+                torque += math.copysign(scrub * self.PULL_FRACTION * self.mass * bl * ffb_forza.G / 2.0,
+                                        1.0 if pud[0] else -1.0)
+        return torque
+
+    def _kicked(self, sample, share, ratio, assist):
+        return share                     # (after the output filter: kick_force)
+
+    def kick_force(self, sample):
+        """Kickback's pulse alone, ext_force units (0 with it off)."""
+        return FULL * self._kick.share(self, sample, 0.0, None, None)
+
+    def kick_trigger(self, sample):
+        event, self._trigger = self._trigger, None
+        if event is None or self._now - event[0] > self.TRIGGER_HOLD:
+            return None
+        return event[1]
+
+    def _track_yaw(self, t, sample):
+        r = sample.yaw_rate
+        if not ffb_forza.finite(r):
+            self._yaw.clear()
+            self.rdot = 0.0
+            return
+        self._yaw.append((sample.game_time if ffb_forza.finite(sample.game_time) else t, r))
+        if len(self._yaw) < 3:
+            self.rdot = 0.0
+            return
+        (t0, r0), (_t1, _r1), (t2, r2) = self._yaw
+        if 0.0 < t2 - t0 <= 2.0 * self.YAW_GAP:
+            self.rdot = (r2 - r0) / (t2 - t0)     # centred on the middle packet
+        else:
+            self.rdot = 0.0
+
+    def _events(self, t, sample, bl):
+        """The onset of a rumble strip under one front wheel, or of a puddle under one: an event for Kickback."""
+        def side(flags):
+            if flags is None or len(flags) < 2:
+                return 0
+            a, b = bool(flags[0]), bool(flags[1])
+            return 1 if a and not b else -1 if b and not a else 0
+        sides = (side(sample.rumble), side(sample.puddle))
+        for now, before in zip(sides, self._sides):
+            if now and now != before:
+                step = -self.KICK_FRACTION * self.mass * bl * ffb_forza.G / 2.0 * now
+                self._trigger = (self._now, step)
+        self._sides = sides
+
+    def feed(self, t, sample, raw, new=True):
+        """A telemetry sample with the game's raw level now (None if none fresh): the mass, the yaw acceleration, the
+        events, the safety check and readiness."""
+        if sample.car != self.car:
+            self.reset(sample.car)
+        dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
+        self._last = self._now = t
+        speed = sample.speed if ffb_forza.finite(sample.speed) else 0.0
+        self.moving = speed > (self.MOVING_OFF if self.moving else self.MOVING_ON)
+        self._track_yaw(t, sample)
+        self.mass_l.add(t, sample)
+        if self.car is not None and self.mass_l.accepted and (self._mass_saved is None or t - self._mass_saved >= self.MASS_SAVE_EVERY):
+            self._mass_saved = t
+            ffb_carprops.STORE.set_mass(self.car, self.mass)
+        self._events(t, sample, ffb_forza.front_share(sample.drivetrain))
+        torque = self._front(sample, self.trail, 0.0)
+        if raw is not None and torque is not None and speed > MIN_SPEED and dt > 0.0:
+            self.moving_time += dt
+            self._corr.add(torque, raw, dt, abs(raw) < self.RAW_CLIPPED)
+        corr = self._corr
+        self.fit = corr.r()
+        self.refused = 'mismatch' if (self.moving_time >= self.MIN_TIME and corr.spread() >= self.MIN_SPREAD
+                                      and self.fit is not None and self.fit <= self.REVERSED_FIT) else None
+        self.ready = bool(self.moving and self.car is not None and not self.refused)
+        self.waiting = None if self.ready else 'mismatch' if self.refused else 'wait'
+
+
 class _CsbRate:
     """CSB1's rate in packets per second of the game's clock (its seq over its game_time, so the bursts of a
     frame do not count against it) and whether that clock is moving."""
@@ -1621,6 +1797,8 @@ REGAINS = 1.0                            # s between reads of app_gain while RBR
 RBR_STREAM_GAP = 2.0                     # s without a new upload: RBR's stream restarted (its STRENGTH may differ)
 CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time at most (one per physics step) ...
 CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ahead is another vehicle's
+FZ_STALL = 0.25                          # s without a Forza sample while ForzaRack plays: released (frame hitches are shorter)
+FZ_LOCK_STEER = 0.97                     # |steer| at or over which the lock stop of Forza's wheel acts
 FH_STALL = 0.05                          # s without a Forza sample while adding (3 of its ~60/s): cut at once
 FH_FRESH_UPLOADS = 3.0                   # Forza: raw is fresh for this many of the game's upload intervals ...
 FH_FRESH_MIN = 0.03                      # ... at least (s), at most RAW_FRESH
@@ -1733,6 +1911,13 @@ class FfbEngine:
         self.rbr_rack = RbrRack()        # ... and its column torque through our chain (RackForce's)
         self.beamng = BeamNGRack()       # BeamNG: the mod's rack force
         self.addon = ForzaLightness()    # Forza Horizon: lighter as the front tyres run out of grip
+        self.forza_rack = ForzaRack()    # ... or, with countersteer_forza_model on (the default), its force from Newton through our chain
+        self.forza_filter = ffb_forza.OutputFilter(FULL)
+        self._forza_model = OVERALL_FORZA_MODEL      # ForzaRack (True) or ForzaLightness (False) for Forza Horizon
+        self._forza_model_req = None     # the profile INI's countersteer_forza_model from the GUI
+        self._fz_sample = None           # the last Forza sample (ForzaRack)
+        self._fz_force_sample = None     # ... the one the rack's share was last worked out for ...
+        self._fz_force = 0.0             # ... and that share (ext_force units, before the output filter)
         self._lightness_req = None       # its strength (0..1) from the GUI
         self._strength_req = None        # the overall steering strength (%) from the GUI
         self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
@@ -1767,8 +1952,8 @@ class FfbEngine:
         self._scale_seen = 0             # the slot seq of the Forza sample the last scale write answered
         self.scale_writes = 0            # game_const_scale writes (tests, the log)
         self.texture = Texture()
-        self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng', 'forza'
-                                         # (each pass)
+        self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng', 'forza' (the add-on),
+                                         # 'forza-rack' (each pass)
         self._played_mode = None         # the mode of the force playing
         self._mode_at = None             # when the mode's game was last heard
         self._linearity_req = None       # RBR's linearity from the GUI
@@ -1924,6 +2109,12 @@ class FfbEngine:
         self._mapping_req = 'classic' if value == 'classic' else 'knee'
         self._wake.set()
 
+    def set_forza_model(self, on):
+        """Forza Horizon (profile INI only, countersteer_forza_model): True plays Countersteer's own force through the ACR
+        chain (ForzaRack), False keeps the game's force lightened as the front tyres run out of grip (ForzaLightness)."""
+        self._forza_model_req = bool(on)
+        self._wake.set()
+
     def set_drive_pull(self, on, level):
         """Drive pull: the scrub couple of the drive's left/right split in the steering force, on or off, at `level` %
         of the physical scrub radius."""
@@ -1978,7 +2169,7 @@ class FfbEngine:
         """The wheel's model (USB vendor:product), for the peak torque the steering force is mapped to
         (wheel_torque; unknown: the relative target). Set before set_device."""
         self._usb_id = usb_id
-        for rack in (self.model, self.rbr_rack):
+        for rack in (self.model, self.rbr_rack, self.forza_rack):
             rack.wheel_peak = wheel_torque.peak_nm(usb_id)        # one attribute swap, read by the engine thread
             rack.wheel_rim = wheel_torque.rim_mm(usb_id)
 
@@ -2131,6 +2322,8 @@ class FfbEngine:
             self._beamng_tick(now)
         elif self._mode == 'forza':
             self._forza_tick(now)
+        elif self._mode == 'forza-rack':
+            self._forza_rack_tick(now)
 
     def _drain(self):
         """Every packet the listener offered since the last pass, in order, to the classifier's gap measure."""
@@ -2146,7 +2339,7 @@ class FfbEngine:
     def _fast(self):
         """RBR, BeamNG or Forza's add-on playing or about to: their force is read each FAST_POLL, not per telemetry sample."""
         heard = self._mode_at is not None and self._clock() - self._mode_at <= NONE_AFTER
-        return (self._mode in ('rbr', 'beamng', 'forza') and self._enabled and self._available and not self._broken
+        return (self._mode in ('rbr', 'beamng', 'forza', 'forza-rack') and self._enabled and self._available and not self._broken
                 and self._path is not None and (heard or self._phase != 'idle'))
 
     def _requests(self, now):
@@ -2158,24 +2351,33 @@ class FfbEngine:
             self._strength = min(max(float(strength), 0.0), STRENGTH_MAX * 100.0) / 100.0
         knee = self._knee_req
         if knee is not None:
-            for rack in (self.model, self.rbr_rack):
+            for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.knee = min(max(float(knee) / 100.0, wheel_torque.KNEE_RANGE[0]), wheel_torque.KNEE_RANGE[1])
         if self._mapping_req is not None:
-            for rack in (self.model, self.rbr_rack):
+            for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.mapping = self._mapping_req
         if self._pull_req is not None:
-            self.model.pull_on, self.model.pull_level = self._pull_req[0], self._pull_req[1] / 100.0
+            for rack in (self.model, self.forza_rack):
+                rack.pull_on, rack.pull_level = self._pull_req[0], self._pull_req[1] / 100.0
         if self._kick_req is not None:
-            self.model.kick_on, self.model.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
+            for rack in (self.model, self.forza_rack):
+                rack.kick_on, rack.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
         if self._damping_req is not None:
-            for rack in (self.model, self.rbr_rack):
+            for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.damping_pct = self._damping_req
         if self._rim_req is not None:
-            for rack in (self.model, self.rbr_rack):
+            for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.rim_user = self._rim_req or None
         if self._car_wheel_req is not None:
             for rack in (self.model, self.rbr_rack):
                 rack.car_wheel_mm = self._car_wheel_req
+            # (the profile's default is the rally car's 350 mm: only a value the user changed wins over Forza's 375)
+            if self._car_wheel_req != wheel_torque.CAR_WHEEL_MM:
+                self.forza_rack.car_wheel_mm = self._car_wheel_req
+            else:
+                self.forza_rack.car_wheel_mm = FORZA_CAR_WHEEL_MM
+        if self._forza_model_req is not None:
+            self._forza_model = self._forza_model_req
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2208,6 +2410,8 @@ class FfbEngine:
             self._rbr_new_at = self._rbr_sample = self._gains_at = None
             self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
             self.rbr_rack.reset()
+            self.forza_rack.reset()
+            self.forza_filter.reset()
             self.addon.reset()
             self._fh_level = self._fh_fresh = None
             self._fh_scale, self._scale_last, self._scale_at = False, None, None
@@ -2315,13 +2519,14 @@ class FfbEngine:
         local alignment spring (the model plays the residual) once the car's ratio and lock are known and the fit is
         ready, the driver reports a spring and the wheel's range is known."""
         stage, model = self._dyn, self.model
-        if stage is None or not stage.usable() or self._played_mode not in ('acr', 'rbr'):
+        if stage is None or not stage.usable() or self._played_mode not in ('acr', 'rbr', 'forza-rack'):
             model.align_on = False
             return
         stage.poll(t)
-        if self._played_mode == 'rbr':
-            # RBR: the column's damping and friction only (no aligning split, no frame check: the lock sits at range / 2)
-            rack = self.rbr_rack
+        if self._played_mode in ('rbr', 'forza-rack'):
+            # RBR, Forza: the column's damping and friction only (no aligning split, no frame check: the lock sits at
+            # the wheel's range / 2)
+            rack = self.rbr_rack if self._played_mode == 'rbr' else self.forza_rack
             stage.column(t, rack.impedance(), rack.wheel_peak, rack.damping_scale())
             return
         if stage.k_limit is not None:
@@ -2446,6 +2651,10 @@ class FfbEngine:
         if self._mode != 'acr':
             if self._mode == 'forza':
                 self.addon.feed(t, sample, self._fh_fresh)
+            if self._mode == 'forza-rack':
+                self._fz_sample = sample
+                self.forza_filter.packet(t)
+                self.forza_rack.feed(t, sample, self._fh_fresh)
             if self._mode == 'rbr':
                 last = self._rbr_sample
                 if last is not None and (sample.stage != last.stage or (
@@ -2561,18 +2770,24 @@ class FfbEngine:
         """The lock stop's push (LockStop), at the overall strength and inside the rim ceiling; 0 when the wheel's
         position can't be read or the game is not ACR or RBR (RBR: at the wheel's range / 2)."""
         stop, stage = self._lock_stop, self._dyn
-        rbr = self._played_mode == 'rbr'
-        if self._played_mode not in ('acr', 'rbr') or stage is None or not stage.range:
+        mode = self._played_mode
+        rbr = mode == 'rbr'
+        if mode not in ('acr', 'rbr', 'forza-rack') or stage is None or not stage.range:
             stop.reset()
             return 0.0
         pos, _converted = self._wheel_position(t, stage)
+        steer = getattr(sample, 'steer', None)
         if rbr:
             lock_deg = stage.range / 2.0       # RBR maps the whole wheel range to steer +-1
+        elif mode == 'forza-rack':
+            # Forza maps the whole wheel range to steer +-1 too; the stop acts from the wheel's own position once the game's
+            # input is at its lock (|steer| >= FZ_LOCK_STEER), from that share of the range
+            lock_deg = stage.range / 2.0 * FZ_LOCK_STEER if steer is not None and abs(steer) >= FZ_LOCK_STEER else None
         else:
             slope = self._lock_slope(stage)
             lock_deg = None if slope is None else stage.range / 2.0 * slope     # (at or past the range: the wheel's own stop)
-        push = stop.force(t, getattr(sample, 'steer', None), pos, lock_deg) * self._strength
-        limit = FULL * (self.rbr_rack if rbr else self.model)._ceiling()
+        push = stop.force(t, steer, pos, lock_deg) * self._strength
+        limit = FULL * {'rbr': self.rbr_rack, 'forza-rack': self.forza_rack}.get(mode, self.model)._ceiling()
         return min(max(push, -limit), limit)
 
     def _game_level(self, sample):
@@ -2731,7 +2946,7 @@ class FfbEngine:
         if game == 'rbr':
             return 'rbr'
         if game == 'forza-fh':
-            return 'forza'
+            return 'forza-rack' if self._forza_model else 'forza'
         if game == 'beamng':
             self._beamng_at = t
             return 'beamng'
@@ -2740,7 +2955,8 @@ class FfbEngine:
         return 'acr'
 
     def _model(self):
-        return {'rbr': self.rbr, 'beamng': self.beamng, 'forza': self.addon}.get(self._mode, self.model)
+        return {'rbr': self.rbr, 'beamng': self.beamng, 'forza': self.addon, 'forza-rack': self.forza_rack}.get(self._mode,
+                                                                                                                self.model)
 
     def _sources(self, now):
         """BeamNGForceSource runs while there is a wheel and BeamNG was heard within NONE_AFTER: started by its
@@ -2923,6 +3139,67 @@ class FfbEngine:
                     self._out(now, value)
         self._publish(now)
 
+    def _forza_rack_tick(self, now):
+        """Forza Horizon through our chain (ForzaRack): the game's constant force is read each pass only to check ours
+        against (fresh raw, the mismatch refusal) and as the level the take-over glides in from; our force is worked out
+        for each Forza sample and played, filtered, every pass."""
+        rate = self.raw_rate
+        fresh = min(max(FH_FRESH_UPLOADS / rate, FH_FRESH_MIN), RAW_FRESH) if rate else RAW_FRESH
+        level, new = self._raw(now, fresh)
+        self._regains(now)
+        self._fh_fresh = level
+        if level is not None:
+            self._fh_level = level
+        playing = self._phase in ('in', 'on')
+        stalled = self._last_t is None or now - self._last_t > FZ_STALL
+        if playing and self._played_mode == 'forza-rack' and stalled:
+            self._release('stall', now)
+            playing = False
+        v = self._verdict = self._forza_rack_verdict(now)
+        want = self._enabled and self._available and v.state == 'replace' and self.forza_rack.ready and not stalled
+        self._decide(now, playing, want, 'stall' if stalled else 'state')
+        if self._phase != 'idle' and self._played_mode == 'forza-rack' and self._write_due(now, True):
+            self._forza_rack_play(now)
+        self._publish(now)
+
+    def _forza_rack_verdict(self, now):
+        v = self.classifier.verdict(now)
+        if v.reason != 'fh-addon':
+            return v                     # no telemetry, measuring, fh-rate: the classifier's
+
+        def verdict(state, reason):
+            return Verdict(state, reason, v.game, v.rate, v.gap_ms)
+        if not self.classifier.has_game_ffb_raw:
+            return verdict('add-on', 'old-driver')
+        if self._app_gain:
+            return verdict('model', 'fh-app-gain')        # the driver would scale the game's force but not ours
+        rack = self.forza_rack
+        if rack.refused:
+            return verdict('model', 'forza-' + rack.refused)
+        if not rack.ready:
+            return verdict('model', 'forza-wait')
+        return verdict('replace', 'ok')
+
+    def _forza_rack_play(self, now):
+        """ForzaRack's force: the share for the newest sample through the chain (RackForce.force), the 60/s steps rebuilt by
+        the output filter (stepped each pass), then Kickback's pulse, the lock stop and the texture on top, glided in from the
+        game's own level after a take-over."""
+        sample, rack = self._fz_sample, self.forza_rack
+        if sample is None:
+            return
+        self._dyn_play(now, sample)
+        rack.strength = self._strength
+        rack._now = now
+        if sample is not self._fz_force_sample:
+            self._fz_force_sample, self._fz_force = sample, rack.force(sample)
+        limit = FULL * rack._ceiling()
+        ours = self.forza_filter.step(now, self._fz_force) + rack.kick_force(sample)
+        ours = min(max(ours, -limit), limit) + self._lock_stop_force(now, sample)
+        texture = self.texture.force(now, sample, ours)
+        w = self._glide(now)
+        game = self._fh_level or 0
+        self._out(now, game + w * (ours - game) + w * texture)
+
     def _scale_play(self, now, g):
         """game_const_scale = round(100 g), faded in and out toward 100 with the engine's fade: written with each
         new Forza sample, at least every FH_SCALE_KEEP s while under 100 (the driver's watchdog), and 100 when
@@ -3085,6 +3362,17 @@ class FfbEngine:
                          k.knee * 100.0, k.damping_pct, self.texture.describe())
             self._dyn_start(t)
             return
+        if self._mode == 'forza-rack':
+            k = self.forza_rack
+            logging.info("Countersteer FFB: replacing Forza Horizon's force with our own from the car's motion through our chain "
+                         "(%.0f packets/s, game uploads %s/s; car %s, mass %.0f kg (%s), hand-force scale %.2f (%.0f/%.0f mm), "
+                         "1:1 up to %.0f %%, column damping %.0f %%, drive pull %s, kickback %s, texture %s)",
+                         self._verdict.rate, 'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, k.car, k.mass,
+                         'learnt' if k.mass_l.known else 'prior', k.rho(), k.rim_mm(), k.car_wheel_mm, k.knee * 100.0,
+                         k.damping_pct, '%.0f %%' % (k.pull_level * 100.0) if k.pull_on else 'off',
+                         '%.0f %%' % (k.kick_level * 100.0) if k.kick_on else 'off', self.texture.describe())
+            self._dyn_start(t)
+            return
         if self._mode == 'beamng':
             b = self.beamng
             logging.info("Countersteer FFB: replacing BeamNG's force with the mod's rack force (%s packets/s of game "
@@ -3225,7 +3513,7 @@ class FfbEngine:
             note = ','.join(n for n, on in (('saturated', self.rbr.saturated), ('s', rack.s_note is not None)) if on) or None
         status = Status(v.state, v.reason, v.game, v.rate, v.gap_ms, self._enabled,
                         self._available and not self._broken, self._phase in ('in', 'on'), ready,
-                        model.refused if self._mode == 'acr' else None, self.last_stop, self._path is not None,
+                        model.refused if self._mode in ('acr', 'forza-rack') else None, self.last_stop, self._path is not None,
                         waiting, held_by, None if self.raw_rate is None else round(self.raw_rate),
                         self._app_gain, self._phase != 'idle' and self._clipped > CLIP_NOTE, None, note)
         old = self.status
@@ -3295,7 +3583,9 @@ def status_text(status, listening=True):
             return 'amber', adds
         return 'amber', _("{}: turn on to use it").format(adds)
     if status.state == 'replace':
-        if status.game == 'rbr':
+        if status.game == 'forza-fh':
+            supported = _("{}: supported ({} packets/s, the force from the car's motion)").format(game, rate)
+        elif status.game == 'rbr':
             supported = _("{}: supported (its own force, {} a second)").format(game, status.raw_rate or 0)
         elif status.game == 'beamng':
             supported = _("{}: supported (the Countersteer mod's rack force, {} a second)").format(game, rate)
@@ -3315,10 +3605,13 @@ def status_text(status, listening=True):
                 'mismatch': _("the game's force stopped following {}, learning again").format(source),
                 'centring': _("learning which way the game centres the wheel, drive a few gentle corners"),
                 'no-centring': _("centring not learnt: no gentle corners seen with the tyres gripping"),
+                'wait': _("waiting for the car to move"),
             }.get(status.waiting, _("learning the game's force"))
             return light, "{}; {}".format(supported, waiting)
         if status.active:
-            if status.game == 'rbr':
+            if status.game == 'forza-fh':
+                text = _("{}: Countersteer's force from the car's motion, {} packets/s").format(game, rate)
+            elif status.game == 'rbr':
                 text = _("{}: Countersteer's force from the game's column torque, {} a second").format(
                     game, status.raw_rate or 0)
                 if status.note and 'saturated' in status.note:
@@ -3359,6 +3652,8 @@ def status_text(status, listening=True):
         'fh-rate': _("{} packets/s, needs {}").format(rate, int(FH_RATE)),
         'fh-app-gain': _("the driver's app_gain is on: it would scale the game's force but not Countersteer's, "
                          "turn app_gain off"),
+        'forza-wait': _("waiting for the car to move"),
+        'forza-mismatch': _("the game's own force runs against the car's motion: the model is not trusted here"),
         'fh-no-slip': _("sends no front tyre slip"),
         'fh-two-effects': _("it drives the wheel with two constant forces at once"),
         'fh-no-constant': _("it drives the wheel through its spring and damper, not a constant force: nothing "

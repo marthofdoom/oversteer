@@ -32,6 +32,9 @@ SIGMA = (100.0, 3000.0, 600.0)           # Nm, N, N: the features' usual size (t
 SOLVE_EVERY = 0.25                       # s of sample time
 TRAIL_RANGE = (0.0, 0.060)               # m
 SCRUB_RANGE = (0.0, 0.040)
+TRAIL_DEFAULT, SCRUB_DEFAULT = 0.027, 0.0155    # m: ffb_engine.CASTER_TRAIL, SCRUB (a car stored for its mass alone)
+MASS_RANGE = (700.0, 2600.0)             # kg: a learnt mass (ffb_forza.MassLearner) is kept in this
+MASS_SAVE_STEP = 10.0                    # kg: a mass moved this far from what was saved is worth saving
 TRAIL_SLEW = 0.001                       # m per second at most
 SCRUB_SLEW = 0.0005
 FY_MIN = 800.0                           # N: a sample with less front side force and ...
@@ -93,6 +96,7 @@ class Store:
         self._rack = {}
         self._steer_lock = {}
         self._frame = {}
+        self._mass = {}
         self._dirty = False
         self._lock = threading.Lock()
         self._saved = {}                 # what the file holds, to tell what changed
@@ -105,7 +109,7 @@ class Store:
     def _load(self):
         if self._cars is None:
             self._cars = {}
-            self._p99, self._rack, self._steer_lock, self._frame = {}, {}, {}, {}
+            self._p99, self._rack, self._steer_lock, self._frame, self._mass = {}, {}, {}, {}, {}
             try:
                 with open(self._file()) as f:
                     for car, v in json.load(f).items():
@@ -121,6 +125,9 @@ class Store:
                         if isinstance(ratio, (int, float)) and isinstance(assist, (int, float)) \
                                 and 3.0 <= ratio <= 40.0 and 0.0 <= assist <= 2.0:
                             self._rack[car] = (float(ratio), float(assist))
+                        mass = v.get('mass')
+                        if isinstance(mass, (int, float)) and math.isfinite(mass) and MASS_RANGE[0] <= mass <= MASS_RANGE[1]:
+                            self._mass[car] = float(mass)
                         lock = v.get('lock')
                         if isinstance(lock, (int, float)) and math.isfinite(lock) and LOCK_RANGE[0] <= lock <= LOCK_RANGE[1]:
                             self._steer_lock[car] = float(lock)
@@ -165,6 +172,28 @@ class Store:
             if self._rack.get(car) != (float(ratio), float(assist)):
                 self._dirty = True
             self._rack[car] = (float(ratio), float(assist))
+
+    def get_mass(self, car):
+        """The car's learnt mass (kg, ForzaRack's MassLearner), None if not learnt."""
+        with self._lock:
+            self._load()
+            return self._mass.get(car)
+
+    def set_mass(self, car, mass):
+        """Keeps a learnt mass; written (with the car's other values) when it moved MASS_SAVE_STEP kg from the stored."""
+        if car is None or not (math.isfinite(mass) and MASS_RANGE[0] <= mass <= MASS_RANGE[1]):
+            return
+        with self._lock:
+            self._load()
+            old = self._mass.get(car)
+            moved = old is None or abs(old - mass) >= MASS_SAVE_STEP
+            if moved:
+                self._dirty = True
+                self._mass[car] = float(mass)
+            trail, scrub = self._cars.get(car) or (TRAIL_DEFAULT, SCRUB_DEFAULT)
+            pending = self._dirty
+        if pending:                      # (put() throttles to SAVE_EVERY: the next call after it flushes)
+            self.put(car, trail, scrub)
 
     def get_lock(self, car):
         """The road wheels' steering lock kept for the car (rad per unit of steer), None if not learnt."""
@@ -238,6 +267,8 @@ class Store:
                     data[c]['p99'] = round(self._p99[c], 1)
                 if c in self._rack:
                     data[c]['ratio'], data[c]['assist'] = self._rack[c]
+                if c in self._mass:
+                    data[c]['mass'] = round(self._mass[c], 1)
                 if c in self._steer_lock:
                     data[c]['lock'] = round(self._steer_lock[c], 4)
                 if self._frame.get(c):
