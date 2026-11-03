@@ -1,8 +1,9 @@
-"""Countersteer FFB for Richard Burns Rally (oversteer/ffb_rbr.py, the engine's RBR mode) against synthetic NGP
-streams: the game's raw level made exactly as NGP and Wine make it (curve, floor, DirectInput to level) at ~870
-uploads a second, RBR's telemetry at 236 a second, a fake driver directory. The curve's inversion round-trips, the
-knee's endpoints (the game's curve at 0, linear at 100), the checks (grid, saturation, gain), the classifier's
-states and the hand-over; nothing is played without fresh raw. Nothing here touches a real wheel or /sys."""
+"""Countersteer FFB for Richard Burns Rally (oversteer/ffb_rbr.py's gates and ffb_engine.RbrRack, the engine's RBR
+mode) against synthetic NGP streams: the game's raw level made exactly as NGP and Wine make it (curve, floor,
+DirectInput to level) at ~870 uploads a second, RBR's telemetry at 236 a second, a fake driver directory. The
+curve's inversion round-trips, the checks (grid, strength; saturation is a note), the column torque, the sign
+latch, the classifier's states and the hand-over; nothing is played without fresh raw. Nothing here touches a
+real wheel or /sys."""
 import math
 import random
 
@@ -13,6 +14,7 @@ from oversteer.telemetry_formats import Sample
 from tests.test_ffb_engine import FakeDriver, forces, levels, upload, wheel  # noqa: F401 (the autouse fixture)
 from tests.test_ffb_engine import _clean_log  # noqa: F401
 
+r_latch = 0.5
 CAR = 'rbr/11'                    # Ford Fiesta WRC 2019 in the shipped table (ffb_sensitivity 100)
 
 
@@ -116,8 +118,9 @@ def ngp_level(torque, s=100.0):
     return r.level_of(r.magnitude(r.ngp_curve(torque, s)))
 
 
-def rbr_sample(car=CAR, speed=20.0):
+def rbr_sample(car=CAR, speed=20.0, steer=0.0, ay=0.0):
     s = Sample(5000.0, gear=3, speed=speed, car=car, game='rbr')
+    s.steer, s.accel = steer, (0.0, ay, 0.0)
     return s
 
 
@@ -125,9 +128,10 @@ class Drive:
     """1 ms engine passes, NGP uploading every 1.15 ms, RBR's telemetry every 1/236 s."""
 
     def __init__(self, engine, amp=36.0, s=100.0, upload_hz=870.0, tel_hz=236.0, level=None, strength=1.0,
-                 hits=True, car=CAR):
+                 hits=True, car=CAR, direction=1.0):
         self.engine, self.amp, self.s, self.upload_hz, self.tel_hz = engine, amp, s, upload_hz, tel_hz
         self.hits, self.car = hits, car
+        self.direction = direction       # 1: the game's DIRECTION normal (the level opposes the steering), -1: inverted
         self.level = level or (lambda t: r.level_of(r.magnitude(r.ngp_curve(self.torque(t), self.s), strength)))
         self.t = self.next_up = self.next_tel = 0.0
         self.uploads = True
@@ -137,6 +141,12 @@ class Drive:
         hit = 250.0 if self.hits and (t % 4.0) > 3.94 else 0.0      # a big hit every 4 s, 60 ms: the curve's top
         return self.amp * math.sin(2 * math.pi * 0.3 * t) + 1.5 * math.sin(2 * math.pi * 23.0 * t) + hit
 
+    def sample(self, t):
+        return rbr_sample(self.car, steer=self.steer(t))
+
+    def steer(self, t):
+        return self.direction * 0.3 * math.sin(2 * math.pi * 0.3 * t)      # (the torque's slow part: it centres)
+
     def run(self, seconds):
         end = self.t + seconds
         while self.t < end:
@@ -145,7 +155,7 @@ class Drive:
                 upload(self.level(t))
                 self.next_up += 1.0 / self.upload_hz
             if self.telemetry and t >= self.next_tel:
-                self.engine.offer(t, rbr_sample(self.car))
+                self.engine.offer(t, self.sample(t))
                 self.next_tel += 1.0 / self.tel_hz
             if not self.uploads:
                 self.next_up = t
@@ -167,7 +177,7 @@ def engine_on(tmp_path, enabled=True, raw=True, linearity=None):
     return engine, path
 
 
-def test_rbr_goes_green_and_plays_the_curve_undone(tmp_path):
+def test_rbr_goes_green_and_plays_the_column_torque(tmp_path):
     engine, path = engine_on(tmp_path)
     drive = Drive(engine).run(1.5)
     assert engine.status.state == 'replace' and not engine.status.active    # learning: drive a few corners
@@ -176,18 +186,19 @@ def test_rbr_goes_green_and_plays_the_curve_undone(tmp_path):
     st = engine.status
     assert st.state == 'replace' and st.active and st.ready and st.game == 'rbr'
     assert st.raw_rate is not None and 700 < st.raw_rate < 1000
-    assert st.gain is not None and st.gain >= r.GAIN_GO
+    assert engine.rbr_rack.direction == 'normal' and engine.rbr_rack.sign_r < -r_latch
     assert levels() == [0]
     # Played at the upload rate (every pass with a new upload), not the telemetry's
     n = len(forces())
     drive.run(1.0)
     assert len(forces()) - n > 700
     level = FakeDriver.raw[0]
-    assert forces()[-1] == engine.rbr.force(level)
+    rack = engine.rbr_rack
+    assert rack.column == pytest.approx(math.copysign(0.062862 * r.linear(abs(level) / r.FULL) * 100.0, level), rel=1e-6)
     assert engine.rbr.torque == pytest.approx(r.ngp_inverse(-level / r.FULL, 100.0), rel=1e-6)
     assert engine.rbr.torque == pytest.approx(drive.torque(drive.next_up - 1 / 870.0), abs=0.2)
     light, text = fe.status_text(engine.status)
-    assert light == 'green' and 'curve undone' in text
+    assert light == 'green' and 'column torque' in text
 
 
 def test_no_fresh_raw_no_force(tmp_path):
@@ -221,18 +232,17 @@ def test_levels_off_the_grid_do_not_follow_the_curve(tmp_path):
     assert 'DirectInput' in fe.status_text(engine.status)[1]
 
 
-def test_a_saturated_force_is_left_to_the_game(tmp_path):
+def test_a_saturated_force_is_a_note_not_a_refusal(tmp_path):
     engine, path = engine_on(tmp_path)
-    Drive(engine, amp=900.0).run(6.0)                    # |x| past 0.98 most of the time
-    assert engine.status[:2] == ('model', 'rbr-saturated') and FakeDriver.log == []
+    Drive(engine, amp=900.0).run(8.0)                    # |x| past 0.98 most of the time
+    assert engine.rbr.saturated and engine.status.active and engine.status.note == 'saturated'
+    assert 'limit' in fe.status_text(engine.status)[1]
 
 
-def test_linearity_0_is_no_improvement(tmp_path):
+def test_the_games_linearity_and_gain_no_longer_gate_it(tmp_path):
     engine, path = engine_on(tmp_path, linearity=0)
-    Drive(engine).run(6.0)
-    assert engine.rbr.linearity == 0
-    assert engine.status[:2] == ('model', 'rbr-no-gain') and FakeDriver.log == []
-    assert engine.status.gain <= 1.0
+    Drive(engine).run(8.0)
+    assert engine.rbr.linearity == 0 and engine.status.active and engine.status.gain is None
 
 
 def test_a_driver_without_game_ffb_raw_is_grey(tmp_path):
@@ -288,21 +298,7 @@ def test_under_the_drivers_cap_ours_rounds_off_below_it(tmp_path):
     Drive(engine, amp=30.0).run(9.0)
     assert engine.status.active and max(abs(v) for v in forces()) <= 0.8 * r.FULL + 1
     assert not engine.status.clipping
-    assert max(abs(v) for v in forces()) > 0.7 * r.FULL                # the knee (the hits), under the cap
-
-
-def test_the_cap_counts_against_the_gain(tmp_path):
-    # The game's own force is not under ext_force_cap: with ours capped at 80 % and the forces high, the game's
-    # curve keeps more detail and it keeps its force
-    engine, path = engine_on(tmp_path)
-    with open(path + '/gain', 'w') as f:
-        f.write('65535\n')
-    engine.set_device(None)
-    engine.step(0.0)
-    engine.set_device(path)
-    engine.step(0.0)
-    Drive(engine, amp=55.0).run(8.0)
-    assert engine.status[:2] == ('model', 'rbr-no-gain')
+    assert max(abs(v) for v in forces()) > 0.2 * r.FULL                # the hits get through
 
 
 # -- the game's STRENGTH, the car key, app_gain, the write rate, every way out while playing --
@@ -314,16 +310,14 @@ def test_a_strength_under_1_never_makes_ours_the_stronger(tmp_path, strength):
     game_peak = engine.rbr.peak
     assert game_peak <= strength * r.FULL + 4
     assert engine.status[:2] == ('model', 'rbr-strength') and FakeDriver.log == []
-    assert max([abs(v) for v in forces()] or [0]) <= game_peak
     assert 'strength' in fe.status_text(engine.status)[1]
     assert drive
 
 
-def test_a_strength_near_1_plays_under_the_games_own_peak(tmp_path):
+def test_a_strength_near_1_plays(tmp_path):
     engine, path = engine_on(tmp_path)
     Drive(engine, amp=36.0, strength=0.9).run(12.0)
     assert engine.status.active
-    assert max(abs(v) for v in forces()) <= engine.rbr.peak
 
 
 def test_the_car_key_narrowing_keeps_the_fit_and_the_force(tmp_path):
@@ -529,3 +523,220 @@ def test_the_ini_is_read_again_when_it_changes(tmp_path):
     assert force.s == 50.0                               # not looked at yet
     force.set_car(CAR, None, root=str(root), now=1.0 + r.INI_CHECK)
     assert force.s == 200.0
+
+
+# -- the rack force: column torque, the sign latch, the chain --
+
+def level_for(x):
+    """The raw level NGP sends for a force level x (+ = T positive: the level is negative)."""
+    return r.level_of(r.magnitude(x))
+
+
+@pytest.mark.parametrize('x, s, nm', [(0.5, 100.0, 4.36), (0.9, 100.0, 14.47), (0.5, 105.0, 4.57), (-0.5, 100.0, -4.36)])
+def test_the_levels_force_is_the_column_torque(x, s, nm):
+    rack = fe.RbrRack()
+    rack.set_level(0.0, level_for(x), s)
+    # (the level's sign is the column torque's: ext_force follows it)
+    assert rack.column == pytest.approx(-nm, abs=0.02)
+    assert rack.s_note is None
+    assert abs(rack.column) == pytest.approx(0.062862 * -math.log(1 - abs(x)) * s, rel=2e-3)
+
+
+def test_an_unknown_s_is_100_with_a_note_and_no_level_no_torque():
+    rack = fe.RbrRack()
+    rack.set_level(0.0, level_for(0.5), None)
+    assert rack.column == pytest.approx(-4.36, abs=0.02) and rack.s_note
+    rack.set_level(0.001, None, None)
+    assert rack.column is None and rack.rim_torque(rbr_sample()) is None
+    rack.set_level(0.002, 0, 100.0)
+    assert rack.column == 0.0
+
+
+def test_the_torque_goes_through_the_boost_curve_and_the_mapping():
+    rack = fe.RbrRack()
+    rack.wheel_peak = 2.1
+    rack.set_level(0.0, level_for(0.5), 100.0)
+    sample = rbr_sample()
+    from oversteer import ffb_carprops as cp
+    assert rack.power_steering() == 'model'
+    assert rack.rim_torque(sample) == pytest.approx(cp.driver_from_column(rack.column, 20.0, 1.0, True))
+    assert abs(rack.rim_torque(sample)) < abs(rack.column)              # the boost took part of it
+    assert rack.force(sample) < 0 and abs(rack.force(sample)) <= fe.FULL    # the level's sign, inside the budget
+    rack.set_level(0.001, -level_for(0.5), 100.0)
+    assert rack.force(sample) > 0
+    assert not rack.LEARNS and rack.learner is None and rack.assist == 1.0
+
+
+def drive_rack(rack, seconds, direction=1.0, ay=0.0, speed=20.0, hz=236.0, start=0.0):
+    t = start
+    while t < start + seconds:
+        steer = 0.3 * math.sin(2 * math.pi * 0.3 * t)
+        level = level_for(direction * steer * 2.0)          # (NGP's level opposes the steering when it centres)
+        rack.feed(t, rbr_sample(speed=speed, steer=steer, ay=ay), level)
+        t += 1.0 / hz
+    return rack
+
+
+def test_the_sign_latches_normal_after_2_s_of_straight_samples():
+    rack = fe.RbrRack()
+    assert not rack.ready and rack.waiting == 'direction'
+    drive_rack(rack, 1.5)
+    assert rack.direction is None and not rack.ready
+    drive_rack(rack, 4.0, start=1.5)
+    assert rack.direction == 'normal' and rack.ready and rack.refused is None
+    assert rack.sign_r <= -0.5 and rack.sign_time >= rack.SIGN_TIME
+
+
+def test_an_inverted_direction_is_refused():
+    rack = drive_rack(fe.RbrRack(), 4.0, direction=-1.0)
+    assert rack.direction == 'inverse' and not rack.ready and rack.refused == 'inverse'
+
+
+@pytest.mark.parametrize('kw', [dict(ay=2.0), dict(speed=3.0)])
+def test_the_latch_only_looks_at_straight_samples_at_speed(kw):
+    rack = drive_rack(fe.RbrRack(), 6.0, **kw)
+    assert rack.direction is None and rack.sign_time == 0.0 and not rack.ready
+
+
+def test_a_restarted_stream_judges_the_sign_again():
+    rack = drive_rack(fe.RbrRack(), 4.0)
+    assert rack.ready
+    rack.restart_sign()
+    assert not rack.ready and rack.direction is None and rack.waiting == 'direction'
+
+
+def test_the_engine_refuses_an_inverted_direction(tmp_path):
+    engine, path = engine_on(tmp_path)
+    Drive(engine, direction=-1.0).run(8.0)
+    assert engine.status[:2] == ('model', 'rbr-inverse') and FakeDriver.log == []
+    assert 'DIRECTION' in fe.status_text(engine.status)[1]
+
+
+def test_ready_is_the_gates_and_the_sign_latch_alone_no_fit_to_the_tyres(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine).run(1.5)
+    assert not engine.status.ready                                       # the latch / the gates are still waiting
+    drive.run(7.0)
+    rack = engine.rbr_rack
+    assert engine.status.ready and engine.status.active and rack.ready and rack.fit is None
+    assert engine.model.moving_time == 0.0 and not engine.model.ready    # the ACR model fitted nothing
+    assert rack.moving_time == 0.0 and rack.learner is None
+
+
+def test_drive_pull_and_kickback_are_forced_off_for_rbr(tmp_path):
+    engine, path = engine_on(tmp_path)
+    engine.set_drive_pull(True, 100.0)
+    engine.set_kick(True, 100.0)
+    engine.set_knee(40.0)
+    engine.set_column_damping(30.0)
+    engine.step(0.0)
+    assert engine.model.pull_on and engine.model.kick_on                 # ACR has them
+    rack = engine.rbr_rack
+    assert not rack.pull_on and not rack.kick_on and rack.pull_scrub() == 0.0
+    assert rack.knee == engine.model.knee and rack.damping_pct == 30.0   # the rest of the settings are shared
+
+
+def test_the_settings_reach_the_rbr_rack(tmp_path):
+    engine, path = engine_on(tmp_path)
+    engine.set_rim_mm(300.0)
+    engine.set_car_wheel_mm(360.0)
+    engine.set_mapping('classic')
+    engine.step(0.0)
+    rack = engine.rbr_rack
+    assert rack.rim_user == 300.0 and rack.car_wheel_mm == 360.0 and rack.classic() and rack.rho() == pytest.approx(300.0 / 360.0)
+
+
+def dyn_engine(tmp_path):
+    from tests.test_ffb_dynamics import dyn_wheel, POS
+    path = dyn_wheel(tmp_path)
+    engine = fe.FfbEngine(driver=FakeDriver, beamng_source=None)
+    engine.set_position_source(POS)
+    engine.set_device(path)
+    engine.set_enabled(True)
+    engine.step(0.0)
+    return engine, path, POS
+
+
+def test_the_lock_stop_is_allowed_for_rbr_at_half_the_range(tmp_path):
+    engine, path, pos = dyn_engine(tmp_path)
+    drive = Drive(engine).run(8.0)
+    assert engine.status.active and engine._played_mode == 'rbr'
+    t = drive.t
+
+    def push_at(deg):
+        pos.raw = int(round((deg / 900.0 + 0.5) * 65535))
+        engine._pos_cache = None
+        return engine._lock_stop_force(t, rbr_sample())
+    assert push_at(440.0) == 0.0 and not engine._lock_stop.active          # inside range / 2 = 450 degrees
+    push = push_at(470.0)
+    assert engine._lock_stop.active and push > 0.3 * fe.FULL
+    assert push_at(-470.0) < 0
+
+
+def test_the_column_damping_is_written_for_rbr(tmp_path):
+    engine, path, pos = dyn_engine(tmp_path)
+    Drive(engine).run(8.0)
+    assert engine.status.active
+    assert int(open(path + '/ffb_dyn_damping').read()) > 0
+
+
+def test_the_texture_runs_for_rbr_without_the_lock_part(tmp_path):
+    from oversteer import ffb_texture as ft
+    assert 'rbr' in ft.TEXTURE_GAMES
+    rnd = random.Random(3)
+    tx = ft.Texture()
+    tx.set(1.0, {name: name in ('road', 'impact') for name in ft.PARTS})
+    peak = 0.0
+    for i in range(400):
+        s = rbr_sample()
+        s.susp_vel = (rnd.gauss(0, 0.3), rnd.gauss(0, 0.3), 0.0, 0.0)           # a rough road: the struts' velocity
+        s.tyre_load = (3000.0, 3000.0, 2500.0, 2500.0)
+        peak = max(peak, abs(tx.force(i / 236.0, s, 4000.0)))
+    assert peak > 0.0 and peak <= ft.TOTAL_CAP * ft.FULL
+    # the lock part is off: wheels locked under braking say nothing for RBR
+    lock = ft.Texture()
+    lock.set(1.0, {name: name == 'lock' for name in ft.PARTS})
+    for i in range(400):
+        s = rbr_sample()
+        s.brake, s.wheel_speed, s.vel = 1.0, (2.0, 2.0, 20.0, 20.0), (20.0, 0.0, 0.0)
+        assert lock.force(i / 236.0, s, 4000.0) == 0.0
+    # the engine hum stays (the rpm)
+    hum = ft.Texture()
+    hum.set(1.0, {name: name == 'engine' for name in ft.PARTS})
+    assert max(abs(hum.force(i / 236.0, rbr_sample(), 4000.0)) for i in range(600)) > 0.0
+
+
+def test_the_engine_steps_the_texture_on_rbr_samples(tmp_path):
+    engine, path = engine_on(tmp_path)
+    engine.set_texture(1.0, {'road': True, 'impact': False, 'lock': False, 'engine': True})
+    rnd = random.Random(4)
+
+    class Rough(Drive):
+        def sample(self, t):
+            s = super().sample(t)
+            s.susp_vel = (rnd.gauss(0, 0.3), rnd.gauss(0, 0.3), 0.0, 0.0)
+            return s
+    Rough(engine).run(9.0)
+    assert engine.status.active and engine.texture.peak > 0.0
+
+
+def test_the_take_over_logs_car_s_torque_p99_rho_and_knee(tmp_path, caplog):
+    import logging
+    caplog.set_level(logging.INFO)
+    engine, path = engine_on(tmp_path)
+    Drive(engine).run(8.0)
+    assert engine.status.active
+    line = [m for m in caplog.messages if 'replacing Richard Burns Rally' in m]
+    assert line and CAR in line[0] and 'S 100.0' in line[0] and 'column torque p99' in line[0]
+    assert 'hand-force scale' in line[0] and '1:1 up to' in line[0]
+
+
+def test_the_glide_in_starts_from_the_raw_level(tmp_path):
+    engine, path = engine_on(tmp_path)
+    drive = Drive(engine)
+    n = len(forces())
+    while not engine._phase in ('in', 'on') and drive.t < 12.0:
+        drive.run(0.05)
+    assert engine._phase in ('in', 'on') and engine._w < 0.2
+    new = forces()[n:]
+    assert new and abs(new[-1]) <= abs(FakeDriver.raw[0]) * 1.2 + 2000      # near the game's own level, not a step to ours

@@ -290,7 +290,7 @@ def test_off_is_exactly_zero_and_other_games_get_none():
     assert all(v == 0.0 for v in drive(tx, rough(1.0)))
     tx = texture(1.0, road=True, impact=True, lock=True)
     assert all(v == 0.0 for v in drive(tx, [car(susp=s.susp, game='acc') for s in rough(1.0)]))
-    assert ft.TEXTURE_GAMES == ('acr',)
+    assert ft.TEXTURE_GAMES == ('acr', 'rbr')
 
 
 def chaos(seconds=5.0, seed=7):

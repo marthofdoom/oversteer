@@ -96,6 +96,7 @@ from . import ffb_record
 from . import ffb_spring
 from . import wheel_torque
 from .ffb_addon import ForzaLightness
+from . import ffb_rbr
 from .ffb_rbr import RbrForce
 from .ffb_sources import BeamNGForceSource
 from .ffb_texture import Texture
@@ -1315,6 +1316,136 @@ class BeamNGRack(RackForce):
         return centre * side * min(push, self.SOFTLOCK_MAX) * gate * FULL
 
 
+class RbrRack(RackForce):
+    """Richard Burns Rally through the same chain as ACR: the column torque NGP computes, recovered from the game's
+    raw level, goes through the boost curve (driver_from_column, assist class 1.0: hydraulic), the hand-force
+    mapping (rho, knee, budget, RIM_SAFE_NM, the reverse limit: RackForce.force, unchanged), the column damping
+    and lock stop and the texture (the engine plays those).
+
+    The column torque (analysis of NGP's curve, ~/.cache/ffb-rbr-nm): x = |level| / FULL at the game's STRENGTH 1,
+    u = -ln(1 - x) = |T| * 100 * (-ln 0.975) / S, and NGP's T is the rack force times the rack ratio in metres per
+    wheel turn, so the column torque is T / 2 pi: tau = 0.062862 * u * S Nm, signed like the level (ext_force follows the
+    level's sign; `set_level`). S is RbrForce's (the car's ForceFeedbackSensitivity_NGP times the ini's surface %),
+    100 with a note when it is not known.
+
+    Not used here: the fit to the game's force (ready is the sign latch alone, the upload rate being the
+    classifier's), the trail and scrub learner, the aligning split, the assist detector, Drive pull and Kickback (off
+    for RBR: no tyre forces). The sign latch is BeamNG's centring latch: on samples with little lateral acceleration
+    at speed r(level, steer) is negative when the game's DIRECTION is normal; latched after SIGN_TIME s of them at
+    |r| >= SIGN_LATCH, a positive r is an inverted DIRECTION, refused ('inverse')."""
+
+    LEARNS = False
+    K_COLUMN = 0.062862                  # Nm per unit of u * S: 1 / (100 * -ln 0.975 * 2 pi)
+    S_DEFAULT = 100.0                    # S when the car is not in the table (WRC 2017-21)
+    SIGN_AY = 1.5                        # m/s^2: lateral acceleration under which the latch looks
+    SIGN_SPEED = 5.0                     # m/s
+    SIGN_TIME = 2.0                      # s of such samples
+    SIGN_LATCH = 0.5                     # |r| to latch at
+
+    @property
+    def pull_on(self):
+        return False
+
+    @pull_on.setter
+    def pull_on(self, value):
+        pass                             # (no Drive pull for RBR: no tyre forces)
+
+    @property
+    def kick_on(self):
+        return False
+
+    @kick_on.setter
+    def kick_on(self, value):
+        pass                             # (no Kickback either)
+
+    def reset(self, car=None):
+        super().reset(car)
+        table = ffb_carprops.table_ratio(car_data.entry(car)) if car is not None else None
+        self.ratio, self.assist = table or self.STEER_RATIO, self.ASSIST     # (diagnostic: the ratio does not enter)
+        self.ratio_known = bool(table)
+        self.column = None               # the column torque (Nm, signed like the level), None without a level
+        self.s = None
+        self.s_note = None
+        self._tau_q = ffb_carprops.Quantile()
+        self._tau_at = None
+        self.restart_sign()
+        self.direction = None            # 'normal' or 'inverse' once latched: the game's DIRECTION, kept through cars
+
+    def restart_sign(self):
+        """The sign is judged again (a new stream: the game's DIRECTION may have been changed in its menus)."""
+        self.direction = None
+        self._sign = _Moments(self.TAU)
+        self.sign_time = 0.0
+        self.sign_r = None
+        self.refused = None
+        self.waiting = 'direction'
+        self.ready = False
+        self._sign_at = None
+
+    def set_car(self, car):
+        """The telemetry's car key (it may narrow): the table ratio, for diagnostics only."""
+        if car != self.car:
+            self.car = car
+            table = ffb_carprops.table_ratio(car_data.entry(car)) if car is not None else None
+            self.ratio, self.ratio_known = table or self.STEER_RATIO, bool(table)
+
+    def set_level(self, t, level, s):
+        """The game's raw level now (None: none fresh) and S (None: not known): the column torque."""
+        self.s_note = None if s is not None else _("the car's sensitivity is not known: 100 assumed")
+        if level is None:
+            self.column = None
+            return
+        x = min(abs(level) / FULL, 1.0)
+        self.column = math.copysign(self.K_COLUMN * ffb_rbr.linear(x) * (self.S_DEFAULT if s is None else s), level) \
+            if level else 0.0
+        last, self._tau_at = self._tau_at, t
+        if last is not None:
+            self._tau_q.add(abs(self.column), min(max(t - last, 0.0), 0.05))
+
+    def tau_p99(self):
+        """The p99 of |column torque| so far (Nm), None before any."""
+        return self._tau_q.value()
+
+    def feed(self, t, sample, level, new=True):
+        """A telemetry sample with the game's raw level now (None if none fresh): the sign latch."""
+        last, self._sign_at = self._sign_at, t
+        if self.direction is not None or level is None or sample is None:
+            return
+        dt = 0.0 if last is None else min(max(t - last, 0.0), 0.1)
+        accel = getattr(sample, 'accel', None)
+        ay = accel[1] if accel is not None and len(accel) > 1 else None
+        steer, speed = getattr(sample, 'steer', None), getattr(sample, 'speed', None)
+        if not all(v is not None and math.isfinite(v) for v in (ay, steer, speed)):
+            return
+        if speed <= self.SIGN_SPEED or abs(ay) >= self.SIGN_AY or dt <= 0.0:
+            return
+        self._sign.add(steer, level, dt)
+        self.sign_time += dt
+        r = self.sign_r = self._sign.r()
+        if self.sign_time < self.SIGN_TIME or r is None or abs(r) < self.SIGN_LATCH:
+            return
+        if r < 0.0:
+            self.direction, self.ready, self.waiting, self.refused = 'normal', True, None, None
+        else:
+            self.direction, self.ready, self.waiting, self.refused = 'inverse', False, None, 'inverse'
+            logging.warning("Countersteer FFB: RBR: the game's force follows the steering the wrong way round (r %.2f): "
+                            "its DIRECTION is inverted; set it normal", r)
+
+    def power_steering(self):
+        """'off' (the column torque) or 'model' (ours): the game's force carries no assist to follow."""
+        return 'off' if ffb_carprops.power_settings()[0] == 'off' else 'model'
+
+    def rim_torque(self, sample, trail=None, scrub=None, ratio=None, assist=None):
+        """The driver's torque at the rim for the column torque of the game's level (None without one)."""
+        if self.column is None:
+            return None
+        speed = getattr(sample, 'speed', None)
+        hyd = not self.classic()
+        if self.power_steering() == 'off':
+            return ffb_carprops.driver_from_column(self.column, speed, 0.0, hyd)
+        return ffb_carprops.driver_from_column(self.column, speed, self.ASSIST * ffb_carprops.power_settings()[1], hyd)
+
+
 class _CsbRate:
     """CSB1's rate in packets per second of the game's clock (its seq over its game_time, so the bursts of a
     frame do not count against it) and whether that clock is moving."""
@@ -1445,7 +1576,7 @@ class DriverReplace:
 
 Status = collections.namedtuple('Status', 'state reason game rate gap_ms enabled available active ready '
                                           'refused last_stop device waiting held_by raw_rate app_gain clipping '
-                                          'gain', defaults=(None,))
+                                          'gain note', defaults=(None, None))
 IDLE_STATUS = Status('none', 'no-telemetry', None, 0.0, None, False, False, False, False, None, None, False,
                      None, None, None, False, False)
 
@@ -1593,7 +1724,8 @@ class FfbEngine:
         self._stop_lock = threading.Lock()
         self.classifier = SupportClassifier()
         self.model = RackForce()         # ACR (and AC, ACC): from the front tyres' Mz
-        self.rbr = RbrForce()            # Richard Burns Rally: the game's own force, NGP's curve undone
+        self.rbr = RbrForce()            # Richard Burns Rally: the gates on the game's force (the upload grid, its strength) and S
+        self.rbr_rack = RbrRack()        # ... and its column torque through our chain (RackForce's)
         self.beamng = BeamNGRack()       # BeamNG: the mod's rack force
         self.addon = ForzaLightness()    # Forza Horizon: lighter as the front tyres run out of grip
         self._lightness_req = None       # its strength (0..1) from the GUI
@@ -1644,6 +1776,9 @@ class FfbEngine:
         self._rbr_level = None           # the last fresh raw level (played while fading out)
         self._rbr_new_at = None          # when the last new upload came
         self._rbr_sample = None          # the last RBR telemetry sample (its stage and clock)
+        self._rbr_now = None             # the fresh raw level of the last pass (None: none), for the sign latch
+        self._rbr_tex_sample = None      # the sample the RBR texture was last stepped for ...
+        self._rbr_tex = 0.0              # ... and its value
         self._gains_at = None            # when app_gain was last read
         self._write_pending = False      # a new value not yet written (MIN_WRITE)
         self._written_at = None
@@ -1838,8 +1973,9 @@ class FfbEngine:
         """The wheel's model (USB vendor:product), for the peak torque the steering force is mapped to
         (wheel_torque; unknown: the relative target). Set before set_device."""
         self._usb_id = usb_id
-        self.model.wheel_peak = wheel_torque.peak_nm(usb_id)      # one attribute swap, read by the engine thread
-        self.model.wheel_rim = wheel_torque.rim_mm(usb_id)
+        for rack in (self.model, self.rbr_rack):
+            rack.wheel_peak = wheel_torque.peak_nm(usb_id)        # one attribute swap, read by the engine thread
+            rack.wheel_rim = wheel_torque.rim_mm(usb_id)
 
     def set_device(self, path):
         """The wheel's sysfs directory, None for none. The old one's game
@@ -2017,19 +2153,24 @@ class FfbEngine:
             self._strength = min(max(float(strength), 0.0), STRENGTH_MAX * 100.0) / 100.0
         knee = self._knee_req
         if knee is not None:
-            self.model.knee = min(max(float(knee) / 100.0, wheel_torque.KNEE_RANGE[0]), wheel_torque.KNEE_RANGE[1])
+            for rack in (self.model, self.rbr_rack):
+                rack.knee = min(max(float(knee) / 100.0, wheel_torque.KNEE_RANGE[0]), wheel_torque.KNEE_RANGE[1])
         if self._mapping_req is not None:
-            self.model.mapping = self._mapping_req
+            for rack in (self.model, self.rbr_rack):
+                rack.mapping = self._mapping_req
         if self._pull_req is not None:
             self.model.pull_on, self.model.pull_level = self._pull_req[0], self._pull_req[1] / 100.0
         if self._kick_req is not None:
             self.model.kick_on, self.model.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
         if self._damping_req is not None:
-            self.model.damping_pct = self._damping_req
+            for rack in (self.model, self.rbr_rack):
+                rack.damping_pct = self._damping_req
         if self._rim_req is not None:
-            self.model.rim_user = self._rim_req or None
+            for rack in (self.model, self.rbr_rack):
+                rack.rim_user = self._rim_req or None
         if self._car_wheel_req is not None:
-            self.model.car_wheel_mm = self._car_wheel_req
+            for rack in (self.model, self.rbr_rack):
+                rack.car_wheel_mm = self._car_wheel_req
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2061,6 +2202,7 @@ class FfbEngine:
             self.raw_rate = self.classifier.raw_rate = self._rbr_level = None
             self._rbr_new_at = self._rbr_sample = self._gains_at = None
             self.rbr.reset()             # a new stream: what the game sent the old wheel says nothing
+            self.rbr_rack.reset()
             self.addon.reset()
             self._fh_level = self._fh_fresh = None
             self._fh_scale, self._scale_last, self._scale_at = False, None, None
@@ -2168,10 +2310,15 @@ class FfbEngine:
         local alignment spring (the model plays the residual) once the car's ratio and lock are known and the fit is
         ready, the driver reports a spring and the wheel's range is known."""
         stage, model = self._dyn, self.model
-        if stage is None or not stage.usable() or self._played_mode != 'acr':
+        if stage is None or not stage.usable() or self._played_mode not in ('acr', 'rbr'):
             model.align_on = False
             return
         stage.poll(t)
+        if self._played_mode == 'rbr':
+            # RBR: the column's damping and friction only (no aligning split, no frame check: the lock sits at range / 2)
+            rack = self.rbr_rack
+            stage.column(t, rack.impedance(), rack.wheel_peak, rack.damping_scale())
+            return
         if stage.k_limit is not None:
             model.align_k_limit = stage.k_limit      # (the model's k already carries the strength)
         model.wheel_range = stage.range
@@ -2299,9 +2446,11 @@ class FfbEngine:
                 if last is not None and (sample.stage != last.stage or (
                         sample.game_time is not None and last.game_time is not None
                         and sample.game_time < last.game_time)):
-                    self.rbr.new_stream('a new stage or a restart')
+                    self._rbr_new_stream('a new stage or a restart')
                 self._rbr_sample = sample
                 self.rbr.set_car(sample.car, sample.stage, now=t)
+                self.rbr_rack.set_car(sample.car)
+                self.rbr_rack.feed(t, sample, self._rbr_now)
             if self._phase != 'idle' and self._played_mode != self._mode:
                 self._release('state', t)        # another game's force was playing
             return                               # its force is taken in step() after this
@@ -2405,16 +2554,20 @@ class FfbEngine:
 
     def _lock_stop_force(self, t, sample):
         """The lock stop's push (LockStop), at the overall strength and inside the rim ceiling; 0 when the wheel's
-        position can't be read or the car is not ACR."""
+        position can't be read or the game is not ACR or RBR (RBR: at the wheel's range / 2)."""
         stop, stage = self._lock_stop, self._dyn
-        if self._played_mode != 'acr' or stage is None or not stage.range:
+        rbr = self._played_mode == 'rbr'
+        if self._played_mode not in ('acr', 'rbr') or stage is None or not stage.range:
             stop.reset()
             return 0.0
         pos, _converted = self._wheel_position(t, stage)
-        slope = self._lock_slope(stage)
-        lock_deg = None if slope is None else stage.range / 2.0 * slope     # (at or past the range: the wheel's own stop)
+        if rbr:
+            lock_deg = stage.range / 2.0       # RBR maps the whole wheel range to steer +-1
+        else:
+            slope = self._lock_slope(stage)
+            lock_deg = None if slope is None else stage.range / 2.0 * slope     # (at or past the range: the wheel's own stop)
         push = stop.force(t, getattr(sample, 'steer', None), pos, lock_deg) * self._strength
-        limit = FULL * self.model._ceiling()
+        limit = FULL * (self.rbr_rack if rbr else self.model)._ceiling()
         return min(max(push, -limit), limit)
 
     def _game_level(self, sample):
@@ -2645,9 +2798,28 @@ class FfbEngine:
             self._app_gain = bool(self._driver.app_gain())
 
     def _texture_for(self, mode, t):
-        """The texture on top of RBR's or BeamNG's force: none yet. The hook for RBR's strut forces (the
-        telemetry's per-wheel strut force at the 720 Hz physics step, ffb_texture) and BeamNG's wheels."""
+        """The texture on top of BeamNG's force: none yet (the hook for its wheels). RBR's is stepped in _rbr_play."""
         return 0.0
+
+    def _rbr_play(self, now):
+        """RBR's force: the column torque of the game's level through the chain (RbrRack.force: boost curve, hand-force
+        mapping), the lock stop and the texture on top, glided in from the game's own level (the raw, in ext_force's
+        units) after a take-over."""
+        sample, rack = self._rbr_sample, self.rbr_rack
+        self._dyn_play(now, sample)
+        rack.strength = self._strength
+        ours = rack.force(sample) + self._lock_stop_force(now, sample)
+        if sample is not None and sample is not self._rbr_tex_sample:      # the texture steps with the telemetry
+            self._rbr_tex_sample = sample
+            self._rbr_tex = self.texture.force(self._last_t if self._last_t is not None else now, sample, ours)
+        w = self._glide(now)
+        game = self._rbr_level or 0
+        self._out(now, game + w * (ours - game) + w * self._rbr_tex)
+
+    def _rbr_new_stream(self, why):
+        """RBR's stream started again: the game's peak is measured again and so is the sign of its DIRECTION."""
+        self.rbr.new_stream(why)
+        self.rbr_rack.restart_sign()
 
     def _rbr_tick(self, now):
         before, last_new = self._raw_count, self._rbr_new_at
@@ -2658,26 +2830,28 @@ class FfbEngine:
             count = self._raw_count
             if (before is not None and count is not None and count < before) or \
                     (last_new is not None and now - last_new > RBR_STREAM_GAP):
-                self.rbr.new_stream('the uploads restarted')      # the wheel bound again, or the game away
+                self._rbr_new_stream('the uploads restarted')     # the wheel bound again, or the game away
         self._regains(now)
         if level is not None:
             self._rbr_level = level
             if new:
                 self.rbr.feed(now, level, holding=playing)
+                self.rbr_rack.set_level(now, level, self.rbr.s)
+        self._rbr_now = level
         self.classifier.raw_rate = self.raw_rate
         v = self.classifier.verdict(now, holding=playing)
-        if v.state == 'replace' and self.rbr.refused:
-            v = Verdict('model', 'rbr-' + self.rbr.refused, v.game, v.rate, v.gap_ms)
+        if v.state == 'replace' and (self.rbr.refused or self.rbr_rack.refused):
+            v = Verdict('model', 'rbr-' + (self.rbr.refused or self.rbr_rack.refused), v.game, v.rate, v.gap_ms)
         elif v.state == 'replace' and self._app_gain:
             # The driver would scale the game's force by its FF_GAIN and not ours: the strengths would differ
             v = Verdict('model', 'rbr-app-gain', v.game, v.rate, v.gap_ms)
         self._verdict = v
         want = (self._enabled and self._available and v.state == 'replace' and self.rbr.ready
-                and level is not None)
+                and self.rbr_rack.ready and level is not None)
         self._decide(now, playing, want, 'raw' if level is None else 'state')
         if self._phase != 'idle' and self._played_mode == 'rbr':
             if self._write_due(now, new):
-                self._out(now, self.rbr.force(self._rbr_level or 0) * self._strength + self._texture_for('rbr', now))
+                self._rbr_play(now)
         self._publish(now)
 
     def _beamng_tick(self, now):
@@ -2895,9 +3069,16 @@ class FfbEngine:
         self._hold_f, self._hold_at, self._taken_skipped = 1.0, None, self.skipped
         self._read_gains()
         if self._mode == 'rbr':
-            logging.info("Countersteer FFB: replacing Richard Burns Rally's force with NGP's curve undone (game "
-                         "uploads %s/s; %s; car %s)", 'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate,
-                         self.rbr.describe(), self.rbr.car)
+            k = self.rbr_rack
+            p99 = k.tau_p99()
+            logging.info("Countersteer FFB: replacing Richard Burns Rally's force with its column torque through our chain "
+                         "(game uploads %s/s; car %s, S %s, column torque p99 %s Nm so far, hand-force scale %.2f "
+                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, texture %s)",
+                         'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, self.rbr.car,
+                         'unknown (100 assumed)' if self.rbr.s is None else '%.1f' % self.rbr.s,
+                         'none' if p99 is None else '%.1f' % p99, k.rho(), k.rim_mm(), k.car_wheel_mm,
+                         k.knee * 100.0, k.damping_pct, self.texture.describe())
+            self._dyn_start(t)
             return
         if self._mode == 'beamng':
             b = self.beamng
@@ -3032,13 +3213,16 @@ class FfbEngine:
         held = wheel_owner.current(self._path) if self._path is not None else None
         held_by = held[0] if held is not None and held[0] != OWNER else None
         model = self._model()
-        gain = self.rbr.gain if self._mode == 'rbr' else None
+        ready, waiting, note = model.ready, model.waiting, None
+        if self._mode == 'rbr':
+            rack = self.rbr_rack
+            ready, waiting = ready and rack.ready, model.waiting or rack.waiting
+            note = ','.join(n for n, on in (('saturated', self.rbr.saturated), ('s', rack.s_note is not None)) if on) or None
         status = Status(v.state, v.reason, v.game, v.rate, v.gap_ms, self._enabled,
-                        self._available and not self._broken, self._phase in ('in', 'on'), model.ready,
+                        self._available and not self._broken, self._phase in ('in', 'on'), ready,
                         model.refused if self._mode == 'acr' else None, self.last_stop, self._path is not None,
-                        model.waiting, held_by, None if self.raw_rate is None else round(self.raw_rate),
-                        self._app_gain, self._phase != 'idle' and self._clipped > CLIP_NOTE,
-                        None if gain is None else round(gain, 1))
+                        waiting, held_by, None if self.raw_rate is None else round(self.raw_rate),
+                        self._app_gain, self._phase != 'idle' and self._clipped > CLIP_NOTE, None, note)
         old = self.status
         figures = ('rate', 'gap_ms', 'raw_rate', 'gain')
         changed = force or any(getattr(status, f) != getattr(old, f) for f in Status._fields if f not in figures)
@@ -3121,6 +3305,7 @@ def status_text(status, listening=True):
             waiting = {
                 'raw': _("waiting for the game's own force on the wheel to check against"),
                 'corners': _("learning the game's force, drive a few corners"),
+                'direction': _("checking which way the game's force turns, drive a few gentle corners"),
                 'fit': _("the game's force does not follow {} yet").format(source),
                 'mismatch': _("the game's force stopped following {}, learning again").format(source),
                 'centring': _("learning which way the game centres the wheel, drive a few gentle corners"),
@@ -3129,10 +3314,13 @@ def status_text(status, listening=True):
             return light, "{}; {}".format(supported, waiting)
         if status.active:
             if status.game == 'rbr':
-                text = _("{}: the game's own force with its curve undone, {} a second").format(
+                text = _("{}: Countersteer's force from the game's column torque, {} a second").format(
                     game, status.raw_rate or 0)
-                if status.gain is not None:
-                    text += _("; it follows the torque's changes more closely than the game's curve here")
+                if status.note and 'saturated' in status.note:
+                    text += _("; its force sits at its limit too often to be followed well: lower the game's force "
+                              "feedback strength or raise ForceFeedbackSensitivity")
+                if status.note and 's' in status.note.split(','):
+                    text += _("; the car's sensitivity is not known, 100 assumed")
             elif status.game == 'beamng':
                 text = _("{}: Countersteer's force from the rack, {} packets/s").format(game, rate)
             else:
@@ -3156,9 +3344,8 @@ def status_text(status, listening=True):
                           "game's force feedback strength to 100 % and use the wheel's own"),
         'rbr-app-gain': _("the driver's app_gain is on: it would scale the game's force but not Countersteer's, "
                           "turn app_gain off"),
-        'rbr-saturated': _("its force sits at its limit too often to be undone: lower the game's force feedback "
-                           "strength or raise ForceFeedbackSensitivity"),
-        'rbr-no-gain': _("at these forces the game's own curve keeps as much detail"),
+        'rbr-inverse': _("the game's DIRECTION is inverted (its force turns the wrong way): set it to normal in the "
+                         "game's force feedback settings"),
         'beamng-no-mod': _("no rack force from the Countersteer BeamNG mod: install it from the FFB tab"),
         'beamng-port': _("the port for the Countersteer BeamNG mod (5320) is in use by another program"),
         'beamng-paused': _("paused"),
