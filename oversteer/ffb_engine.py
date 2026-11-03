@@ -1341,6 +1341,8 @@ class RbrRack(RackForce):
     SIGN_SPEED = 5.0                     # m/s
     SIGN_TIME = 2.0                      # s of such samples
     SIGN_LATCH = 0.5                     # |r| to latch at
+    SIGN_SPREAD = 0.02                   # ... and the steering input's spread (of -1..1) under it: a straight's noise
+                                         # alone never latches
 
     @property
     def pull_on(self):
@@ -1423,6 +1425,9 @@ class RbrRack(RackForce):
         self.sign_time += dt
         r = self.sign_r = self._sign.r()
         if self.sign_time < self.SIGN_TIME or r is None or abs(r) < self.SIGN_LATCH:
+            return
+        spread = self._sign.spread()
+        if spread is None or spread < self.SIGN_SPREAD:
             return
         if r < 0.0:
             self.direction, self.ready, self.waiting, self.refused = 'normal', True, None, None
