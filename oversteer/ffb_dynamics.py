@@ -111,6 +111,54 @@ def align_text(theta_a_left_deg, k_fs_per_deg, tau_max_fs, range_deg):
     return '%d %d %d' % (align_target(theta_a_left_deg, range_deg), k, tau)
 
 
+SENSITIVITY_LINEAR = 50                  # the driver's `sensitivity` where the steering curve is the identity
+
+
+def sensitivity_curve(x, sensitivity):
+    """The driver's steering curve (new-lg4ff lg4ff_apply_sensitivity) on a position x in -1..1 of the half range:
+    50 is linear, lower blends toward x^2, higher toward sqrt(x), by 2 x |sensitivity - 50| %. Full lock is kept."""
+    if sensitivity == SENSITIVITY_LINEAR:
+        return x
+    ax = min(abs(x), 1.0)
+    mix = abs(sensitivity - SENSITIVITY_LINEAR) / 50.0
+    curved = ax * ax if sensitivity < SENSITIVITY_LINEAR else math.sqrt(ax)
+    return math.copysign(ax * (1.0 - mix) + curved * mix, x)
+
+
+def sensitivity_inverse(y, sensitivity):
+    """The raw position that sensitivity_curve maps to y (bisection: the curve is monotonic); None when `sensitivity`
+    is not a number in 0..100 (no inverse to trust)."""
+    if sensitivity is None or not 0 <= sensitivity <= 100:
+        return None
+    if sensitivity == SENSITIVITY_LINEAR:
+        return y
+    ay = min(abs(y), 1.0)
+    low, high = 0.0, 1.0
+    for _ in range(40):
+        mid = (low + high) / 2.0
+        if sensitivity_curve(mid, sensitivity) < ay:
+            low = mid
+        else:
+            high = mid
+    return math.copysign((low + high) / 2.0, y)
+
+
+def sensitivity_gain(sensitivity, degrees=1.0, range_deg=900.0):
+    """How many times the curve multiplies a small turn: the output over the input at `degrees` from the centre of a
+    wheel of `range_deg` degrees (75 at 900 degrees: 11 times at 1 degree)."""
+    x = degrees / (range_deg / 2.0)
+    return sensitivity_curve(x, sensitivity) / x if x else 1.0
+
+
+def sensitivity_warning(sensitivity, range_deg=None):
+    """The warning for a sensitivity other than 50 while force feedback plays, None at 50 or when unknown."""
+    if sensitivity is None or sensitivity == SENSITIVITY_LINEAR:
+        return None
+    gain = sensitivity_gain(sensitivity, 1.0, range_deg or 900.0)
+    return ("Sensitivity other than 50 bends the wheel's centre (×{:.2g} at 1°); with force feedback this can "
+            "make the wheel shake. Use the game's steering lock/ratio for quicker steering.").format(gain)
+
+
 class FrameCheck:
     """Does the wheel's measured position follow the game's steering the way the alignment spring assumes? The
     spring's target is in the driver's position frame (+ toward increasing ABS_X, over the current range); the engine
@@ -128,8 +176,11 @@ class FrameCheck:
     SLOPE = (0.3, 2.0)                   # any linear mapping in this (ACR maps its 540 deg lock onto a 900 deg wheel: 0.60)
     FEED_EVERY = 0.05
     JUDGE_EVERY = 1.0
+    LINEAR_TOL = 0.2                     # slope at small vs large angles may differ by this share
+    LINEAR_MIN = 10                      # pairs in each of the two groups
 
     def __init__(self):
+        self.linear = False              # also require the same slope at small and large angles (a bent position)
         self.reset()
 
     def reset(self):
@@ -179,9 +230,30 @@ class FrameCheck:
             self.reason = ("correlation %.2f (inverted axis or another range)" if self.r < 0 else "correlation %.2f") % self.r
         elif not self.SLOPE[0] <= self.slope <= self.SLOPE[1]:
             self.reason = "scale %.2f of the expected" % self.slope
+        elif self.linear and not self._linear(pairs):
+            pass
         else:
             self.reason = None
             self.ok = True
+
+    def _linear(self, pairs):
+        """The measured position per expected degree agrees (within LINEAR_TOL) between the small and the large
+        angles; sets the reason (and 'waiting' while a group lacks pairs). A bent wheel curve is not what the spring
+        assumes: it stays off."""
+        top = max(abs(p[2]) for p in pairs)
+        small = [p for p in pairs if abs(p[2]) <= 0.3 * top]
+        large = [p for p in pairs if abs(p[2]) >= 0.6 * top]
+        if len(small) < self.LINEAR_MIN or len(large) < self.LINEAR_MIN:
+            self.reason = 'waiting'
+            return False
+        def slope(group):
+            sxx = sum(p[2] * p[2] for p in group)
+            return sum(p[2] * p[3] for p in group) / sxx if sxx > 1e-9 else 0.0
+        low, high = slope(small), slope(large)
+        if low <= 0.0 or high <= 0.0 or abs(high / low - 1.0) > self.LINEAR_TOL:
+            self.reason = "not linear (slope %.2f at small angles, %.2f at large)" % (low, high)
+            return False
+        return True
 
     def failed(self):
         """The reason the wheel does not match, None while waiting or when it does."""
@@ -276,6 +348,11 @@ class Dynamics:
         value = self.numbers('range', 1)
         return value[0] if value and value[0] > 0 else None
 
+    def sensitivity(self):
+        """The driver's steering sensitivity (50 linear), None when it has none."""
+        value = self.numbers('sensitivity', 1)
+        return int(value[0]) if value else None
+
     def align_k_limit(self):
         """ffb_align's 4th field (k_limit) in FS per degree, None when the driver does not report it."""
         value = self.numbers('ffb_align', 4)
@@ -318,6 +395,7 @@ class DynStage:
         self.wheel = None                # the wheel's calibrated ffb_dyn_wheel values, None until there is a result
         self.range = None                # degrees
         self.k_limit = None              # FS per degree, as the driver reports it
+        self.sensitivity = None          # the driver's steering sensitivity (None: it has none, the curve is the identity)
         self.record = record
         self.on = False                  # something is written and not yet set back
         self._column = None              # (damping, friction) last written
@@ -365,6 +443,7 @@ class DynStage:
         self._poll_at = t
         self.range = self.dyn.range()
         self.k_limit = self.dyn.align_k_limit()
+        self.sensitivity = self.dyn.sensitivity()
         if self.record is not None and self.dyn.has('ffb_align'):
             self.record(t, 'ffb_align_read', (self.k_limit or 0.0) * 1e6, self.range or 0.0)
 

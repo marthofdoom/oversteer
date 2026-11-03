@@ -132,6 +132,8 @@ class Calibration:
     BLIND_DEG = 4.0             # the reported position and the axis's current value may differ this much
     TICK_GAP_S = 0.020          # a pause between writes this long during a pulse above SWEEP_MAX stops the run
     EMERGENCY_BRAKE_S = 0.200   # stopping at the hard margin: brake this long at most, then force 0
+    COOL_WAIT_S = 60.0          # a warm wheel (the driver derating, or its heat estimate over COOL_MEAN_PERCENT) is waited for this long
+    COOL_MEAN_PERCENT = 50      # ffb_thermal's mean square, in percent of the limit: below this the wheel is cool enough
     STALE_SAMPLES = 3           # ext_force reads taken (50 ms apart) to tell a stale value from a live writer
 
     def __init__(self, io, progress=None, pending_path=None, pending_key=None, record_dir=None):
@@ -200,6 +202,7 @@ class Calibration:
             # itself) or the run is refused before any write; only then may _check_free clear a stale ext_force
             owner = self._acquire_owner()
             self._check_free()              # before anything is changed: nothing to put back if it isn't
+            self._wait_cool()               # a warm motor weakens the torque: the figures would not be comparable
             # no collector pauses in the middle of a pulse
             gc.collect()
             gc.freeze()
@@ -341,6 +344,36 @@ class Calibration:
                 io.write('ext_force', '0')
             except OSError as e:
                 raise Aborted('unplugged', _("The wheel stopped answering (unplugged?): {}").format(e)) from e
+
+    def _thermal(self):
+        """(mean square in percent of the limit, derating flag) of the driver's ffb_thermal, None without one."""
+        try:
+            fields = str(self.io.read('ffb_thermal')).split()
+            return int(fields[0]), int(fields[1])
+        except (OSError, KeyError, ValueError, IndexError):
+            return None
+
+    def _wait_cool(self):
+        """The driver's thermal derating must be off and its heat estimate below COOL_MEAN_PERCENT of the limit
+        before a run: a warm wheel gives less torque and the fit would not match a cold one. Waits up to
+        COOL_WAIT_S, saying so; refuses after (nothing was changed)."""
+        io = self.io
+        thermal = self._thermal()
+        if thermal is None:
+            return                          # an older driver: nothing to read
+        start = io.now()
+        while thermal[1] or thermal[0] >= self.COOL_MEAN_PERCENT:
+            if self.cancel_event.is_set():
+                raise Aborted('cancelled', _("Calibration cancelled."))
+            waited = io.now() - start
+            if waited >= self.COOL_WAIT_S:
+                raise Aborted('warm', _("The wheel is warm (motor heat {} %); let it cool and try again.")
+                              .format(thermal[0]))
+            self._report(_("Waiting for the wheel to cool down (motor heat {} %, {:.0f} s left)")
+                         .format(thermal[0], self.COOL_WAIT_S - waited))
+            io.sleep_until(io.now() + 1.0)
+            thermal = self._thermal() or (0, 0)
+        return
 
     def _prepare(self):
         io = self.io
@@ -1639,6 +1672,37 @@ ENTRY_VERSION = 1
 FRICTION_COMP_CAP = 0.8         # friction compensation cancels at most this share of the torque at the breakaway
 
 
+CONSISTENT_A_FS = 0.15          # a new fit's a_fs may differ from the previous one by this share...
+CONSISTENT_CURVE = 0.1          # ...and its torque curve at the knots CONSISTENT_KNOTS by this much of full scale
+CONSISTENT_KNOTS = (0.4, 0.7)
+
+
+def inconsistency(result, previous):
+    """Why a new fit does not agree with the stored one (a_fs more than 15 % apart, or the torque curve more than
+    0.1 of full scale apart at the knots 0.4 to 0.7), None when it does or there is nothing to compare."""
+    if not isinstance(result, dict) or not isinstance(previous, dict):
+        return None
+    reasons = []
+    new, old = _num(result.get('a_fs')), _num(previous.get('a_fs'))
+    if new and old and abs(new / old - 1.0) > CONSISTENT_A_FS:
+        reasons.append(_("full-scale acceleration {:+.0f} %").format((new / old - 1.0) * 100))
+    try:
+        worst = 0.0
+        for k, a in zip(result['knots'], result['curve']):
+            if CONSISTENT_KNOTS[0] <= k <= CONSISTENT_KNOTS[1] and k in previous['knots']:
+                worst = max(worst, abs(float(a) - float(previous['curve'][list(previous['knots']).index(k)])))
+    except (KeyError, TypeError, ValueError, IndexError):
+        worst = 0.0
+    if worst > CONSISTENT_CURVE:
+        reasons.append(_("torque curve {:.2f} of full scale apart").format(worst))
+    return ', '.join(reasons) or None
+
+
+def _num(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) \
+        and value > 0 else None
+
+
 def _clamped_int(value, low, high, default=0):
     try:
         return max(low, min(high, int(value)))
@@ -1770,6 +1834,8 @@ def summary(result):
     if result.get('encoder_deg'):
         parts.append(_("encoder step {:.3f}°").format(result['encoder_deg']))
     text = ', '.join(parts)
+    if result.get('inconsistent'):
+        text += ' ' + _("(inconsistent with the previous calibration: {})").format(result['inconsistent'])
     if result.get('partial'):
         text += ' ' + _("(the time ran out in \"{}\": only the first pass was measured)").format(
             result.get('timed_out_in') or '')

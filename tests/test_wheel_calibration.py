@@ -1835,3 +1835,92 @@ def test_the_deadband_lift_fades_in_over_the_luts_first_512_like_the_drivers():
     # m = 256 of the LUT's output: half the lift's usual size, and continuous at 512
     assert wc.shaped(256, ident, d) == pytest.approx((d + (wc.FULL - d) * 256 / wc.FULL) * 0.5, rel=1e-3)
     assert wc.shaped(512, ident, d) == pytest.approx(d + (wc.FULL - d) * 512 / wc.FULL, rel=1e-3)
+
+
+# -- calibration consistency: a cool wheel, and a result that disagrees is not applied --
+
+def test_a_warm_wheel_is_waited_for_and_then_refused():
+    sim = SimWheel()
+    sim.attrs['ffb_thermal'] = '80 1 60'
+    cal = Calibration(sim)
+    with pytest.raises(Aborted) as e:
+        cal.run()
+    assert e.value.reason == 'warm' and 'cool' in str(e.value)
+    assert sim.t >= 100.0 + Calibration.COOL_WAIT_S - 1e-6                     # it waited the full time
+    assert not any(n == 'ext_force' and v != '0' for _t, n, v in sim.writes)     # nothing was driven
+
+
+def test_a_derating_flag_alone_also_waits():
+    sim = SimWheel()
+    sim.attrs['ffb_thermal'] = '10 1 80'
+    with pytest.raises(Aborted) as e:
+        Calibration(sim).run()
+    assert e.value.reason == 'warm'
+
+
+def test_a_wheel_that_cools_in_time_runs_and_a_cold_one_does_not_wait():
+    class Cooling(SimWheel):
+        def read(self, name):
+            value = super().read(name)
+            if name == 'ffb_thermal' and self.t > 105.0:
+                self.attrs['ffb_thermal'] = '20 0 100'
+            return value
+    sim = Cooling()
+    sim.attrs['ffb_thermal'] = '80 1 60'
+    cal = Calibration(sim)
+    cal._wait_cool()                                                   # (the whole run is covered by the other tests)
+    assert 105.0 <= sim.t < 100.0 + Calibration.COOL_WAIT_S
+    cold = SimWheel()
+    cold.attrs['ffb_thermal'] = '20 0 100'
+    Calibration(cold)._wait_cool()
+    assert cold.t == 100.0
+    Calibration(SimWheel())._wait_cool()                               # an older driver: no attribute, no wait
+
+
+def test_the_output_cap_is_100_during_a_run_and_put_back(g29_like):
+    sim = SimWheel()
+    sim.attrs['ffb_output_cap'] = '70'
+    sim.attrs['ffb_thermal'] = '10 0 100'
+    cal = Calibration(sim)
+    cal._wait_cool()
+    cal.io.hold()
+    cal.saved['ffb_output_cap'] = '70'
+    cal._prepare()
+    assert sim.attrs['ffb_output_cap'] == '100'
+
+
+def test_inconsistency_compares_a_fs_and_the_curve_at_the_middle_knots(g29_like):
+    _sim, _cal, result = g29_like
+    assert wcal.inconsistency(result, result) is None
+    assert wcal.inconsistency(result, None) is None
+    slower = dict(result, a_fs=result['a_fs'] * 1.2)
+    assert 'acceleration' in wcal.inconsistency(slower, result)
+    assert wcal.inconsistency(dict(result, a_fs=result['a_fs'] * 1.1), result) is None
+    bent = dict(result, curve=[v + (0.15 if 0.4 <= k <= 0.7 else 0.0) for k, v in zip(result['knots'], result['curve'])])
+    assert 'torque curve' in wcal.inconsistency(bent, result)
+    outside = dict(result, curve=[v + (0.3 if k < 0.3 else 0.0) for k, v in zip(result['knots'], result['curve'])])
+    assert wcal.inconsistency(outside, result) is None
+    assert 'inconsistent with the previous calibration' in wcal.summary(dict(result, inconsistent='x'))
+
+
+def test_an_inconsistent_calibration_is_kept_beside_the_previous_one_not_applied(tmp_path, g29_like):
+    _sim, cal, result = g29_like
+    wheel = _Wheel()
+    gui = _gui(tmp_path, wheel)
+    gui._calibration_finished(cal, wheel, result, None)
+    stored = wcal.load_store(str(tmp_path / wcal.STORE_NAME))['046d:c24f']
+    lut = wheel.attrs['ffb_lut']
+    gui.ui.calls.clear()
+    other = dict(result, a_fs=result['a_fs'] * 1.5, date='2026-11-03T10:00:00')
+    gui._calibration_finished(cal, wheel, other, None)
+    entry = wcal.load_store(str(tmp_path / wcal.STORE_NAME))['046d:c24f']
+    assert entry['result'] == stored['result']                         # the previous one stays
+    assert entry['candidate']['a_fs'] == other['a_fs'] and 'inconsistent' in entry['candidate']
+    assert wheel.attrs['ffb_lut'] == lut
+    dialog = [c for c in gui.ui.calls if c[0] == 'info_dialog'][-1]
+    assert 'inconsistent' in dialog[1] and 'recalibrate' in dialog[2]
+    assert 'recalibrate' in gui.wheel_calibration_text()
+    # a consistent run replaces it and drops the candidate
+    gui._calibration_finished(cal, wheel, dict(result, date='2026-11-04T10:00:00'), None)
+    entry = wcal.load_store(str(tmp_path / wcal.STORE_NAME))['046d:c24f']
+    assert 'candidate' not in entry and entry['result']['date'] == '2026-11-04T10:00:00'

@@ -142,6 +142,7 @@ class FakeController:
     countersteer_view = Gui.countersteer_view
     countersteer_info = Gui.countersteer_info
     countersteer_details = Gui.countersteer_details
+    sensitivity_warning = Gui.sensitivity_warning
     _countersteer_wanted = Gui._countersteer_wanted
 
     def __init__(self, profile_path, device=None, enabled=True, token='pair-me-1234'):

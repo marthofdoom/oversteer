@@ -1381,6 +1381,7 @@ class FfbEngine:
         self._pos_src = None
         self._frame = ffb_dynamics.FrameCheck()
         self._frame_range = None
+        self._frame_sens = None          # the driver's sensitivity the check was fed under
         self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
         self.align_note = None           # why the alignment spring is not played (the info line shows it)
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
@@ -1725,6 +1726,17 @@ class FfbEngine:
         if stage.range != self._frame_range:
             self._frame_range = stage.range
             check.reset()                # a new range: the window says nothing about it
+        # The driver's spring works on the RAW position, the evdev position is bent by the sensitivity curve: the
+        # measured position is taken back to raw (the spring's frame); a bent frame must also be linear to be trusted
+        sens = stage.sensitivity
+        if sens != self._frame_sens:
+            self._frame_sens = sens
+            check.reset()
+            if sens not in (None, ffb_dynamics.SENSITIVITY_LINEAR):
+                logging.info("Countersteer FFB: the wheel's sensitivity is %s: the position is taken back to the raw "
+                             "frame for the alignment spring", sens)
+        bent = sens is not None and sens != ffb_dynamics.SENSITIVITY_LINEAR
+        check.linear = bent
         steer = getattr(sample, 'steer', None)
         if self._pos_src is not None and stage.range and steer is not None and math.isfinite(steer) \
                 and (sample.speed or 0.0) > MIN_SPEED:
@@ -1734,7 +1746,14 @@ class FfbEngine:
                 raw = None
             if raw is not None:
                 half = stage.range / 2.0
-                check.feed(t, steer, -steer * half, raw / 65535.0 * stage.range - half)
+                measured = raw / 65535.0 * stage.range - half
+                if bent:
+                    unbent = ffb_dynamics.sensitivity_inverse(measured / half, sens)
+                    measured = None if unbent is None else unbent * half
+                if measured is None:
+                    check.reset()
+                else:
+                    check.feed(t, steer, -steer * half, measured)
         if self._pos_src is None:
             self.align_note = _("wheel position unavailable: the alignment spring stays off")
         elif check.failed():
