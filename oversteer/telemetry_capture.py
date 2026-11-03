@@ -31,6 +31,10 @@ The times are on the capture records' own clock (the listener's monotonic
 one, taken from the first packet), so a steering sample lines up with the
 telemetry packet beside it. Read-only: the wheel's node is opened without a
 grab and nothing is written to it. The .ovcap format is unchanged.
+
+A capture recorded for FFB tuning has a third sidecar, `<file>.ffb.gz` (ffb_record): the engine's side of the force
+chain (the game's raw force, ext_force, the driver's alignment spring and column writes, hands, live friction and
+thermal readings) on the same clock, for an offline replay of the whole chain.
 """
 
 import glob
@@ -46,6 +50,7 @@ import threading
 import time
 import zlib
 
+from . import ffb_record
 from .telemetry_formats import OVST4_SIZE, OVST5_SIZE, OVST_MAGIC
 
 MAGIC = b'OVCAP1\n'
@@ -54,6 +59,7 @@ SUFFIX = '.ovcap.gz'
 WHEEL_MAGIC = b'OVWHL1\n'
 WHEEL_RECORD = struct.Struct('<dHHi')
 WHEEL_SUFFIX = '.wheel.gz'
+FFB_SUFFIX = ffb_record.SUFFIX       # the engine's channels of an FFB tuning capture (ffb_record)
 EV_KEY, EV_ABS = 0x01, 0x03          # linux/input-event-codes.h
 CAPTURE_GAP = 60.0          # seconds without telemetry that close a capture file: a menu or a pause does not
 RECORD_QUEUE = 4096         # packets waiting for the writer (about 34 s at 120 a second, 12 s at ACR's 333, 6 s at RBR's 720)
@@ -259,10 +265,13 @@ def read_capture(path):
 
 
 def _wheel_size(path):
-    try:
-        return os.path.getsize(path + WHEEL_SUFFIX)
-    except OSError:
-        return 0
+    total = 0
+    for suffix in (WHEEL_SUFFIX, FFB_SUFFIX):
+        try:
+            total += os.path.getsize(path + suffix)
+        except OSError:
+            pass
+    return total
 
 
 def ffb_tuning(path):
@@ -343,7 +352,7 @@ def _scan(folder):
 
 def sidecars(path):
     """The sidecar files of a capture that exist: its labels and its wheel inputs."""
-    return [p for p in (path + '.json', path + WHEEL_SUFFIX) if os.path.exists(p)]
+    return [p for p in (path + '.json', path + WHEEL_SUFFIX, path + FFB_SUFFIX) if os.path.exists(p)]
 
 
 def capture_summary(folder):
@@ -369,10 +378,11 @@ def prune(folder, cap, keep=None):
             os.remove(path)
         except OSError:
             continue
-        try:
-            os.remove(path + WHEEL_SUFFIX)       # the wheel's inputs go with the capture
-        except OSError:
-            pass
+        for suffix in (WHEEL_SUFFIX, FFB_SUFFIX):
+            try:
+                os.remove(path + suffix)         # the wheel's inputs and the engine's channels go with the capture
+            except OSError:
+                pass
         total -= size
         deleted.append(path)
     return deleted
@@ -586,6 +596,7 @@ class Recorder:
         self.folder = folder
         self.wheel = wheel                # () -> (source, header fields) or None: the wheel's inputs, beside each capture
         self._sampler = None
+        self._ffb_log = None              # ffb_record.FfbSampler of an FFB tuning capture
         self._started = None
         self.cap = cap
         self.port = port
@@ -829,7 +840,20 @@ class Recorder:
         self._writer, self.path, self._started = self._new_file(port, first)
         self._file_port = port
 
+    def _start_ffb_log(self, origin):
+        """An FFB tuning capture also keeps the engine's side (ffb_record), on the capture's clock."""
+        if not self.ffb_tuning or self._ffb_log is not None:
+            return
+        try:
+            self._ffb_log = ffb_record.FfbSampler(self.path + FFB_SUFFIX, origin, {
+                'capture': os.path.basename(self.path), 'oversteer': self.version, 'started': self._started})
+            self._ffb_log.start()
+        except OSError as e:
+            logging.warning("ffb sidecar: %s", e)
+            self._ffb_log = None
+
     def _start_wheel(self, origin):
+        self._start_ffb_log(origin)
         if self.wheel is None:
             return
         source = None
@@ -856,6 +880,9 @@ class Recorder:
         sampler, self._sampler = self._sampler, None
         if sampler is not None:
             sampler.stop()
+        ffb_log, self._ffb_log = self._ffb_log, None
+        if ffb_log is not None:
+            ffb_log.stop()
         writer, self._writer = self._writer, None
         if writer is None:
             return

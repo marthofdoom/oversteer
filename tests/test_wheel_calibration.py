@@ -722,7 +722,8 @@ def _gui(tmp_path, wheel, confirm=True):
     gui.test = None
     gui.grab_input = False
     gui._wheel_retry = None
-    gui.ffb_engine = SimpleNamespace(set_device=lambda path: None)
+    gui.ffb_engine = SimpleNamespace(set_device=lambda path: None, set_wheel_result=lambda result: None,
+                                    set_position_source=lambda source: None)
     return gui
 
 
@@ -1387,7 +1388,8 @@ def test_a_replugged_wheel_gives_the_engine_its_new_path(tmp_path):
     wheel.dev_path = '/sys/devices/usb1/1-3/1-3:1.0/0003:046D:C24F.0009'     # bound again under a new number
     gui = _gui(tmp_path, wheel)
     paths = []
-    gui.ffb_engine = SimpleNamespace(set_device=paths.append)
+    gui.ffb_engine = SimpleNamespace(set_device=paths.append, set_wheel_result=lambda result: None,
+                                    set_position_source=lambda source: None)
     gui.device_manager = SimpleNamespace(is_changed=lambda: False, take_plugged=lambda: ['/sys/fake'])
     gui.apply_plug_profile = lambda device_id: None
     gui.populate_devices()
