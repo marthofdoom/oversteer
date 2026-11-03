@@ -78,6 +78,8 @@ class Model:
         'countersteer_mapping': None,
         'countersteer_drive_pull': None,
         'countersteer_drive_pull_level': None,
+        'countersteer_kick': None,
+        'countersteer_kick_level': None,
         'countersteer_texture': None,
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
@@ -131,6 +133,8 @@ class Model:
         'countersteer_mapping': 'string',
         'countersteer_drive_pull': 'boolean',
         'countersteer_drive_pull_level': 'integer',
+        'countersteer_kick': 'boolean',
+        'countersteer_kick_level': 'integer',
         'countersteer_texture': 'integer',
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
@@ -243,6 +247,7 @@ class Model:
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_MAPPING, OVERALL_PULL, OVERALL_PULL_LEVEL
+        from .ffb_kick import OVERALL_KICK, OVERALL_KICK_LEVEL
         from .ffb_texture import LEVEL
         # The overall Countersteer force in % of the car's real steering torque, and where it stops being played 1:1
         data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
@@ -250,6 +255,8 @@ class Model:
                 'countersteer_mapping': OVERALL_MAPPING if supported else None,
                 'countersteer_drive_pull': OVERALL_PULL if supported else None,
                 'countersteer_drive_pull_level': OVERALL_PULL_LEVEL if supported else None,
+                'countersteer_kick': OVERALL_KICK if supported else None,
+                'countersteer_kick_level': OVERALL_KICK_LEVEL if supported else None,
                 'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
         for part in cls.TEXTURE_PARTS:
             data['countersteer_texture_' + part] = True if supported else None
@@ -431,6 +438,8 @@ class Model:
             data['countersteer_knee'] = min(max(data['countersteer_knee'], KNEE_MIN), KNEE_MAX)
         if data['countersteer_drive_pull_level'] is not None:
             data['countersteer_drive_pull_level'] = min(max(data['countersteer_drive_pull_level'], 0), 100)
+        if data['countersteer_kick_level'] is not None:
+            data['countersteer_kick_level'] = min(max(data['countersteer_kick_level'], 0), 100)
         if data['countersteer_mapping'] is not None and data['countersteer_mapping'] not in MAPPINGS:
             data['countersteer_mapping'] = MAPPINGS[0]
 
@@ -748,6 +757,27 @@ class Model:
         value = self.data.get('countersteer_drive_pull_level')
         return OVERALL_PULL_LEVEL if value is None else value
 
+    def set_countersteer_kick(self, value):
+        """Kickback (the onset pulse of the scrub couple, ffb_kick) on or off."""
+        if self.set_if_changed('countersteer_kick', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_kick()
+
+    def get_countersteer_kick(self):
+        from .ffb_kick import OVERALL_KICK
+        value = self.data.get('countersteer_kick')
+        return OVERALL_KICK if value is None else bool(value)
+
+    def set_countersteer_kick_level(self, value):
+        """Kickback's level, 0..100 % of its amplitude."""
+        value = min(max(int(value), 0), 100)
+        if self.set_if_changed('countersteer_kick_level', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_kick()
+
+    def get_countersteer_kick_level(self):
+        from .ffb_kick import OVERALL_KICK_LEVEL
+        value = self.data.get('countersteer_kick_level')
+        return OVERALL_KICK_LEVEL if value is None else value
+
     def set_countersteer_texture(self, value):
         """The texture's master level, 0..100 %."""
         value = min(max(int(value), 0), 100)
@@ -1045,6 +1075,7 @@ class Model:
         self.ui.set_countersteer_strength(data['countersteer_strength'])
         self.ui.set_countersteer_knee(data['countersteer_knee'])
         self.ui.set_countersteer_drive_pull(data['countersteer_drive_pull'], data['countersteer_drive_pull_level'])
+        self.ui.set_countersteer_kick(data['countersteer_kick'], data['countersteer_kick_level'])
         self.ui.set_countersteer_texture(data['countersteer_texture'],
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])

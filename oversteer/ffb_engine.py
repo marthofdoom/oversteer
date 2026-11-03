@@ -88,6 +88,7 @@ from . import wheel_owner
 from . import car_data
 from . import ffb_carprops
 from . import ffb_dynamics
+from . import ffb_kick
 from . import ffb_record
 from . import ffb_spring
 from . import wheel_torque
@@ -568,6 +569,8 @@ class RackForce:
                                          # top end, damping at the same scale)
     pull_on = False                      # "Drive pull": the scrub couple of the drive's left/right split in the force ...
     pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the physical SCRUB
+    kick_on = False                      # "Kickback": the onset pulse of the scrub couple (ffb_kick) ...
+    kick_level = ffb_kick.OVERALL_KICK_LEVEL / 100.0   # ... at this share of its amplitude
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
                                          # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car)
     CLASSIC_SCALE = COLUMN_SCALE         # the classic mapping's uniform scale: the p99-based impedance scale of the drive
@@ -603,6 +606,7 @@ class RackForce:
     def __init__(self):
         self.learner = None
         self.car = None
+        self._kick = ffb_kick.Kick()
         self.floor = None                # |raw| the game sends as its minimum force (ACR: 6 % of full scale), None unknown
         self._floor_counts = collections.Counter()
         self._floor_uploads = 0
@@ -1066,6 +1070,7 @@ class RackForce:
                 share -= self._spring.force(theta_a, theta, k_fs, tau, self.align_k_limit, dt)
                 if self.align_writer is not None:
                     self.align_writer(theta_a, k_fs, tau)
+        share = self._kick.share(self, sample, share, ratio, assist)
         limit = FULL * self._ceiling()
         vel = getattr(sample, 'vel', None)
         if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:
@@ -1572,6 +1577,7 @@ class FfbEngine:
         self._knee_req = None            # the "1:1 up to" share (%) from the GUI
         self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
+        self._kick_req = None            # "Kickback": (on, level %) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
         self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
@@ -1747,6 +1753,11 @@ class FfbEngine:
         """Drive pull: the scrub couple of the drive's left/right split in the steering force, on or off, at `level` %
         of the physical scrub radius."""
         self._pull_req = (bool(on), min(max(float(level), 0.0), 100.0))
+        self._wake.set()
+
+    def set_kick(self, on, level):
+        """Kickback: the onset pulse of the scrub couple (ffb_kick), on or off, at `level` % of its amplitude."""
+        self._kick_req = (bool(on), min(max(float(level), 0.0), 100.0))
         self._wake.set()
 
     def car_properties(self):
@@ -1936,6 +1947,8 @@ class FfbEngine:
             self.model.mapping = self._mapping_req
         if self._pull_req is not None:
             self.model.pull_on, self.model.pull_level = self._pull_req[0], self._pull_req[1] / 100.0
+        if self._kick_req is not None:
+            self.model.kick_on, self.model.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2811,13 +2824,14 @@ class FfbEngine:
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, rim model %.1f:1 assist %.1f wheel %.1f Nm (car p99 %.0f Nm), "
-                     "mapping %s, 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, texture %s%s)", self._verdict.game, self._verdict.rate,
+                     "mapping %s, 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, texture %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,
                      m.ratio, m.assist, m.wheel_peak or wheel_torque.DEFAULT_PEAK_NM, m.p99,
                      m.mapping, m.knee * 100.0, m.top_torque(),
                      '%.0f %%' % (m.pull_level * 100.0) if m.pull_on else 'off',
+                     '%.0f %%' % (m.kick_level * 100.0) if m.kick_on else 'off',
                      self.texture.describe(),
                      "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '')
         self._dyn_start(t)
