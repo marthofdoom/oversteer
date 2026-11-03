@@ -116,6 +116,8 @@ def test_the_setters_reach_the_child_and_the_status_comes_back(tmp_path, proxy):
     p.set_drive_pull(True, 40)
     p.set_kick(True, 60)
     p.set_column_damping(45)
+    p.set_rim_mm(300)
+    p.set_car_wheel_mm(400)
     p.set_lightness(70)
     p.set_linearity(30)
     p.set_texture(0.5, {'road': True, 'kerb': False})
@@ -128,6 +130,7 @@ def test_the_setters_reach_the_child_and_the_status_comes_back(tmp_path, proxy):
     assert got['enabled'] is True and got['path'] == path and got['usb_id'] == '046d:c24f'
     assert got['strength'] == 90 and got['knee'] == 45 and got['mapping'] == 'classic'
     assert got['pull'] == (True, 40.0) and got['kick'] == (True, 60.0) and got['damping'] == 45.0
+    assert got['rim'] == 300.0 and got['car_wheel'] == 400.0
     assert got['lightness'] == 70 and got['linearity'] == 30
     assert got['texture'] == (0.5, {'road': True, 'kerb': False})
     assert got['dynamics'] == (False, True, True) and got['wheel'] == {'damping': 1}
@@ -147,13 +150,15 @@ def test_a_child_restarted_gets_every_setting_again(tmp_path, proxy):
     p.set_device(path)
     p.set_knee(50)
     p.set_column_damping(35)
+    p.set_rim_mm(260)
+    p.set_car_wheel_mm(380)
     p.set_enabled(True)
     assert until(lambda: p._ready)
     first = p.pid
     os.kill(first, signal.SIGKILL)                       # our own child
     assert until(lambda: p.pid != first and p._ready)
     got = p.probe()
-    assert got['damping'] == 35.0 and got['knee'] == 50 and got['enabled'] is True and got['path'] == path
+    assert got['rim'] == 260.0 and got['car_wheel'] == 380.0 and got['damping'] == 35.0 and got['knee'] == 50 and got['enabled'] is True and got['path'] == path
 
 
 def test_the_listener_never_waits_for_the_engine_process():

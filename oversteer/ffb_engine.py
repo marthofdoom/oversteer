@@ -142,7 +142,9 @@ OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_PULL = False                     # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
 OVERALL_PULL_LEVEL = 35                  # ... and its level, % of the physical scrub radius
-OVERALL_COLUMN_DAMPING = 60              # "Column damping" default: % of the real steering column's damping the knee mapping plays
+OVERALL_COLUMN_DAMPING = 64              # "Column damping" default: % of the real steering column's damping the knee mapping plays
+                                         # (rho^2 for a 279 mm rim on a 350 mm car wheel: a column's damping is torque per rad/s, and
+                                         # the hand feels it as torque / radius while the rim turns as radius, so it scales as rho^2)
 FULL = 32767                             # ext_force full scale (an FF_CONSTANT level at 0x4000)
 
 
@@ -565,6 +567,9 @@ class RackForce:
     ASSIST = 1.0                         # assist class: 1.0 road / rally power steering, 0.0 unassisted (race cars)
     RIM_SAFE_NM = 10.0                   # hard ceiling on the torque at the rim whatever the car and the wheel
     wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the 2.1 Nm class
+    rim_user = None                      # mm: the user's rim diameter (the profile's), None: the table's
+    wheel_rim = None                     # mm: the wheel's rim diameter (wheel_torque.rim_mm), None unknown: DEFAULT_RIM_MM
+    car_wheel_mm = wheel_torque.CAR_WHEEL_MM   # mm: the car's steering wheel (the profile INI's countersteer_car_wheel_mm)
     strength = 1.0                       # the overall steering strength (the engine's), applied inside rim_share
     knee = wheel_torque.KNEE             # share of the wheel's peak played 1:1 in Nm (the engine's, "1:1 up to")
     mapping = OVERALL_MAPPING            # the steering mapping (the engine's, the profile INI's countersteer_mapping):
@@ -998,6 +1003,15 @@ class RackForce:
         """The scrub radius (m) the steering force plays: SCRUB times the Drive pull level, 0 with it off."""
         return SCRUB * self.pull_level if self.pull_on else 0.0
 
+    def rim_mm(self):
+        """The wheel's rim diameter in mm: the user's, else the table's, else the G29's."""
+        return self.rim_user or self.wheel_rim or wheel_torque.DEFAULT_RIM_MM
+
+    def rho(self):
+        """The hand-force scale of a car's torque on this wheel: rim diameter / the car's wheel diameter (0.797 for 279 /
+        350 mm). The hand feels torque / radius, so 1:1 in hand force plays the car's torque times rho (knee mapping)."""
+        return (self.rim_mm() / self.car_wheel_mm)
+
     def damping_scale(self):
         """The column damping's scale: the impedance scale in the classic mapping, the "Column damping" share (damping_pct,
         60 % by default) of the real column's in the knee one."""
@@ -1043,8 +1057,9 @@ class RackForce:
             share = scale * self.strength * torque / peak
             share = max(-wheel_torque.STEER_BUDGET, min(wheel_torque.STEER_BUDGET, share))
         else:
-            x_top = self.top_torque(ratio, assist)
-            share = wheel_torque.rim_share(torque, self.wheel_peak, self.strength, x_top, self.knee)
+            rho = self.rho()
+            x_top = self.top_torque(ratio, assist) * rho         # the car's top, in hand force at this rim
+            share = wheel_torque.rim_share(torque * rho, self.wheel_peak, self.strength, x_top, self.knee)
         if self.align_on:
             split = self.align(sample)
             if split is not None:
@@ -1055,8 +1070,8 @@ class RackForce:
                 if classic:
                     k_fs = scale * split['k'] * self.strength / peak
                 else:
-                    k_fs = split['k'] * wheel_torque.rim_share_slope(torque, self.wheel_peak, self.strength, x_top,
-                                                                     self.knee) * self.strength / peak
+                    k_fs = split['k'] * rho * wheel_torque.rim_share_slope(torque * rho, self.wheel_peak, self.strength,
+                                                                           x_top, self.knee) * self.strength / peak
                 tau = wheel_torque.STEER_BUDGET
                 theta_a, theta = split['theta_a_deg'], split['theta_deg']
                 if self.wheel_range:
@@ -1589,6 +1604,8 @@ class FfbEngine:
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
         self._kick_req = None            # "Kickback": (on, level %) from the GUI
         self._damping_req = None         # "Column damping" (% of the real column's) from the GUI
+        self._rim_req = None             # the wheel's rim diameter (mm, 0: the table's) from the GUI
+        self._car_wheel_req = None       # the car's steering wheel diameter (mm, profile INI only) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
         self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
@@ -1784,6 +1801,18 @@ class FfbEngine:
         self._damping_req = min(max(float(pct), 0.0), 100.0)
         self._wake.set()
 
+    def set_rim_mm(self, value):
+        """The wheel's rim diameter in mm, 200..400 (0: the table's for the wheel, wheel_torque.RIM_MM)."""
+        value = float(value)
+        self._rim_req = 0.0 if value <= 0 else min(max(value, wheel_torque.RIM_RANGE[0]), wheel_torque.RIM_RANGE[1])
+        self._wake.set()
+
+    def set_car_wheel_mm(self, value):
+        """The car's steering wheel diameter in mm, 280..420: the hand-force scale rho is the wheel's
+        rim over it."""
+        self._car_wheel_req = min(max(float(value), wheel_torque.CAR_WHEEL_RANGE[0]), wheel_torque.CAR_WHEEL_RANGE[1])
+        self._wake.set()
+
     def car_properties(self):
         """(car, caster trail m, scrub radius m) as the ACR model holds them for the current car, None before one."""
         model = self.model
@@ -1810,6 +1839,7 @@ class FfbEngine:
         (wheel_torque; unknown: the relative target). Set before set_device."""
         self._usb_id = usb_id
         self.model.wheel_peak = wheel_torque.peak_nm(usb_id)      # one attribute swap, read by the engine thread
+        self.model.wheel_rim = wheel_torque.rim_mm(usb_id)
 
     def set_device(self, path):
         """The wheel's sysfs directory, None for none. The old one's game
@@ -1996,6 +2026,10 @@ class FfbEngine:
             self.model.kick_on, self.model.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
         if self._damping_req is not None:
             self.model.damping_pct = self._damping_req
+        if self._rim_req is not None:
+            self.model.rim_user = self._rim_req or None
+        if self._car_wheel_req is not None:
+            self.model.car_wheel_mm = self._car_wheel_req
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2876,12 +2910,13 @@ class FfbEngine:
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, rim model %.1f:1 assist %.1f wheel %.1f Nm (car p99 %.0f Nm), "
-                     "mapping %s, 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s)", self._verdict.game, self._verdict.rate,
+                     "mapping %s, hand-force scale %.2f (%.0f/%.0f mm), 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,
                      m.ratio, m.assist, m.wheel_peak or wheel_torque.DEFAULT_PEAK_NM, m.p99,
-                     m.mapping, m.knee * 100.0, m.top_torque(),
+                     m.mapping, m.rho(), m.rim_mm(), m.car_wheel_mm,
+                     m.knee * 100.0, m.top_torque(),
                      '%.0f %%' % (m.pull_level * 100.0) if m.pull_on else 'off',
                      '%.0f %%' % (m.kick_level * 100.0) if m.kick_on else 'off',
                      m.damping_pct, self.texture.describe(),

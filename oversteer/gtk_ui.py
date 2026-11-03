@@ -9,6 +9,7 @@ from .gtk_handlers import GtkHandlers
 from . import hotkeys
 from .ffb_meter import FfbMeter, FfbPoller
 from . import qr
+from . import wheel_torque
 from . import steam_options
 from .telemetry import AUTO, DEFAULT_PORT, PORT_PRESETS, PORT_MIN, PORT_MAX, parse_port
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
@@ -1229,7 +1230,8 @@ class GtkUi:
                                  "50 % by default. Saved with the profile.")
     COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, as a share of a real steering column's. Lower "
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
-                                    "after a slide. 60 % by default.")
+                                    "after a slide. 64 % by default (the rim over the car's wheel, squared).")
+    COUNTERSTEER_RIM_TOOLTIP = ("Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
                                  "acts on the steering through the scrub radius; the game's own force has it. On: "
                                  "Countersteer plays that pull, unfiltered, at the level below. Off: the steering "
@@ -1334,6 +1336,21 @@ class GtkUi:
         self.countersteer_knee = knee
         self._dependent_rows.append(self._setting_row(
             _("1:1 up to"), None, _(self.COUNTERSTEER_KNEE_TOOLTIP), (self._response_row(knee),)))
+        steering.add(self._dependent_rows[-1])
+        rim = Gtk.SpinButton.new_with_range(*wheel_torque.RIM_RANGE, 1)
+        rim.set_value(wheel_torque.DEFAULT_RIM_MM)
+        rim.connect('value-changed', lambda w: None if self.updating_countersteer_rim else
+                    self.controller.model.set_countersteer_rim_mm(w.get_value_as_int()))
+        self.countersteer_rim_mm = rim
+        self._dependent_rows.append(self._setting_row(
+            _("Your wheel's rim diameter (mm)"), None, _(self.COUNTERSTEER_RIM_TOOLTIP), (rim,)))
+        steering.add(self._dependent_rows[-1])
+        car = Gtk.SpinButton.new_with_range(*wheel_torque.CAR_WHEEL_RANGE, 1)
+        car.set_value(wheel_torque.CAR_WHEEL_MM)
+        car.connect('value-changed', lambda w: self.controller.model.set_countersteer_car_wheel_mm(w.get_value_as_int()))
+        self.countersteer_car_wheel_mm = car
+        self._dependent_rows.append(self._setting_row(
+            _("Car's steering wheel diameter (mm)"), None, _(self.COUNTERSTEER_RIM_TOOLTIP), (car,)))
         steering.add(self._dependent_rows[-1])
         damping = self._response_scale(0, 100, 5)
         damping.set_size_request(160, -1)
@@ -1449,6 +1466,27 @@ class GtkUi:
             return
         if int(self.countersteer_knee.get_value()) != int(value):
             self.countersteer_knee.set_value(int(value))
+
+    updating_countersteer_rim = False
+
+    def set_countersteer_rim_mm(self, value):
+        """The wheel's rim diameter shown, mm (the table's for the wheel when the profile has none; None where the driver
+        has no replace mode). Shown without saving it."""
+        if not hasattr(self, 'countersteer_rim_mm') or value is None:
+            return
+        if int(self.countersteer_rim_mm.get_value()) != int(value):
+            self.updating_countersteer_rim = True
+            try:
+                self.countersteer_rim_mm.set_value(int(value))
+            finally:
+                self.updating_countersteer_rim = False
+
+    def set_countersteer_car_wheel_mm(self, value):
+        """The car's steering wheel diameter, mm (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_car_wheel_mm') or value is None:
+            return
+        if int(self.countersteer_car_wheel_mm.get_value()) != int(value):
+            self.countersteer_car_wheel_mm.set_value(int(value))
 
     def set_countersteer_column_damping(self, value):
         """The column damping share, 0..100 (None where the driver has no replace mode)."""

@@ -142,7 +142,7 @@ def test_the_column_scale_is_frozen_on_the_g29_class_and_the_car_tops_out_at_the
     # a strong wheel plays the car 1:1 in Nm
     strong = rack_for(10.0)
     strong.p99 = 550.0
-    assert force_at(strong, 550.0) == pytest.approx(abs(strong.rim_torque(sample_at(550.0))) / 10.0)
+    assert force_at(strong, 550.0) == pytest.approx(abs(strong.rim_torque(sample_at(550.0))) * strong.rho() / 10.0)
     # an unassisted car's top is its p99 (at least twice the knee's torque)
     plain = rack_for(2.1, assist=0.0, ratio=13.0)
     plain.p99 = 390.0
@@ -157,9 +157,9 @@ def test_the_played_share_is_1_to_1_up_to_the_knee_and_clamps_hard_at_the_budget
     for nm in (10.0, 30.0, 85.0):
         rim = abs(rack.rim_torque(sample_at(nm)))
         assert rim / 2.1 < rack.knee
-        assert force_at(rack, nm) == pytest.approx(rim / 2.1, rel=1e-6)                       # 1:1 in Nm
+        assert force_at(rack, nm) == pytest.approx(rim * rack.rho() / 2.1, rel=1e-6)       # 1:1 in hand force
     rack.strength = 0.5
-    assert force_at(rack, 85.0) == pytest.approx(0.5 * abs(rack.rim_torque(sample_at(85.0))) / 2.1, rel=1e-6)
+    assert force_at(rack, 85.0) == pytest.approx(0.5 * rack.rho() * abs(rack.rim_torque(sample_at(85.0))) / 2.1, rel=1e-6)
     rack.strength = 1.0
     shares = [force_at(rack, nm) for nm in range(0, 4000, 5)]
     assert all(b >= a for a, b in zip(shares, shares[1:]))
@@ -176,7 +176,7 @@ def test_an_unknown_wheel_counts_as_the_g29_class():
 def test_a_strong_wheel_plays_the_same_nm_and_never_passes_the_ceiling():
     weak, strong = rack_for(2.1), rack_for(20.0)
     nm = abs(strong.rim_torque(sample_at(300.0)))
-    assert force_at(strong, 300.0) == pytest.approx(nm / 20.0, rel=1e-6)
+    assert force_at(strong, 300.0) == pytest.approx(nm * strong.rho() / 20.0, rel=1e-6)
     assert force_at(strong, 300.0) < force_at(weak, 300.0) + 1e-9
     unassisted = rack_for(20.0, assist=0.0)
     assert force_at(unassisted, 5000.0) == pytest.approx(fe.RackForce.RIM_SAFE_NM / 20.0, rel=0.001)
@@ -323,7 +323,7 @@ def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_
         rack._now += 0.005
         resid = rack.force(s)
     split = rack.align(s)
-    k_fs = split['k'] * wheel_torque.rim_share_slope(rack.rim_torque(s), 20.0, 1.0, rack.top_torque(), rack.knee) / 20.0
+    k_fs = split['k'] * rack.rho() * wheel_torque.rim_share_slope(rack.rim_torque(s) * rack.rho(), 20.0, 1.0, rack.top_torque() * rack.rho(), rack.knee) / 20.0
     assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, wheel_torque.STEER_BUDGET))
     spring = ffb_spring.DriverSpring()
     for _ in range(200):
@@ -481,13 +481,13 @@ def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
     assert rack.damping_scale() == rack.impedance() == 0.30
 
 
-def test_column_damping_defaults_to_60_and_sets_the_knee_mappings_damping_scale_clamped_to_0_100():
+def test_column_damping_defaults_to_64_and_sets_the_knee_mappings_damping_scale_clamped_to_0_100():
     from oversteer.model import Model
-    assert fe.OVERALL_COLUMN_DAMPING == 60 and fe.RackForce.DAMPING_SCALE == 0.60
-    assert Model._texture_defaults(True)['countersteer_column_damping'] == 60
+    assert fe.OVERALL_COLUMN_DAMPING == 64 and fe.RackForce.DAMPING_SCALE == 0.64
+    assert Model._texture_defaults(True)['countersteer_column_damping'] == 64
     engine = fe.FfbEngine()
     engine._requests(0.0)
-    assert engine.model.damping_pct == 60 and engine.model.damping_scale() == pytest.approx(0.60)
+    assert engine.model.damping_pct == 64 and engine.model.damping_scale() == pytest.approx(0.64)
     engine.set_column_damping(25)
     engine._requests(0.0)
     assert engine.model.damping_scale() == pytest.approx(0.25)
@@ -501,12 +501,12 @@ def test_column_damping_defaults_to_60_and_sets_the_knee_mappings_damping_scale_
     assert engine.model.damping_scale() == engine.model.impedance()
 
 
-def test_the_model_clamps_the_column_damping_setting_to_0_100_and_defaults_it_to_60():
+def test_the_model_clamps_the_column_damping_setting_to_0_100_and_defaults_it_to_64():
     from oversteer.model import Model
     model = Model.__new__(Model)
     model.data, model.ui = {}, None
     model.set_if_changed = lambda key, value: model.data.update({key: value}) or True
-    assert model.get_countersteer_column_damping() == 60
+    assert model.get_countersteer_column_damping() == 64
     model.set_countersteer_column_damping(150)
     assert model.get_countersteer_column_damping() == 100
     model.set_countersteer_column_damping(-3)
@@ -530,3 +530,63 @@ def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_kne
     assert data['countersteer_mapping'] == 'knee' and data['countersteer_drive_pull'] is False
     assert data['countersteer_drive_pull_level'] == 35
     assert fe.OVERALL_MAPPING == 'knee' and fe.OVERALL_PULL is False and fe.OVERALL_PULL_LEVEL == 35
+
+
+# -- hand force: the car's torque scaled by rim / car wheel diameter --
+
+def test_rho_is_the_rims_over_the_cars_wheel_and_the_table_knows_the_logitech_rims():
+    from oversteer import wheel_ids as wid
+    assert wheel_torque.rim_mm(wid.LG_G29) == 279.0 and wheel_torque.rim_mm(wid.LG_G27) == 270.0
+    assert wheel_torque.rim_mm(None) is None and wheel_torque.rim_mm('dead:beef') is None
+    rack = rack_for(2.1)
+    assert rack.rho() == pytest.approx(0.797, abs=1e-3)                  # 279 / 350
+    rack.rim_user, rack.car_wheel_mm = 300.0, 400.0
+    assert rack.rho() == pytest.approx(0.75)
+
+
+def test_one_nm_of_car_torque_plays_rho_over_the_peak_below_the_knee_and_x_top_still_lands_at_top():
+    rack = rack_for(2.1, assist=0.0, ratio=1.0)
+    rack.p99 = 0.0
+    s = sample_at(0.0)
+    rack.rim_torque = lambda sample, *a, **k: 1.0
+    assert rack.force(s) / fe.FULL == pytest.approx(rack.rho() / 2.1)
+    rack.rim_torque = lambda sample, *a, **k: rack.top_torque()
+    assert rack.force(s) / fe.FULL == pytest.approx(wheel_torque.TOP, abs=1e-6)
+    rack.mapping = 'classic'                                             # classic knows nothing of the rims
+    rack.rim_torque = lambda sample, *a, **k: 1.0
+    plain = fe.RackForce.CLASSIC_SCALE / 2.1
+    assert rack.force(s) / fe.FULL == pytest.approx(plain)
+    rack.rim_user = 200.0
+    assert rack.force(s) / fe.FULL == pytest.approx(plain)
+
+
+def test_the_rim_and_car_wheel_settings_round_trip_through_the_engine_and_default_from_the_table():
+    from oversteer.model import Model
+    engine = fe.FfbEngine()
+    engine.usb_id = '046d:c24f'                                          # a G29
+    assert engine.model.rim_mm() == 279.0 and engine.model.car_wheel_mm == 350.0
+    engine.set_rim_mm(300)
+    engine.set_car_wheel_mm(999)
+    engine._requests(0.0)
+    assert engine.model.rim_mm() == 300.0 and engine.model.car_wheel_mm == 420.0 and engine.model.rho() == pytest.approx(300 / 420)
+    engine.set_rim_mm(0)                                                 # 0: the table's again
+    engine._requests(0.0)
+    assert engine.model.rim_mm() == 279.0
+    d = Model._texture_defaults(True)
+    assert d['countersteer_car_wheel_mm'] == 350 and d['countersteer_rim_mm'] == 0
+
+
+def test_the_model_defaults_the_rim_from_the_wheel_table_and_clamps_both_diameters():
+    from types import SimpleNamespace
+    from oversteer.model import Model
+    model = Model.__new__(Model)
+    model.data, model.ui = {'countersteer_rim_mm': 0}, None
+    model.set_if_changed = lambda key, value: model.data.update({key: value}) or True
+    model.device = SimpleNamespace(usb_id='046d:c24f')
+    assert model.get_countersteer_rim_mm() == 279 and model.get_countersteer_car_wheel_mm() == 350
+    model.set_countersteer_rim_mm(50)
+    assert model.get_countersteer_rim_mm() == 200
+    model.set_countersteer_rim_mm(0)
+    assert model.get_countersteer_rim_mm() == 279
+    model.set_countersteer_car_wheel_mm(900)
+    assert model.get_countersteer_car_wheel_mm() == 420

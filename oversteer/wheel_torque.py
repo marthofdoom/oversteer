@@ -34,6 +34,26 @@ PEAK_NM = {
     wid.CM_C5: (5.0, False),
 }
 
+# usb id: the wheel's rim diameter in mm. The hand feels force = torque / rim radius, so a car's torque at its own steering
+# wheel is scaled by rho = rim / car wheel diameter (RackForce.rho) before rim_share: "1:1" is in hand force. None: unknown
+# (the G29's is taken). Logitech's published figures: G29/G920/G923 11 in (279 mm), G25/G27/DFGT about 270 mm.
+RIM_MM = {
+    wid.LG_G29: 279.0,
+    wid.LG_G920: 279.0,
+    wid.LG_G923P: 279.0,
+    wid.LG_G923X: 279.0,
+    wid.LG_G27: 270.0,
+    wid.LG_G25: 270.0,
+    wid.LG_DFGT: 270.0,
+    wid.LG_DFP: None,
+    wid.FT_CSL_DD: None,
+    wid.CM_C5: None,
+}
+DEFAULT_RIM_MM = 279.0                   # an unknown wheel is taken to have a G29's rim
+CAR_WHEEL_MM = 350.0                     # a rally car's steering wheel (profile key countersteer_car_wheel_mm)
+CAR_WHEEL_RANGE = (280, 420)
+RIM_RANGE = (200, 400)                   # mm: the rim diameter setting
+
 # Direct drives by name, for later: their USB ids are not in wheel_ids and are NOT FOUND in the repo (not guessed)
 DIRECT_DRIVE_NM = {'moza r5': 5.5, 'moza r9': 9.0, 'moza r12': 12.0, 'moza r16': 16.0, 'moza r21': 21.0,
                    'fanatec csl dd 8': 8.0, 'simucube 2 sport': 17.0}
@@ -43,6 +63,11 @@ def peak_nm(usb_id):
     """The wheel's peak rim torque in Nm if it is known and usable, else None."""
     entry = PEAK_NM.get(str(usb_id).lower()) if usb_id else None
     return entry[0] if entry is not None and entry[1] else None
+
+
+def rim_mm(usb_id):
+    """The wheel's rim diameter in mm, None if unknown."""
+    return RIM_MM.get(str(usb_id).lower()) if usb_id else None
 
 
 def impedance_scale(p99_nm, peak_nm=None):

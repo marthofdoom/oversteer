@@ -235,7 +235,7 @@ def test_the_spring_is_worked_out_in_the_wheels_own_position_frame():
     g = 450.0 / (r.lock * r.ratio * 180.0 / math.pi)
     theta_a, k, tau = seen[-1]
     assert theta_a == pytest.approx(max(-450.0, min(450.0, car['theta_a_deg'] * g)))
-    slope = wheel_torque.rim_share_slope(r.rim_torque(s), 2.1, 1.0, r.top_torque(), r.knee)
+    slope = r.rho() * wheel_torque.rim_share_slope(r.rim_torque(s) * r.rho(), 2.1, 1.0, r.top_torque() * r.rho(), r.knee)
     assert k == pytest.approx(slope * car['k'] / 2.1 / g)
     # steer 1 at the lock puts the zero-slip angle at the wheel's own steer * range / 2, whatever the car's lock
     s = slip_sample(0.01, steer=0.5, alpha=0.0)
@@ -380,12 +380,12 @@ def feed(engine, t, seconds, **kw):
     return t
 
 
-def test_the_default_column_damping_writes_60_percent_of_the_real_columns(tmp_path):
+def test_the_default_column_damping_writes_64_percent_of_the_real_columns(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
-    assert engine.model.damping_pct == 60
-    assert int(open(path + '/ffb_dyn_damping').read()) == round(0.6 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 2.1) * 1e6)
-    assert fd.column_targets(0.3, 2.1, damping_scale=0.6)[0] == round(0.6 * 1413)
+    assert engine.model.damping_pct == 64
+    assert int(open(path + '/ffb_dyn_damping').read()) == round(0.64 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 2.1) * 1e6)
+    assert fd.column_targets(0.3, 2.1, damping_scale=0.64)[0] == round(0.64 * 1413)
 
 
 def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp_path):
