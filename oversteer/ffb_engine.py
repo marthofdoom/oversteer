@@ -946,12 +946,22 @@ class RackForce:
         theta_a = theta - alpha * ratio * deg
         stiffness = self.align_stiffness()
         column = -stiffness * self._sat(alpha) / ratio
-        off = ffb_carprops.power_settings()[0] == 'off'
-        cls = 0.0 if off else self.assist * ffb_carprops.power_settings()[1]
+        source = self.power_steering()
+        cls = 0.0 if source == 'off' else self.assist * ffb_carprops.power_settings()[1]
         speed = getattr(sample, 'speed', None)
         hyd = not self.classic()
-        model = ffb_carprops.driver_from_column(column, speed, cls, hyd)
-        slope = ffb_carprops.driver_slope(column, speed, cls, hyd)
+        curve = self._assist.curve(self.p99) if source == 'game' else None
+        if curve:
+            # the same assist curve rim_torque plays (the game's fitted one): its slope against the column torque by a
+            # central difference, so the aligning spring never carries more or less than the played torque's own stiffness
+            def game(c):
+                return self._game_torque(c * ratio, cls, hyd, ratio, curve)
+            model = game(column)
+            h = 0.02 * abs(column) + 1e-3
+            slope = max((game(column + h) - game(column - h)) / (2.0 * h), 0.0)
+        else:
+            model = ffb_carprops.driver_from_column(column, speed, cls, hyd)
+            slope = ffb_carprops.driver_slope(column, speed, cls, hyd)
         k = slope * stiffness / (1.0 + abs(alpha) / self.ALIGN_PK) ** 2 / (ratio * ratio) / deg
         return {'theta_a_deg': theta_a, 'theta_deg': theta, 'k': k, 'model': model}
 
@@ -1025,10 +1035,15 @@ class RackForce:
         if source == 'game':
             curve = self._assist.curve(self.p99)
             if curve:
-                target = ffb_carprops.driver_from_column(self.p99 / ratio, self.GAME_SHAPE_SPEED, cls, hyd)
-                level = target / (self.p99 * ffb_carprops.game_shape(self.p99, curve))
-                return math.copysign(level * abs(mz) * ffb_carprops.game_shape(mz, curve), mz)
+                return self._game_torque(mz, cls, hyd, ratio, curve)
         return ffb_carprops.driver_from_column(mz / ratio, speed, cls, hyd)
+
+    def _game_torque(self, mz, cls, hyd, ratio, curve):
+        """The driver's torque (Nm) for a kingpin torque `mz` where the game's force has the assist: the game's fitted gain
+        curve scaled so the car's p99 lands where our class model puts it (rim_torque and align share it)."""
+        target = ffb_carprops.driver_from_column(self.p99 / ratio, self.GAME_SHAPE_SPEED, cls, hyd)
+        level = target / (self.p99 * ffb_carprops.game_shape(self.p99, curve))
+        return math.copysign(level * abs(mz) * ffb_carprops.game_shape(mz, curve), mz)
 
     def classic(self):
         """The classic steering mapping is on (the INI's countersteer_mapping = classic)."""

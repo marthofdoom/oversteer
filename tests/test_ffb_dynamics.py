@@ -1083,3 +1083,72 @@ def test_a_bent_sensitivity_keeps_the_alignment_spring_off_and_50_plays_it(tmp_p
         t = feed(engine, t, 6.0)
         assert engine._frame_sens == 50 and m.align_on
         engine.stop()
+
+
+# -- the aligning spring carries the assisted stiffness (the played torque's own tangent) --
+
+ASSISTED_POINTS = [(v, a) for v in (5.0, 20.0, 40.0) for a in (0.001, 0.04, 0.2)]
+
+
+def _model_nm(r, speed, alpha):
+    s = slip_sample(0.0, alpha=alpha)
+    s.speed = speed
+    return r.align(s)
+
+
+def _fd_per_deg(r, speed, alpha, d_deg=0.5):
+    """(model(alpha - d) - model(alpha + d)) / 2d: the model's torque against the angle error (steering wheel deg), by a
+    central difference of +-d_deg (the angle error is alpha x ratio). On the centre (alpha 0.001, an error of 0.7 deg)
+    +-0.5 deg would span the boost curve's knee, so the step is 0.05 deg there."""
+    if abs(alpha) < 0.005:
+        d_deg = 0.05
+    d = math.radians(d_deg) / r.ratio
+    return (_model_nm(r, speed, alpha - d)['model'] - _model_nm(r, speed, alpha + d)['model']) / (2.0 * d_deg)
+
+
+@pytest.mark.parametrize('speed,alpha', ASSISTED_POINTS)
+def test_the_aligning_springs_k_is_the_assisted_finite_difference_within_2_percent(speed, alpha):
+    r = rack()
+    k = _model_nm(r, speed, alpha)['k']
+    assert k == pytest.approx(_fd_per_deg(r, speed, alpha), rel=0.02)
+
+
+@pytest.mark.parametrize('speed,alpha', ASSISTED_POINTS)
+def test_the_aligning_spring_is_never_stiffer_than_the_assisted_stiffness(speed, alpha):
+    r = rack()
+    split = _model_nm(r, speed, alpha)
+    err = abs(alpha) * r.ratio * 180.0 / math.pi                        # the angle error, steering wheel degrees
+    assert split['k'] * err <= abs(split['model']) * 1.0001             # the tangent never overshoots the (concave) torque
+    peak = 2.1
+    for limit in (None, 0.5 * split['k'] / peak):
+        spring = fe.ffb_spring.DriverSpring()
+        t = 0.0
+        for _ in range(100):
+            f = spring.force(0.0, -err, split['k'] / peak, 0.8, limit, 0.005)
+            t += 0.005
+        k_eff = split['k'] / peak if limit is None else limit
+        assert 0.0 <= f <= k_eff * err * 1.0001 and f <= abs(split['model']) / peak * 1.0001
+
+
+def test_without_the_assist_the_aligning_spring_is_stiffer_at_the_centre():
+    r = rack()
+    assisted = _model_nm(r, 20.0, 0.001)['k']
+    r.assist = 0.0
+    unassisted = _model_nm(r, 20.0, 0.001)['k']
+    assert assisted < unassisted
+    assert unassisted == pytest.approx(_fd_per_deg(r, 20.0, 0.001), rel=0.02)
+
+
+@pytest.mark.parametrize('speed,alpha', [(20.0, 0.001), (20.0, 0.04), (20.0, 0.2)])
+def test_with_the_games_own_assist_curve_the_spring_follows_that_curve(speed, alpha):
+    r = rack()
+    r._assist.state = True                                              # 'auto' follows the game's curve once it has one
+    r._assist.curve = lambda p99: [(0.3 * p99, 1.0), (p99, 0.6), (3.0 * p99, 0.25)]
+    assert r.power_steering() == 'game'
+    split = _model_nm(r, speed, alpha)
+    column = split['model']
+    assert column == pytest.approx(-math.copysign(1.0, alpha) * abs(column))      # (signed against the slip)
+    assert split['k'] == pytest.approx(_fd_per_deg(r, speed, alpha), rel=0.02)
+    # and it is the model the played torque uses, not our boost curve's
+    r2 = rack()
+    assert split['k'] != pytest.approx(_model_nm(r2, speed, alpha)['k'], rel=0.02)
