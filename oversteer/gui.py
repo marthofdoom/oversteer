@@ -85,9 +85,10 @@ class Gui:
         self.equipment = []
         self.telemetry = None
         self.telemetry_generation = 0
-        # Countersteer FFB: its own thread, fed by the listener, writing the wheel's ext_force (ffb_engine)
-        from .ffb_engine import FfbEngine
-        self.ffb_engine = FfbEngine()
+        # Countersteer FFB: its own process (ffb_process: its own GIL), fed by the listener, writing the wheel's
+        # ext_force (ffb_engine); this is its stand-in, with the engine's interface
+        from .ffb_process import EngineProcess
+        self.ffb_engine = EngineProcess()
         self.ffb_engine.start()
         # Pedals as pressed fractions for the rev lights' launch mode; the
         # input thread writes, the telemetry thread reads (plain floats).
