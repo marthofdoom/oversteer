@@ -1907,12 +1907,17 @@ class FfbEngine:
         if took > LATE_PASS:
             self._late(end, "pass took %.0f ms (phase %s, mode %s)" % (took * 1000.0, self._phase, self._mode))
 
-    def _late(self, now, what):
-        """A late pass or write gap: one warning per LATE_LOG_EVERY, with the count since the last."""
+    def _late(self, now, what, paused=False):
+        """A late pass or write gap: one warning per LATE_LOG_EVERY, with the count since the last. A gap in which no
+        sample arrived (`paused`: the game sent nothing) is logged at INFO instead, on the same limit."""
         self._late_count += 1
         if now - self._late_at >= LATE_LOG_EVERY:
-            logging.warning("Countersteer FFB: engine late: %s (%d in the last %.0f s)", what, self._late_count,
-                            min(now - self._late_at, 999.0))
+            if paused:
+                logging.info("Countersteer FFB: %s (%d in the last %.0f s)", what, self._late_count,
+                             min(now - self._late_at, 999.0))
+            else:
+                logging.warning("Countersteer FFB: engine late: %s (%d in the last %.0f s)", what, self._late_count,
+                                min(now - self._late_at, 999.0))
             self._late_at, self._late_count = now, 0
 
     def step(self, now=None):
@@ -2418,6 +2423,7 @@ class FfbEngine:
         value = int(round(level / comp))
         saturated = abs(value) > FULL
         value = min(max(value, -FULL), FULL)
+        prev_written = self._written_at
         self._written_at = t
         self._write_pending = False
         try:
@@ -2426,8 +2432,12 @@ class FfbEngine:
             self._last_value = self._base_value = value
             mono = time.monotonic()
             if self._write_mono is not None and mono - self._write_mono > LATE_PASS and self._phase == 'on':
-                self._late(mono, "ext_force written %.0f ms after the last write (the pass before took %.0f ms)"
-                           % ((mono - self._write_mono) * 1000.0, self._pass_took * 1000.0))
+                gap = (mono - self._write_mono) * 1000.0
+                if prev_written is not None and (self._arrived_at is None or self._arrived_at <= prev_written):
+                    self._late(mono, "telemetry paused %.0f ms (the game sent nothing)" % gap, paused=True)
+                else:
+                    self._late(mono, "ext_force written %.0f ms after the last write (the pass before took %.0f ms)"
+                               % (gap, self._pass_took * 1000.0))
             self._write_mono = mono if self._phase == 'on' else None
             if ffb_record.current is not None:
                 ffb_record.log(t, 'ext_force', value)
