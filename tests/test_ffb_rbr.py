@@ -438,19 +438,16 @@ def test_profiles_keep_the_steering_toggles(tmp_path):
     model = Model(device, None)
     assert model.data['countersteer_column'] is True and model.data['countersteer_align'] is True
     assert model.data['countersteer_friction_removal'] is False
-    assert model.get_countersteer_column() and model.get_countersteer_align()
-    assert not model.get_countersteer_friction_removal()
+    assert model.get_countersteer_dynamics() == (True, True, False)
     model.data.update(countersteer_column=False, countersteer_align=False, countersteer_friction_removal=True)
     profile = str(tmp_path / 'p.ini')
     model.save(profile)
     fresh = Model(device, None)
     fresh.load(profile)
-    assert not fresh.get_countersteer_column() and not fresh.get_countersteer_align()
-    assert fresh.get_countersteer_friction_removal()
+    assert fresh.get_countersteer_dynamics() == (False, False, True)
     (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\n')
     fresh.load(str(tmp_path / 'old.ini'))
-    assert fresh.get_countersteer_column() and fresh.get_countersteer_align()
-    assert not fresh.get_countersteer_friction_removal()
+    assert fresh.get_countersteer_dynamics() == (True, True, False)
     plain = Model(FakeDevice(), None)
     assert plain.data['countersteer_column'] is None and plain.data['countersteer_friction_removal'] is None
 

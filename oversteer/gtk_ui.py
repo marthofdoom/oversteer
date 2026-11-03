@@ -1298,7 +1298,7 @@ class GtkUi:
                 ('align', _("Local alignment spring"), self.COUNTERSTEER_ALIGN_TOOLTIP),
                 ('friction_removal', _("Friction removal"), self.COUNTERSTEER_FRICTION_REMOVAL_TOOLTIP)):
             row, switch = self._switch_row(
-                title, _(tooltip), lambda state, key=key: getattr(self.controller.model, 'set_countersteer_' + key)(state))
+                title, _(tooltip), lambda state, key=key: self.controller.model.set_countersteer_dynamics('countersteer_' + key, state))
             self.countersteer_toggles[key] = switch
             self._dependent_rows.append(row)
             steering.add(row)

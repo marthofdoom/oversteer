@@ -71,6 +71,8 @@ class Gui:
         self.grab_input = False
         self.test = None
         self.calibration = None             # the wheel calibration running now (wheel_calibration.Calibration)
+        self.live_friction = None           # the driver's re-identified wheel friction (share of full scale), if seen
+        self._live_applied = None           # ... the one the correction was last written with
         self.calibration_thread = None
         self._wheel_retry = None            # a GLib timer waiting for the wheel to be free (wheel_owner)
         self._test_wheel = None     # the wheel the test holds with wheel_owner
@@ -512,6 +514,7 @@ class Gui:
             if self.device.is_ready():
                 self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
                 self.ffb_engine.set_device(self.device.dev_path)
+                self.ffb_engine.set_position_source(self._position_source(self.device))
             self.apply_wheel_correction()
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
@@ -572,6 +575,7 @@ class Gui:
         # The old wheel's game force is restored by the engine before it takes the new one
         self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
         self.ffb_engine.set_device(self.device.dev_path if ready else None)
+        self.ffb_engine.set_position_source(self._position_source(self.device) if ready else None)
         self.ffb_pending = {}
         self.ui.safe_call(self.ui.reset_ffb_meter)
 
@@ -650,6 +654,7 @@ class Gui:
         self.apply_countersteer_strength()
         self.apply_countersteer_linearity()
         self.apply_countersteer_lightness()
+        self.apply_countersteer_dynamics()
 
     def apply_countersteer_strength(self):
         """The overall steering strength (FFB tab, under the Countersteer switch) to the engine."""
@@ -658,6 +663,10 @@ class Gui:
     def apply_countersteer_linearity(self):
         """Richard Burns Rally's linearity (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_linearity(self.model.get_countersteer_linearity())
+
+    def apply_countersteer_dynamics(self):
+        """The driver's virtual steering dynamics switches (column feel, local alignment spring, friction removal) to the engine."""
+        self.ffb_engine.set_dynamics(*self.model.get_countersteer_dynamics())
 
     def apply_countersteer_lightness(self):
         """Forza Horizon's understeer lightness (FFB tab, under the Countersteer switch) to the engine."""
@@ -685,13 +694,28 @@ class Gui:
             mean, derating, gain = thermal
             wheel = (_("Wheel motor heat: {} % — easing the force to {} %").format(mean, gain) if derating
                      else _("Wheel motor heat: {} %").format(mean))
+        # The driver's virtual steering dynamics (newer drivers): whether it sees a hand on the rim and the wheel's
+        # friction as it re-identifies it
+        extra = []
+        hands = self.device.get_ffb_hands() if self.device is not None else None
+        if hands is not None:
+            extra.append(_("hands on") if hands[1] else _("hands off"))
+        live = self.device.get_ffb_dyn_live() if self.device is not None else None
+        if live is not None:
+            if live[2] > 0.0:
+                self._note_live_friction(live[0] / 1e4)
+            extra.append(_("wheel friction {:.1f} %").format(live[0] / 100.0))
+        note = getattr(self.ffb_engine, 'align_note', None)
+        if note:
+            extra.append(note)
+        if extra:
+            wheel = '; '.join(filter(None, [wheel] + extra))
         return car, wheel
 
     def countersteer_details(self):
         """The Countersteer FFB tab's read-only lines, {key: text} ('' for what is not known): the calibration,
         what is learnt for the current car (ratio, caster trail, scrub, impedance scale, power steering) and the
-        wheel (motor heat, derating, hands, live friction). The last two come from driver_state() of the engine
-        when it has one: {'hands': bool, 'friction': Nm}."""
+        wheel (motor heat, derating, hands, live friction, the alignment spring's note: all from countersteer_info())."""
         engine = self.ffb_engine
         car = ''
         props = engine.car_properties()
@@ -713,15 +737,28 @@ class Gui:
                     parts.append(_("power steering: detected") if model.assist > 0.5 else _("power steering: absent"))
             car = ", ".join(parts)
         wheel = self.countersteer_info()[1]
-        state = getattr(engine, 'driver_state', None)
-        state = state() if callable(state) else None
-        if state:
-            if state.get('hands') is not None:
-                wheel = "; ".join(filter(None, (wheel, _("hands on the wheel") if state['hands']
-                                                else _("hands off the wheel"))))
-            if state.get('friction') is not None:
-                wheel = "; ".join(filter(None, (wheel, _("live friction %.2f Nm") % state['friction'])))
         return {'calibration': self.wheel_calibration_text(), 'car': car, 'wheel': wheel}
+
+    def _position_source(self, device):
+        """For the engine: a callable giving the wheel's ABS_X (0..65535) now, None when it can't be read (see
+        ffb_dynamics.position_source)."""
+        from .ffb_dynamics import position_source
+        return position_source(device)
+
+    LIVE_FRICTION_STEP = 0.15           # the live friction must move this share from the one applied to be applied again
+
+    def _note_live_friction(self, share):
+        """The driver's re-identified friction (share of full scale, from enough samples): used by the friction
+        compensation at the next correction written, and written again now when it moved and the wheel is free."""
+        if not 0.0 < share <= 1.0:
+            return
+        self.live_friction = share
+        applied = getattr(self, '_live_applied', None)
+        if applied is not None and abs(share - applied) <= self.LIVE_FRICTION_STEP * applied:
+            return
+        entry = self._wheel_entry()
+        if entry is not None and entry.get('friction_comp') and self._wheel_held() is None and self.calibration is None:
+            self.apply_wheel_correction()
 
     def wheel_calibration_text(self):
         """The FFB tab's calibration line ("Calibrated 2026-10-30: dead zone ..."), for the web page too."""
@@ -2409,10 +2446,12 @@ class Gui:
     def apply_wheel_correction(self):
         """Write the selected wheel's stored correction (on device change and at start); nothing if it was never
         calibrated, the driver lacks the attributes or a calibration is running."""
+        stored = self._wheel_entry() if self.device is not None else None
+        self.ffb_engine.set_wheel_result(stored.get('result') if stored else None)   # its ffb_dyn_wheel at the next start
         if self.calibration is not None or not self._wheel_supported():
             return
         self.correction_key = wcal.wheel_key(self.device)
-        entry = self._wheel_entry()
+        entry = stored
         if entry is not None:
             held = self._wheel_held()
             # Any holder (Countersteer FFB playing, the test, a demo) keeps the forces as they were until it lets
@@ -2420,10 +2459,17 @@ class Gui:
             if held is not None:
                 self._defer_wheel_writes()
                 return
+            live = getattr(self, 'live_friction', None)
             try:
-                wcal.apply_correction(self.device.write_attr, entry)
+                self._live_applied = live
+                wcal.apply_correction(self.device.write_attr, entry, live)
             except Exception as e:
                 logging.warning("wheel correction: %s", e)
+            try:
+                if self.device.checked_device_file('ffb_dyn_wheel'):           # newer drivers only
+                    wcal.apply_dyn_wheel(self.device.write_attr, entry)       # the virtual steering dynamics' wheel
+            except Exception as e:
+                logging.warning("wheel dynamics: %s", e)
 
     def _change_wheel_entry(self, **changes):
         if self.device is None:

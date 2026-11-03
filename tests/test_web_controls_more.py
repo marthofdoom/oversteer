@@ -112,9 +112,10 @@ def test_the_steering_toggles_write_only_when_paired(tmp_path):
         assert r.post(body, token=None)[0] == 401
         assert r.post(body, headers={'Origin': 'http://evil.example'})[0] == 403
         m = r.model
-        assert m.get_countersteer_column() and m.get_countersteer_align() and not m.get_countersteer_friction_removal()
+        assert m.get_countersteer_dynamics() == (True, True, False)
         assert r.post(body)[0] == 200
-        assert not m.get_countersteer_column() and not m.get_countersteer_align() and m.get_countersteer_friction_removal()
+        assert m.get_countersteer_dynamics() == (False, False, True)
+        assert ('set_dynamics', False, False, True) in r.controller.ffb_engine.calls
         assert ('set_countersteer_toggles', False, False, True) in r.ui.calls
         assert r.post({'set': {'countersteer_column': 1}})[0] == 400
         assert r.post({'set': {'countersteer_ffb': True}})[0] == 200
@@ -204,9 +205,7 @@ def test_the_countersteer_page_builds_and_follows_the_toggles():
         ui.main_notebook.append_page(Gtk.Box(), Gtk.Label(label=label))
     sets = []
     ui.controller = SimpleNamespace(model=SimpleNamespace(
-        set_countersteer_column=lambda v: sets.append(('column', v)),
-        set_countersteer_align=lambda v: sets.append(('align', v)),
-        set_countersteer_friction_removal=lambda v: sets.append(('friction_removal', v)),
+        set_countersteer_dynamics=lambda k, v: sets.append((k[len('countersteer_'):], v)),
         set_countersteer_ffb=lambda v: None))
     GtkUi._build_countersteer_page(ui)
     assert ui.main_notebook.get_n_pages() == 4

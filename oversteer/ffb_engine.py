@@ -85,6 +85,8 @@ from locale import gettext as _
 from . import wheel_owner
 from . import car_data
 from . import ffb_carprops
+from . import ffb_dynamics
+from . import ffb_record
 from . import ffb_spring
 from . import wheel_torque
 from .ffb_addon import ForzaLightness
@@ -440,6 +442,12 @@ class RackForce:
     # abstract). k is the tangent stiffness of the model's rim torque against the angle error at this slip.
     align_on = False
     align_writer = None
+    wheel_range = None                   # degrees: the wheel's range. Set, the split is worked out in the wheel's own
+                                         # position frame (steer x range / 2, what the driver's target is in); None: in
+                                         # the car's steering wheel degrees
+    ALIGN_RESET_JUMP = 15.0              # m beyond what the speed explains between two samples: a reset/teleport
+    ALIGN_RESET_TURN = 0.5               # cos of the heading change between two samples (60 deg) under which it is one
+    ALIGN_RESET_HOLD = 0.5               # s the spring is held at k = 0 after one (the driver fades it in 50 ms)
     align_k_limit = 0.060                # FS per degree: what the driver reports as ffb_align's 4th field (the report's
                                          # k_limit at a 6 ms delay); the writer's owner updates it from the driver
     ALIGN_LOCK = 0.52                    # rad: the road wheels' steering lock until the car's is learnt (RatioLearner);
@@ -481,8 +489,14 @@ class RackForce:
         self._imp = None
         self._assist = ffb_carprops.AssistDetector()
         kept = ffb_carprops.STORE.get_rack(car) if car is not None else None
-        self.ratio, self.assist = kept or (ffb_carprops.table_ratio(car_data.entry(car)) or self.STEER_RATIO, self.ASSIST)
-        self.lock = (ffb_carprops.STORE.get_lock(car) if car is not None else None) or self.ALIGN_LOCK
+        table = None if kept else ffb_carprops.table_ratio(car_data.entry(car))
+        self.ratio, self.assist = kept or (table or self.STEER_RATIO, self.ASSIST)
+        self.ratio_known = bool(kept or table)           # learnt, or from the car table: not the rally default
+        stored_lock = ffb_carprops.STORE.get_lock(car) if car is not None else None
+        self.lock = stored_lock or self.ALIGN_LOCK
+        self.lock_known = bool(stored_lock)
+        self._align_prev = None                          # (time, pos, forward) at the last aligning split
+        self._align_hold = None                          # time before which the spring is held at k = 0 (a reset)
         self.refused = None
         self.cross = None
         self.centring = None
@@ -574,13 +588,14 @@ class RackForce:
         lock = learner.lock()
         if lock is None:
             return
-        self.lock = lock
+        self.lock, self.lock_known = lock, True
         ffb_carprops.STORE.set_lock(self.car, lock)
         entry = car_data.entry(self.car)
         ratio = learner.ratio(entry.get('steering_wheel_lock_deg') if entry else None)
         if ratio is not None:
             step = ffb_carprops.RATIO_SLEW * elapsed
             self.ratio = min(max(ratio, self.ratio - step), self.ratio + step)
+            self.ratio_known = True
             ffb_carprops.STORE.set_rack(self.car, self.ratio, self.assist)
 
     def _learn(self, sample, raw, dt):
@@ -709,6 +724,34 @@ class RackForce:
         k = slope * stiffness / (1.0 + abs(alpha) / self.ALIGN_PK) ** 2 / (ratio * ratio) / deg
         return {'theta_a_deg': theta_a, 'theta_deg': theta, 'k': k, 'model': model}
 
+    def align_ready(self):
+        """The split may play: the car's steering ratio and lock are known (learnt or from the table) and the
+        stiffness fit has enough samples."""
+        return bool(self.ratio_known and self.lock_known and self.ready and self._align.s[0] >= self.ALIGN_MIN_N)
+
+    def _reset_jump(self, sample):
+        """The car was put somewhere else since the last aligning split: its position jumped further than its speed
+        explains, or its heading turned past ALIGN_RESET_TURN in one sample."""
+        pos = getattr(sample, 'pos', None)
+        fwd = getattr(sample, 'forward', None)
+        prev, self._align_prev = self._align_prev, (self._now, pos, fwd)
+        if prev is None:
+            return False
+        dt = min(max(self._now - prev[0], 0.0), 1.0)
+        try:
+            if pos is not None and prev[1] is not None:
+                dx, dz = pos[0] - prev[1][0], pos[2] - prev[1][2]
+                speed = abs(getattr(sample, 'speed', 0.0) or 0.0)
+                if math.hypot(dx, dz) > self.ALIGN_RESET_JUMP + 2.0 * speed * dt:
+                    return True
+            if fwd is not None and prev[2] is not None and dt <= 0.25:
+                a, b = math.hypot(fwd[0], fwd[2]), math.hypot(prev[2][0], prev[2][2])
+                if a > 1e-6 and b > 1e-6 and (fwd[0] * prev[2][0] + fwd[2] * prev[2][2]) / (a * b) < self.ALIGN_RESET_TURN:
+                    return True
+        except (TypeError, IndexError):
+            return False
+        return False
+
     def power_steering(self):
         """Where the assist comes from now: 'game' (the game's force has it: its curve is followed), 'model' (ours)
         or 'off' (column torque), by countersteer_power_steering (auto / on / off) and the detector."""
@@ -778,11 +821,26 @@ class RackForce:
                 # k limit, tau_max, slew and fades) comes off, the residual goes through ext_force
                 k_fs = scale * split['k'] / (self.wheel_peak or wheel_torque.DEFAULT_PEAK_NM)
                 tau = wheel_torque.STEER_BUDGET
+                theta_a, theta = split['theta_a_deg'], split['theta_deg']
+                if self.wheel_range:
+                    # the wheel's own position frame: the game maps the wheel's travel to steer -1..1, so one degree
+                    # of the wheel is `g` degrees of the car's steering wheel (the torque is the same, so k is per
+                    # wheel degree); the target is held to the wheel's range
+                    half = self.wheel_range / 2.0
+                    g = half / max(self.lock * self.ratio * 180.0 / math.pi, 1e-6)
+                    theta, theta_a, k_fs = theta * g, theta_a * g, k_fs / g
+                    theta_a = min(max(theta_a, -half), half)
+                if self._reset_jump(sample):
+                    self._align_hold = self._now + self.ALIGN_RESET_HOLD
+                if self._align_hold is not None and self._now < self._align_hold:
+                    k_fs = 0.0                   # a reset: the driver fades the spring out; the mirror starts again after
+                    self._spring.reset()
+                    self._spring_at = None
                 dt = 0.0 if self._spring_at is None else min(max(self._now - self._spring_at, 0.0), 0.1)
                 self._spring_at = self._now
-                share -= self._spring.force(split['theta_a_deg'], split['theta_deg'], k_fs, tau, self.align_k_limit, dt)
+                share -= self._spring.force(theta_a, theta, k_fs, tau, self.align_k_limit, dt)
                 if self.align_writer is not None:
-                    self.align_writer(split['theta_a_deg'], k_fs, tau)
+                    self.align_writer(theta_a, k_fs, tau)
         limit = FULL * self._ceiling()
         vel = getattr(sample, 'vel', None)
         if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:
@@ -1213,6 +1271,15 @@ class FfbEngine:
         self._lightness_req = None       # its strength (0..1) from the GUI
         self._strength_req = None        # the overall steering strength (%) from the GUI
         self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
+        self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
+        self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
+        self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
+        self._pos_req = None             # () -> (ABS_X 0..65535, ...) of the physical wheel, or None (ffb_dynamics.FrameCheck)
+        self._pos_src = None
+        self._frame = ffb_dynamics.FrameCheck()
+        self._frame_range = None
+        self.align_note = None           # why the alignment spring is not played (the info line shows it)
+        self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
         self._fh_scale = False           # the driver has game_const_scale: Forza is lightened through it
@@ -1294,6 +1361,23 @@ class FfbEngine:
     def set_enabled(self, on):
         """The "Countersteer FFB" switch."""
         self._enabled_req = bool(on)
+        self._wake.set()
+
+    def set_dynamics(self, column, align, removal):
+        """The profile's switches for the driver's virtual steering dynamics: the car's column feel (damping and
+        friction), the local alignment spring, and friction removal (a column lighter than the wheel's own)."""
+        self._dyn_req = (bool(column), bool(align), bool(removal))
+        self._wake.set()
+
+    def set_position_source(self, source):
+        """A callable returning the physical wheel's ABS_X now (0..65535 over its range), None if it can't be read:
+        the alignment spring is played only once the wheel's position is seen to follow the game's steering."""
+        self._pos_req = (source,)
+        self._wake.set()
+
+    def set_wheel_result(self, result):
+        """The wheel's stored calibration result (wheel_calibration), None for none."""
+        self._wheel_req = result if isinstance(result, dict) else None
         self._wake.set()
 
     def set_texture(self, level, parts):
@@ -1413,6 +1497,7 @@ class FfbEngine:
         else:
             self._idle(now)
         self._sources(now)
+        self._dyn_record(now)
         if self._mode == 'rbr':
             self._rbr_tick(now)
         elif self._mode == 'beamng':
@@ -1443,6 +1528,10 @@ class FfbEngine:
         if self._inhibit_req:
             self._inhibit_req = False
             self._quick_release('inhibited', now)
+        self._dyn_apply()
+        if self._pos_req is not None and self._pos_req[0] is not self._pos_src:
+            self._pos_src = self._pos_req[0]
+            self._frame.reset()
         path = self._path_req
         if path != self._path:
             self._release('device', now)
@@ -1450,6 +1539,11 @@ class FfbEngine:
             if self._driver is not None:
                 self._driver.close()
             self._path, self._driver, self._available, self._broken = path, None, False, False
+            self._dyn = None
+            self._frame.reset()
+            if path is not None:
+                self._dyn = ffb_dynamics.DynStage(path, ffb_record.log)
+                self._dyn_apply()
             self._raw_count = self._raw_at = self._raw_id = self._raw_id_at = None
             self._raw_counts.clear()
             self.raw_rate = self.classifier.raw_rate = self._rbr_level = None
@@ -1481,6 +1575,102 @@ class FfbEngine:
             self._enabled = enabled
             self._publish(None, force=True)
 
+    def _dyn_apply(self):
+        stage = self._dyn
+        if stage is not None:
+            stage.column_on, stage.align_pref, stage.removal = self._dyn_req
+            if self._wheel_req is not stage.result:
+                stage.set_wheel_result(self._wheel_req)
+
+    def _dyn_start(self, t):
+        """Playing ACR's force begins: the calibrated wheel to the driver and the spring's limits read."""
+        stage = self._dyn
+        if stage is not None:
+            stage.start(t)
+
+    def _frame_ok(self, t, sample, stage):
+        """The wheel's measured position follows the game's steering (FrameCheck), judged from the moving samples
+        while the spring is off; False (and a note, a log line once) when it does not or cannot be seen."""
+        check = self._frame
+        if stage.range != self._frame_range:
+            self._frame_range = stage.range
+            check.reset()                # a new range: the window says nothing about it
+        steer = getattr(sample, 'steer', None)
+        if self._pos_src is not None and stage.range and steer is not None and math.isfinite(steer) \
+                and (sample.speed or 0.0) > MIN_SPEED:
+            try:
+                raw = self._pos_src()
+            except Exception:
+                raw = None
+            if raw is not None:
+                half = stage.range / 2.0
+                check.feed(t, steer, -steer * half, raw / 65535.0 * stage.range - half)
+        if self._pos_src is None:
+            self.align_note = _("wheel position unavailable: the alignment spring stays off")
+        elif check.failed():
+            reason = check.failed()
+            self.align_note = _("wheel position doesn't match the game's steering ({}): the alignment spring is off").format(reason)
+            if reason.split()[0] not in check.reasons_logged:
+                check.reasons_logged.add(reason.split()[0])
+                logging.warning("Countersteer FFB: wheel position doesn't match the game's steering: %s; the aligning "
+                                "spring stays off", reason)
+        else:
+            self.align_note = None
+        return check.ok and self._pos_src is not None
+
+    def _dyn_play(self, t, sample):
+        """The driver's virtual steering dynamics beside ACR's force: the car's column damping and friction, and the
+        local alignment spring (the model plays the residual) once the car's ratio and lock are known and the fit is
+        ready, the driver reports a spring and the wheel's range is known."""
+        stage, model = self._dyn, self.model
+        if stage is None or not stage.usable() or self._played_mode != 'acr':
+            model.align_on = False
+            return
+        stage.poll(t)
+        if stage.k_limit is not None:
+            # the spring is written scaled by the overall strength: the driver's limit on k is on the scaled value
+            model.align_k_limit = stage.k_limit / max(self._strength, 0.05)
+        model.wheel_range = stage.range
+        # (align_ready includes the rack force's own gate: the game's raw force agrees with our sign)
+        want = stage.can_align() and model.align_ready() and self._frame_ok(t, sample, stage)
+        if model.align_on and not want:
+            stage.align_off(t)
+        if want and not model.align_on:
+            model.align_writer = self._align_write
+        model.align_on = want
+        stage.column(t, model.impedance(), model.wheel_peak)
+
+    def _align_write(self, theta_a_deg, k_fs, tau_fs):
+        """RackForce's spring to the driver, at the overall steering strength like the rest of the force."""
+        stage = self._dyn
+        if stage is not None:
+            stage.align(self._last_t if self._last_t is not None else self._clock(), theta_a_deg,
+                        k_fs * self._strength, tau_fs * self._strength)
+
+    def _dyn_stop(self, t):
+        """Nothing plays: the stage's targets back to 0 (the driver slews them out) and the split off."""
+        self.model.align_on = False
+        stage = self._dyn
+        if stage is not None:
+            stage.stop(t)
+
+    def _dyn_record(self, now):
+        """While an FFB tuning capture runs: the driver's hands observer, re-identified friction and thermal state,
+        about 20 times a second, for the offline replay."""
+        stage = self._dyn
+        if not ffb_record.active() or stage is None or (self._rec_at is not None and 0.0 <= now - self._rec_at < 0.05):
+            return
+        self._rec_at = now
+        dyn = stage.dyn
+        hands, live = dyn.hands(), dyn.live()
+        thermal = dyn.numbers('ffb_thermal', 3)
+        if hands is not None:
+            ffb_record.log(now, 'ffb_hands', *hands)
+        if live is not None:
+            ffb_record.log(now, 'ffb_dyn_live', *live)
+        if thermal is not None:
+            ffb_record.log(now, 'ffb_thermal', *thermal)
+
     def _raw(self, t, fresh=RAW_FRESH, stops=False):
         """(level, new): the game's constant force level now, or None (none
         sent within `fresh` s, two effects, no attribute); `new`: uploaded
@@ -1504,6 +1694,8 @@ class FfbEngine:
         new = count != self._raw_count
         if new:
             self._raw_count, self._raw_at = count, t
+            if ffb_record.current is not None:
+                ffb_record.log(t, 'game_ffb_raw', level, count, effect)
         counts = self._raw_counts
         counts.append((t, count))
         while counts and counts[0][0] < t - 1.0:
@@ -1591,6 +1783,7 @@ class FfbEngine:
         return 1.0
 
     def _play(self, t, sample):
+        self._dyn_play(t, sample)
         rack = self.model.force(sample) * self._strength
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
         self._out(t, rack + self.texture.force(t, sample, rack))
@@ -1637,6 +1830,8 @@ class FfbEngine:
             self._driver.force(value)
             self.writes += 1
             self._last_value = value
+            if ffb_record.current is not None:
+                ffb_record.log(t, 'ext_force', value)
             if self._cap_level is not None:
                 over = saturated or abs(level) > self._cap_level or (not compensate and self._clip_at is not None and abs(value) > self._clip_at)
                 self._clipped += (over - self._clipped) / 333.0       # about a second
@@ -1676,6 +1871,10 @@ class FfbEngine:
             self._driver.force(self._last_value)
             self.writes += 1
             self._written_at = now
+            if ffb_record.current is not None:
+                ffb_record.log(now, 'ext_force', self._last_value)
+            if self._dyn is not None:
+                self._dyn.keep(now)          # the spring is held too: the driver drops one not written for 20 ms
         except OSError as e:
             logging.warning("Countersteer FFB: ext_force: %s", e)
             self._broken, self._available = True, False
@@ -2040,6 +2239,7 @@ class FfbEngine:
                      m.ratio, m.assist, m.wheel_peak or wheel_torque.DEFAULT_PEAK_NM, m.p99,
                      self.texture.describe(),
                      "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '')
+        self._dyn_start(t)
 
     def _read_gains(self):
         driver = self._driver
@@ -2102,6 +2302,7 @@ class FfbEngine:
         self._release(reason, now)
 
     def _let_go(self):
+        self._dyn_stop(self._last_t if self._last_t is not None else self._clock())
         self._smooth = self._smooth_at = self._spike = None
         self._written_at = None
         if self._owned:

@@ -304,6 +304,8 @@ class Bridge:
             model.set_pedal_response(key[:-9], *value)
         elif key.startswith('countersteer_texture_'):
             model.set_countersteer_texture_part(key[len('countersteer_texture_'):], value)
+        elif key in COUNTERSTEER_TOGGLES:
+            model.set_countersteer_dynamics(key, value)
         elif key == 'rev_leds_mode':
             controller.change_rev_leds_shift_unit(value)
         elif key == 'ffb_leds':
