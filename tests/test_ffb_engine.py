@@ -348,19 +348,9 @@ def test_the_lock_stop_pushes_back_past_the_lock_and_not_inside_it():
     assert _hold(fe.LockStop(), 0.0, 400.0)[0] == pytest.approx(fe.LockStop.MAX)
 
 
-def test_the_lock_stop_without_a_measured_slope_takes_the_lock_where_the_steering_saturated():
+def test_the_lock_stop_waits_for_a_measured_lock():
     stop = fe.LockStop()
-    t = 0.0
-    for pos in range(200, 262, 2):                                      # steer < 0.99: nothing
-        assert stop.force(t, 0.9, float(pos), None) == 0
-        t += 0.003
-    assert stop.force(t, 1.0, 262.0, None) == 0                         # the lock is taken here
-    t += 0.003
-    assert stop.force(t, 1.0, 270.0, None) > 0
-    for _ in range(3):
-        t += 0.003
-        stop.force(t, 0.5, 240.0, None)                                 # steering released: forgotten
-    assert stop.force(t + 0.003, 0.5, 300.0, None) == 0
+    assert _hold(stop, 0.0, 300.0, lock=None)[0] == 0 and not stop.active
 
 
 def test_a_wheel_pushed_past_the_lock_is_stopped_and_settles_without_bouncing_far_back():

@@ -1396,14 +1396,12 @@ class LockStop:
     """Our own steering-lock stop for ACR (a real rack has a mechanical one). ACR's force to the wheel carries a
     lock-stop force that telemetry lacks, so with Countersteer playing nothing stops the wheel at the game's lock
     (on marth's 900 degree wheel it went 14 and 44 degrees past it). Beyond the game's lock angle in the wheel's
-    own frame (the range / 2 times FrameCheck's measured slope; until the check has one, the position where the
-    steering input reached STEER_FROM) a stiff spring grows with a smooth onset (quadratic over the first ONSET
+    own frame (the range / 2 times FrameCheck's measured slope; until the check has one there is no stop: the
+    wheel's own end stop remains) a stiff spring grows with a smooth onset (quadratic over the first ONSET
     degrees), with damping on the wheel's speed so it does not bounce, bounded to MAX of full scale. Nothing
     inside the lock. Returns ext_force units (positive pushes toward decreasing ABS_X); the position is ABS_X in
     degrees from the centre (positive toward increasing ABS_X)."""
 
-    STEER_FROM = 0.99                    # |steer| from which the lock is taken to be reached (no measured slope yet)
-    STEER_OFF = 0.97                     # ... and below which it is forgotten
     ONSET = 3.0                          # degrees past the lock over which the spring comes in
     K = 0.075                            # share of full scale per degree past the lock (0.6 at 8 degrees)
     DAMP = 0.005                         # share of full scale per degree/s (about critical for a light wheel: the driver's
@@ -1418,11 +1416,10 @@ class LockStop:
     def reset(self):
         self._prev = None                # (t, pos)
         self.vel = 0.0                   # degrees per second, smoothed
-        self._ref = None                 # |pos| the lock was taken at while the slope is unknown
         self.active = False
 
     def force(self, t, steer, pos, lock_deg=None):
-        """The push at time `t` (ext_force units). `lock_deg`: the game's lock in wheel degrees when known."""
+        """The push at time `t` (ext_force units). `lock_deg`: the game's lock in wheel degrees; None (unknown): no push."""
         prev, self._prev = self._prev, (t, pos)
         if pos is None or not math.isfinite(pos):
             self.vel, self.active = 0.0, False
@@ -1432,13 +1429,6 @@ class LockStop:
         else:
             dt = t - prev[0]
             self.vel += (((pos - prev[1]) / dt) - self.vel) * (dt / (self.VEL_TAU + dt))
-        if lock_deg is None:
-            saturated = steer is not None and math.isfinite(steer)
-            if saturated and abs(steer) < self.STEER_OFF:
-                self._ref = None
-            elif saturated and abs(steer) >= self.STEER_FROM and self._ref is None:
-                self._ref = abs(pos)
-            lock_deg = self._ref
         if lock_deg is None:
             self.active = False
             return 0.0
