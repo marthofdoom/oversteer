@@ -713,24 +713,10 @@ class Gui:
         return car, wheel
 
     def _position_source(self, device):
-        """For the engine: a callable giving the physical wheel's ABS_X (0..65535) now, None when it can't be read.
-        The wheel's own node, not a proxy's virtual device: the driver's alignment target is in the wheel's axis. It
-        opens the node when first called and again after an error."""
-        if device is None or not getattr(device, 'dev_name', None):
-            return None
-        state = {'dev': None}
-
-        def read():
-            from evdev import InputDevice, ecodes
-            try:
-                if state['dev'] is None:
-                    state['dev'] = InputDevice(device.dev_name)
-                value = state['dev'].absinfo(ecodes.ABS_X).value
-                return device._normalized_axis(ecodes.ABS_X, value)[1]
-            except (OSError, AttributeError):
-                state['dev'] = None
-                return None
-        return read
+        """For the engine: a callable giving the wheel's ABS_X (0..65535) now, None when it can't be read (see
+        ffb_dynamics.position_source)."""
+        from .ffb_dynamics import position_source
+        return position_source(device)
 
     LIVE_FRICTION_STEP = 0.15           # the live friction must move this share from the one applied to be applied again
 

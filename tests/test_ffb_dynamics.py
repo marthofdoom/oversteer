@@ -729,3 +729,89 @@ def test_pruning_removes_the_engine_sidecar_with_its_capture(tmp_path):
     (tmp_path / ('old' + tc.SUFFIX + tc.FFB_SUFFIX)).write_bytes(b'y' * 100)
     assert tc.prune(str(tmp_path), 10) == [str(old)]
     assert not any(n.startswith('old') for n in os.listdir(tmp_path))
+
+
+# -- the wheel position source: the wheel's own node, or the proxy's virtual device --
+
+class _Node:
+    """A fake evdev node: absinfo of ABS_X over [lo, hi], value set by the test."""
+
+    def __init__(self, lo, hi):
+        self.lo, self.hi, self.value = lo, hi, lo
+
+    def absinfo(self, code):
+        return SimpleNamespace(min=self.lo, max=self.hi, value=self.value)
+
+
+def _proxied(tmp_path, lo=-32768, hi=32767):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    node_file = tmp_path / 'event-virtual'
+    node_file.write_text('')
+    node = _Node(lo, hi)
+    device = SimpleNamespace(dev_name=str(tmp_path / 'event-own-root-only'), _input_node=lambda: str(node_file),
+                             _normalized_axis=lambda code, value: (code, value))
+    return device, node, fd.position_source(device, opener=lambda path: node)
+
+
+def test_the_source_reads_the_proxys_virtual_node_by_its_own_range(tmp_path):
+    device, node, read = _proxied(tmp_path)
+    node.value = node.lo
+    assert read() == 0
+    node.value = node.hi
+    assert read() == 65535
+    node.value = 0
+    assert abs(read() - 32768) <= 1
+    assert fd.position_source(None) is None
+    device._input_node = lambda: None
+    assert read() is None                                                # nothing readable: no spring
+
+
+def test_the_wheels_own_node_goes_through_normalize_and_a_node_change_reopens(tmp_path):
+    own = tmp_path / 'event-own'
+    own.write_text('')
+    node = _Node(0, 65535)
+    device = SimpleNamespace(dev_name=str(own), _input_node=lambda: str(own),
+                             _normalized_axis=lambda code, value: (code, 65535 - value))
+    opened = []
+    read = fd.position_source(device, opener=lambda path: opened.append(path) or node)
+    node.value = 1000
+    assert read() == 64535 and opened == [str(own)]
+    read()
+    assert len(opened) == 1                                              # kept open
+    own.unlink()
+    own.write_text('')                                                   # a new node under the same name
+    read()
+    assert len(opened) == 2
+
+
+def _drive_with_node(tmp_path, invert):
+    device, node, read = _proxied(tmp_path)
+    path = dyn_wheel(tmp_path)
+    engine = fe.FfbEngine(clock=lambda: 0.0, driver=tfe.FakeDriver)
+    engine.set_position_source(read)
+    engine.set_device(path)
+    engine.set_enabled(True)
+    engine.step(0.0)
+    t = tfe.run(engine, 0.0, 8.0)
+    m = engine.model
+    m.ratio_known = m.lock_known = True
+    m._align.s[0] = 1e4
+    end = t + 5.0
+    while t < end:
+        s = tfe.acr(t)
+        s.tyre_slip_angle, s.pos, s.forward = (0.04, 0.04, 0, 0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+        # the virtual node: steer + = left = decreasing ABS_X; a proxy that inverts it reads the other way
+        frac = (1.0 + (1.0 if invert else -1.0) * s.steer) / 2.0
+        node.value = int(round(node.lo + frac * (node.hi - node.lo)))
+        tfe.upload(tfe.game_raw(s))
+        engine.offer(t, s)
+        engine.step(t)
+        t += 1.0 / tfe.HZ
+    on = m.align_on
+    engine.stop()
+    return on
+
+
+def test_a_passthrough_proxy_turns_the_spring_on_and_an_inverting_one_keeps_it_off(tmp_path):
+    assert _drive_with_node(tmp_path / 'a', invert=False) is True
+    assert _drive_with_node(tmp_path / 'b', invert=True) is False

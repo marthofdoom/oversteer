@@ -187,6 +187,43 @@ class FrameCheck:
         return None if self.ok or self.reason in (None, 'waiting') else self.reason
 
 
+def position_source(device, opener=None):
+    """A callable returning the wheel's ABS_X now as 0..65535, None when it can't be read, for FrameCheck. It reads
+    `device._input_node()`: the wheel's own node when readable, else the virtual device of the proxy that holds it
+    (the wheel's node is root-only then). Whatever that node reports is what FrameCheck validates against the game's
+    steering, so a proxy that inverts or rescales the axis fails the check (the spring stays off). A proxied node is
+    scaled by its own absinfo range, the wheel's own through normalize. The node is opened on first use and again
+    when the node, or the device behind its name, changes (a proxy restart) or an error."""
+    if device is None:
+        return None
+    if opener is None:
+        from evdev import InputDevice
+        opener = InputDevice
+    state = {'node': None, 'dev': None, 'ino': None}
+
+    def read():
+        from evdev import ecodes
+        try:
+            node = device._input_node()
+            if node is None:
+                state['dev'] = None
+                return None
+            ino = os.stat(node).st_ino if os.path.exists(node) else None
+            if state['dev'] is None or state['node'] != node or state['ino'] != ino:
+                state['dev'], state['node'], state['ino'] = opener(node), node, ino
+            info = state['dev'].absinfo(ecodes.ABS_X)
+            if node != getattr(device, 'dev_name', None):
+                span = info.max - info.min
+                if span <= 0:
+                    return None
+                return int(round(min(1.0, max(0.0, (info.value - info.min) / span)) * 65535))
+            return device._normalized_axis(ecodes.ABS_X, info.value)[1]
+        except (OSError, AttributeError):
+            state['dev'] = None
+            return None
+    return read
+
+
 class Dynamics:
     """The attributes of one wheel (its sysfs directory). Each write opens the file: they are rare (the spring at the
     telemetry rate at most) and a failure is the caller's to handle (OSError)."""
