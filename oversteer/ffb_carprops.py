@@ -412,6 +412,8 @@ RATIO_MAX_AY = 2.0                       # m/s^2: lateral acceleration under whi
 RATIO_MAX_ALPHA = 0.03                   # rad: front slip angle under which the Ackermann angle holds (on gravel the low
                                          # lateral acceleration samples are understeer: the lock came out 0.04 rad)
 RATIO_ROLL = 0.04                        # front and rear wheel speeds within this share of each other: free-rolling
+RATIO_ALPHA_WIDE = 0.6                   # rad: front and rear slip angles under which the kinematic identity is used (it holds
+                                         # at any slip, so no lateral-acceleration or small-slip gate: on gravel those leave 8 %)
 RATIO_MIN_SXX = 0.1                      # unit^2 s of steer evidence before the lock is believed
 RATIO_SLEW = 0.1                         # ratio units per second at most
 
@@ -434,16 +436,30 @@ class RatioLearner:
     acceleration the road-wheel angle is the Ackermann one, delta = wheelbase * yaw rate / speed (positive left,
     like steer); regressed on the game's steer (-1..1) through the origin it gives the lock in rad per unit of
     steer. Where the steering wheel's own lock is known (a car table's steering_wheel_lock_deg) the ratio is
-    their quotient. A few multiplies per sample."""
+    their quotient. With the rear slip angle too, the exact identity delta = alpha_f - alpha_r + wheelbase * yaw
+    rate / speed holds at any slip, so a gravel drive (nearly all of it sliding) teaches the lock as well. A few
+    multiplies per sample."""
     TAU = 120.0                                      # s of moving samples the sums remember
 
     def __init__(self):
         self.sxx = self.sxy = 0.0
 
-    def add(self, steer, yaw, speed, dt, alpha=None, wheels=None):
+    def add(self, steer, yaw, speed, dt, alpha=None, wheels=None, alpha_r=None):
         """`alpha`: the mean front slip angle (rad) and `wheels`: the four wheels' tread speeds, when the game gives
         them; samples with a front slip angle of RATIO_MAX_ALPHA or more, or driven or braked wheels (front and
-        rear speeds apart by RATIO_ROLL), are left out."""
+        rear speeds apart by RATIO_ROLL), are left out. `alpha_r`: the mean rear slip angle; with both slips the
+        kinematic identity is used instead and only RATIO_MIN_SPEED and RATIO_ALPHA_WIDE gate the sample."""
+        if alpha is not None and alpha_r is not None:
+            if not (dt > 0.0 and speed is not None and speed >= RATIO_MIN_SPEED and steer is not None and yaw is not None
+                    and math.isfinite(steer) and math.isfinite(yaw) and math.isfinite(speed)
+                    and math.isfinite(alpha) and math.isfinite(alpha_r)
+                    and abs(alpha) < RATIO_ALPHA_WIDE and abs(alpha_r) < RATIO_ALPHA_WIDE):
+                return
+            delta = alpha - alpha_r + WHEELBASE * yaw / speed
+            decay = math.exp(-dt / self.TAU)
+            self.sxx = self.sxx * decay + steer * steer * dt
+            self.sxy = self.sxy * decay + steer * delta * dt
+            return
         if alpha is not None and not abs(alpha) < RATIO_MAX_ALPHA:
             return
         if wheels is not None and len(wheels) >= 4 and all(math.isfinite(w) for w in wheels):

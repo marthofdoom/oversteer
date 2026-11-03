@@ -444,6 +444,34 @@ def ready_engine(path):
     return engine, m, t
 
 
+def test_the_wheels_measured_lock_gives_the_ratio_and_the_spring_starts_when_both_are_learnt(tmp_path):
+    cp.STORE.use(str(tmp_path / 'props.json'))
+    POS.scale = 0.6                                                     # 540 deg game lock on the 900 deg wheel: 270 deg
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    m = engine.model
+    m._align.s[0] = 1e4
+    true_lock, speed = math.radians(27.2), 20.0
+    end = t + 60.0
+    noted = False
+    while t < end:
+        s = tfe.acr(t)
+        af, ar = 0.25 * math.sin(t * 0.7), 0.1 * math.sin(t * 0.9)
+        s.tyre_slip_angle, s.pos, s.forward = (af, af, ar, ar), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+        s.yaw_rate = speed * (true_lock * s.steer - af + ar) / cp.WHEELBASE
+        POS.follow(s.steer)
+        tfe.upload(tfe.game_raw(s))
+        engine.offer(t, s)
+        engine.step(t)
+        noted = noted or bool(engine.align_note and 'not learnt' in engine.align_note)
+        t += 1.0 / tfe.HZ
+    assert noted                                                        # said so while it was unlearnt
+    assert m.lock_known and m.lock == pytest.approx(true_lock, rel=0.06)
+    assert m.wheel_lock_deg == pytest.approx(270.0, rel=0.03)
+    assert m.ratio_known and m.ratio < m.STEER_RATIO and m.ratio == pytest.approx(270.0 / 27.2, rel=0.1)
+    assert m.align_on and engine.align_note is None
+    engine.stop()
+
+
 def test_the_frame_check_is_fed_and_the_slope_known_before_the_ratio_gate_opens(tmp_path):
     POS.scale = 0.6
     engine, t = playing_engine(dyn_wheel(tmp_path))

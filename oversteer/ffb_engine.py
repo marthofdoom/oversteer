@@ -613,6 +613,8 @@ class RackForce:
                                          # position frame (steer x range / 2, what the driver's target is in); None: in
                                          # the car's steering wheel degrees
     wheel_slope = 1.0                    # the measured wheel position per degree of -steer x range / 2 (FrameCheck.slope)
+    wheel_lock_deg = None                # the steering wheel's measured lock (degrees, centre to full lock: FrameCheck.slope x
+                                         # range / 2), the ratio's numerator where the car table has none; None: not measured
     ALIGN_RESET_JUMP = 15.0              # m beyond what the speed explains between two samples: a reset/teleport
     ALIGN_RESET_TURN = 0.5               # cos of the heading change between two samples (60 deg) under which it is one
     ALIGN_RESET_HOLD = 0.5               # s the spring is held at k = 0 after one (the driver fades it in 50 ms)
@@ -655,6 +657,7 @@ class RackForce:
         self._align = _Moments(self.TAU)
         self._ratio_l = ffb_carprops.RatioLearner()
         self._ratio_since = 0.0
+        self._ratio_logged = False
         self._spring = ffb_spring.DriverSpring()
         self._spring_at = None
         self._now = 0.0
@@ -784,7 +787,8 @@ class RackForce:
         (ffb_carprops.RatioLearner), looked at once a second; the ratio slews."""
         learner = self._ratio_l
         learner.add(getattr(sample, 'steer', None), getattr(sample, 'yaw_rate', None), sample.speed, dt,
-                    self._slip(sample), getattr(sample, 'wheel_speed', None) or getattr(sample, 'wheel_rot', None))
+                    self._slip(sample), getattr(sample, 'wheel_speed', None) or getattr(sample, 'wheel_rot', None),
+                    self._rear_slip(sample))
         self._ratio_since += dt
         if self._ratio_since < 1.0:
             return
@@ -795,12 +799,16 @@ class RackForce:
         self.lock, self.lock_known = lock, True
         ffb_carprops.STORE.set_lock(self.car, lock)
         entry = car_data.entry(self.car)
-        ratio = learner.ratio(entry.get('steering_wheel_lock_deg') if entry else None)
+        wheel_deg = (entry.get('steering_wheel_lock_deg') if entry else None) or self.wheel_lock_deg
+        ratio = learner.ratio(wheel_deg)
         if ratio is not None:
             step = ffb_carprops.RATIO_SLEW * elapsed
             self.ratio = min(max(ratio, self.ratio - step), self.ratio + step)
             self.ratio_known = True
             ffb_carprops.STORE.set_rack(self.car, self.ratio, self.assist)
+            if not self._ratio_logged:
+                self._ratio_logged = True
+                logging.info("Countersteer FFB: aligning spring: lock %.3f rad, ratio %.1f (wheel mapping)", lock, ratio)
 
     def _learn(self, sample, raw, dt):
         """The car's trail and scrub from this sample (ffb_carprops), when it has the front forces."""
@@ -899,6 +907,14 @@ class RackForce:
         if sa is None or len(sa) < 2 or not (math.isfinite(sa[0]) and math.isfinite(sa[1])):
             return None
         return 0.5 * (sa[0] + sa[1])
+
+    @staticmethod
+    def _rear_slip(sample):
+        """The mean rear slip angle (rad, same sign as _slip), None without it."""
+        sa = sample.tyre_slip_angle
+        if sa is None or len(sa) < 4 or not (math.isfinite(sa[2]) and math.isfinite(sa[3])):
+            return None
+        return 0.5 * (sa[2] + sa[3])
 
     def _sat(self, alpha):
         """The kingpin torque's shape in the slip angle: alpha / (1 + |alpha| / ALIGN_PK), saturating like the
@@ -2652,12 +2668,15 @@ class FfbEngine:
         model.wheel_range = stage.range
         slope = self._frame.slope
         model.wheel_slope = slope if self._frame.ok and slope else 1.0
+        model.wheel_lock_deg = slope * stage.range / 2.0 if self._frame.ok and slope and stage.range else None
         if self._frame.ok and slope and not self._slope_logged and abs(slope - 1.0) > 0.05:
             self._slope_logged = True
             logging.info("Countersteer FFB: wheel mapping: %.2f x the game's steering", slope)
         # (align_ready includes the rack force's own gate: the game's raw force agrees with our sign)
         # (the check is fed whatever the ratio gate says: the slope serves the lock stop as well)
         frame_ok = self._frame_ok(t, sample, stage) if stage.can_align() else False
+        if stage.can_align() and self.align_note is None and not (model.ratio_known and model.lock_known):
+            self.align_note = _("steering lock not learnt yet: the aligning spring is off")
         want = stage.can_align() and model.align_ready() and frame_ok \
             and self._w >= 1.0 and not self._handback      # (while gliding between the levels the spring would add its own)
         if model.align_on and not want:
