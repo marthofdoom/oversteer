@@ -1413,13 +1413,14 @@ class RbrRack(RackForce):
             table = ffb_carprops.table_ratio(car_data.entry(car)) if car is not None else None
             self.ratio, self.ratio_known = table or self.STEER_RATIO, bool(table)
 
-    def set_level(self, t, level, s):
-        """The game's raw level now (None: none fresh) and S (None: not known): the column torque."""
+    def set_level(self, t, level, s, strength=1.0):
+        """The game's raw level now (None: none fresh), S (None: not known) and the game's STRENGTH (ffb_rbr.StrengthFit,
+        1 until fitted): the column torque."""
         self.s_note = None if s is not None else _("the car's sensitivity is not known: 100 assumed")
         if level is None:
             self.column = None
             return
-        x = min(abs(level) / FULL, 1.0)
+        x = min(abs(level) / (FULL * strength), 1.0)
         self.column = math.copysign(self.K_COLUMN * ffb_rbr.linear(x) * (self.S_DEFAULT if s is None else s), level) \
             if level else 0.0
         last, self._tau_at = self._tau_at, t
@@ -2665,6 +2666,7 @@ class FfbEngine:
                 self.rbr.set_car(sample.car, sample.stage, now=t)
                 self.rbr_rack.set_car(sample.car)
                 self.rbr_rack.feed(t, sample, self._rbr_now)
+                self.rbr.feed_physics(t, sample, self._rbr_now)
             if self._phase != 'idle' and self._played_mode != self._mode:
                 self._release('state', t)        # another game's force was playing
             return                               # its force is taken in step() after this
@@ -3057,7 +3059,7 @@ class FfbEngine:
             self._rbr_level = level
             if new:
                 self.rbr.feed(now, level, holding=playing)
-                self.rbr_rack.set_level(now, level, self.rbr.s)
+                self.rbr_rack.set_level(now, level, self.rbr.s, self.rbr.strength)
         self._rbr_now = level
         self.classifier.raw_rate = self.raw_rate
         v = self.classifier.verdict(now, holding=playing)

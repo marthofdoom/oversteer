@@ -45,10 +45,10 @@ def test_the_sensitivity_follows_ngp():
 
 def test_ngp_levels_are_on_wines_grid_and_others_mostly_not():
     for m in range(-10000, 10001, 7):
-        assert r.on_grid(r.level_of(m)) and r.on_grid(round(m * r.DI_LEVEL))
+        assert r.on_grid(r.level_of(m)) and r.magnitude_of(r.level_of(m)) == m
     rng = random.Random(4)
     share = sum(r.on_grid(rng.randint(-32000, 32000)) for _ in range(20000)) / 20000
-    assert 0.5 < share < 0.7 < r.GRID_GO
+    assert 0.25 < share < 0.4 < r.GRID_GO
     assert r.magnitude(0.5) == -5000 and r.magnitude(-3.0) == 10000
 
 
@@ -740,3 +740,63 @@ def test_the_glide_in_starts_from_the_raw_level(tmp_path):
     assert engine._phase in ('in', 'on') and engine._w < 0.2
     new = forces()[n:]
     assert new and abs(new[-1]) <= abs(FakeDriver.raw[0]) * 1.2 + 2000      # near the game's own level, not a step to ours
+
+
+# -- Wine's measured mapping and the self-calibrated STRENGTH (20261103-133906: a game at 20 %) --
+
+def test_wines_mapping_matches_the_measured_levels():
+    # the drive's levels: m = 1, 2, 3 -> 2, 6, 9; m = 0 -> -1; m = -1, -2, -3 -> -4, -8, -11; the ends of 20 %
+    assert [r.level_of(m) for m in (1, 2, 3, 0, -1, -2, -3)] == [2, 6, 9, -1, -4, -8, -11]
+    assert r.level_of(1999) == 6549 and r.level_of(-2000) == -6554
+    for level in (-6554, -6532, -6496, 6549, 2, -1):
+        assert r.on_grid(level)
+    assert not r.on_grid(3) and not r.on_grid(-5)
+
+
+def fit_drive(strength, seconds=120.0, trail=0.060, hz=100.0):
+    """StrengthFit fed a corner-weaving drive whose level NGP makes at `strength` from Newton's torque."""
+    fit = r.StrengthFit()
+    speed, n = 20.0, int(seconds * hz)
+    for i in range(n):
+        t = i / hz
+        ay = 3.5 + 3.0 * math.sin(2 * math.pi * 0.2 * t) + 0.5 * math.sin(2 * math.pi * 0.77 * t)
+        yaw = ay / speed
+        fy = r.CAR_M * (r.CAR_B / r.CAR_L) * ay + r.CAR_IZ * (3.0 * 2 * math.pi * 0.2 * math.cos(2 * math.pi * 0.2 * t) / speed) / r.CAR_L
+        torque = 2 * math.pi * trail * fy / r.CAR_N
+        level = r.level_of(r.magnitude(r.ngp_curve(torque, 100.0), strength))
+        fit.feed(t, ay, yaw, speed, level)
+    return fit
+
+
+def test_the_fit_finds_a_strength_of_0_2():
+    fit = fit_drive(0.2)
+    assert fit.converged and abs(fit.s - 0.2) <= 0.02 and fit.r > 0.95
+    assert 55 < fit.trail_mm(100.0) < 65                 # the 60 mm trail it was made with
+
+
+def test_the_fit_finds_a_strength_of_1():
+    fit = fit_drive(1.0, trail=0.030)
+    assert fit.s == 1.0 and fit.r > 0.95
+
+
+def test_the_strength_is_1_until_converged_and_the_force_never_heavier():
+    fit = fit_drive(0.2, seconds=10.0)
+    assert not fit.converged and fit.s == 1.0
+    force = r.RbrForce()
+    assert force.strength == 1.0
+    level = r.level_of(-1000)
+    assert force._x(level) == abs(level) / r.FULL
+    force.full = r.FULL * 0.2                            # a fitted 20 % makes the same level a bigger x
+    assert force._x(level) > abs(level) / r.FULL
+
+
+def test_a_fitted_strength_lets_a_20_percent_game_play():
+    force = r.RbrForce()
+    force.peak = 0.2 * r.FULL                            # the game's top at its 20 %: proven only against C = 0.2 FULL
+    force.changes, force.force_time = 500, 10.0
+    force._grid.add(True, 1.0)
+    force._judge(False)
+    assert force.refused == 'strength'                   # at C = 32767 a 20 % peak is not proof
+    force.full = r.FULL * 0.2
+    force._judge(False)
+    assert force.ready
