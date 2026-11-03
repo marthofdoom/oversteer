@@ -1227,6 +1227,9 @@ class GtkUi:
                                  "quarters of the wheel's range. Lower: a stronger squeeze of the heavy moments, more "
                                  "headroom; higher: more of the car's real weight, less room at the top. 30 to 60 %, "
                                  "50 % by default. Saved with the profile.")
+    COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, as a share of a real steering column's. Lower "
+                                    "feels freer on fast corrections; higher settles the wheel better when you let go "
+                                    "after a slide. 60 % by default.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
                                  "acts on the steering through the scrub radius; the game's own force has it. On: "
                                  "Countersteer plays that pull, unfiltered, at the level below. Off: the steering "
@@ -1331,6 +1334,13 @@ class GtkUi:
         self.countersteer_knee = knee
         self._dependent_rows.append(self._setting_row(
             _("1:1 up to"), None, _(self.COUNTERSTEER_KNEE_TOOLTIP), (self._response_row(knee),)))
+        steering.add(self._dependent_rows[-1])
+        damping = self._response_scale(0, 100, 5)
+        damping.set_size_request(160, -1)
+        damping.connect('value-changed', lambda w: self.controller.model.set_countersteer_column_damping(int(w.get_value())))
+        self.countersteer_column_damping = damping
+        self._dependent_rows.append(self._setting_row(
+            _("Column damping"), None, _(self.COUNTERSTEER_DAMPING_TOOLTIP), (self._response_row(damping),)))
         steering.add(self._dependent_rows[-1])
         row, self.countersteer_drive_pull = self._switch_row(
             _("Drive pull"), _(self.COUNTERSTEER_PULL_TOOLTIP), lambda state: self.controller.model.set_countersteer_drive_pull(state))
@@ -1439,6 +1449,13 @@ class GtkUi:
             return
         if int(self.countersteer_knee.get_value()) != int(value):
             self.countersteer_knee.set_value(int(value))
+
+    def set_countersteer_column_damping(self, value):
+        """The column damping share, 0..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_column_damping') or value is None:
+            return
+        if int(self.countersteer_column_damping.get_value()) != int(value):
+            self.countersteer_column_damping.set_value(int(value))
 
     def set_countersteer_drive_pull(self, value, level):
         """The drive pull switch and its level, 0..100 (None where the driver has no replace mode)."""

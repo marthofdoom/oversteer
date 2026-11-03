@@ -478,7 +478,7 @@ def wheel(tr, fit):
 
 
 def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_limit, delay_s, seconds, h=0.002,
-               scale=None):
+               scale=None, column_damping=None):
     """A released wheel (steering wheel degrees) at theta0 under the model's restoring torque toward theta_a, through
     the driver's shaping and the fitted wheel. The engine's part sees the state `delay_s` late (the telemetry loop);
     with align_on the driver's spring (ffb_spring.DriverSpring) renders the engine-subtracted part locally (no delay
@@ -487,7 +487,7 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_
     a_fs, f, beta = result['a_fs'], result['friction'], result['damping']
     # the column damping the driver adds (ffb_dynamics.column_targets: a total, the wheel's own included)
     classic = scale is not None
-    damping = scale if classic else fe.RackForce.DAMPING_SCALE
+    damping = scale if classic else (fe.RackForce.DAMPING_SCALE if column_damping is None else column_damping / 100.0)
     beta = max(beta, fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * damping * math.pi / 180.0 / peak)
     stick = fit.tau(result['breakaway'])
     lat = delay_s + fit.latency_ms / 1000.0
@@ -559,7 +559,7 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_
     return settle, over, crossings, float(errs[-1])
 
 
-def dynamics(tr, fit, events=24, seconds=3.0, delay_s=0.020):
+def dynamics(tr, fit, events=24, seconds=3.0, delay_s=0.020, column_damping=None):
     ready = tr['ready']
     with np.errstate(invalid='ignore'):
         cand = ready & (tr['speed'] > 8.0) & (np.abs(tr['alpha_f']) > 0.12) & np.isfinite(tr['theta_a']) \
@@ -583,7 +583,7 @@ def dynamics(tr, fit, events=24, seconds=3.0, delay_s=0.020):
             res = _sim_slide(rack, fit, float(tr['theta'][i]), float(tr['theta_a'][i]), float(tr['speed'][i]),
                              float(tr['cls'][i]), float(tr['x_top'][i]), float(tr['peak'][i]), bool(tr['align_on']),
                              float(tr['align_k_limit']), delay_s, seconds,
-                             scale=float(tr['scale'][i]) if rack.classic() else None)
+                             scale=float(tr['scale'][i]) if rack.classic() else None, column_damping=column_damping)
             if res is not None:
                 rows.append(res)
     if not rows:
@@ -661,7 +661,7 @@ def safety(tr):
 
 
 def score(drive, hz=50.0, wheel_path=WHEEL, friction_comp=0, derate=1.0, wheel_peak=None, texture_level=None,
-          align_on=None, events=24, mapping=None):
+          align_on=None, events=24, mapping=None, column_damping=None):
     """Everything, as one JSON-able dict."""
     notes = list(drive.notes)
     tr = run(drive, hz=hz, wheel_peak=wheel_peak, texture_level=texture_level, align_on=align_on,
@@ -682,7 +682,7 @@ def score(drive, hz=50.0, wheel_path=WHEEL, friction_comp=0, derate=1.0, wheel_p
         notes.append("the engine was never ready on this drive: no force to score")
     result['physics'] = physics(tr)
     result['wheel_fit'] = wheel(tr, fit)
-    result['dynamics'] = dynamics(tr, fit, events=events)
+    result['dynamics'] = dynamics(tr, fit, events=events, column_damping=column_damping)
     result['safety'] = safety(tr)
     result['notes'] = notes
     return _clean(result)

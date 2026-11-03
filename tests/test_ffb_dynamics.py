@@ -64,7 +64,7 @@ def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_
     assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 2.1)
     assert fd.column_targets(50.0, 2.1) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
     # the damping's own scale (1:1 with the torque under the knee): the friction keeps the impedance scale
-    d, f = fd.column_targets(0.3, 2.1, (470, 670, 500, 1250, 5000), damping_scale=1.0)
+    d, f = fd.column_targets(0.3, 2.1, (470, 670, 500, 1250, 5000), damping_scale=1.0)   # 1:1 (100 %)
     assert d == round(0.17 * math.pi / 180 / 2.1 * 1e6) > 470 and f == round(0.75 * 0.3 / 2.1 * 1e4)
 
 
@@ -378,6 +378,14 @@ def feed(engine, t, seconds, **kw):
         engine.step(t)
         t += 1.0 / tfe.HZ
     return t
+
+
+def test_the_default_column_damping_writes_60_percent_of_the_real_columns(tmp_path):
+    path = dyn_wheel(tmp_path)
+    engine, t = playing_engine(path)
+    assert engine.model.damping_pct == 60
+    assert int(open(path + '/ffb_dyn_damping').read()) == round(0.6 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 2.1) * 1e6)
+    assert fd.column_targets(0.3, 2.1, damping_scale=0.6)[0] == round(0.6 * 1413)
 
 
 def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp_path):

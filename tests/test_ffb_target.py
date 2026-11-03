@@ -481,6 +481,38 @@ def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
     assert rack.damping_scale() == rack.impedance() == 0.30
 
 
+def test_column_damping_defaults_to_60_and_sets_the_knee_mappings_damping_scale_clamped_to_0_100():
+    from oversteer.model import Model
+    assert fe.OVERALL_COLUMN_DAMPING == 60 and fe.RackForce.DAMPING_SCALE == 0.60
+    assert Model._texture_defaults(True)['countersteer_column_damping'] == 60
+    engine = fe.FfbEngine()
+    engine._requests(0.0)
+    assert engine.model.damping_pct == 60 and engine.model.damping_scale() == pytest.approx(0.60)
+    engine.set_column_damping(25)
+    engine._requests(0.0)
+    assert engine.model.damping_scale() == pytest.approx(0.25)
+    engine.set_column_damping(250)
+    engine._requests(0.0)
+    assert engine.model.damping_scale() == 1.0
+    engine.set_column_damping(-5)
+    engine._requests(0.0)
+    assert engine.model.damping_scale() == 0.0
+    engine.model.mapping = 'classic'                 # the classic mapping keeps the impedance scale
+    assert engine.model.damping_scale() == engine.model.impedance()
+
+
+def test_the_model_clamps_the_column_damping_setting_to_0_100_and_defaults_it_to_60():
+    from oversteer.model import Model
+    model = Model.__new__(Model)
+    model.data, model.ui = {}, None
+    model.set_if_changed = lambda key, value: model.data.update({key: value}) or True
+    assert model.get_countersteer_column_damping() == 60
+    model.set_countersteer_column_damping(150)
+    assert model.get_countersteer_column_damping() == 100
+    model.set_countersteer_column_damping(-3)
+    assert model.get_countersteer_column_damping() == 0
+
+
 def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_knee_with_the_drive_pull_off():
     from oversteer.model import Model
     engine = fe.FfbEngine()

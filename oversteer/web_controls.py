@@ -32,6 +32,7 @@ ACTIONS = ('reset_ffb', 'load_profile', 'save_profile', 'try_effect', 'calibrate
 EFFECTS = ('constant', 'spring', 'damper', 'friction', 'rumble')
 # Countersteer FFB (its own tab): number settings and the range the GTK scale has; the texture parts are switches
 COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, STRENGTH_MAX), 'countersteer_knee': (KNEE_MIN, KNEE_MAX),
+                        'countersteer_column_damping': (0, 100),
                         'countersteer_drive_pull_level': (0, 100), 'countersteer_kick_level': (0, 100),
                         'countersteer_texture': (0, 100),
                         'countersteer_linearity': (0, 100), 'countersteer_lightness': (0, 100)}
