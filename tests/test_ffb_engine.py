@@ -1277,3 +1277,31 @@ def test_driven_front_axle_couple_adds_the_scrub_term():
     assert fe.front_torque(s) == pytest.approx(-fe.SCRUB * 600.0)
     s.tyre_fx = (500.0, 500.0, 0.0, 0.0)                     # an even split: no couple
     assert fe.front_torque(s) == pytest.approx(0.0)
+
+
+def test_late_passes_are_logged_once_per_window(caplog):
+    engine = fe.FfbEngine(driver=FakeDriver)
+    with caplog.at_level('WARNING'):
+        engine._late(100.0, "pass took 120 ms")
+        engine._late(101.0, "pass took 90 ms")
+        engine._late(111.0, "pass took 60 ms")
+    lines = [r.getMessage() for r in caplog.records if 'engine late' in r.getMessage()]
+    assert len(lines) == 2 and '(1 in' in lines[0] and '(2 in' in lines[1]
+
+
+def test_a_late_ext_force_write_is_noted(tmp_path, caplog):
+    engine, path = engine_on(tmp_path)
+    t = run(engine, 0.0, 1.0)
+    engine._phase = 'on'
+    engine._write_mono = time.monotonic() - 0.2
+    engine._late_at = -fe.LATE_LOG_EVERY
+    with caplog.at_level('WARNING'):
+        engine._out(t, 1000.0)
+    assert any('ext_force written' in r.getMessage() for r in caplog.records)
+
+
+def test_a_slow_pass_is_noted_and_arms_the_stack_dump(caplog):
+    engine = fe.FfbEngine(driver=FakeDriver)
+    with caplog.at_level('WARNING'):
+        engine._pass_done(time.monotonic() - 0.2)
+    assert any('pass took' in r.getMessage() for r in caplog.records)
