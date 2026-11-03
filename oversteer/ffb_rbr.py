@@ -66,11 +66,10 @@ no longer comes from `force()`/`shape()` (kept for the replay scripts), the 'no-
 'saturated' is a note (`saturated`), not a refusal. The checks on the raw (`refused`):
 
 - 'grid': the levels are not on Wine's grid of DirectInput magnitudes
-  (int(m * DI_LEVEL), or one more where Wine rounds). An upload from another
-  program, or a game not sending its force this way, lands on it about 61 %
-  of the time; NGP's always (GRID_GO: 90 %). `round_trip` takes a level to
-  its nearest magnitude, x, T and back through the curve, the floor and
-  Wine: `on_grid` is the level within GRID_TOL above what comes back.
+  (`level_of`: floor((m * 65535 - 10000) / 20000)). An upload from another
+  program lands on it about 30 % of the time; NGP's always (GRID_GO: 90 %).
+  `round_trip` takes a level to its nearest magnitude and back through Wine:
+  `on_grid` is the level coming back unchanged.
 - 'saturated': the game's force is over SAT_X of full scale more than
   SAT_SHARE of the time: the inversion is ill-conditioned there (one
   magnitude step is a large torque step) and the knee would hold ours at
@@ -80,19 +79,13 @@ no longer comes from `force()`/`shape()` (kept for the replay scripts), the 'no-
 - 'strength': the game's own force has not yet reached STRENGTH_PROVEN of
   full scale.
 
-STRENGTH. The full scale C is 32767 times the game's STRENGTH (0..1), which
-lives in the profile, a binary file not read here: C is taken as 32767. A
-STRENGTH under 1 would leave C too high and let ours, slope-matched at small
-forces, go past anything the game can send (up to -ln(1 - s) / s times it).
-So the ceiling A is also the game's own highest level so far (PEAK_MARGIN 1):
-ours is never stronger than what the game itself sent. Bounding ours that
-low costs the gain (ours flattens where the game still rises: on a weave
-peaking at 60 % the gain is 0.78), so it plays only once the game's own
-force has reached STRENGTH_PROVEN of full scale (a big hit; with STRENGTH
-1.0 the curve gets there, under 0.85 it never can): the STRENGTH is then
-known to be 0.85 or more and the ceiling is near full scale. Until then the
-state is amber 'strength' (set the game's force feedback strength to 100 %
-and use the wheel's own strength).
+STRENGTH. The full scale C is 32767 times the game's STRENGTH (0..1), which lives in the profile, a binary file
+that is not readable (the 2026-11-03 drive had 0.2: no level past 6554). `StrengthFit` finds it from the drive: x =
+|level| / (32767 s), u(s) = -ln(1 - x) must be linear in the column torque Newton gives (the front's lateral force
+Fy = m (b/L) a_y + I_z rdot / L through a trail prior over the ratio N), on moderate-a_y samples; the s with the best
+correlation r wins (only s above the game's own peak are possible). Until it has converged s is 1: x is smaller, the force
+lighter. With s unknown the 'strength' state below still holds the take-over back until the game's peak is
+STRENGTH_PROVEN of C; with s fitted C = 32767 s, so a 20 % game reaches its own full scale and plays.
 """
 import logging
 import math
@@ -102,14 +95,13 @@ import time
 
 FULL = 32767                             # ext_force full scale (ffb_engine.FULL)
 DI_MAX = 10000                           # DirectInput's magnitude range
-DI_LEVEL = 32767.0 / DI_MAX              # Wine: FF_CONSTANT level per DirectInput magnitude (calibrated by the grid check)
+DI_LEVEL = 65535.0 / (2 * DI_MAX)        # Wine: FF_CONSTANT level per DirectInput magnitude (see `level_of`)
 BASE = 0.975
 K_LN = -math.log(BASE)                   # 0.025318: u = |T| * 100 * K_LN / S
 X_MAX = 0.995                            # |x| past this is not inverted further (u <= 5.3)
 
 LINEARITY = 70                           # % (see the docstring)
 FORCE_MIN = 0.10                         # |x| under which an upload says nothing about the curve (straights)
-GRID_TOL = 1.0                           # level units: on the grid of m * DI_LEVEL
 GRID_GO, GRID_HOLD = 0.90, 0.80          # share of changed levels on the grid
 SAT_X = 0.98
 SAT_SHARE, SAT_HOLD = 0.05, 0.10         # share of the time over SAT_X
@@ -121,6 +113,16 @@ TAU_SAT, TAU_GAIN = 5.0, 10.0              # s
 MAX_DT = 0.05                            # s: one upload never counts for more than this (a pause)
 STRENGTH_PROVEN = 0.85                   # the game's own peak, share of full scale, that shows its STRENGTH is near 1
 PEAK_MARGIN = 1.0                        # ours never past the game's own peak times this
+FIT_STEPS = tuple(round(0.1 + 0.01 * i, 2) for i in range(91))     # candidate strengths 0.10 .. 1.00
+FIT_HZ = 20.0                            # the fit takes telemetry at this rate
+FIT_TAU = 90.0                           # s: its exponential window
+FIT_SPEED, FIT_AY_LO, FIT_AY_HI = 8.0, 1.0, 6.0     # m/s, m/s^2: the samples it looks at
+FIT_MIN_TIME = 25.0                      # s of such samples before it is believed
+FIT_MARGIN = 0.03                        # r over r at s = 1 needed to leave s = 1
+FIT_SWITCH = 0.015                       # r a new s must beat the held one by
+FIT_SMOOTH = 0.1                         # s: the one-pole filter on Fy and the level
+CAR_M, CAR_L, CAR_B, CAR_IZ, CAR_N = 1390.0, 2.53, 1.24, 1751.0, 14.3   # a WRC (Fiesta/C3/Yaris/i20): the scale k is free
+TRAIL_PRIOR = 0.040                      # m
 INI_RETRY = 30.0                         # s between looks for RichardBurnsRally.ini while none was found
 INI_CHECK = 5.0                          # s between looks at its mtime
 
@@ -148,26 +150,26 @@ def magnitude(x, strength=1.0):
 
 
 def level_of(m):
-    """The FF_CONSTANT level Wine makes of a magnitude (game_ffb_raw's units and sign: m's)."""
-    return int(m * DI_LEVEL)
+    """The FF_CONSTANT level Wine makes of a magnitude (game_ffb_raw's units and sign: m's). Measured on a drive
+    (20261103-133906, 99.98 % of 4000 levels): the -32768..32767 range's mapping, floor((m * 65535 - 10000) / 20000),
+    so m = 0 is -1 and the positive and negative sides are one level apart (not int(m * 32767 / 10000))."""
+    return (m * 65535 - 10000) // (2 * DI_MAX)
 
 
-def round_trip(level, sensitivity=100.0, strength=1.0):
-    """A raw level taken to NGP's magnitude, x, T and back through the curve, the floor and Wine. NGP's own levels
-    come back as they went (`on_grid`); the curve leg is skipped past X_MAX, where it is not inverted."""
-    m = round(abs(level) / DI_LEVEL)
-    x = m / DI_MAX / strength
-    back = m
-    if x < X_MAX:
-        back = abs(magnitude(ngp_curve(ngp_inverse(x, sensitivity), sensitivity), strength))
-        if abs(back - m) <= 1:               # the floor of a float product: one step either way
-            back = m
-    return int(math.copysign(level_of(back), level)) if level else 0
+def magnitude_of(level):
+    """The DirectInput magnitude whose level is nearest to `level` (the inverse of `level_of` on its grid)."""
+    return int(round((2 * level + 1) * DI_MAX / 65535.0))
+
+
+def round_trip(level):
+    """A raw level taken to its nearest magnitude and back through Wine: NGP's own levels come back as they went."""
+    return level_of(magnitude_of(level))
 
 
 def on_grid(level):
-    """The level is one Wine makes of a DirectInput magnitude: int(m * DI_LEVEL), or one more (rounded)."""
-    return 0 <= abs(level) - abs(round_trip(level)) <= GRID_TOL
+    """The level is exactly one Wine makes of a DirectInput magnitude (an upload from another program lands on it
+    1 time in 3.3)."""
+    return round_trip(level) == level
 
 
 def shape(v, knee, ceiling):
@@ -230,6 +232,112 @@ class _Share:
         return self.on / self.w if self.w > 0.0 else None
 
 
+class StrengthFit:
+    """The game's STRENGTH from the drive (module docstring): per candidate s, exponentially weighted moments of u(s)
+    and the Newton front force over moderate-a_y samples; r(u, Fy) picks s, the slope gives the trail it implies."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.peak = 0.0                  # the highest |level| / 32767 seen: s below it is impossible
+        self.n = 0
+        self.time = 0.0
+        self.w = 0.0
+        self.mom = {c: [0.0] * 5 for c in FIT_STEPS}     # per s: sum u, u^2, uF, and shared F, F^2 below
+        self.f1 = self.f2 = 0.0
+        self.s = 1.0                     # the strength in use
+        self.r = self.trail = None
+        self.converged = False
+        self.source = 'assumed 1'
+        self._t = None
+        self._yaw = None                 # (t, yaw rate)
+        self._rdot = 0.0
+        self._fy = self._lev = self._ay = None
+        self._due = 0.0
+        self._last = None
+
+    def feed(self, t, ay, yaw, speed, level):
+        """A telemetry sample (a_y m/s^2, yaw rate rad/s, speed m/s) with the raw level now. Returns True when s moved."""
+        if level is None or ay is None or yaw is None or speed is None or not all(map(math.isfinite, (ay, yaw, speed))):
+            return False
+        y = abs(level) / FULL
+        self.peak = max(self.peak, y)
+        dt = 0.0 if self._t is None else t - self._t
+        self._t = t
+        if dt <= 0.0 or dt > 0.25:
+            self._fy = self._lev = self._ay = self._yaw = None
+            return False
+        if self._yaw is not None and t > self._yaw[0]:
+            rd = (yaw - self._yaw[1]) / (t - self._yaw[0])
+            self._rdot += (1.0 - math.exp(-dt / FIT_SMOOTH)) * (rd - self._rdot)
+        self._yaw = (t, yaw)
+        fy = CAR_M * (CAR_B / CAR_L) * ay + CAR_IZ * self._rdot / CAR_L
+        if self._fy is None:
+            self._fy, self._lev, self._ay = fy, y, ay
+        else:
+            a = 1.0 - math.exp(-dt / FIT_SMOOTH)
+            self._fy += a * (fy - self._fy)
+            self._lev += a * (y - self._lev)
+            self._ay += a * (ay - self._ay)
+        if t < self._due:
+            return False
+        self._due = t + 1.0 / FIT_HZ
+        if speed < FIT_SPEED or not FIT_AY_LO < abs(self._ay) < FIT_AY_HI:
+            return False
+        step = 1.0 / FIT_HZ
+        decay = math.exp(-step / FIT_TAU)
+        f, lev = abs(self._fy), self._lev
+        self.f1 = self.f1 * decay + step * f
+        self.f2 = self.f2 * decay + step * f * f
+        self.w = self.w * decay + step
+        for c, m in self.mom.items():
+            x = min(lev / c, X_MAX)
+            u = -math.log(1.0 - x)
+            m[0] = m[0] * decay + step * u
+            m[1] = m[1] * decay + step * u * u
+            m[2] = m[2] * decay + step * u * f
+        self.n += 1
+        self.time += step
+        return self._decide()
+
+    def _r(self, c):
+        m, w = self.mom[c], self.w
+        vu = m[1] / w - (m[0] / w) ** 2
+        vf = self.f2 / w - (self.f1 / w) ** 2
+        if vu <= 1e-12 or vf <= 1e-12:
+            return None
+        return (m[2] / w - m[0] / w * self.f1 / w) / math.sqrt(vu * vf)
+
+    def _decide(self):
+        if self.time < FIT_MIN_TIME or self.w <= 0.0:
+            return False
+        rs = {c: self._r(c) for c in FIT_STEPS if c >= self.peak - 0.001}     # (a strength under the game's own peak is impossible)
+        rs = {c: v for c, v in rs.items() if v is not None}
+        if not rs or 1.0 not in rs:
+            return False
+        best = max(rs, key=rs.get)
+        held = self.s if self.s in rs else 1.0
+        need = FIT_MARGIN if held == 1.0 else FIT_SWITCH
+        new = best if best != held and rs[best] >= rs[held] + need else held
+        self.r = rs[new]
+        m = self.mom[new]
+        self.trail = m[2] / self.f2 if self.f2 > 0.0 else None        # u per N of Fy
+        moved = new != self.s or not self.converged
+        self.s, self.converged = new, True
+        self.source = 'fitted' if new != 1.0 else 'fitted (1)'
+        return moved
+
+    def trail_mm(self, sens):
+        """The trail the fit implies (mm) for sensitivity `sens`: tau_col = 0.062862 u S Nm, trail = tau_col N / Fy."""
+        return None if self.trail is None else 0.062862 * sens * CAR_N * self.trail * 1000.0
+
+    def describe(self):
+        return "strength %.3f (%s, r %s, %d samples, implied trail %s mm at S 100)" % (
+            self.s, self.source, 'n/a' if self.r is None else '%.2f' % self.r, self.n,
+            'n/a' if self.trail is None else '%.0f' % (self.trail_mm(100.0)))
+
+
 class RbrForce:
     """Undoes NGP's curve on the game's raw level and plays it through the knee (module docstring).
     feed() every new upload; force() the ext_force for a level."""
@@ -245,7 +353,8 @@ class RbrForce:
     def reset(self, car=None):
         """Everything learnt: a new stream (the device set again). A car key narrowing keeps all but S (set_car)."""
         self.car = car
-        self.full = float(FULL)          # C: the game's full-scale level (STRENGTH 1.0 assumed)
+        self.fit = StrengthFit()
+        self.full = float(FULL)          # C: the game's full-scale level (STRENGTH 1.0 until the fit has it)
         self.peak = 0.0                  # the game's own highest |level| since the stream started
         self._clear_s()
         self._last_level = None
@@ -267,6 +376,7 @@ class RbrForce:
         if self.peak:
             logging.info("Countersteer FFB: RBR: %s: the game's own peak is measured again", why)
         self.peak = 0.0
+        self.fit.peak = 0.0              # (its moments stay: a stage restart is mostly the same STRENGTH)
 
     def _clear_s(self):
         self.base_s = None               # the car's ForceFeedbackSensitivity_NGP (None: not in the car table)
@@ -353,6 +463,22 @@ class RbrForce:
             return False
         read()
         return self._percents[2]
+
+    @property
+    def strength(self):
+        """The game's STRENGTH in use: fitted, else 1 (conservative: x smaller, the force lighter)."""
+        return self.full / FULL
+
+    def feed_physics(self, t, sample, level):
+        """A telemetry sample with the raw level now: the strength fit (StrengthFit)."""
+        accel = getattr(sample, 'accel', None)
+        ay = accel[1] if accel is not None and len(accel) > 1 else None
+        if not self.fit.feed(t, ay, getattr(sample, 'yaw_rate', None), getattr(sample, 'speed', None), level):
+            return
+        full = max(FULL * self.fit.s, self.peak)
+        if full != self.full:
+            logging.info("Countersteer FFB: RBR %s: game STRENGTH %s", self.car, self.fit.describe())
+        self.full = full
 
     def _x(self, level):
         return min(abs(level) / self.full, 1.0)
