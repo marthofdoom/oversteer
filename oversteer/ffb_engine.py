@@ -395,10 +395,21 @@ CASTER_TRAIL = 0.027                    # m
 SCRUB = 0.0155                          # m: the physical scrub radius; the steering force plays it only as "Drive pull" (pull_scrub)
 
 
-def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB):
+# The pneumatic trail the steering force believes: tp = -Mz / Fy of the front pair, kept within [TP_MIN, TP_MAX] m
+# (audit of drives 20261102-235822 and -192230: a real trail is at most ~1/6 of the contact length; p99 under
+# 0.4 rad of slip is 30-46 mm; ACR's Mz spikes at landings imply 107-110 mm and flipped the force by +-0.68 of full
+# scale in 25 ms; with the clamp the opposite-sign high-slip runs fell from 8 to 1). Only the steering path clamps
+# (rim_torque); the fit and the classifier read the game's Mz as it is.
+TP_MIN = -0.02                          # m
+TP_MAX = 0.05                           # m
+TP_FY_MIN = 500.0                       # N: under this |Fy| the implied trail means nothing (Mz over a near-zero Fy) and the game's Mz stands
+
+
+def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB, clamp=False):
     """Steering torque about the kingpins (Nm, front Mz's sign): FL + FR Mz plus the lateral forces' caster
     arm, -trail * (FL + FR Fy) (CASTER_TRAIL unless the car's own is known), and the scrub-radius couple of the driven or braked front axle,
-    -scrub * (Fx_FL - Fx_FR) (SCRUB likewise). Terms without their forces are left out; None without Mz."""
+    -scrub * (Fx_FL - Fx_FR) (SCRUB likewise). Terms without their forces are left out; None without Mz.
+    `clamp`: Mz is first limited to the implied pneumatic trail TP_MIN..TP_MAX of the front Fy (Mz ~ -tp * Fy)."""
     mz = front_mz(sample)
     if mz is None:
         return None
@@ -406,6 +417,9 @@ def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB):
     if fy is not None:
         side = fy[0] + fy[1]
         if math.isfinite(side):
+            if clamp and abs(side) >= TP_FY_MIN:
+                lo, hi = sorted((-TP_MAX * side, -TP_MIN * side))
+                mz = min(max(mz, lo), hi)
             mz -= trail * side
     if fx is not None:
         couple = fx[0] - fx[1]
@@ -945,7 +959,7 @@ class RackForce:
         # per-car scrub (self.scrub) is no longer played, it only serves the fit and the cross-check
         scrub = self.pull_scrub() if scrub is None else scrub
         hyd = not self.classic()
-        mz = front_torque(sample, trail, scrub)
+        mz = front_torque(sample, trail, scrub, clamp=True)
         if mz is None:
             return None
         ratio = self.ratio if ratio is None else ratio

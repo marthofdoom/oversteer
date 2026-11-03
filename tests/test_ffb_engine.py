@@ -1305,3 +1305,23 @@ def test_a_slow_pass_is_noted_and_arms_the_stack_dump(caplog):
     with caplog.at_level('WARNING'):
         engine._pass_done(time.monotonic() - 0.2)
     assert any('pass took' in r.getMessage() for r in caplog.records)
+
+
+def test_the_steering_path_clamps_the_implied_pneumatic_trail():
+    s = tyre_sample(949.0, -8627.0)                          # a landing spike: tp = 0.11 m, the wrong way round for grip
+    lo, hi = sorted((-fe.TP_MAX * -8627.0, -fe.TP_MIN * -8627.0))
+    assert fe.front_torque(s, 0.0, 0.0, clamp=True) == pytest.approx(hi)
+    assert fe.front_torque(s, 0.0, 0.0) == pytest.approx(949.0)       # the fit and the classifier see it as it is
+    s = tyre_sample(-8627.0 * -0.11 * -1, 8627.0)            # the same the other way (tp 0.11 m, Fy positive)
+    assert fe.front_torque(s, 0.0, 0.0, clamp=True) == pytest.approx(-fe.TP_MAX * 8627.0)
+    s = tyre_sample(-100.0, 3000.0)                          # a normal sample (tp 33 mm) is untouched
+    assert fe.front_torque(s, clamp=True) == pytest.approx(fe.front_torque(s))
+    s = tyre_sample(30.0, 3000.0)                            # a small opposite sign (tp -10 mm) is within TP_MIN
+    assert fe.front_torque(s, 0.0, 0.0, clamp=True) == pytest.approx(30.0)
+
+
+def test_rim_torque_uses_the_clamped_mz():
+    model = fe.RackForce()
+    spike = tyre_sample(949.0, -8627.0)
+    plain = tyre_sample(fe.TP_MAX * 8627.0, -8627.0)         # exactly at the limit
+    assert model.rim_torque(spike) == pytest.approx(model.rim_torque(plain))
