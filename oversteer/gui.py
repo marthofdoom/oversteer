@@ -416,7 +416,7 @@ class Gui:
         """Build the combined-device spec from the ticked equipment and
         install (or disable) it through pkexec. The privileged step runs
         off the GTK thread; the user's spec is only saved once it succeeded."""
-        from .proxy.equipment import build_combined_spec, KIND_WHEEL
+        from .proxy.equipment import build_combined_spec, carry_calibration, KIND_WHEEL
         from .proxy import install
         from .proxy.manager import user_dir
         from .proxy.spec import ProxySpec, SpecError
@@ -437,6 +437,8 @@ class Gui:
             try:
                 identity = 'generic' if self.ui.get_combine_generic() else 'wheel'
                 specs = [build_combined_spec(wheel, others, spec_id=self.COMBINED_ID, identity=identity)]
+                previous = [s for s in [self._load_combined_spec()] if s is not None]
+                specs = carry_calibration(specs, previous)
             except Exception as e:
                 self.ui.error_dialog(_("Could not build the combined device."), str(e))
                 self.refresh_equipment()
@@ -1294,20 +1296,24 @@ class Gui:
         calibration.write(proxy_id, entries)
 
     def _resend_handbrake_calibration(self, proxied):
-        """A restarted service has forgotten the run-time calibration: send
-        the spec's again, once per service run."""
+        """Whenever the running proxy's status lacks (or differs from) the
+        stored calibration, send it: a restarted service has forgotten the
+        run-time one. Status file read only; called from the combine tick."""
+        if getattr(self, 'hb_cal', None) is not None or self.combine_busy:
+            return              # a calibration in progress owns the file
         spec = self._load_combined_spec()
         if spec is None or not any(m.low is not None for m in spec.mappings):
             return
+        from .proxy import calibration
         from .proxy.manager import ProxyManager
         status = ProxyManager.read_status() or {}
         proxy = next((p for p in status.get('proxies', []) if p['id'] == proxied[0]), None)
         if proxy is None or not proxy.get('runtime_calibration'):
             return
-        mark = (status.get('pid'), proxied[0])
-        if getattr(self, '_hb_resent', None) == mark:
+        wanted = {'{}:{}'.format(m.source, m.from_code): {'low': m.low, 'high': m.high, 'dead': m.dead}
+                  for m in spec.mappings if m.low is not None}
+        if not calibration.stale(proxy.get('calibration'), wanted):
             return
-        self._hb_resent = mark
         try:
             self._push_handbrake_calibration(proxied[0], spec)
         except OSError as e:

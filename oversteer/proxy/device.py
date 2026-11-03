@@ -179,11 +179,21 @@ class ProxyDevice:
                 'ff_playing': list(self._ff_summary[1]) if self._ff_summary else [],
                 'inverted_axes': self._inverted_axes(),
                 'runtime_calibration': True,
-                'calibration': dict(self.calibrated),
+                'calibration': self._calibration_summary(),
                 'source_axes': {'{}:{}'.format(key, code): [info.min, info.max]
                                 for key, src in self.sources.items()
                                 for code, info in src.absinfo.items()},
             }
+
+    def _calibration_summary(self):
+        """{'<source>:<code>': [low, high, dead]} for every axis rescaled
+        over a calibrated travel right now, from the spec or at run time."""
+        out = {}
+        for (key, etype, code), rules in self._rules.items():
+            for rule in rules:
+                if etype == ecodes.EV_ABS and rule.to_type == ecodes.EV_ABS and rule.low is not None:
+                    out['{}:{}'.format(key, code)] = [rule.low, rule.high, rule.dead]
+        return out
 
     def _inverted_axes(self):
         """{'<source>:<code>': bool} for every axis this proxy maps, with
@@ -582,6 +592,8 @@ class ProxyDevice:
                 rule.dead, rule.high, rule.low = fitted[2], fitted[1], fitted[0]     # low last: it is what switches the rule on
             self.calibrated[name] = list(fitted)
             logging.info("proxy %s: %s calibrated at run time: %s..%s dead %.2f", self.spec.id, name, *fitted)
+        if self.on_change is not None:
+            self.on_change(self)         # the status shows it now, so the app need not send it again
 
     def _pump(self, timeout):
         """Wait for events on any source or the virtual device and handle them."""

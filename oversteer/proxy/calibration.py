@@ -117,3 +117,15 @@ def fit(entry, src_min, src_max):
     if high - low < MIN_SPAN * span:
         return None
     return low, high, entry['dead']
+
+
+def stale(reported, wanted, tolerance=1.0):
+    """True when the running proxy's `reported` calibration ({'<src>:<code>':
+    [low, high, dead]}, from its status) lacks or differs from any of the
+    `wanted` entries ({'<src>:<code>': {'low', 'high', 'dead'}})."""
+    for name, entry in wanted.items():
+        got = (reported or {}).get(name)
+        if not got or abs(got[0] - entry['low']) > tolerance or abs(got[1] - entry['high']) > tolerance \
+                or abs(got[2] - entry['dead']) > 1e-6:
+            return True
+    return False

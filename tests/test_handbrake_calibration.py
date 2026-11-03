@@ -262,3 +262,66 @@ def test_device_ignores_a_file_of_another_user(tmp_path):
     dev._calibration_next = 0
     dev._check_calibration(now=2.0)
     assert dev.spec.mappings[0].low == 1000.0
+
+
+# --- carrying over and re-sending ----------------------------------------
+
+def _hb_spec(vendor, product, low=None):
+    extra = {"low": low, "high": 60000} if low else {}
+    d = _spec(extra)
+    d["sources"] = {"hb": {"match": {"vendor": vendor, "product": product}}}
+    d["mappings"][0]["source"] = "hb"
+    return ProxySpec.from_dict(d)
+
+
+def test_rebuilt_specs_keep_the_calibration_of_the_same_device_and_axis():
+    from oversteer.proxy.equipment import carry_calibration
+    old = _hb_spec("8086", "0a01", low=7000)
+    new = _hb_spec("8086", "0a01")
+    other = _hb_spec("1111", "2222")
+    carry_calibration([new, other], [old])
+    assert (new.mappings[0].low, new.mappings[0].high, new.mappings[0].dead) == (7000, 60000, 0.03)
+    assert other.mappings[0].low is None
+
+
+def test_the_installed_spec_carries_low_and_high(tmp_path):
+    spec = _hb_spec("8086", "0a01", low=7000)
+    spec.save(str(tmp_path / "x.json"))
+    assert json.load(open(tmp_path / "x.json"))["mappings"][0]["low"] == 7000
+
+
+def test_stale_detects_a_restarted_service():
+    wanted = {NAME: {"low": 7000.0, "high": 60000.0, "dead": 0.03}}
+    assert not calibration.stale({NAME: [7000.0, 60000.0, 0.03]}, wanted)
+    assert calibration.stale({}, wanted)                                # restarted: nothing applied
+    assert calibration.stale({NAME: [7000.0, 59000.0, 0.03]}, wanted)
+
+
+def test_status_reports_the_calibration_so_the_resend_stops():
+    dev, _src = _device()
+    assert dev.status()['calibration'] == {}
+    dev.apply_calibration({NAME: {"low": 7000.0, "high": 60000.0, "dead": 0.03}})
+    assert dev.status()['calibration'] == {NAME: [7000.0, 60000.0, 0.03]}
+
+
+def test_one_tick_resends_after_a_service_restart(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from oversteer.gui import Gui
+    from oversteer.proxy.manager import ProxyManager
+    spec = ProxySpec.from_dict(_spec({"low": 7000, "high": 60000}))
+    sent = []
+    status = {'pid': 1, 'proxies': [{'id': 't', 'runtime_calibration': True, 'calibration': {}}]}
+    monkeypatch.setattr(ProxyManager, 'read_status', staticmethod(lambda: status))
+    monkeypatch.setattr(calibration, 'write', lambda pid, entries, *a: sent.append((pid, entries)))
+    fake = SimpleNamespace(hb_cal=None, combine_busy=False, _load_combined_spec=lambda: spec)
+    fake._push_handbrake_calibration = lambda pid, sp, calibrating=None: Gui._push_handbrake_calibration(fake, pid, sp, calibrating)
+    proxied = ('t', 'handbrake1', ecodes.ABS_THROTTLE, False)
+    Gui._resend_handbrake_calibration(fake, proxied)
+    assert sent == [('t', {NAME: {'low': 7000.0, 'high': 60000.0, 'dead': 0.03}})]
+    status['proxies'][0]['calibration'] = {NAME: [7000.0, 60000.0, 0.03]}      # the daemon applied it
+    Gui._resend_handbrake_calibration(fake, proxied)
+    assert len(sent) == 1
+    fake.hb_cal = {}                                                    # a calibration in progress is left alone
+    status['proxies'][0]['calibration'] = {}
+    Gui._resend_handbrake_calibration(fake, proxied)
+    assert len(sent) == 1
