@@ -133,7 +133,9 @@ MZ_MISSING_RUN = 10                      # samples in a row without Mz (30 ms at
 OVERALL_STRENGTH = 1.0                   # "Steering strength" default: Countersteer's own force as the model gives it
 STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied inside wheel_torque.rim_share before the mapping
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
-OVERALL_KICK = True                      # "Kickback" default
+OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
+OVERALL_PULL = False                     # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
+OVERALL_PULL_LEVEL = 35                  # ... and its level, % of the physical scrub radius
 FULL = 32767                             # ext_force full scale (an FF_CONSTANT level at 0x4000)
 
 
@@ -388,103 +390,7 @@ def front_mz(sample):
 # names) was not decodable, and the dump has no surface input (grip 0 throughout), so one trail serves every car
 # and surface; 27 mm is also a typical rally-car mechanical trail.
 CASTER_TRAIL = 0.027                    # m
-SCRUB = 0.0155                          # m: the physical scrub radius (the Kickback's couple; the steering force plays none)
-
-
-class Kickback:
-    """The assist lag on the scrub-radius couple: a one-sided kerb, a lifted inside wheel or a dirt edge snaps the
-    column through the couple -SCRUB * (Fx_FL - Fx_FR) / ratio, which a real power rack passes to the driver's hands
-    for the moment the assist has not yet followed (the driver feels (1 - boost slope) of the fast part, K_FAST of it
-    here). The fast part is c less its low-pass (tau TAU_A), low-passed again at F_MECH; it plays only through a gate
-    that opens on a one-sided event: a step of the angle between the front wheels' contact normals, or one front
-    wheel's load going under LIFT_LOW while the other carries over LIFT_HIGH, with a step of Fx_FL - Fx_FR in the
-    same window. The gate holds for HOLD s and fades over FADE s; a gap in the samples or a new car resets it.
-    Without the gate the term would be steady-gravel noise."""
-    TAU_A = 0.040                        # s: the assist's own time constant
-    F_MECH = 15.0                        # Hz: low-pass on the fast part (the column's mechanics)
-    K_FAST = 0.20                        # share of the fast part's (1 - boost slope) the driver feels
-    WINDOW = 0.050                       # s: the span the steps are taken over
-    NORMAL_STEP = 0.15                   # rad: step of the front contact normals' angle
-    LIFT_LOW, LIFT_HIGH = 150.0, 1500.0  # N: one front load under / the other over: a lift onset
-    FX_STEP = 1500.0                     # N: step of Fx_FL - Fx_FR within the window
-    MIN_SPEED = 8.0                      # m/s
-    HOLD, FADE = 0.15, 0.10              # s: the gate stays open, then fades out
-    GAP = 0.05                           # s without a sample: everything starts again
-
-    def __init__(self):
-        self._car = None
-        self.reset()
-
-    def reset(self):
-        self._t = None
-        self._lp = None                  # c low-passed at TAU_A
-        self._fast = 0.0
-        self._hist = collections.deque()  # (t, normal angle, Fx_FL - Fx_FR, lifted)
-        self._open_at = None             # time of the last trigger
-        self.gate = 0.0
-
-    @staticmethod
-    def _lowpass(y, x, rc, dt):
-        return x if y is None else y + (x - y) * dt / (rc + dt)
-
-    @staticmethod
-    def _angle(sample):
-        normals = getattr(sample, 'contact_normal', None)
-        try:
-            a, b = normals[0], normals[1]
-            na, nb = math.sqrt(sum(c * c for c in a)), math.sqrt(sum(c * c for c in b))
-            if na > 1e-9 and nb > 1e-9:
-                return math.acos(min(max(sum(x * y for x, y in zip(a, b)) / (na * nb), -1.0), 1.0))
-        except (TypeError, IndexError, ValueError):
-            pass
-        return None
-
-    def _trigger(self, t, sample, dfx):
-        """This sample is a one-sided event: a step in the window before it and an Fx_FL - Fx_FR step with it."""
-        load = getattr(sample, 'tyre_load', None)
-        lifted = False
-        if load is not None and len(load) >= 2 and load[0] is not None and load[1] is not None:
-            lifted = (load[0] < self.LIFT_LOW and load[1] > self.LIFT_HIGH) or (load[1] < self.LIFT_LOW and load[0] > self.LIFT_HIGH)
-        angle = self._angle(sample)
-        hist = self._hist
-        hist.append((t, angle, dfx, lifted))
-        while len(hist) > 1 and t - hist[1][0] >= self.WINDOW:
-            hist.popleft()               # (the oldest kept is the latest sample at least WINDOW back, if any)
-        old = hist[0]
-        if t - old[0] < self.WINDOW * 0.5 or t - old[0] > self.WINDOW * 3.0:
-            return False
-        if abs(dfx - old[2]) < self.FX_STEP:
-            return False
-        step = angle is not None and old[1] is not None and angle - old[1] >= self.NORMAL_STEP
-        onset = lifted and not old[3]
-        return bool(step or onset)
-
-    def update(self, t, sample, car, ratio, slope):
-        """The kick at the driver's hands (Nm at the rim) for this sample. `slope`: a callable returning the boost
-        curve's slope at the sample's column torque (called only while the gate is open)."""
-        fx = getattr(sample, 'tyre_fx', None)
-        if car != self._car or self._t is None or not 0.0 <= t - self._t <= self.GAP:
-            self.reset()
-            self._car = car
-        dt = 0.0 if self._t is None else t - self._t
-        self._t = t
-        try:
-            dfx = fx[0] - fx[1]
-        except (TypeError, IndexError):
-            dfx = math.nan
-        if not math.isfinite(dfx):
-            return 0.0
-        c = -SCRUB * dfx / ratio
-        speed = getattr(sample, 'speed', None)
-        if self._trigger(t, sample, dfx) and speed is not None and abs(speed) > self.MIN_SPEED:
-            self._open_at = t
-        self._lp = self._lowpass(self._lp, c, self.TAU_A, dt)
-        self._fast = self._lowpass(self._fast, c - self._lp, 1.0 / (2.0 * math.pi * self.F_MECH), dt)
-        age = math.inf if self._open_at is None else t - self._open_at
-        self.gate = 1.0 if age < self.HOLD else max(0.0, 1.0 - (age - self.HOLD) / self.FADE)
-        if self.gate <= 0.0:
-            return 0.0
-        return self.K_FAST * (1.0 - slope()) * self._fast * self.gate
+SCRUB = 0.0155                          # m: the physical scrub radius; the steering force plays it only as "Drive pull" (pull_scrub)
 
 
 def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB):
@@ -593,9 +499,9 @@ class RackForce:
       inside it; an unknown wheel counts as the G29's 2.1 Nm) so the car's top torque (top_torque()) lands at
       wheel_torque.STEER_BUDGET of full scale, which is also its hard clamp: the rest stays free for texture and
       impacts. The column's damping, friction and stiffness the driver renders keep a frozen scale
-      (COLUMN_SCALE, impedance()). The steering force plays no scrub couple (the drive's left/right split is absorbed by
-      the suspension; the learnt scrub only serves the cross-check against the game's force). A gated kickback (Kickback) rides on
-      top, outside the steering budget; the output never passes RIM_SAFE_NM at the rim. The ratio is learnt per car from the road-wheel angle where the steering
+      (COLUMN_SCALE, impedance()). The steering force plays the scrub couple only as "Drive pull" (pull_scrub: the
+      physical SCRUB times the level, off by default; the learnt scrub no longer plays, it only serves the cross-check
+      against the game's force). The output never passes RIM_SAFE_NM at the rim. The ratio is learnt per car from the road-wheel angle where the steering
       wheel's lock is known (ffb_carprops.RatioLearner), from the car table (+ a 0.13 m steering arm) until
       then. The car's
       learnt p99 of |front torque| (ffb_carprops.Quantile) is kept per car as a diagnostic only.
@@ -640,12 +546,17 @@ class RackForce:
     wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the 2.1 Nm class
     strength = 1.0                       # the overall steering strength (the engine's), applied inside rim_share
     knee = wheel_torque.KNEE             # share of the wheel's peak played 1:1 in Nm (the engine's, "1:1 up to")
-    kick_on = True                       # the gated kickback (Kickback) rides on the steering force
-    KICK_CAP = 0.15                      # share of full scale: the kickback's most
-    KICK_TOTAL = wheel_torque.STEER_BUDGET + KICK_CAP    # share of full scale: the steering force and the kick together
+    mapping = OVERALL_MAPPING            # the steering mapping (the engine's, the profile INI's countersteer_mapping):
+                                         # 'knee' = 1:1 up to a knee; 'classic' = the uniform impedance scale (share =
+                                         # CLASSIC_SCALE x strength x torque / peak, clamped at the budget, no hydraulic
+                                         # top end, damping at the same scale)
+    pull_on = False                      # "Drive pull": the scrub couple of the drive's left/right split in the force ...
+    pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the physical SCRUB
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
                                          # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car)
-    DAMPING_SCALE = 1.0                  # ... but the column damping is played 1:1 like the torque under the knee: at 1:1 the
+    CLASSIC_SCALE = COLUMN_SCALE         # the classic mapping's uniform scale: the p99-based impedance scale of the drive
+                                         # the classic feel was tuned on (the Fabia, p99 573 Nm), frozen
+    DAMPING_SCALE = 1.0                  # ('knee' mapping) the column damping is played 1:1 like the torque under the knee: at 1:1 the
                                          # centring loop needs it (slide sim, drive 20261102-220623: 0.17 Nm s/rad in all
                                          # settles in 0.51 s, 4 % overshoot; the wheel's own 0.055 alone rings, 13 crossings)
     # The aligning torque split (feature flag, off: the driver's local spring `ffb_align` does not exist yet). With
@@ -703,7 +614,6 @@ class RackForce:
         self._spring = ffb_spring.DriverSpring()
         self._spring_at = None
         self._now = 0.0
-        self._kick = Kickback()
         self._assist = ffb_carprops.AssistDetector()
         kept = ffb_carprops.STORE.get_rack(car) if car is not None else None
         table = None if kept else ffb_carprops.table_ratio(car_data.entry(car))
@@ -979,8 +889,9 @@ class RackForce:
         off = ffb_carprops.power_settings()[0] == 'off'
         cls = 0.0 if off else self.assist * ffb_carprops.power_settings()[1]
         speed = getattr(sample, 'speed', None)
-        model = ffb_carprops.driver_from_column(column, speed, cls)
-        slope = ffb_carprops.driver_slope(column, speed, cls)
+        hyd = not self.classic()
+        model = ffb_carprops.driver_from_column(column, speed, cls, hyd)
+        slope = ffb_carprops.driver_slope(column, speed, cls, hyd)
         k = slope * stiffness / (1.0 + abs(alpha) / self.ALIGN_PK) ** 2 / (ratio * ratio) / deg
         return {'theta_a_deg': theta_a, 'theta_deg': theta, 'k': k, 'model': model}
 
@@ -1028,10 +939,10 @@ class RackForce:
         where it has, the game's own gain-against-load curve (fitted live, AssistDetector.curve) scaled so the
         car's p99 lands where our class model puts it, so the assist is not stacked."""
         trail = self.trail if trail is None else trail
-        # no scrub couple in the steering force: Fx_FL - Fx_FR is mostly the drive's left/right split, which the
-        # suspension and steering geometry absorb (drive 20261102-235822 with the physical scrub: force reversals 1.1
-        # -> 2.8 per second, "it felt like disruption"); a one-sided kerb or lift plays through the gated Kickback
-        scrub = 0.0 if scrub is None else scrub
+        # the scrub couple only as "Drive pull" (pull_scrub), unfiltered like ACR's own finalFF has it; the learnt
+        # per-car scrub (self.scrub) is no longer played, it only serves the fit and the cross-check
+        scrub = self.pull_scrub() if scrub is None else scrub
+        hyd = not self.classic()
         mz = front_torque(sample, trail, scrub)
         if mz is None:
             return None
@@ -1040,15 +951,27 @@ class RackForce:
         cls = self.assist if assist is None else assist
         source = self.power_steering()
         if source == 'off':
-            return ffb_carprops.driver_from_column(mz / ratio, speed, 0.0)
+            return ffb_carprops.driver_from_column(mz / ratio, speed, 0.0, hyd)
         cls *= ffb_carprops.power_settings()[1]
         if source == 'game':
             curve = self._assist.curve(self.p99)
             if curve:
-                target = ffb_carprops.driver_from_column(self.p99 / ratio, self.GAME_SHAPE_SPEED, cls)
+                target = ffb_carprops.driver_from_column(self.p99 / ratio, self.GAME_SHAPE_SPEED, cls, hyd)
                 level = target / (self.p99 * ffb_carprops.game_shape(self.p99, curve))
                 return math.copysign(level * abs(mz) * ffb_carprops.game_shape(mz, curve), mz)
-        return ffb_carprops.driver_from_column(mz / ratio, speed, cls)
+        return ffb_carprops.driver_from_column(mz / ratio, speed, cls, hyd)
+
+    def classic(self):
+        """The classic steering mapping is on (the INI's countersteer_mapping = classic)."""
+        return self.mapping == 'classic'
+
+    def pull_scrub(self):
+        """The scrub radius (m) the steering force plays: SCRUB times the Drive pull level, 0 with it off."""
+        return SCRUB * self.pull_level if self.pull_on else 0.0
+
+    def damping_scale(self):
+        """The column damping's scale: the impedance scale in the classic mapping, DAMPING_SCALE (1:1) in the knee one."""
+        return self.impedance() if self.classic() else self.DAMPING_SCALE
 
     def impedance(self, ratio=None, assist=None):
         """The scale of the column's damping, friction and stiffness sent to the driver (ffb_dynamics.column_targets):
@@ -1073,7 +996,7 @@ class RackForce:
     def force(self, sample):
         """ext_force for this sample at the overall steering strength (0 without Mz): the rim torque (rim_torque) as a
         share of the wheel's peak, 1:1 up to the knee and compressed above, clamped at the steering budget
-        (wheel_torque.rim_share), plus the gated kickback. A reversing car (backwards over REVERSE_SPEED) keeps the
+        (wheel_torque.rim_share; the classic mapping: the uniform scale times the strength). A reversing car (backwards over REVERSE_SPEED) keeps the
         game's own sign of Mz and Fy, which turn with the travel (the caster trail is negative to it: the wheel swings
         to the lock, and a driver holds it); the force is not faded, only bounded to REVERSE_MAX of full scale, so a
         spin never holds the wheel at the stop with the whole of it."""
@@ -1083,8 +1006,15 @@ class RackForce:
             return 0
         ratio, assist = (held[2], held[3]) if held is not None else (None, None)
         peak = self.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
-        x_top = self.top_torque(ratio, assist)
-        share = wheel_torque.rim_share(torque, self.wheel_peak, self.strength, x_top, self.knee)
+        classic = self.classic()
+        if classic:
+            # the uniform impedance scale (frozen) times the strength, hard-clamped at the budget
+            scale = self.CLASSIC_SCALE if peak <= 3.0 else self.impedance()
+            share = scale * self.strength * torque / peak
+            share = max(-wheel_torque.STEER_BUDGET, min(wheel_torque.STEER_BUDGET, share))
+        else:
+            x_top = self.top_torque(ratio, assist)
+            share = wheel_torque.rim_share(torque, self.wheel_peak, self.strength, x_top, self.knee)
         if self.align_on:
             split = self.align(sample)
             if split is not None:
@@ -1092,8 +1022,11 @@ class RackForce:
                 # k limit, tau_max, slew and fades) comes off, the residual goes through ext_force
                 # (the hydraulic top end is in split['k'] already; the mapping's slope and the strength are the
                 # steering force's own, so the spring and the residual add up to the played share)
-                k_fs = split['k'] * wheel_torque.rim_share_slope(torque, self.wheel_peak, self.strength, x_top,
-                                                                 self.knee) * self.strength / peak
+                if classic:
+                    k_fs = scale * split['k'] * self.strength / peak
+                else:
+                    k_fs = split['k'] * wheel_torque.rim_share_slope(torque, self.wheel_peak, self.strength, x_top,
+                                                                     self.knee) * self.strength / peak
                 tau = wheel_torque.STEER_BUDGET
                 theta_a, theta = split['theta_a_deg'], split['theta_deg']
                 if self.wheel_range:
@@ -1117,28 +1050,11 @@ class RackForce:
                 share -= self._spring.force(theta_a, theta, k_fs, tau, self.align_k_limit, dt)
                 if self.align_writer is not None:
                     self.align_writer(theta_a, k_fs, tau)
-        if self.kick_on and held is None and self.power_steering() == 'model':
-            share = self._kickback(sample, share, peak)
-        else:
-            self._kick.reset()
         limit = FULL * self._ceiling()
         vel = getattr(sample, 'vel', None)
         if vel is not None and len(vel) and vel[0] is not None and vel[0] < -REVERSE_SPEED:
             limit = min(limit, FULL * REVERSE_MAX)
         return min(max(FULL * share, -limit), limit)
-
-    def _kickback(self, sample, share, peak):
-        """The steering share with the kickback (Kickback, capped at KICK_CAP of full scale at the strength) added;
-        together they stay inside KICK_TOTAL. The column torque for the boost slope is the physical one."""
-        cls = self.assist * ffb_carprops.power_settings()[1]
-        speed = getattr(sample, 'speed', None)
-
-        def slope():
-            mz = front_torque(sample, self.trail, 0.0)
-            return ffb_carprops.driver_slope((mz or 0.0) / self.ratio, speed, cls)
-        kick = self._kick.update(self._now, sample, self.car, self.ratio, slope)
-        kick = min(max(kick / peak * self.strength, -self.KICK_CAP), self.KICK_CAP)
-        return min(max(share + kick, -self.KICK_TOTAL), self.KICK_TOTAL)
 
 
 class BeamNGRack(RackForce):
@@ -1629,7 +1545,8 @@ class FfbEngine:
         self._strength_req = None        # the overall steering strength (%) from the GUI
         self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
         self._knee_req = None            # the "1:1 up to" share (%) from the GUI
-        self._kick_req = None            # the kickback switch from the GUI
+        self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
+        self._pull_req = None            # "Drive pull": (on, level %) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
         self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
@@ -1788,9 +1705,16 @@ class FfbEngine:
         self._knee_req = value
         self._wake.set()
 
-    def set_kick(self, value):
-        """The kickback (a gated jolt on one-sided events through the assist lag) on or off."""
-        self._kick_req = bool(value)
+    def set_mapping(self, value):
+        """The steering mapping (profile INI only): 'knee' (1:1 in Nm up to the knee, compressed above, hydraulic top
+        end) or 'classic' (the uniform impedance scale, the feel before the knee)."""
+        self._mapping_req = 'classic' if value == 'classic' else 'knee'
+        self._wake.set()
+
+    def set_drive_pull(self, on, level):
+        """Drive pull: the scrub couple of the drive's left/right split in the steering force, on or off, at `level` %
+        of the physical scrub radius."""
+        self._pull_req = (bool(on), min(max(float(level), 0.0), 100.0))
         self._wake.set()
 
     def car_properties(self):
@@ -1923,8 +1847,10 @@ class FfbEngine:
         knee = self._knee_req
         if knee is not None:
             self.model.knee = min(max(float(knee) / 100.0, wheel_torque.KNEE_RANGE[0]), wheel_torque.KNEE_RANGE[1])
-        if self._kick_req is not None:
-            self.model.kick_on = self._kick_req
+        if self._mapping_req is not None:
+            self.model.mapping = self._mapping_req
+        if self._pull_req is not None:
+            self.model.pull_on, self.model.pull_level = self._pull_req[0], self._pull_req[1] / 100.0
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2085,7 +2011,7 @@ class FfbEngine:
         if want and not model.align_on:
             model.align_writer = self._align_write
         model.align_on = want
-        stage.column(t, model.impedance(), model.wheel_peak, model.DAMPING_SCALE)
+        stage.column(t, model.impedance(), model.wheel_peak, model.damping_scale())
 
     def _align_write(self, theta_a_deg, k_fs, tau_fs):
         """RackForce's spring to the driver (its k already carries the overall steering strength, like the rest of the
@@ -2795,12 +2721,13 @@ class FfbEngine:
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, rim model %.1f:1 assist %.1f wheel %.1f Nm (car p99 %.0f Nm), "
-                     "1:1 up to %.0f %%, compressed to a top of %.1f Nm, kick %s, texture %s%s)", self._verdict.game, self._verdict.rate,
+                     "mapping %s, 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, texture %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,
                      m.ratio, m.assist, m.wheel_peak or wheel_torque.DEFAULT_PEAK_NM, m.p99,
-                     m.knee * 100.0, m.top_torque(), 'on' if m.kick_on else 'off',
+                     m.mapping, m.knee * 100.0, m.top_torque(),
+                     '%.0f %%' % (m.pull_level * 100.0) if m.pull_on else 'off',
                      self.texture.describe(),
                      "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '')
         self._dyn_start(t)

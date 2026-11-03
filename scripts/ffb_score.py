@@ -178,7 +178,7 @@ def _mean(a, b):
     return 0.5 * (a + b)
 
 
-def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
+def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None, mapping=None):
     """Drive the engine's classes with the drive. Returns a dict of numpy arrays, one entry per REAL row."""
     keys = ('t', 'ready', 'speed', 'ay', 'steer', 'alpha_f', 'alpha_r', 'sr_f', 'brake', 'load', 'game', 'base',
             'tex', 'intended', 'shaped', 'rim_engine', 'rim_model', 'scale', 'x_top', 'peak', 'ceiling', 'reverse', 'source',
@@ -187,6 +187,8 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
     with _sandbox():
         rack = fe.RackForce()
         rack.wheel_peak = wheel_peak
+        if mapping is not None:
+            rack.mapping = mapping
         if align_on is not None:
             rack.align_on = bool(align_on)
         texture = ft.Texture()
@@ -236,7 +238,7 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
                 src = rack.power_steering()
                 cls = 0.0 if cp.power_settings()[0] == 'off' else rack.assist * cp.power_settings()[1]
                 rec['rim_engine'].append(math.nan if rim is None else rim)
-                rec['rim_model'].append(_first_principles_rim(s, rack, cls))
+                rec['rim_model'].append(_first_principles_rim(s, rack, cls, rack.classic()))
                 rec['scale'].append(rack.impedance())
                 rec['x_top'].append(rack.top_torque())
                 rec['peak'].append(peak)
@@ -262,15 +264,17 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
         rack.reset(None)
         out = {k: (np.array(v) if k != 'source' else np.array(v, dtype=object)) for k, v in rec.items()}
         out['align_on'] = bool(rack.align_on)
+        out['mapping'] = rack.mapping
         out['align_k_limit'] = float(rack.align_k_limit)
         out['wheel_peak'] = rack.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
     return out
 
 
-def _first_principles_rim(s, rack, cls):
+def _first_principles_rim(s, rack, cls, classic=False):
     """The driver's rim torque (Nm) worked out again from the tyre forces: kingpin torque (FL+FR Mz, the caster arm
-    -trail*(Fy_FL+Fy_FR), no scrub couple, as the engine plays it) through the column ratio and the boost curve (the
-    class the engine uses), where the model's assist applies. NaN without Mz."""
+    -trail*(Fy_FL+Fy_FR), the scrub couple only with Drive pull on, as the engine plays it) through the column ratio and the boost curve (the
+    class the engine uses), where the model's assist applies. NaN without Mz. The classic mapping has no hydraulic
+    top end."""
     mz, fy, fx = s.tyre_mz, s.tyre_fy, s.tyre_fx
     if mz is None:
         return math.nan
@@ -279,7 +283,10 @@ def _first_principles_rim(s, rack, cls):
         tq -= rack.trail * (fy[0] + fy[1])
     if not math.isfinite(tq):
         return math.nan
-    return cp.driver_from_column(tq / rack.ratio, s.speed, cls)
+    scrub = rack.pull_scrub()
+    if scrub and fx is not None and math.isfinite(fx[0] - fx[1]):
+        tq -= scrub * (fx[0] - fx[1])
+    return cp.driver_from_column(tq / rack.ratio, s.speed, cls, not classic)
 
 
 # ------------------------------------------------------------------------------------------------ the wheel
@@ -388,9 +395,13 @@ def physics(tr):
     # consistency: expected share from first principles against what the engine plays
     sel = ready & np.isfinite(tr['rim_model'])
     peak, scale, ceiling = tr['peak'], tr['scale'], tr['ceiling']
+    classic = tr['mapping'] != 'knee'
     with np.errstate(invalid='ignore'):
-        share = np.array([wheel_torque.rim_share(r, p, 1.0, x, wheel_torque.KNEE) if np.isfinite(r) and np.isfinite(x) else np.nan
-                          for r, p, x in zip(tr['rim_model'], peak, tr['x_top'])])
+        if classic:
+            share = scale * tr['rim_model'] / peak
+        else:
+            share = np.array([wheel_torque.rim_share(r, p, 1.0, x, wheel_torque.KNEE) if np.isfinite(r) and np.isfinite(x) else np.nan
+                              for r, p, x in zip(tr['rim_model'], peak, tr['x_top'])])
         exp = np.clip(share, -wheel_torque.STEER_BUDGET, wheel_torque.STEER_BUDGET)
         exp = np.clip(exp, -ceiling, ceiling)
         budget = sel & (np.abs(share) >= wheel_torque.STEER_BUDGET - 1e-9)
@@ -466,7 +477,8 @@ def wheel(tr, fit):
     return out
 
 
-def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_limit, delay_s, seconds, h=0.002):
+def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_limit, delay_s, seconds, h=0.002,
+               scale=None):
     """A released wheel (steering wheel degrees) at theta0 under the model's restoring torque toward theta_a, through
     the driver's shaping and the fitted wheel. The engine's part sees the state `delay_s` late (the telemetry loop);
     with align_on the driver's spring (ffb_spring.DriverSpring) renders the engine-subtracted part locally (no delay
@@ -474,7 +486,9 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_
     result = fit.result
     a_fs, f, beta = result['a_fs'], result['friction'], result['damping']
     # the column damping the driver adds (ffb_dynamics.column_targets: a total, the wheel's own included)
-    beta = max(beta, fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * fe.RackForce.DAMPING_SCALE * math.pi / 180.0 / peak)
+    classic = scale is not None
+    damping = scale if classic else fe.RackForce.DAMPING_SCALE
+    beta = max(beta, fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * damping * math.pi / 180.0 / peak)
     stick = fit.tau(result['breakaway'])
     lat = delay_s + fit.latency_ms / 1000.0
     delay = int(round(lat / h))
@@ -505,14 +519,19 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_
             return None
         # the model's rim torque -> share of full scale (the engine's chain without the budget ceiling's reverse bits)
         torque = al['model']
-        share = wheel_torque.rim_share(torque, peak, 1.0, x_top, wheel_torque.KNEE)
+        if classic:
+            share = max(-wheel_torque.STEER_BUDGET, min(wheel_torque.STEER_BUDGET, scale * torque / peak))
+        else:
+            share = wheel_torque.rim_share(torque, peak, 1.0, x_top, wheel_torque.KNEE)
         cmd = share
         if align_on:
-            k_fs = al['k'] * wheel_torque.rim_share_slope(torque, peak, 1.0, x_top, wheel_torque.KNEE) / peak
+            k_fs = (scale * al['k'] / peak) if classic else \
+                al['k'] * wheel_torque.rim_share_slope(torque, peak, 1.0, x_top, wheel_torque.KNEE) / peak
             tau = wheel_torque.STEER_BUDGET
             cmd -= spring_e.force(al['theta_a_deg'], al['theta_deg'], k_fs, tau, k_limit, h)
             al_now = split(theta)
-            k_now = al_now['k'] * wheel_torque.rim_share_slope(al_now['model'], peak, 1.0, x_top, wheel_torque.KNEE) / peak
+            k_now = (scale * al_now['k'] / peak) if classic else \
+                al_now['k'] * wheel_torque.rim_share_slope(al_now['model'], peak, 1.0, x_top, wheel_torque.KNEE) / peak
             cmd += spring_d.force(al_now['theta_a_deg'], theta, k_now, tau, k_limit, h)
         u = fit.command(min(max(cmd, -1.0), 1.0))
         tq = fit.tau(u)
@@ -552,6 +571,7 @@ def dynamics(tr, fit, events=24, seconds=3.0, delay_s=0.020):
         return out
     pick = idx[np.linspace(0, len(idx) - 1, min(events, len(idx))).astype(int)]
     rack = fe.RackForce()
+    rack.mapping = tr['mapping']
     rows = []
     with _sandbox():
         for i in pick:
@@ -562,7 +582,8 @@ def dynamics(tr, fit, events=24, seconds=3.0, delay_s=0.020):
             rack.align_stiffness = (lambda v: (lambda: v))(float(tr['stiff'][i]))
             res = _sim_slide(rack, fit, float(tr['theta'][i]), float(tr['theta_a'][i]), float(tr['speed'][i]),
                              float(tr['cls'][i]), float(tr['x_top'][i]), float(tr['peak'][i]), bool(tr['align_on']),
-                             float(tr['align_k_limit']), delay_s, seconds)
+                             float(tr['align_k_limit']), delay_s, seconds,
+                             scale=float(tr['scale'][i]) if rack.classic() else None)
             if res is not None:
                 rows.append(res)
     if not rows:
@@ -640,16 +661,17 @@ def safety(tr):
 
 
 def score(drive, hz=50.0, wheel_path=WHEEL, friction_comp=0, derate=1.0, wheel_peak=None, texture_level=None,
-          align_on=None, events=24):
+          align_on=None, events=24, mapping=None):
     """Everything, as one JSON-able dict."""
     notes = list(drive.notes)
-    tr = run(drive, hz=hz, wheel_peak=wheel_peak, texture_level=texture_level, align_on=align_on)
+    tr = run(drive, hz=hz, wheel_peak=wheel_peak, texture_level=texture_level, align_on=align_on,
+             mapping=mapping)
     fit = WheelFit(load_wheel(wheel_path), friction_comp, derate)
     result = {
         'schema': SCHEMA, 'source': drive.source, 'kind': drive.kind, 'rows': int(len(tr['t'])),
         'duration_s': _duration(tr),
         'real_rate_hz': _rate(tr), 'engine_hz': hz, 'wheel': os.path.basename(wheel_path),
-        'align_on': tr['align_on'], 'ready_share': float(np.mean(tr['ready'])) if len(tr['t']) else 0.0,
+        'align_on': tr['align_on'], 'mapping': tr['mapping'], 'ready_share': float(np.mean(tr['ready'])) if len(tr['t']) else 0.0,
     }
     if not len(tr['t']):
         notes.append("no sample with the game's force (finalFF, bridge version 5): nothing to score")

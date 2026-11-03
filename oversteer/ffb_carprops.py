@@ -352,22 +352,23 @@ def _driver_boost(column, speed, assist):
     return math.copysign(0.5 * (lo + hi), column)
 
 
-def driver_from_column(column, speed, assist=1.0):
+def driver_from_column(column, speed, assist=1.0, hyd=True):
     """The driver's torque at the rim (signed, Nm) for a column torque: the inverse of column_from_driver (T_c is
     strictly increasing in T_d, and T_d <= T_c: bisection), then through the hydraulic top end (_hyd: it tends to
-    HYD_K + HYD_R). Unassisted (assist 0): the column torque."""
+    HYD_K + HYD_R). Unassisted (assist 0): the column torque. `hyd` False skips the top end (the classic mapping)."""
     if assist <= 0.0 or abs(column) <= 0.0:
         return column
-    return _hyd(_driver_boost(column, speed, assist))
+    boost = _driver_boost(column, speed, assist)
+    return _hyd(boost) if hyd else boost
 
 
-def driver_slope(column, speed, assist=1.0):
+def driver_slope(column, speed, assist=1.0, hyd=True):
     """dT_d / dT_c at a column torque: how much of a change of the column torque the driver feels (1 / (1 + dA/dT_d)
-    on the boost curve, times the hydraulic top end's slope)."""
+    on the boost curve, times the hydraulic top end's slope unless `hyd` is False)."""
     if assist <= 0.0:
         return 1.0
     td = abs(_driver_boost(column, speed, assist))
-    return _hyd_slope(td) / (1.0 + _assist(td, speed, assist)[1])
+    return (_hyd_slope(td) if hyd else 1.0) / (1.0 + _assist(td, speed, assist)[1])
 
 
 # -- the steering ratio from telemetry --

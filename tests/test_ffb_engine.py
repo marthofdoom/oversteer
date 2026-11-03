@@ -386,9 +386,15 @@ def test_it_starts_at_finalff_scale_and_fits_the_games_force_but_plays_its_own_l
     assert model.scale == pytest.approx(0.5 * 32767 / 582, rel=0.05)         # the fit (the game's units per Nm)
     assert model.cross == pytest.approx(1.0, abs=0.05)       # finalFF agrees
     s = acr(1.0, game_gain=0.5)
+    model.mapping = 'classic'                                  # (the profile INI's countersteer_mapping)
+    classic = fe.FULL * fe.RackForce.CLASSIC_SCALE * model.rim_torque(s) / fe.wheel_torque.DEFAULT_PEAK_NM
+    assert model.force(s) == pytest.approx(max(-0.75 * fe.FULL, min(0.75 * fe.FULL, classic)))
+    model.mapping = 'knee'
     # the magnitude is the rim-torque model's, not the game's: its FFB setting does not move it
     assert model.force(s) == pytest.approx(fe.FULL * fe.wheel_torque.rim_share(model.rim_torque(s), None, 1.0, model.top_torque(), model.knee))
-    assert fitted(game_gain=2.0).force(s) == pytest.approx(model.force(s), rel=1e-6)
+    twice = fitted(game_gain=2.0)
+    twice.mapping = 'knee'
+    assert twice.force(s) == pytest.approx(model.force(s), rel=1e-6)
     strong = fitted(game_gain=2.0)
     assert strong.scale == pytest.approx(2.0 * 32767 / 582, rel=0.1)           # clipped raw left out
 

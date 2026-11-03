@@ -91,7 +91,8 @@ def test_countersteer_state(tmp_path):
         s = state['settings']
         assert s['countersteer_ffb'] == {'value': False, 'enabled': True}
         assert s['countersteer_strength']['min'] == 0 and s['countersteer_strength']['max'] == 130
-        assert s['countersteer_knee']['min'] == 30 and s['countersteer_knee']['max'] == 60 and s['countersteer_kick']['value'] is True
+        assert s['countersteer_knee']['min'] == 30 and s['countersteer_knee']['max'] == 60 and s['countersteer_drive_pull']['value'] is False
+        assert s['countersteer_drive_pull_level']['value'] == 35 and 'countersteer_mapping' not in s
         assert s['countersteer_strength']['enabled'] is False            # the switch is off
         assert s['countersteer_texture']['max'] == 100 and 'countersteer_linearity' in s and 'countersteer_lightness' in s
         assert all(s['countersteer_texture_' + p]['value'] is True for p in ('road', 'impact', 'lock', 'engine'))

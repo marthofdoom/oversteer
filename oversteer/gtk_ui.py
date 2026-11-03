@@ -1227,10 +1227,12 @@ class GtkUi:
                                  "quarters of the wheel's range. Lower: a stronger squeeze of the heavy moments, more "
                                  "headroom; higher: more of the car's real weight, less room at the top. 30 to 60 %, "
                                  "50 % by default. Saved with the profile.")
-    COUNTERSTEER_KICK_TOOLTIP = ("A real power steering lets a kerb strike, a lifted inside wheel or a dirt edge "
-                                 "jolt the wheel for a moment before the assist follows. On: Countersteer plays that "
-                                 "jolt, only on such one-sided events and never louder than 15 % of the wheel's "
-                                 "range. Off: the steering force only. On by default. Saved with the profile.")
+    COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
+                                 "acts on the steering through the scrub radius; the game's own force has it. On: "
+                                 "Countersteer plays that pull, unfiltered, at the level below. Off: the steering "
+                                 "force without it. Off by default. Saved with the profile.")
+    COUNTERSTEER_PULL_LEVEL_TOOLTIP = ("How much of the physical scrub radius the drive pull is played at, 0 to 100 %. "
+                                       "35 % by default. Saved with the profile.")
     COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
                                  "in the others.")
     COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
@@ -1325,10 +1327,17 @@ class GtkUi:
         self._dependent_rows.append(self._setting_row(
             _("1:1 up to"), None, _(self.COUNTERSTEER_KNEE_TOOLTIP), (self._response_row(knee),)))
         steering.add(self._dependent_rows[-1])
-        row, self.countersteer_kick = self._switch_row(
-            _("Kickback"), _(self.COUNTERSTEER_KICK_TOOLTIP), lambda state: self.controller.model.set_countersteer_kick(state))
+        row, self.countersteer_drive_pull = self._switch_row(
+            _("Drive pull"), _(self.COUNTERSTEER_PULL_TOOLTIP), lambda state: self.controller.model.set_countersteer_drive_pull(state))
         self._dependent_rows.append(row)
         steering.add(row)
+        pull = self._response_scale(0, 100, 5)
+        pull.set_size_request(160, -1)
+        pull.connect('value-changed', lambda w: self.controller.model.set_countersteer_drive_pull_level(int(w.get_value())))
+        self.countersteer_drive_pull_level = pull
+        self._dependent_rows.append(self._setting_row(
+            _("Drive pull level"), None, _(self.COUNTERSTEER_PULL_LEVEL_TOOLTIP), (self._response_row(pull),)))
+        steering.add(self._dependent_rows[-1])
         self.countersteer_toggles = {}
         for key, title, tooltip in (
                 ('column', _("Real column feel"), self.COUNTERSTEER_COLUMN_TOOLTIP),
@@ -1415,12 +1424,14 @@ class GtkUi:
         if int(self.countersteer_knee.get_value()) != int(value):
             self.countersteer_knee.set_value(int(value))
 
-    def set_countersteer_kick(self, value):
-        """The kickback switch (None where the driver has no replace mode)."""
-        if not hasattr(self, 'countersteer_kick') or value is None:
+    def set_countersteer_drive_pull(self, value, level):
+        """The drive pull switch and its level, 0..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_drive_pull') or value is None:
             return
-        if self.countersteer_kick.get_active() != bool(value):
-            self.countersteer_kick.set_active(bool(value))
+        if self.countersteer_drive_pull.get_active() != bool(value):
+            self.countersteer_drive_pull.set_active(bool(value))
+        if level is not None and int(self.countersteer_drive_pull_level.get_value()) != int(level):
+            self.countersteer_drive_pull_level.set_value(int(level))
 
     def set_countersteer_texture(self, level, parts):
         """The texture's level (0..100, None where the driver has no replace mode) and parts."""
