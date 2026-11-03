@@ -90,7 +90,8 @@ def test_countersteer_state(tmp_path):
         state = r.state()
         s = state['settings']
         assert s['countersteer_ffb'] == {'value': False, 'enabled': True}
-        assert s['countersteer_strength']['min'] == 10 and s['countersteer_strength']['max'] == 100
+        assert s['countersteer_strength']['min'] == 0 and s['countersteer_strength']['max'] == 130
+        assert s['countersteer_knee']['min'] == 30 and s['countersteer_knee']['max'] == 60 and s['countersteer_kick']['value'] is True
         assert s['countersteer_strength']['enabled'] is False            # the switch is off
         assert s['countersteer_texture']['max'] == 100 and 'countersteer_linearity' in s and 'countersteer_lightness' in s
         assert all(s['countersteer_texture_' + p]['value'] is True for p in ('road', 'impact', 'lock', 'engine'))
@@ -172,7 +173,7 @@ def test_a_paired_countersteer_write_takes_the_gtk_path(tmp_path):
         assert ('set_strength', 60) in r.controller.ffb_engine.calls
         ui = [c[0] for c in r.ui.calls]
         assert 'set_countersteer_ffb' in ui and 'set_countersteer_texture' in ui and 'set_countersteer_strength' in ui
-        assert body['state']['settings']['countersteer_strength'] == {'value': 60, 'min': 10, 'max': 100, 'step': 1, 'enabled': True}
+        assert body['state']['settings']['countersteer_strength'] == {'value': 60, 'min': 0, 'max': 130, 'step': 1, 'enabled': True}
 
     finally:
         r.stop()
@@ -183,7 +184,7 @@ def test_countersteer_ranges_are_clamped_and_types_checked(tmp_path):
     try:
         assert r.post({'set': {'countersteer_strength': 3, 'countersteer_texture': 250,
                                'countersteer_linearity': -5}})[0] == 200
-        assert r.model.get_countersteer_strength() == 10 and r.model.data['countersteer_texture'] == 100
+        assert r.model.get_countersteer_strength() == 3 and r.model.data['countersteer_texture'] == 100
         assert r.model.get_countersteer_linearity() == 0
         for bad in ('50', 50.5, True, None):
             assert r.post({'set': {'countersteer_strength': bad}})[0] == 400

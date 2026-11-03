@@ -231,8 +231,8 @@ def test_the_spring_is_worked_out_in_the_wheels_own_position_frame():
     g = 450.0 / (r.lock * r.ratio * 180.0 / math.pi)
     theta_a, k, tau = seen[-1]
     assert theta_a == pytest.approx(max(-450.0, min(450.0, car['theta_a_deg'] * g)))
-    scale = r.impedance()
-    assert k == pytest.approx(scale * car['k'] / 2.1 / g)
+    slope = wheel_torque.rim_share_slope(r.rim_torque(s), 2.1, 1.0, r.top_torque(), r.knee)
+    assert k == pytest.approx(slope * car['k'] / 2.1 / g)
     # steer 1 at the lock puts the zero-slip angle at the wheel's own steer * range / 2, whatever the car's lock
     s = slip_sample(0.01, steer=0.5, alpha=0.0)
     r._now = 0.01
