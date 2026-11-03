@@ -119,7 +119,7 @@ class MassLearner:
     GAP = 0.05                           # s
     GEAR_WINDOW = 0.15                   # s
     GRADE_MAX = 0.3
-    R_MIN = 0.85
+    R_MIN = 0.75                         # (0.85 refused the 207, r 0.76, leaving it on the 1400 kg prior: 23 % heavy)
     SD_MIN = 0.8                         # m/s^2: the spread of a (partialled): without it the slope is nothing
     QUALIFY_S = 20.0                     # s of qualifying samples (weighted)
     SOLVE_EVERY = 0.25                   # s
