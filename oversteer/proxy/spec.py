@@ -250,6 +250,25 @@ class AbsSpec:
         return (0, self.min, self.max, self.fuzz, self.flat, self.resolution)
 
 
+def one_sided_fraction(value, src_min, src_max, low, high, dead, invert):
+    """0 at rest .. 1 fully pulled for a one-sided axis (pedal, handbrake)
+    whose real travel is low..high in source units, not the declared
+    src_min..src_max. low < high always: the travel as the source reports
+    it. `invert` says the lever rests at the high end. The dead band is a
+    fraction of the travel measured from the rest end, so a sensor that
+    drifts a little at rest still reads 0; beyond it the output rises
+    linearly to 1 at the far end of the travel, and is clamped."""
+    span = high - low
+    if span <= 0:
+        return 0.0
+    t = min(1.0, max(0.0, (value - low) / span))
+    if invert:
+        t = 1.0 - t
+    if t <= dead:
+        return 0.0
+    return min(1.0, (t - dead) / (1.0 - dead))
+
+
 @dataclass
 class Mapping:
     """One event translation rule.
@@ -259,6 +278,10 @@ class Mapping:
     - ABS -> ABS: rescaled from the source range to the target range, optionally
       inverted. `deadzone` (0..1, fraction of travel around the centre) and
       `raw` (copy value untouched) are optional.
+      One-sided axes may carry `low` and `high` (source units: the travel the
+      sensor really covers, low < high) and `dead` (fraction of that travel
+      from the rest end that still reads 0, default 0.03): see
+      one_sided_fraction. Without them the declared range is used.
     - KEY -> KEY: value copied.
     - ABS -> KEY: pressed while the normalised source value satisfies `when`
       ({"gt": 0.5} or {"lt": 0.25}).
@@ -273,6 +296,9 @@ class Mapping:
     raw: bool = False
     deadzone: float = 0.0
     when: dict = None
+    low: float = None
+    high: float = None
+    dead: float = 0.03
 
     @classmethod
     def from_dict(cls, data, sources):
@@ -313,9 +339,26 @@ class Mapping:
             invert = bool(invert)
         elif from_type != ecodes.EV_ABS:
             raise SpecError("mapping {!r}: 'auto' inversion is for axes".format(data['from']))
+        low = high = None
+        dead = 0.03
+        if 'low' in data or 'high' in data:
+            if from_type != ecodes.EV_ABS:
+                raise SpecError("mapping {!r}: low/high are for axes".format(data['from']))
+            try:
+                low, high = float(data['low']), float(data['high'])
+                dead = float(data.get('dead', dead))
+            except (KeyError, TypeError, ValueError):
+                raise SpecError("mapping {!r}: low and high are both needed, as numbers".format(data['from']))
+            if not low < high:
+                raise SpecError("mapping {!r}: low must be below high".format(data['from']))
+            if not 0 <= dead < 1:
+                raise SpecError("mapping {!r}: dead must be within [0, 1)".format(data['from']))
+            if deadzone:
+                raise SpecError("mapping {!r}: low/high and deadzone do not combine".format(data['from']))
         return cls(source=source, from_type=from_type, from_code=from_code, to_type=to_type,
                    to_code=to_code, invert=invert,
-                   raw=bool(data.get('raw', False)), deadzone=deadzone, when=when)
+                   raw=bool(data.get('raw', False)), deadzone=deadzone, when=when,
+                   low=low, high=high, dead=dead)
 
     def to_dict(self):
         data = {'source': self.source, 'from': code_name(self.from_type, self.from_code),
@@ -328,6 +371,10 @@ class Mapping:
             data['deadzone'] = self.deadzone
         if self.when:
             data['when'] = self.when
+        if self.low is not None:
+            data['low'] = self.low
+            data['high'] = self.high
+            data['dead'] = self.dead
         return data
 
 

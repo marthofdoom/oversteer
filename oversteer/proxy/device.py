@@ -21,8 +21,8 @@ import select
 import threading
 import time
 
-from .spec import code_name
-from . import uinput_ff
+from .spec import code_name, one_sided_fraction
+from . import calibration, uinput_ff
 
 # Types never copied from a passthrough source: we generate SYN ourselves and
 # FF is handled by the passthrough machinery.
@@ -109,6 +109,12 @@ class ProxyDevice:
         self._rules = {}                  # (source key, from_type, from_code) -> [Mapping]
         for m in spec.mappings:
             self._rules.setdefault((m.source, m.from_type, m.from_code), []).append(m)
+        self.calibration_dir = calibration.CALIBRATION_DIR
+        self._calibration_seen = None     # (mtime_ns, size) of the file last applied
+        self._calibration_next = 0.0
+        self.calibration_uid_file = calibration.UID_FILE
+        self.calibrating = {}             # '<source>:<code>' -> (monotonic deadline, saved (low, high, dead) or None)
+        self.calibrated = {}              # '<source>:<code>' -> [low, high, dead] applied at run time
         self._thread = None
         self._lock = threading.Lock()
         self._wake_r, self._wake_w = os.pipe()
@@ -172,7 +178,22 @@ class ProxyDevice:
                 'ff_effect_types': dict(self._ff_summary[0]) if self._ff_summary else {},
                 'ff_playing': list(self._ff_summary[1]) if self._ff_summary else [],
                 'inverted_axes': self._inverted_axes(),
+                'runtime_calibration': True,
+                'calibration': self._calibration_summary(),
+                'source_axes': {'{}:{}'.format(key, code): [info.min, info.max]
+                                for key, src in self.sources.items()
+                                for code, info in src.absinfo.items()},
             }
+
+    def _calibration_summary(self):
+        """{'<source>:<code>': [low, high, dead]} for every axis rescaled
+        over a calibrated travel right now, from the spec or at run time."""
+        out = {}
+        for (key, etype, code), rules in self._rules.items():
+            for rule in rules:
+                if etype == ecodes.EV_ABS and rule.to_type == ecodes.EV_ABS and rule.low is not None:
+                    out['{}:{}'.format(key, code)] = [rule.low, rule.high, rule.dead]
+        return out
 
     def _inverted_axes(self):
         """{'<source>:<code>': bool} for every axis this proxy maps, with
@@ -277,6 +298,8 @@ class ProxyDevice:
                         self._create_device()
                     self._update_state()
                 timeout = max(0.05, next_scan - time.monotonic()) if self.missing_sources() else None
+                timeout = 0.25 if timeout is None else min(timeout, 0.25)     # also the rhythm of the calibration check
+                self._check_calibration()
                 self._pump(timeout)
         except Exception as e:
             logging.exception("proxy %s: fatal error", self.spec.id)
@@ -488,6 +511,90 @@ class ProxyDevice:
             self._ff_playing.clear()
         self._ff_changed()
 
+    def _check_calibration(self, now=None):
+        """Apply a calibration file the app wrote (proxy.calibration), at
+        most once a second and only when it changed."""
+        now = time.monotonic() if now is None else now
+        if now < self._calibration_next:
+            return
+        self._calibration_next = now + 0.25
+        self._restore_expired(now)
+        path = calibration.path_for(self.spec.id, self.calibration_dir)
+        try:
+            info = os.stat(path)
+        except OSError:
+            return
+        mark = (info.st_mtime_ns, info.st_size)
+        if mark == self._calibration_seen:
+            return
+        self._calibration_seen = mark
+        entries = calibration.read(path, calibration.allowed_uids(self.calibration_uid_file))
+        if entries is not None:
+            self.apply_calibration(entries)
+
+    def _axis_rules(self, name):
+        """(rules, absinfo) of the axis '<source>:<code>' this spec rescales."""
+        try:
+            key, code = name.rsplit(':', 1)
+            code = int(code)
+        except ValueError:
+            return [], None
+        rules = [r for r in self._rules.get((key, ecodes.EV_ABS, code), [])
+                 if r.to_type == ecodes.EV_ABS and not r.raw]
+        with self._lock:
+            source = self.sources.get(key)
+        return rules, (source.absinfo.get(code) if source is not None else None)
+
+    def _restore(self, name):
+        """Put back what an axis had before it was passed through raw."""
+        saved = self.calibrating.pop(name, (0, None))[1]
+        rules, _ = self._axis_rules(name)
+        for rule in rules:
+            if saved is None:
+                rule.low = None
+            else:
+                rule.dead, rule.high, rule.low = saved[2], saved[1], saved[0]
+        logging.info("proxy %s: %s back to %s", self.spec.id, name, "its calibration" if saved else "the declared range")
+
+    def _restore_expired(self, now):
+        for name, (deadline, _saved) in list(self.calibrating.items()):
+            if now > deadline:
+                self._restore(name)
+
+    def apply_calibration(self, entries):
+        """entries as calibration.read gives them. Only mappings of this
+        spec that rescale an axis take them. An axis marked calibrating
+        passes through raw until an entry without the mark arrives (or the
+        mark times out)."""
+        for name in list(self.calibrating):
+            if not entries.get(name, {}).get('calibrating'):
+                self._restore(name)
+        for name, entry in entries.items():
+            rules, info = self._axis_rules(name)
+            if not rules or info is None:
+                continue
+            if entry.get('calibrating'):
+                if name not in self.calibrating:
+                    first = rules[0]
+                    saved = (first.low, first.high, first.dead) if first.low is not None else None
+                    self.calibrating[name] = (0, saved)
+                self.calibrating[name] = (time.monotonic() + calibration.CALIBRATING_SECONDS, self.calibrating[name][1])
+                for rule in rules:
+                    rule.low = None
+                self.calibrated.pop(name, None)
+                continue
+            fitted = calibration.fit(entry, info.min, info.max)
+            if fitted is None:
+                logging.warning("proxy %s: calibration for %s ignored: travel too short", self.spec.id, name)
+                continue
+            for rule in rules:
+                rule.deadzone = 0.0
+                rule.dead, rule.high, rule.low = fitted[2], fitted[1], fitted[0]     # low last: it is what switches the rule on
+            self.calibrated[name] = list(fitted)
+            logging.info("proxy %s: %s calibrated at run time: %s..%s dead %.2f", self.spec.id, name, *fitted)
+        if self.on_change is not None:
+            self.on_change(self)         # the status shows it now, so the app need not send it again
+
     def _pump(self, timeout):
         """Wait for events on any source or the virtual device and handle them."""
         with self._lock:
@@ -557,6 +664,8 @@ class ProxyDevice:
         norm = (value - info.min) / (info.max - info.min)
         norm = min(1.0, max(0.0, norm))
         invert = rule.invert if rule.invert != 'auto' else self._auto_invert.get((rule.source, rule.from_code), False)
+        if rule.low is not None:
+            return one_sided_fraction(value, info.min, info.max, rule.low, rule.high, rule.dead, invert)
         if invert:
             norm = 1.0 - norm
         if rule.deadzone:

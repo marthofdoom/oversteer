@@ -221,6 +221,29 @@ def list_equipment(include_virtual=False):
     return found
 
 
+def carry_calibration(new_specs, old_specs):
+    """Copy the stored low/high/dead of rescaled axes from `old_specs` to
+    the same source device (same match) and axis in `new_specs`: rebuilding
+    the combined device must not forget a handbrake calibration."""
+    def match_of(spec, key):
+        src = spec.sources[key]
+        return (src.vendor, src.product, src.name, src.phys)
+
+    old = {}
+    for spec in old_specs:
+        for m in spec.mappings:
+            if m.low is not None and m.source in spec.sources:
+                old[(match_of(spec, m.source), m.from_type, m.from_code)] = m
+    for spec in new_specs:
+        for m in spec.mappings:
+            if m.source not in spec.sources or m.low is not None:
+                continue
+            prev = old.get((match_of(spec, m.source), m.from_type, m.from_code))
+            if prev is not None:
+                m.low, m.high, m.dead = prev.low, prev.high, prev.dead
+    return new_specs
+
+
 def build_combined_specs(wheel, others, spec_id='combined-wheel'):
     """Strict layout: a caps-identical virtual copy of `wheel` carrying the
     button-only devices, plus one virtual device per axis device (a

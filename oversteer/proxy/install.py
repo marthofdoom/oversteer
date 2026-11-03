@@ -16,13 +16,14 @@ import shutil
 import subprocess
 import sys
 
+from . import calibration
 from .manager import HIDE_RULES_FILE, HIDE_TAG_RULES_FILE, SYSTEM_DIR, BUILTIN_DIR, load_specs, hide_rules, user_dir
 
 UNIT_FILE = '/etc/systemd/system/oversteer-proxy.service'
 DAEMON_DIR = '/usr/local/lib/oversteer-proxy'
 DAEMON_FILES = ['__init__.py', 'wheel_ids.py', 'proxy/__init__.py', 'proxy/spec.py', 'proxy/device.py',
                 'proxy/uinput_ff.py', 'proxy/manager.py', 'proxy/equipment.py', 'proxy/daemon.py',
-                'proxy/install.py']
+                'proxy/install.py', 'proxy/calibration.py']
 HOST_PYTHON = '/usr/bin/python3'
 UNIT_TEMPLATE = """[Unit]
 Description=Oversteer proxy devices (virtual wheels, shifters, handbrakes)
@@ -220,6 +221,12 @@ def install(spec_dirs=None):
         if os.path.exists(stale):
             os.remove(stale)
 
+    # The user who asked for the install (pkexec / sudo say who), for calibration.py
+    uid = os.environ.get('PKEXEC_UID') or os.environ.get('SUDO_UID')
+    if uid and uid.isdigit() and int(uid) > 0:
+        with open(calibration.UID_FILE, 'w') as f:
+            f.write(uid + "\n")
+        os.chmod(calibration.UID_FILE, 0o644)
     with open(UNIT_FILE, 'w') as f:
         f.write(UNIT_TEMPLATE.format(daemon_dir=DAEMON_DIR, python=HOST_PYTHON))
     os.chmod(UNIT_FILE, 0o644)

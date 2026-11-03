@@ -858,6 +858,7 @@ class GtkUi:
         self.handbrake_input.set_visible(visible)
         self.handbrake_label.set_visible(visible)
         self.invert_handbrake.set_visible(visible)
+        self.calibrate_handbrake.set_visible(visible)
         if not visible:
             self.handbrake_input.set_value(0)
 
@@ -870,6 +871,15 @@ class GtkUi:
             self.invert_handbrake.set_active(bool(state))
         finally:
             self.updating_invert_pedals = False
+
+    def handbrake_progress_dialog(self, message, secondary_text=''):
+        """A modeless notice for the seconds the handbrake is sampled;
+        destroy() it when done."""
+        dialog = Gtk.MessageDialog(self.window, 0, Gtk.MessageType.INFO,
+                Gtk.ButtonsType.NONE, message)
+        dialog.format_secondary_text(secondary_text)
+        dialog.show()
+        return dialog
 
     def get_handbrake_invert(self):
         return self.invert_handbrake.get_active()
@@ -2891,6 +2901,7 @@ class GtkUi:
         self.handbrake_input = self.builder.get_object('handbrake_input')
         self.handbrake_label = self.builder.get_object('handbrake_label')
         self.invert_handbrake = self.builder.get_object('invert_handbrake')
+        self.calibrate_handbrake = self.builder.get_object('calibrate_handbrake')
         self.hat_up_input = self.builder.get_object('hat_up_input')
         self.hat_down_input = self.builder.get_object('hat_down_input')
         self.hat_left_input = self.builder.get_object('hat_left_input')
