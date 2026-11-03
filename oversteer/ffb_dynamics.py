@@ -9,7 +9,7 @@ deg/s^2, friction and torques in 1e-4 FS, stiffness in uFS per deg, latency in u
 which pushes toward decreasing ABS_X, and of the engine's left-positive angles).
 
 The stage plays only in replace mode: the engine keeps writing ext_force (even 0) while it is on, writes the
-alignment spring at the telemetry rate (the driver fades a spring not written for 20 ms), and sets everything back to
+aligning spring at the telemetry rate (the driver fades a spring not written for 20 ms), and sets everything back to
 0 when it stops playing and during a calibration.
 """
 import logging
@@ -160,7 +160,7 @@ def sensitivity_warning(sensitivity, range_deg=None):
 
 
 class FrameCheck:
-    """Does the wheel's measured position follow the game's steering the way the alignment spring assumes? The
+    """Does the wheel's measured position follow the game's steering the way the aligning spring assumes? The
     spring's target is in the driver's position frame (+ toward increasing ABS_X, over the current range); the engine
     works it out as -steer x range / 2. A wrong sign would pull the wheel toward the mirror image of where the tyres
     point, a wrong scale (a range the game does not map to its lock) to the wrong angle. Pairs of (expected, measured)
@@ -392,7 +392,7 @@ class Dynamics:
 
 class DynStage:
     """The engine's side: what to write and when. `column`/`align`/`removal` are the profile's toggles (column feel,
-    local alignment spring, friction removal); `record(t, channel, *values)` an optional hook (ffb_record)."""
+    local aligning spring, friction removal); `record(t, channel, *values)` an optional hook (ffb_record)."""
 
     def __init__(self, path, record=None):
         self.dyn = Dynamics(path)

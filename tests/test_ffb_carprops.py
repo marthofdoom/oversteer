@@ -267,3 +267,30 @@ def test_the_engine_learns_the_lock_and_the_ratio_and_keeps_them(tmp_path):
         assert cp.STORE.get_rack('rbr/test')[0] == pytest.approx(270.0 / 22.0, rel=0.05)
     finally:
         car_data.set_cars(None)
+
+
+def _drive_slides(learner, lock_rad, rear=True, seconds=60.0, speed=20.0, hz=100.0, sign=1.0):
+    """A gravel drive: front slip 0.1-0.4 rad, rear slip 0.05-0.2, yaw rate from delta = af - ar + L r / v."""
+    for i in range(int(seconds * hz)):
+        steer = 0.4 * math.sin(i / hz * 1.3)
+        af, ar = 0.25 * math.sin(i / hz * 0.7 + 1.0), 0.12 * math.sin(i / hz * 0.9)
+        yaw = speed * (lock_rad * steer - af + ar) / cp.WHEELBASE
+        learner.add(steer, sign * yaw, speed, 1.0 / hz, alpha=af, alpha_r=ar if rear else None)
+    return learner
+
+
+def test_the_lock_is_learnt_from_the_kinematic_identity_at_gravel_slip_angles():
+    lock = math.radians(27.2)
+    learner = _drive_slides(cp.RatioLearner(), lock)
+    assert learner.lock() == pytest.approx(lock, rel=0.05)
+    assert learner.ratio(270.0) == pytest.approx(270.0 / 27.2, rel=0.05)
+
+
+def test_without_the_rear_slip_the_old_gates_still_leave_a_gravel_drive_unlearnt():
+    learner = _drive_slides(cp.RatioLearner(), math.radians(27.2), rear=False)
+    assert learner.lock() is None                                       # |alpha| >= RATIO_MAX_ALPHA nearly always
+
+
+def test_the_identity_with_the_wrong_sign_is_not_believed():
+    learner = _drive_slides(cp.RatioLearner(), math.radians(27.2), sign=-1.0)
+    assert learner.lock() is None

@@ -33,7 +33,7 @@ telemetry packet beside it. Read-only: the wheel's node is opened without a
 grab and nothing is written to it. The .ovcap format is unchanged.
 
 A capture recorded for FFB tuning has a third sidecar, `<file>.ffb.gz` (ffb_record): the engine's side of the force
-chain (the game's raw force, ext_force, the driver's alignment spring and column writes, hands, live friction and
+chain (the game's raw force, ext_force, the driver's aligning spring and column writes, hands, live friction and
 thermal readings) on the same clock, for an offline replay of the whole chain.
 """
 

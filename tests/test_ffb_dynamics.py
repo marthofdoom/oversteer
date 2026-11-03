@@ -444,6 +444,34 @@ def ready_engine(path):
     return engine, m, t
 
 
+def test_the_wheels_measured_lock_gives_the_ratio_and_the_spring_starts_when_both_are_learnt(tmp_path):
+    cp.STORE.use(str(tmp_path / 'props.json'))
+    POS.scale = 0.6                                                     # 540 deg game lock on the 900 deg wheel: 270 deg
+    engine, t = playing_engine(dyn_wheel(tmp_path))
+    m = engine.model
+    m._align.s[0] = 1e4
+    true_lock, speed = math.radians(27.2), 20.0
+    end = t + 60.0
+    noted = False
+    while t < end:
+        s = tfe.acr(t)
+        af, ar = 0.25 * math.sin(t * 0.7), 0.1 * math.sin(t * 0.9)
+        s.tyre_slip_angle, s.pos, s.forward = (af, af, ar, ar), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+        s.yaw_rate = speed * (true_lock * s.steer - af + ar) / cp.WHEELBASE
+        POS.follow(s.steer)
+        tfe.upload(tfe.game_raw(s))
+        engine.offer(t, s)
+        engine.step(t)
+        noted = noted or bool(engine.align_note and 'not learnt' in engine.align_note)
+        t += 1.0 / tfe.HZ
+    assert noted                                                        # said so while it was unlearnt
+    assert m.lock_known and m.lock == pytest.approx(true_lock, rel=0.06)
+    assert m.wheel_lock_deg == pytest.approx(270.0, rel=0.03)
+    assert m.ratio_known and m.ratio < m.STEER_RATIO and m.ratio == pytest.approx(270.0 / 27.2, rel=0.1)
+    assert m.align_on and engine.align_note is None
+    engine.stop()
+
+
 def test_the_frame_check_is_fed_and_the_slope_known_before_the_ratio_gate_opens(tmp_path):
     POS.scale = 0.6
     engine, t = playing_engine(dyn_wheel(tmp_path))
@@ -788,7 +816,7 @@ def test_the_info_line_shows_hands_and_the_live_friction(tmp_path):
     for name in ('ffb_hands', 'ffb_dyn_live'):
         os.remove(path + '/' + name)
     assert Gui.countersteer_info(gui)[1] == 'Wheel motor heat: 12 %'
-    gui.ffb_engine.align_note = "wheel position doesn't match the game's steering (x): the alignment spring is off"
+    gui.ffb_engine.align_note = "wheel position doesn't match the game's steering (x): the aligning spring is off"
     assert "doesn't match the game's steering" in Gui.countersteer_info(gui)[1]
 
 
@@ -1055,3 +1083,132 @@ def test_a_bent_sensitivity_keeps_the_alignment_spring_off_and_50_plays_it(tmp_p
         t = feed(engine, t, 6.0)
         assert engine._frame_sens == 50 and m.align_on
         engine.stop()
+
+
+# -- the aligning spring carries the assisted stiffness (the played torque's own tangent) --
+
+ASSISTED_POINTS = [(v, a) for v in (5.0, 20.0, 40.0) for a in (0.001, 0.04, 0.2)]
+
+
+def _model_nm(r, speed, alpha):
+    s = slip_sample(0.0, alpha=alpha)
+    s.speed = speed
+    return r.align(s)
+
+
+def _fd_per_deg(r, speed, alpha, d_deg=0.5):
+    """(model(alpha - d) - model(alpha + d)) / 2d: the model's torque against the angle error (steering wheel deg), by a
+    central difference of +-d_deg (the angle error is alpha x ratio). On the centre (alpha 0.001, an error of 0.7 deg)
+    +-0.5 deg would span the boost curve's knee, so the step is 0.05 deg there."""
+    if abs(alpha) < 0.005:
+        d_deg = 0.05
+    d = math.radians(d_deg) / r.ratio
+    return (_model_nm(r, speed, alpha - d)['model'] - _model_nm(r, speed, alpha + d)['model']) / (2.0 * d_deg)
+
+
+@pytest.mark.parametrize('speed,alpha', ASSISTED_POINTS)
+def test_the_aligning_springs_k_is_the_assisted_finite_difference_within_2_percent(speed, alpha):
+    r = rack()
+    k = _model_nm(r, speed, alpha)['k']
+    assert k == pytest.approx(_fd_per_deg(r, speed, alpha), rel=0.02)
+
+
+@pytest.mark.parametrize('speed,alpha', ASSISTED_POINTS)
+def test_the_aligning_spring_is_never_stiffer_than_the_assisted_stiffness(speed, alpha):
+    r = rack()
+    split = _model_nm(r, speed, alpha)
+    err = abs(alpha) * r.ratio * 180.0 / math.pi                        # the angle error, steering wheel degrees
+    assert split['k'] * err <= abs(split['model']) * 1.0001             # the tangent never overshoots the (concave) torque
+    peak = 2.1
+    for limit in (None, 0.5 * split['k'] / peak):
+        spring = fe.ffb_spring.DriverSpring()
+        t = 0.0
+        for _ in range(100):
+            f = spring.force(0.0, -err, split['k'] / peak, 0.8, limit, 0.005)
+            t += 0.005
+        k_eff = split['k'] / peak if limit is None else limit
+        assert 0.0 <= f <= k_eff * err * 1.0001 and f <= abs(split['model']) / peak * 1.0001
+
+
+def test_without_the_assist_the_aligning_spring_is_stiffer_at_the_centre():
+    r = rack()
+    assisted = _model_nm(r, 20.0, 0.001)['k']
+    r.assist = 0.0
+    unassisted = _model_nm(r, 20.0, 0.001)['k']
+    assert assisted < unassisted
+    assert unassisted == pytest.approx(_fd_per_deg(r, 20.0, 0.001), rel=0.02)
+
+
+@pytest.mark.parametrize('speed,alpha', [(20.0, 0.001), (20.0, 0.04), (20.0, 0.2)])
+def test_with_the_games_own_assist_curve_the_spring_follows_that_curve(speed, alpha):
+    r = rack()
+    r._assist.state = True                                              # 'auto' follows the game's curve once it has one
+    r._assist.curve = lambda p99: [(0.3 * p99, 1.0), (p99, 0.6), (3.0 * p99, 0.25)]
+    assert r.power_steering() == 'game'
+    split = _model_nm(r, speed, alpha)
+    column = split['model']
+    assert column == pytest.approx(-math.copysign(1.0, alpha) * abs(column))      # (signed against the slip)
+    assert split['k'] == pytest.approx(_fd_per_deg(r, speed, alpha), rel=0.02)
+    # and it is the model the played torque uses, not our boost curve's
+    r2 = rack()
+    assert split['k'] != pytest.approx(_model_nm(r2, speed, alpha)['k'], rel=0.02)
+
+
+# -- the engine off: no pump, no assist --
+
+def _rpm_sample(t, rpm, game='acr', alpha=0.04):
+    s = slip_sample(t, alpha=alpha)
+    s.rpm, s.game = rpm, game
+    return s
+
+
+def _run_rpm(r, t, seconds, rpm, game='acr', dt=0.005):
+    end = t + seconds
+    while t < end:
+        r.feed(t, _rpm_sample(t, rpm, game), None)
+        t += dt
+    return t
+
+
+def test_the_engine_off_ramps_the_assist_to_nothing_over_half_a_second_and_it_returns():
+    r = rack()
+    t = _run_rpm(r, 0.0, 1.0, 3000.0)
+    assert r.engine_known and r.assist_level() == pytest.approx(1.0)
+    s = _rpm_sample(t, 0.0)
+    assisted = r.rim_torque(s)
+    k_assisted = r.align(s)['k']
+    t = _run_rpm(r, t, 0.3, 0.0)                                        # the debounce
+    assert r.assist_level() == pytest.approx(1.0, abs=0.02)
+    t = _run_rpm(r, t, 0.25, 0.0)
+    assert r.assist_level() == pytest.approx(0.5, abs=0.05)
+    assert r.power_steering() == 'model'
+    t = _run_rpm(r, t, 0.35, 0.0)
+    assert r.assist_level() == 0.0 and r.power_steering() == 'off'
+    s = _rpm_sample(t, 0.0)
+    assert abs(r.rim_torque(s)) > abs(assisted)                         # no boost: the driver feels the whole column torque
+    r.assist = 0.0
+    k_unassisted = r.align(s)['k']
+    r.assist = fe.RackForce.ASSIST
+    assert r.align(s)['k'] == pytest.approx(k_unassisted) and k_unassisted > k_assisted
+    t = _run_rpm(r, t, 0.6, 3000.0)
+    assert r.assist_level() == pytest.approx(1.0) and r.power_steering() == 'model'
+
+
+def test_a_single_zero_rpm_packet_is_ignored_and_beamng_never_counts():
+    r = rack()
+    t = _run_rpm(r, 0.0, 1.0, 3000.0)
+    r.feed(t, _rpm_sample(t, 0.0), None)
+    t = _run_rpm(r, t + 0.005, 1.0, 3000.0)
+    assert r.assist_level() == pytest.approx(1.0)
+    b = rack()
+    _run_rpm(b, 0.0, 2.0, 0.0, game='beamng-ffb')
+    assert b.assist_level() == pytest.approx(1.0) and not b.engine_known
+
+
+def test_the_rim_torque_at_the_end_of_the_ramp_is_the_unassisted_column_torque():
+    r = rack()
+    s = _rpm_sample(0.0, 0.0)
+    t = _run_rpm(r, 0.0, 1.5, 0.0)
+    off = r.rim_torque(s)
+    r.assist = 0.0
+    assert off == pytest.approx(r.rim_torque(s))

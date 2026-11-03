@@ -164,7 +164,7 @@ class Kick:
             mz = rack_front_torque(rack, sample)
             if mz is None:
                 return 1.0
-            c = 0.0 if rack.power_steering() == 'off' else cls * ffb_carprops.power_settings()[1]
+            c = 0.0 if rack.power_steering() == 'off' else cls * rack.assist_level()
             return ffb_carprops.driver_slope(mz / ratio, speed, c, not rack.classic())
 
         kick_trigger = getattr(rack, 'kick_trigger', None)
