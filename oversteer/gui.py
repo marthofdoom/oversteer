@@ -662,6 +662,8 @@ class Gui:
         self.apply_countersteer_mapping()
         self.apply_countersteer_knee()
         self.apply_countersteer_column_damping()
+        self.apply_countersteer_rim_mm()
+        self.apply_countersteer_car_wheel_mm()
         self.apply_countersteer_drive_pull()
         self.apply_countersteer_kick()
         self.apply_countersteer_linearity()
@@ -683,6 +685,14 @@ class Gui:
     def apply_countersteer_column_damping(self):
         """The column damping share (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_column_damping(self.model.get_countersteer_column_damping())
+
+    def apply_countersteer_rim_mm(self):
+        """The wheel's rim diameter (FFB tab; 0: the table's) to the engine."""
+        self.ffb_engine.set_rim_mm(self.model.get_countersteer_rim_mm_setting())
+
+    def apply_countersteer_car_wheel_mm(self):
+        """The car's steering wheel diameter (FFB tab) to the engine."""
+        self.ffb_engine.set_car_wheel_mm(self.model.get_countersteer_car_wheel_mm())
 
     def apply_countersteer_drive_pull(self):
         """Drive pull's switch and level (FFB tab, under the Countersteer switch) to the engine."""

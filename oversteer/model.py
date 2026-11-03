@@ -1,6 +1,8 @@
 import configparser
 import logging
 
+from . import wheel_torque
+
 STRENGTH_MIN = 0                     # Countersteer's overall steering strength, %
 STRENGTH_MAX = 130
 MAPPINGS = ('knee', 'classic')       # steering mapping (profile INI only): 1:1 up to a knee and compressed above (default), or the uniform impedance scale
@@ -81,6 +83,8 @@ class Model:
         'countersteer_kick': None,
         'countersteer_kick_level': None,
         'countersteer_column_damping': None,
+        'countersteer_rim_mm': None,
+        'countersteer_car_wheel_mm': None,
         'countersteer_texture': None,
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
@@ -137,6 +141,8 @@ class Model:
         'countersteer_kick': 'boolean',
         'countersteer_kick_level': 'integer',
         'countersteer_column_damping': 'integer',
+        'countersteer_rim_mm': 'integer',
+        'countersteer_car_wheel_mm': 'integer',
         'countersteer_texture': 'integer',
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
@@ -261,6 +267,8 @@ class Model:
                 'countersteer_kick': OVERALL_KICK if supported else None,
                 'countersteer_kick_level': OVERALL_KICK_LEVEL if supported else None,
                 'countersteer_column_damping': OVERALL_COLUMN_DAMPING if supported else None,
+                'countersteer_rim_mm': 0 if supported else None,       # 0: from the wheel table
+                'countersteer_car_wheel_mm': int(wheel_torque.CAR_WHEEL_MM) if supported else None,
                 'countersteer_texture': int(round(LEVEL * 100)) if supported else None}
         for part in cls.TEXTURE_PARTS:
             data['countersteer_texture_' + part] = True if supported else None
@@ -444,6 +452,12 @@ class Model:
             data['countersteer_drive_pull_level'] = min(max(data['countersteer_drive_pull_level'], 0), 100)
         if data['countersteer_column_damping'] is not None:
             data['countersteer_column_damping'] = min(max(data['countersteer_column_damping'], 0), 100)
+        if data['countersteer_rim_mm']:
+            data['countersteer_rim_mm'] = int(min(max(data['countersteer_rim_mm'], wheel_torque.RIM_RANGE[0]),
+                                                  wheel_torque.RIM_RANGE[1]))
+        if data['countersteer_car_wheel_mm'] is not None:
+            data['countersteer_car_wheel_mm'] = int(min(max(data['countersteer_car_wheel_mm'], wheel_torque.CAR_WHEEL_RANGE[0]),
+                                                        wheel_torque.CAR_WHEEL_RANGE[1]))
         if data['countersteer_kick_level'] is not None:
             data['countersteer_kick_level'] = min(max(data['countersteer_kick_level'], 0), 100)
         if data['countersteer_mapping'] is not None and data['countersteer_mapping'] not in MAPPINGS:
@@ -752,6 +766,37 @@ class Model:
         from .ffb_engine import OVERALL_COLUMN_DAMPING
         value = self.data.get('countersteer_column_damping')
         return OVERALL_COLUMN_DAMPING if value is None else value
+
+    def set_countersteer_rim_mm(self, value):
+        """The wheel's rim diameter in mm, 200..400; 0: from the wheel table (wheel_torque.RIM_MM)."""
+        value = int(value)
+        value = 0 if value <= 0 else min(max(value, wheel_torque.RIM_RANGE[0]), wheel_torque.RIM_RANGE[1])
+        if self.set_if_changed('countersteer_rim_mm', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_rim_mm()
+
+    def get_countersteer_rim_mm_setting(self):
+        """The saved rim diameter, 0 when none (from the table)."""
+        return int(self.data.get('countersteer_rim_mm') or 0)
+
+    def get_countersteer_rim_mm(self):
+        """The rim diameter in effect: the saved one, else the table's for the wheel, else the G29's."""
+        saved = self.get_countersteer_rim_mm_setting()
+        if saved:
+            return saved
+        device = getattr(self, 'device', None)
+        table = wheel_torque.rim_mm(getattr(device, 'usb_id', None))
+        return int(round(table or wheel_torque.DEFAULT_RIM_MM))
+
+    def set_countersteer_car_wheel_mm(self, value):
+        """The car's steering wheel diameter in mm, 280..420: the hand-force scale is the
+        wheel's rim over it."""
+        value = int(min(max(int(value), wheel_torque.CAR_WHEEL_RANGE[0]), wheel_torque.CAR_WHEEL_RANGE[1]))
+        if self.set_if_changed('countersteer_car_wheel_mm', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_car_wheel_mm()
+
+    def get_countersteer_car_wheel_mm(self):
+        value = self.data.get('countersteer_car_wheel_mm')
+        return int(wheel_torque.CAR_WHEEL_MM) if value is None else value
 
     def set_countersteer_drive_pull(self, value):
         """Drive pull (the scrub couple of the drive's left/right split in the steering force) on or off."""
@@ -1092,6 +1137,8 @@ class Model:
         self.ui.set_countersteer_strength(data['countersteer_strength'])
         self.ui.set_countersteer_knee(data['countersteer_knee'])
         self.ui.set_countersteer_column_damping(data['countersteer_column_damping'])
+        self.ui.set_countersteer_rim_mm(None if data['countersteer_rim_mm'] is None else self.get_countersteer_rim_mm())
+        self.ui.set_countersteer_car_wheel_mm(data['countersteer_car_wheel_mm'])
         self.ui.set_countersteer_drive_pull(data['countersteer_drive_pull'], data['countersteer_drive_pull_level'])
         self.ui.set_countersteer_kick(data['countersteer_kick'], data['countersteer_kick_level'])
         self.ui.set_countersteer_texture(data['countersteer_texture'],

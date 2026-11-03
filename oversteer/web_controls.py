@@ -20,6 +20,7 @@ import logging
 import os
 import threading
 
+from . import wheel_torque
 from .model import Model, STRENGTH_MIN, STRENGTH_MAX, KNEE_MIN, KNEE_MAX
 
 PEDALS = Model.PEDAL_RESPONSES
@@ -33,6 +34,7 @@ EFFECTS = ('constant', 'spring', 'damper', 'friction', 'rumble')
 # Countersteer FFB (its own tab): number settings and the range the GTK scale has; the texture parts are switches
 COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, STRENGTH_MAX), 'countersteer_knee': (KNEE_MIN, KNEE_MAX),
                         'countersteer_column_damping': (0, 100),
+                        'countersteer_rim_mm': wheel_torque.RIM_RANGE, 'countersteer_car_wheel_mm': wheel_torque.CAR_WHEEL_RANGE,
                         'countersteer_drive_pull_level': (0, 100), 'countersteer_kick_level': (0, 100),
                         'countersteer_texture': (0, 100),
                         'countersteer_linearity': (0, 100), 'countersteer_lightness': (0, 100)}
@@ -500,6 +502,8 @@ class Bridge:
         for key, (low, high) in COUNTERSTEER_NUMBERS.items():
             number(key, low, high, enabled=on and (key != 'countersteer_drive_pull_level' or bool(data.get('countersteer_drive_pull')))
                    and (key != 'countersteer_kick_level' or bool(data.get('countersteer_kick'))))
+        if 'countersteer_rim_mm' in settings:
+            settings['countersteer_rim_mm']['value'] = model.get_countersteer_rim_mm()      # 0 (the table's) shown as its figure
         for key in COUNTERSTEER_TOGGLES:
             flag(key, on)
         flag('countersteer_drive_pull', on)

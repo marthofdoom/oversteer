@@ -391,7 +391,7 @@ def test_it_starts_at_finalff_scale_and_fits_the_games_force_but_plays_its_own_l
     assert model.force(s) == pytest.approx(max(-0.75 * fe.FULL, min(0.75 * fe.FULL, classic)))
     model.mapping = 'knee'
     # the magnitude is the rim-torque model's, not the game's: its FFB setting does not move it
-    assert model.force(s) == pytest.approx(fe.FULL * fe.wheel_torque.rim_share(model.rim_torque(s), None, 1.0, model.top_torque(), model.knee))
+    assert model.force(s) == pytest.approx(fe.FULL * fe.wheel_torque.rim_share(model.rim_torque(s) * model.rho(), None, 1.0, model.top_torque() * model.rho(), model.knee))
     twice = fitted(game_gain=2.0)
     twice.mapping = 'knee'
     assert twice.force(s) == pytest.approx(model.force(s), rel=1e-6)
