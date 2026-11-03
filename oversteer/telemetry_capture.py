@@ -86,8 +86,8 @@ OVST_THIN_RATE = 60.0
 # and are not counted toward the folder's cap either: they are listed apart, delete them by hand). The exception
 # ends by itself after FFB_MAX_SECONDS of driving (the gaps between packets, each at most CAPTURE_GAP, so a menu
 # does not use it up) or FFB_MAX_BYTES written to disk (compressed), and thinning resumes in a new file.
-FFB_MAX_SECONDS = 20 * 60.0
-FFB_MAX_BYTES = 250 * 1000 * 1000
+FFB_MAX_SECONDS = 60 * 60.0
+FFB_MAX_BYTES = 600 * 1000 * 1000
 OVST_THIN_STEP_LEAP = 1000  # physics steps the packet id may leap forward before both packets are kept (a new session)
 
 

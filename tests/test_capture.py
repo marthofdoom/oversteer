@@ -7,6 +7,7 @@ import os
 import struct
 import subprocess
 import sys
+from unittest import mock
 
 import pytest
 
@@ -419,3 +420,44 @@ def test_prune_keeps_a_capture_whose_header_cannot_be_read_yet(tmp_path):
     os.remove(old)
     tc.list_captures(str(tmp_path))
     assert old not in tc._TUNING
+
+
+def _ffb_gui(tmp_path, wish):
+    me = mock.MagicMock()
+    me.telemetry = None
+    me.device = None
+    me.telemetry_recorder = None
+    me.telemetry_capture_on = True
+    me.telemetry_capture_cap = 1
+    me.ffb_tuning_on = wish
+    me.ffb_stop_reason = None
+    me.capture_folder.return_value = str(tmp_path)
+    return me
+
+
+def test_ffb_tuning_wish_is_kept_and_a_new_recorder_resumes_it(tmp_path, caplog):
+    import logging
+    from oversteer.gui import Gui
+    me = _ffb_gui(tmp_path, True)
+    with caplog.at_level(logging.INFO):
+        Gui.apply_telemetry_capture(me)
+    assert me.telemetry_recorder._ffb_pending is True and me.ffb_tuning_on      # the writer applies it
+    assert 'FFB tuning recording on (saved)' in caplog.text
+    me.telemetry_capture_on = False                   # recording off: the saved wish stays
+    Gui.apply_telemetry_capture(me)
+    assert me.telemetry_recorder is None and me.ffb_tuning_on
+    me.telemetry_recorder = None
+    me.telemetry_capture_on, me.ffb_tuning_on = True, False
+    Gui.apply_telemetry_capture(me)
+    assert me.telemetry_recorder._ffb_pending is None
+    me.telemetry_recorder.close()
+
+
+def test_ffb_tuning_switch_is_saved_and_the_limit_stop_saves_it_off(tmp_path):
+    from oversteer.gui import Gui
+    me = _ffb_gui(tmp_path, False)
+    Gui.set_ffb_tuning(me, True)
+    assert me.ffb_tuning_on and me.save_preferences.call_count == 1
+    me.telemetry_recorder = mock.MagicMock(ffb_stopped='time', error=None, dropped=0)
+    Gui.refresh_capture_status(me)
+    assert not me.ffb_tuning_on and me.ffb_stop_reason == 'time' and me.save_preferences.call_count == 2
