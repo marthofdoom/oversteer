@@ -27,6 +27,7 @@ from . import wheel_calibration as wcal
 from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
 from .combined_chart import CombinedChart
+from .handbrake_display import HandbrakeDisplay
 from .linear_chart import LinearChart
 from .performance_chart import PerformanceChart
 
@@ -121,6 +122,7 @@ class Gui:
         self._forward_stop = threading.Event()
         self._forward_resolved = None           # the text the live targets were resolved from
         self.handbrake_axis = None
+        self.handbrake_display = None
         self.handbrake_invert = None
         self.pedal_axes = {}
         self.pedals_defaulted = set()     # device ids whose pedals we already straightened
@@ -581,6 +583,7 @@ class Gui:
 
         if self.device is None or not self.device.is_ready():
             self.handbrake_axis = None
+            self.handbrake_display = None
             self.pedal_axes = {}
             self.ui.set_handbrake_visible(False)
             self.refresh_wheel_correction()
@@ -935,11 +938,11 @@ class Gui:
             axis = self.pedal_axes.get(code)
             if axis is not None and code in setters:
                 setters[code](self._axis_fraction(axis, value))
-        if self.handbrake_axis is not None:
-            code, low, high = self.handbrake_axis
-            value = self.device.axis_value(code)
-            if value is not None and high > low:
-                self.ui.set_handbrake_input(min(1.0, max(0.0, (value - low) / (high - low))))
+        hb = self.handbrake_display
+        if hb is not None:
+            value = self.device.axis_value(hb.code)
+            if value is not None:
+                self.ui.set_handbrake_input(hb.update(value))
         return False
 
     LAUNCH_PEDAL = {ecodes.ABS_Y: 'clutch', ecodes.ABS_Z: 'throttle'}
@@ -1010,6 +1013,10 @@ class Gui:
         state = proxied[3] if proxied is not None else None
         if axis == self.handbrake_axis and state == self.handbrake_invert:
             return
+        if axis != self.handbrake_axis:
+            # A new node or axis (proxy restart, other device): what was
+            # learnt about the old one's travel does not carry over
+            self.handbrake_display = HandbrakeDisplay.for_axis(axis)
         self.handbrake_axis = axis
         if axis is None:
             self.launch_inputs['handbrake'] = None     # none fitted: clutch and throttle make the launch
@@ -2291,14 +2298,12 @@ class Gui:
                         name = self.LAUNCH_PEDAL.get(event.code)
                         if name is not None:
                             self.launch_inputs[name] = self._pressed_fraction(axis, event.value)
-                elif self.handbrake_axis is not None and event.code == self.handbrake_axis[0]:
-                    _, low, high = self.handbrake_axis
-                    if high > low:
-                        # As the game receives it: pulled is high once the
-                        # Invert box is right, which the game needs too
-                        pulled = min(1.0, max(0.0, (event.value - low) / (high - low)))
-                        self.launch_inputs['handbrake'] = pulled
-                        self.ui.safe_call(self.ui.set_handbrake_input, pulled)
+                elif (hb := self.handbrake_display) is not None and event.code == hb.code:
+                    # As the game receives it: pulled is high once the
+                    # Invert box is right, which the game needs too
+                    pulled = hb.update(event.value)
+                    self.launch_inputs['handbrake'] = pulled
+                    self.ui.safe_call(self.ui.set_handbrake_input, pulled)
                 elif event.code == ecodes.ABS_HAT0X:
                     self.ui.safe_call(self.ui.set_hatx_input, event.value)
                     self._hat_hotkey(event)
