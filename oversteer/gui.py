@@ -712,7 +712,7 @@ class Gui:
         self.ffb_engine.set_linearity(self.model.get_countersteer_linearity())
 
     def apply_countersteer_dynamics(self):
-        """The driver's virtual steering dynamics switches (column feel, local alignment spring, friction removal) to the engine."""
+        """The driver's virtual steering dynamics switches (column feel, local aligning spring, friction removal) to the engine."""
         self.ffb_engine.set_dynamics(*self.model.get_countersteer_dynamics())
 
     def apply_countersteer_lightness(self):
@@ -779,7 +779,7 @@ class Gui:
     def countersteer_details(self):
         """The Countersteer FFB tab's read-only lines, {key: text} ('' for what is not known): the calibration,
         what is learnt for the current car (ratio, caster trail, scrub, impedance scale, power steering) and the
-        wheel (motor heat, derating, hands, live friction, the alignment spring's note: all from countersteer_info())."""
+        wheel (motor heat, derating, hands, live friction, the aligning spring's note: all from countersteer_info())."""
         engine = self.ffb_engine
         car = ''
         props = engine.car_properties()

@@ -279,7 +279,7 @@ class Model:
         data['countersteer_linearity'] = LINEARITY if supported else None
         # Forza Horizon: how much of the add-on's lightening is played (ffb_addon)
         data['countersteer_lightness'] = int(round(STRENGTH * 100)) if supported else None
-        # The driver's virtual steering dynamics (ffb_dynamics): the car's column feel and the local alignment spring
+        # The driver's virtual steering dynamics (ffb_dynamics): the car's column feel and the local aligning spring
         # on, friction removal (a column lighter than the wheel's own) off
         for key, on in cls.DYNAMICS_KEYS.items():
             data[key] = on if supported else None
@@ -895,7 +895,7 @@ class Model:
             self.ui.controller.apply_countersteer_dynamics()
 
     def get_countersteer_dynamics(self):
-        """(column feel, local alignment spring, friction removal) for the engine."""
+        """(column feel, local aligning spring, friction removal) for the engine."""
         return tuple(bool(self.data.get(key)) if self.data.get(key) is not None else default
                      for key, default in self.DYNAMICS_KEYS.items())
 

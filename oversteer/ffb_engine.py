@@ -1999,7 +1999,7 @@ class FfbEngine:
         self._rim_req = None             # the wheel's rim diameter (mm, 0: the table's) from the GUI
         self._car_wheel_req = None       # the car's steering wheel diameter (mm, profile INI only) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
-        self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
+        self._dyn_req = (True, True, False)     # column feel, local aligning spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
         self._pos_req = None             # () -> (ABS_X 0..65535, ...) of the physical wheel, or None (ffb_dynamics.FrameCheck)
         self._pos_src = None
@@ -2012,7 +2012,7 @@ class FfbEngine:
         self._prov_saved = None          # (key, slope) last handed to the store
         self._pos_cache = None           # (t, measured degrees, raw frame) of the last wheel position read
         self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
-        self.align_note = None           # why the alignment spring is not played (the info line shows it)
+        self.align_note = None           # why the aligning spring is not played (the info line shows it)
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
@@ -2133,13 +2133,13 @@ class FfbEngine:
 
     def set_dynamics(self, column, align, removal):
         """The profile's switches for the driver's virtual steering dynamics: the car's column feel (damping and
-        friction), the local alignment spring, and friction removal (a column lighter than the wheel's own)."""
+        friction), the local aligning spring, and friction removal (a column lighter than the wheel's own)."""
         self._dyn_req = (bool(column), bool(align), bool(removal))
         self._wake.set()
 
     def set_position_source(self, source):
         """A callable returning the physical wheel's ABS_X now (0..65535 over its range), None if it can't be read:
-        the alignment spring is played only once the wheel's position is seen to follow the game's steering."""
+        the aligning spring is played only once the wheel's position is seen to follow the game's steering."""
         self._pos_req = (source,)
         self._wake.set()
 
@@ -2607,7 +2607,7 @@ class FfbEngine:
             check.reset()
             if sens not in (None, ffb_dynamics.SENSITIVITY_LINEAR):
                 logging.info("Countersteer FFB: the wheel's sensitivity is %s: the position is taken back to the raw "
-                             "frame for the alignment spring", sens)
+                             "frame for the aligning spring", sens)
         bent = sens is not None and sens != ffb_dynamics.SENSITIVITY_LINEAR
         check.linear = bent
         steer = getattr(sample, 'steer', None)
@@ -2620,10 +2620,10 @@ class FfbEngine:
             elif measured is not None:
                 check.feed(t, steer, -steer * half, measured)
         if self._pos_src is None:
-            self.align_note = _("wheel position unavailable: the alignment spring stays off")
+            self.align_note = _("wheel position unavailable: the aligning spring stays off")
         elif check.failed():
             reason = check.failed()
-            self.align_note = _("wheel position doesn't match the game's steering ({}): the alignment spring is off").format(reason)
+            self.align_note = _("wheel position doesn't match the game's steering ({}): the aligning spring is off").format(reason)
             if reason.split()[0] not in check.reasons_logged:
                 check.reasons_logged.add(reason.split()[0])
                 logging.warning("Countersteer FFB: wheel position doesn't match the game's steering: %s; the aligning "
@@ -2634,7 +2634,7 @@ class FfbEngine:
 
     def _dyn_play(self, t, sample):
         """The driver's virtual steering dynamics beside ACR's force: the car's column damping and friction, and the
-        local alignment spring (the model plays the residual) once the car's ratio and lock are known and the fit is
+        local aligning spring (the model plays the residual) once the car's ratio and lock are known and the fit is
         ready, the driver reports a spring and the wheel's range is known."""
         stage, model = self._dyn, self.model
         if stage is None or not stage.usable() or self._played_mode not in ('acr', 'rbr', 'forza-rack'):
@@ -2865,7 +2865,7 @@ class FfbEngine:
 
     def _lock_slope(self, stage):
         """The wheel mapping the lock stop uses: the live FrameCheck's once it passes, else the one stored for this car,
-        wheel range and sensitivity (provisional: the alignment spring still waits for the live check). A live slope that
+        wheel range and sensitivity (provisional: the aligning spring still waits for the live check). A live slope that
         disagrees with the stored one (sign, or beyond PROV_TOL) drops the stored one (logged once); the stop then waits
         for the live slope. A passing live slope is stored."""
         car = self.model.car

@@ -1384,7 +1384,7 @@ class GtkUi:
         self.countersteer_toggles = {}
         for key, title, tooltip in (
                 ('column', _("Real column feel"), self.COUNTERSTEER_COLUMN_TOOLTIP),
-                ('align', _("Local alignment spring"), self.COUNTERSTEER_ALIGN_TOOLTIP),
+                ('align', _("Local aligning spring"), self.COUNTERSTEER_ALIGN_TOOLTIP),
                 ('friction_removal', _("Friction removal"), self.COUNTERSTEER_FRICTION_REMOVAL_TOOLTIP)):
             row, switch = self._switch_row(
                 title, _(tooltip), lambda state, key=key: self.controller.model.set_countersteer_dynamics('countersteer_' + key, state))
@@ -1445,7 +1445,7 @@ class GtkUi:
             row.set_sensitive(bool(on))
 
     def set_countersteer_toggles(self, column, align, friction_removal):
-        """Real column feel, local alignment spring and friction removal (None where the driver has no replace mode)."""
+        """Real column feel, local aligning spring and friction removal (None where the driver has no replace mode)."""
         if not hasattr(self, 'countersteer_toggles'):
             return
         for key, value in (('column', column), ('align', align), ('friction_removal', friction_removal)):

@@ -788,7 +788,7 @@ def test_the_info_line_shows_hands_and_the_live_friction(tmp_path):
     for name in ('ffb_hands', 'ffb_dyn_live'):
         os.remove(path + '/' + name)
     assert Gui.countersteer_info(gui)[1] == 'Wheel motor heat: 12 %'
-    gui.ffb_engine.align_note = "wheel position doesn't match the game's steering (x): the alignment spring is off"
+    gui.ffb_engine.align_note = "wheel position doesn't match the game's steering (x): the aligning spring is off"
     assert "doesn't match the game's steering" in Gui.countersteer_info(gui)[1]
 
 
