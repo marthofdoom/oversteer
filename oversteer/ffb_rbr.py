@@ -60,7 +60,10 @@ mid-range compressed. Above u = 1 every setting is less sensitive than the
 game; the gain check stops it where a car or a sensitivity setting keeps
 the force up there.
 
-Checks on the raw (`refused`):
+Since the rack-force path (ffb_engine.RbrRack: the column torque through the boost curve, the hand-force
+mapping, the damping and lock stop) this class is the gate on the raw and the source of S: the force itself
+no longer comes from `force()`/`shape()` (kept for the replay scripts), the 'no-gain' check is gone and
+'saturated' is a note (`saturated`), not a refusal. The checks on the raw (`refused`):
 
 - 'grid': the levels are not on Wine's grid of DirectInput magnitudes
   (int(m * DI_LEVEL), or one more where Wine rounds). An upload from another
@@ -256,6 +259,7 @@ class RbrForce:
         self.refused = None
         self.waiting = 'raw'
         self.gain = None
+        self.saturated = False           # the game's force sits at its limit too often (a status note)
 
     def new_stream(self, why):
         """RBR's stream started again (the uploads restarted, a new stage): its STRENGTH may have been changed
@@ -381,25 +385,23 @@ class RbrForce:
         self._judge(holding)
 
     def _judge(self, holding):
+        """The gates that stay with the rack force (ffb_engine.RbrRack): the uploads are NGP's (the grid) and the
+        game's STRENGTH is near 1. The saturation is a note (`saturated`), not a refusal, and the gain is no longer
+        judged: the force is the column torque through our own chain, not this class's knee."""
         grid, sat = self._grid.share(), self._sat.share()
         self.gain = self._ours / self._game if self._game > 0.0 else None
+        self.saturated = sat is not None and sat > (SAT_HOLD if holding else SAT_SHARE)
         if self.changes < MIN_CHANGES or grid is None:
             self._set(None, 'raw')
             return
         if grid < (GRID_HOLD if holding else GRID_GO):
             self._set('grid')
             return
-        if sat is not None and sat > (SAT_HOLD if holding else SAT_SHARE):
-            self._set('saturated')
-            return
-        if self.force_time < MIN_FORCE_TIME or self.gain is None:
+        if self.force_time < MIN_FORCE_TIME:
             self._set(None, 'corners')
             return
         if self.peak < STRENGTH_PROVEN * self.full:
             self._set('strength')        # the game's top not seen yet: its STRENGTH may be under 1 (docstring)
-            return
-        if self.gain < (GAIN_HOLD if holding else GAIN_GO):
-            self._set('no-gain')
             return
         self._set(None, None)
 

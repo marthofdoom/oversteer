@@ -43,12 +43,17 @@ and the parts' switches slew over SLEW.
 
 Games: TEXTURE_GAMES only. The hook for others is that list: a game whose
 telemetry arrives at 60 a second would have it 16 ms late and alias the
-road band, so it needs its own parts (or none) first."""
+road band, so it needs its own parts (or none) first. Richard Burns Rally:
+the road part from the strut velocity (susp_vel, FL minus FR) and the impact
+from the tyre load, stepped with each telemetry sample; no lock part (it has
+no wheel speeds); the engine hum from the rpm."""
 import math
 
 FULL = 32767                             # ext_force full scale (ffb_engine.FULL)
 
-TEXTURE_GAMES = ('acr',)                 # the physics-rate games it is tuned for (the hook for others)
+TEXTURE_GAMES = ('acr', 'rbr')           # the games it is tuned for (the hook for others)
+NO_LOCK_GAMES = ('rbr',)                 # ... of which these send no wheel speeds: the lock part is off
+SUSP_VEL_GAMES = ('rbr',)                # ... and these send the strut velocity itself (no travel to differentiate)
 
 PARTS = ('road', 'impact', 'lock', 'engine')
 LEVEL = 0.30                             # the master level's default (0..1)
@@ -132,15 +137,23 @@ class RoadTexture:
         self._lp.reset()
 
     def step(self, dt, sample):
-        travel = _finite(sample.susp, 2)
-        if travel is None:
-            self.reset()
-            return 0.0
-        prev, self._prev = self._prev, travel
-        if prev is None:
-            return 0.0
-        vl = min(max((travel[0] - prev[0]) / dt, -self.V_MAX), self.V_MAX)
-        vr = min(max((travel[1] - prev[1]) / dt, -self.V_MAX), self.V_MAX)
+        if sample.game in SUSP_VEL_GAMES:
+            vel = _finite(sample.susp_vel, 2)
+            if vel is None:
+                self.reset()
+                return 0.0
+            vl = min(max(vel[0], -self.V_MAX), self.V_MAX)
+            vr = min(max(vel[1], -self.V_MAX), self.V_MAX)
+        else:
+            travel = _finite(sample.susp, 2)
+            if travel is None:
+                self.reset()
+                return 0.0
+            prev, self._prev = self._prev, travel
+            if prev is None:
+                return 0.0
+            vl = min(max((travel[0] - prev[0]) / dt, -self.V_MAX), self.V_MAX)
+            vr = min(max((travel[1] - prev[1]) / dt, -self.V_MAX), self.V_MAX)
         x = self._lp.step(self._hp2.step(self._hp1.step(vl - vr, dt), dt), dt)
         return self.CAP * FULL * math.tanh(x / self.V_REF)
 
@@ -527,8 +540,9 @@ class Texture:
         moving = min(max((speed - MIN_SPEED) / MIN_SPEED, 0.0), 1.0)
         onset = min((t - self._since) / ONSET, 1.0)
         # The road, the landings and the lock need the car rolling; the engine's idle shake does not
+        lock = 0.0 if sample.game in NO_LOCK_GAMES else gains['lock'] * self.lock.step(dt, sample)
         total = (gains['road'] * self.road.step(dt, sample) + gains['impact'] * self.impact.step(dt, sample)
-                 + gains['lock'] * self.lock.step(dt, sample)) * moving \
+                 + lock) * moving \
             + gains['engine'] * self.engine.step(dt, sample)
         steering = abs(steering) if math.isfinite(steering) else 0.0
         total = self._dc.step(total, dt)
