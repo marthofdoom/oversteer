@@ -1289,15 +1289,33 @@ def test_late_passes_are_logged_once_per_window(caplog):
     assert len(lines) == 2 and '(1 in' in lines[0] and '(2 in' in lines[1]
 
 
-def test_a_late_ext_force_write_is_noted(tmp_path, caplog):
+def test_a_late_ext_force_write_with_samples_waiting_is_a_warning(tmp_path, caplog):
     engine, path = engine_on(tmp_path)
     t = run(engine, 0.0, 1.0)
     engine._phase = 'on'
     engine._write_mono = time.monotonic() - 0.2
     engine._late_at = -fe.LATE_LOG_EVERY
-    with caplog.at_level('WARNING'):
+    engine._written_at = t - 0.05
+    engine._arrived_at = t - 0.01           # a sample came in since the last write
+    with caplog.at_level('INFO'):
         engine._out(t, 1000.0)
-    assert any('ext_force written' in r.getMessage() for r in caplog.records)
+    assert any(r.levelname == 'WARNING' and 'engine late: ext_force written' in r.getMessage() for r in caplog.records)
+    assert not any('telemetry paused' in r.getMessage() for r in caplog.records)
+
+
+def test_a_late_ext_force_write_with_no_sample_since_is_an_info_pause(tmp_path, caplog):
+    engine, path = engine_on(tmp_path)
+    t = run(engine, 0.0, 1.0)
+    engine._phase = 'on'
+    engine._write_mono = time.monotonic() - 0.2
+    engine._late_at = -fe.LATE_LOG_EVERY
+    engine._written_at = t - 0.05
+    engine._arrived_at = t - 0.1           # nothing arrived since the last write
+    with caplog.at_level('INFO'):
+        engine._out(t, 1000.0)
+    lines = [r for r in caplog.records if 'telemetry paused' in r.getMessage()]
+    assert len(lines) == 1 and lines[0].levelname == 'INFO' and 'the game sent nothing' in lines[0].getMessage()
+    assert not any(r.levelname == 'WARNING' and 'engine late' in r.getMessage() for r in caplog.records)
 
 
 def test_a_slow_pass_is_noted_and_arms_the_stack_dump(caplog):

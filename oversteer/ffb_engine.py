@@ -142,6 +142,7 @@ OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_PULL = False                     # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
 OVERALL_PULL_LEVEL = 35                  # ... and its level, % of the physical scrub radius
+OVERALL_COLUMN_DAMPING = 60              # "Column damping" default: % of the real steering column's damping the knee mapping plays
 FULL = 32767                             # ext_force full scale (an FF_CONSTANT level at 0x4000)
 
 
@@ -578,9 +579,14 @@ class RackForce:
                                          # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car)
     CLASSIC_SCALE = COLUMN_SCALE         # the classic mapping's uniform scale: the p99-based impedance scale of the drive
                                          # the classic feel was tuned on (the Fabia, p99 573 Nm), frozen
-    DAMPING_SCALE = 1.0                  # ('knee' mapping) the column damping is played 1:1 like the torque under the knee: at 1:1 the
-                                         # centring loop needs it (slide sim, drive 20261102-220623: 0.17 Nm s/rad in all
-                                         # settles in 0.51 s, 4 % overshoot; the wheel's own 0.055 alone rings, 13 crossings)
+    DAMPING_SCALE = OVERALL_COLUMN_DAMPING / 100.0   # ('knee' mapping) the share of the real column's damping (0.17 Nm s/rad) played,
+                                         # the "Column damping" setting (damping_pct). 1:1 settles best (slide sim, drive
+                                         # 20261102-220623: 0.51 s, 4 % overshoot; the wheel's own 0.055 alone rings, 13
+                                         # crossings) but drags 0.9 Nm at the p90 wheel speed (308 deg/s) on gravel (capture
+                                         # 20261103-112548), too much resistance. Sweep there: 100 %: overshoot 1 % median /
+                                         # 5 % worst, drag 0.91 Nm; 60 %: total 0.102 Nm s/rad, settle 0.59 s, overshoot 7 % /
+                                         # 19 %, 2 crossings (the default); 50 %: 11 % / 26 %
+    damping_pct = OVERALL_COLUMN_DAMPING # the setting as applied (%); DAMPING_SCALE stays the default
     # The aligning torque split (feature flag, off: the driver's local spring `ffb_align` does not exist yet). With
     # it on, force() plays only the residual: the wanted rim torque less the spring the driver will render
     # (ffb_spring.DriverSpring: k clamped to `align_k_limit`, tau_max, slew and fades), through ext_force; the spring's
@@ -993,8 +999,9 @@ class RackForce:
         return SCRUB * self.pull_level if self.pull_on else 0.0
 
     def damping_scale(self):
-        """The column damping's scale: the impedance scale in the classic mapping, DAMPING_SCALE (1:1) in the knee one."""
-        return self.impedance() if self.classic() else self.DAMPING_SCALE
+        """The column damping's scale: the impedance scale in the classic mapping, the "Column damping" share (damping_pct,
+        60 % by default) of the real column's in the knee one."""
+        return self.impedance() if self.classic() else self.damping_pct / 100.0
 
     def impedance(self, ratio=None, assist=None):
         """The scale of the column's damping, friction and stiffness sent to the driver (ffb_dynamics.column_targets):
@@ -1581,6 +1588,7 @@ class FfbEngine:
         self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
         self._kick_req = None            # "Kickback": (on, level %) from the GUI
+        self._damping_req = None         # "Column damping" (% of the real column's) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
         self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
@@ -1770,6 +1778,12 @@ class FfbEngine:
         self._kick_req = (bool(on), min(max(float(level), 0.0), 100.0))
         self._wake.set()
 
+    def set_column_damping(self, pct):
+        """Column damping: 0..100 % of the real steering column's damping played in the knee mapping; the dynamics stage
+        rewrites ffb_dyn_damping when its target changes."""
+        self._damping_req = min(max(float(pct), 0.0), 100.0)
+        self._wake.set()
+
     def car_properties(self):
         """(car, caster trail m, scrub radius m) as the ACR model holds them for the current car, None before one."""
         model = self.model
@@ -1907,12 +1921,17 @@ class FfbEngine:
         if took > LATE_PASS:
             self._late(end, "pass took %.0f ms (phase %s, mode %s)" % (took * 1000.0, self._phase, self._mode))
 
-    def _late(self, now, what):
-        """A late pass or write gap: one warning per LATE_LOG_EVERY, with the count since the last."""
+    def _late(self, now, what, paused=False):
+        """A late pass or write gap: one warning per LATE_LOG_EVERY, with the count since the last. A gap in which no
+        sample arrived (`paused`: the game sent nothing) is logged at INFO instead, on the same limit."""
         self._late_count += 1
         if now - self._late_at >= LATE_LOG_EVERY:
-            logging.warning("Countersteer FFB: engine late: %s (%d in the last %.0f s)", what, self._late_count,
-                            min(now - self._late_at, 999.0))
+            if paused:
+                logging.info("Countersteer FFB: %s (%d in the last %.0f s)", what, self._late_count,
+                             min(now - self._late_at, 999.0))
+            else:
+                logging.warning("Countersteer FFB: engine late: %s (%d in the last %.0f s)", what, self._late_count,
+                                min(now - self._late_at, 999.0))
             self._late_at, self._late_count = now, 0
 
     def step(self, now=None):
@@ -1975,6 +1994,8 @@ class FfbEngine:
             self.model.pull_on, self.model.pull_level = self._pull_req[0], self._pull_req[1] / 100.0
         if self._kick_req is not None:
             self.model.kick_on, self.model.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
+        if self._damping_req is not None:
+            self.model.damping_pct = self._damping_req
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
             self.addon.set_strength(lightness / 100.0)
@@ -2418,6 +2439,7 @@ class FfbEngine:
         value = int(round(level / comp))
         saturated = abs(value) > FULL
         value = min(max(value, -FULL), FULL)
+        prev_written = self._written_at
         self._written_at = t
         self._write_pending = False
         try:
@@ -2426,8 +2448,12 @@ class FfbEngine:
             self._last_value = self._base_value = value
             mono = time.monotonic()
             if self._write_mono is not None and mono - self._write_mono > LATE_PASS and self._phase == 'on':
-                self._late(mono, "ext_force written %.0f ms after the last write (the pass before took %.0f ms)"
-                           % ((mono - self._write_mono) * 1000.0, self._pass_took * 1000.0))
+                gap = (mono - self._write_mono) * 1000.0
+                if prev_written is not None and (self._arrived_at is None or self._arrived_at <= prev_written):
+                    self._late(mono, "telemetry paused %.0f ms (the game sent nothing)" % gap, paused=True)
+                else:
+                    self._late(mono, "ext_force written %.0f ms after the last write (the pass before took %.0f ms)"
+                               % (gap, self._pass_took * 1000.0))
             self._write_mono = mono if self._phase == 'on' else None
             if ffb_record.current is not None:
                 ffb_record.log(t, 'ext_force', value)
@@ -2850,7 +2876,7 @@ class FfbEngine:
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, rim model %.1f:1 assist %.1f wheel %.1f Nm (car p99 %.0f Nm), "
-                     "mapping %s, 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, texture %s%s)", self._verdict.game, self._verdict.rate,
+                     "mapping %s, 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,
@@ -2858,7 +2884,7 @@ class FfbEngine:
                      m.mapping, m.knee * 100.0, m.top_torque(),
                      '%.0f %%' % (m.pull_level * 100.0) if m.pull_on else 'off',
                      '%.0f %%' % (m.kick_level * 100.0) if m.kick_on else 'off',
-                     self.texture.describe(),
+                     m.damping_pct, self.texture.describe(),
                      "; app_gain on: the game's FF_GAIN scales its force but not ours" if self._app_gain else '')
         self._dyn_start(t)
 

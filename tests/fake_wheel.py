@@ -138,6 +138,7 @@ class FakeController:
     apply_countersteer_strength = Gui.apply_countersteer_strength
     apply_countersteer_mapping = Gui.apply_countersteer_mapping
     apply_countersteer_knee = Gui.apply_countersteer_knee
+    apply_countersteer_column_damping = Gui.apply_countersteer_column_damping
     apply_countersteer_drive_pull = Gui.apply_countersteer_drive_pull
     apply_countersteer_kick = Gui.apply_countersteer_kick
     apply_countersteer_linearity = Gui.apply_countersteer_linearity
