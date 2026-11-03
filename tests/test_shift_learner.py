@@ -992,3 +992,10 @@ def test_the_slope_is_read_in_the_games_axes():
             raw = {'acr': (n * 3.0, n * 0.3, 0.0), 'wrcg': (n * 3.0, 0.0, n * 0.3)}[game]
             learner._positions.append(plan_xyz(game, raw))
         assert abs(learner._grade() - 0.3 / math.hypot(3.0, 0.3)) < 1e-6, game
+
+
+def test_best_bands_pause_gives_the_same_bands(tmp_path):
+    learner = ShiftLearner(str(tmp_path / 'telemetry.db'))
+    drive(learner)
+    exits(learner)
+    assert learner.car.best_bands(resamples=4, pause=0.0005) == learner.car.best_bands(resamples=4)

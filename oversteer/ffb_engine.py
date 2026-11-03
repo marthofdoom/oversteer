@@ -75,9 +75,11 @@ Every sysfs write happens on the engine thread; the GUI only sets requests
 (set_enabled, set_device) and reads `status`."""
 import atexit
 import collections
+import faulthandler
 import logging
 import math
 import os
+import sys
 import threading
 import time
 from locale import gettext as _
@@ -393,10 +395,21 @@ CASTER_TRAIL = 0.027                    # m
 SCRUB = 0.0155                          # m: the physical scrub radius; the steering force plays it only as "Drive pull" (pull_scrub)
 
 
-def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB):
+# The pneumatic trail the steering force believes: tp = -Mz / Fy of the front pair, kept within [TP_MIN, TP_MAX] m
+# (audit of drives 20261102-235822 and -192230: a real trail is at most ~1/6 of the contact length; p99 under
+# 0.4 rad of slip is 30-46 mm; ACR's Mz spikes at landings imply 107-110 mm and flipped the force by +-0.68 of full
+# scale in 25 ms; with the clamp the opposite-sign high-slip runs fell from 8 to 1). Only the steering path clamps
+# (rim_torque); the fit and the classifier read the game's Mz as it is.
+TP_MIN = -0.02                          # m
+TP_MAX = 0.05                           # m
+TP_FY_MIN = 500.0                       # N: under this |Fy| the implied trail means nothing (Mz over a near-zero Fy) and the game's Mz stands
+
+
+def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB, clamp=False):
     """Steering torque about the kingpins (Nm, front Mz's sign): FL + FR Mz plus the lateral forces' caster
     arm, -trail * (FL + FR Fy) (CASTER_TRAIL unless the car's own is known), and the scrub-radius couple of the driven or braked front axle,
-    -scrub * (Fx_FL - Fx_FR) (SCRUB likewise). Terms without their forces are left out; None without Mz."""
+    -scrub * (Fx_FL - Fx_FR) (SCRUB likewise). Terms without their forces are left out; None without Mz.
+    `clamp`: Mz is first limited to the implied pneumatic trail TP_MIN..TP_MAX of the front Fy (Mz ~ -tp * Fy)."""
     mz = front_mz(sample)
     if mz is None:
         return None
@@ -404,6 +417,9 @@ def front_torque(sample, trail=CASTER_TRAIL, scrub=SCRUB):
     if fy is not None:
         side = fy[0] + fy[1]
         if math.isfinite(side):
+            if clamp and abs(side) >= TP_FY_MIN:
+                lo, hi = sorted((-TP_MAX * side, -TP_MIN * side))
+                mz = min(max(mz, lo), hi)
             mz -= trail * side
     if fx is not None:
         couple = fx[0] - fx[1]
@@ -943,7 +959,7 @@ class RackForce:
         # per-car scrub (self.scrub) is no longer played, it only serves the fit and the cross-check
         scrub = self.pull_scrub() if scrub is None else scrub
         hyd = not self.classic()
-        mz = front_torque(sample, trail, scrub)
+        mz = front_torque(sample, trail, scrub, clamp=True)
         if mz is None:
             return None
         ratio = self.ratio if ratio is None else ratio
@@ -1417,6 +1433,14 @@ KEEP_WRITE = 0.010                       # s: ext_force is written at least this
 MIN_WRITE = 0.001 - 1e-6                 # s: and never more often than this (RBR, BeamNG)
 WRITE_GAP = 1.0                          # s without an ext_force write while 'on': the driver's watchdog has given
                                          # the game its force back (and blocks ext_force): a release, then a new take-over
+LATE_PASS = 0.030                        # s: a pass (or the time between ext_force writes) longer than this is logged
+LATE_DUMP = 0.100                        # s: a pass this long dumps every thread's stack (faulthandler, no GIL needed)
+LATE_LOG_EVERY = 10.0                    # s between those warnings (with a count of what was left out)
+LATE_DUMP_EVERY = 30.0                   # s between stack dumps
+LATE_DUMP_MAX = 262144                   # bytes: no more dumps once the file is this big
+SWITCH_INTERVAL = 0.001                  # s: the interpreter's thread switch (default 5 ms). Each GIL-releasing call of a
+                                         # pass (a sysfs write, a lock) waits a whole interval for a busy thread (the
+                                         # drive log's bands: audit, engine passes of 100-270 ms every ~10 s)
 LEVEL_CHECK = 0.25                       # s between reads of game_ffb_level while we hold the game muted
 SPIKE = 0.30                             # share of full scale: a jump past this must persist a second sample to pass
 SLEW = FULL / 0.010                      # ext_force units/s: the most the written value moves (full scale in 10 ms;
@@ -1517,6 +1541,7 @@ class FfbEngine:
     any release it waits REARM s before it takes over again."""
 
     POLL = 0.01                          # s: the longest wait for a sample (bounds the stall check)
+    STALL_DUMPS = True                   # faulthandler stack dumps of a long pass (off in the tests)
     STATUS_EVERY = 0.1                   # s between status updates while nothing changes
 
     def __init__(self, clock=time.monotonic, driver=DriverReplace, beamng_source=BeamNGForceSource):
@@ -1639,6 +1664,13 @@ class FfbEngine:
         self._status_at = None
         self.last_stop = None            # why the force last stopped ('off', 'state', 'stall', ...)
         self.writes = 0                  # ext_force writes (tests, the log)
+        self._pass_took = 0.0            # the last pass's length (the late-write warning names it)
+        self._write_mono = None          # monotonic time of the last ext_force write (late-write check)
+        self._late_at = -LATE_LOG_EVERY  # engine-late warnings: last logged, and how many since
+        self._late_count = 0
+        self._dump_at = -LATE_DUMP_EVERY # faulthandler stack dumps (engine-stalls.log)
+        self._dump_file = None
+        self._dump_armed = None
         self.skipped = 0                 # samples the engine never saw (it was behind)
         self.status = IDLE_STATUS
 
@@ -1748,6 +1780,8 @@ class FfbEngine:
         if self._thread is not None:
             return
         self._running = True
+        if sys.getswitchinterval() > SWITCH_INTERVAL:
+            sys.setswitchinterval(SWITCH_INTERVAL)
         self._thread = threading.Thread(target=self._run, name='countersteer-ffb', daemon=True)
         self._thread.start()
         atexit.register(self.stop)
@@ -1781,8 +1815,11 @@ class FfbEngine:
             self._wake.clear()           # before the slot is read: an offer after this wakes the next wait
             if not self._running:
                 break
+            began = time.monotonic()
+            self._arm_dump(began)
             try:
                 self.step()
+                self._pass_done(began)
             except Exception:
                 logging.exception("Countersteer FFB: stopped until the wheel is set again")
                 self._broken, self._available = True, False
@@ -1792,6 +1829,54 @@ class FfbEngine:
                     logging.exception("Countersteer FFB: restoring the game's force")
 
     # -- the engine thread --
+
+    def _arm_dump(self, began):
+        """Have faulthandler (its own C thread: it needs no GIL) write every thread's stack if this pass takes
+        LATE_DUMP, to engine-stalls.log in the log folder; at most once per LATE_DUMP_EVERY, until the file is big."""
+        if not self.STALL_DUMPS or began - self._dump_at < LATE_DUMP_EVERY:
+            self._cancel_dump()
+            return
+        try:
+            if self._dump_file is None:
+                from . import diagnostics
+                folder = diagnostics.log_dir()
+                os.makedirs(folder, exist_ok=True)
+                path = os.path.join(folder, 'engine-stalls.log')
+                if os.path.exists(path) and os.path.getsize(path) > LATE_DUMP_MAX:
+                    self._dump_at = float('inf')
+                    return
+                self._dump_file = open(path, 'a')
+            faulthandler.dump_traceback_later(LATE_DUMP, file=self._dump_file)
+            self._dump_armed = began
+        except Exception:
+            self._dump_at = float('inf')                # not available here: do not try again
+
+    def _cancel_dump(self):
+        if self._dump_armed is not None:
+            faulthandler.cancel_dump_traceback_later()
+            self._dump_armed = None
+
+    def _pass_done(self, began):
+        """After a pass: a dump that fired is noted (and not armed again for a while); a pass longer than LATE_PASS is
+        logged, at most once per LATE_LOG_EVERY with how many were left out."""
+        end = time.monotonic()
+        took = self._pass_took = end - began
+        if self._dump_armed is not None:
+            self._cancel_dump()
+            if took >= LATE_DUMP:
+                self._dump_at = end
+                logging.warning("Countersteer FFB: a pass took %.0f ms; every thread's stack is in engine-stalls.log",
+                                took * 1000.0)
+        if took > LATE_PASS:
+            self._late(end, "pass took %.0f ms (phase %s, mode %s)" % (took * 1000.0, self._phase, self._mode))
+
+    def _late(self, now, what):
+        """A late pass or write gap: one warning per LATE_LOG_EVERY, with the count since the last."""
+        self._late_count += 1
+        if now - self._late_at >= LATE_LOG_EVERY:
+            logging.warning("Countersteer FFB: engine late: %s (%d in the last %.0f s)", what, self._late_count,
+                            min(now - self._late_at, 999.0))
+            self._late_at, self._late_count = now, 0
 
     def step(self, now=None):
         """One pass: requests, then the newest sample if there is one, else
@@ -2300,6 +2385,11 @@ class FfbEngine:
             self._driver.force(value)
             self.writes += 1
             self._last_value = self._base_value = value
+            mono = time.monotonic()
+            if self._write_mono is not None and mono - self._write_mono > LATE_PASS and self._phase == 'on':
+                self._late(mono, "ext_force written %.0f ms after the last write (the pass before took %.0f ms)"
+                           % ((mono - self._write_mono) * 1000.0, self._pass_took * 1000.0))
+            self._write_mono = mono if self._phase == 'on' else None
             if ffb_record.current is not None:
                 ffb_record.log(t, 'ext_force', value)
             if self._cap_level is not None:

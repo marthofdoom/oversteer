@@ -106,6 +106,9 @@ DRAG_C2 = 3.5e-4                 # 1/m: aerodynamic drag / mass, typical car
 BOOST_HOLD = 0.8                 # s of full throttle before power counts: turbo lag (calibrate; learnt per car later)
 BOOTSTRAP_RESAMPLES = 20         # for the confidence band of each best change up
 BANDS_EVERY = 10.0               # seconds between working the bands out again, per car
+BANDS_PAUSE = 0.001              # s slept between bootstrap resamples on a background thread: pure Python holds the
+                                 # GIL for ~1.5 ms a resample (100+ ms in all), and each of the FFB engine's GIL-releasing
+                                 # calls then waits for it (audit: engine stalls of 100-270 ms every ~10.3 s)
 SAVE_EVERY = 20.0                # seconds between saves while learning
 SESSION_GAP = 120.0              # seconds without telemetry that end a session (a pause does not)
 TIPS_SHOWN = 3                   # coaching tips at a time, the biggest first
@@ -487,11 +490,12 @@ class CarModel:
             return (ceiling, coverage)
         return None
 
-    def best_bands(self, resamples=BOOTSTRAP_RESAMPLES, seed=0):
+    def best_bands(self, resamples=BOOTSTRAP_RESAMPLES, seed=0, pause=0.0):
         """{gear: (low, high)}: the 10th and 90th percentiles of the best
         change up over bootstrap resamples of the power samples, for the
         gears whose best is known. Slow (tens of ms): the drive-log thread
-        works it out, at most every BANDS_EVERY seconds per car."""
+        works it out, at most every BANDS_EVERY seconds per car. `pause`: seconds to
+        sleep (GIL released) between resamples, so other threads get their turn."""
         rng = random.Random(seed)
 
         def resample(samples):
@@ -501,7 +505,13 @@ class CarModel:
         for gear in gears:
             if gear + 1 not in gears or self.best_shift(gear) is None:
                 continue
-            found = [b[0] for b in (self.best_shift(gear, resample) for _ in range(resamples)) if b is not None]
+            found = []
+            for _ in range(resamples):
+                if pause:
+                    time.sleep(pause)
+                b = self.best_shift(gear, resample)
+                if b is not None:
+                    found.append(b[0])
             if len(found) >= resamples // 2:
                 bands[gear] = (_quantile(found, 0.1), _quantile(found, 0.9))
         return bands
@@ -1533,7 +1543,7 @@ class ShiftLearner:
         cached = self._bands.get(car.key)
         now = time.monotonic()
         if cached is None or now - cached[0] > BANDS_EVERY:
-            cached = (now, car.best_bands())
+            cached = (now, car.best_bands(pause=BANDS_PAUSE))
             bands = dict(self._bands)
             bands[car.key] = cached
             self._bands = bands                  # a new dict: the listener reads it without the lock

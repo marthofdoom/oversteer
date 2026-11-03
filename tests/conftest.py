@@ -1,6 +1,6 @@
 import pytest
 
-from oversteer import ffb_carprops, rbr_fingerprint, rbr_install, stage_tables
+from oversteer import ffb_engine, ffb_carprops, rbr_fingerprint, rbr_install, stage_tables
 
 
 @pytest.fixture(autouse=True)
@@ -10,6 +10,12 @@ def _no_learnt_finishes():
     stage_tables.set_learnt({})
     yield
     stage_tables.set_learnt({})
+
+
+@pytest.fixture(autouse=True)
+def _no_stall_dump_file(monkeypatch):
+    """The engine thread writes no engine-stalls.log in the real log folder."""
+    monkeypatch.setattr(ffb_engine.FfbEngine, 'STALL_DUMPS', False)
 
 
 @pytest.fixture(autouse=True)
