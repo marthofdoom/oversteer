@@ -85,12 +85,12 @@ def wheel_text(values):
 def column_targets(scale, peak_nm, own=DEFAULT_WHEEL, removal=False):
     """(ffb_dyn_damping, ffb_dyn_friction) for a car on a wheel: the car's column values at the rim times the
     impedance scale s, as shares of the wheel's peak torque (None: the 2.1 Nm class), in the driver's units. They are
-    the column's TOTAL, the wheel's own included; below the wheel's own the driver would take friction out (the
-    wheel lighter than the column: opt-in, `removal`), so without it neither goes under the wheel's own."""
+    the column's TOTAL, the wheel's own included. The driver renders target - own: below the wheel's own it takes friction out (the
+    wheel lighter than the column: opt-in, `removal`), so friction is held at the wheel's own without it. Damping is
+    not floored: the driver limits what it removes (half the wheel's own) by its passivity budget."""
     peak = peak_nm or wheel_torque.DEFAULT_PEAK_NM
     damping = COLUMN_DAMPING_NMS_RAD * math.pi / 180.0 * scale / peak * 1e6
     friction = COLUMN_COULOMB_NM * scale / peak * 1e4
-    damping = max(damping, own[0])
     if not removal:
         friction = max(friction, own[2])
     return (int(_clamp(round(damping), 0, COLUMN_DAMPING_MAX)), int(_clamp(round(friction), 0, COLUMN_FRICTION_MAX)))
@@ -109,6 +109,82 @@ def align_text(theta_a_left_deg, k_fs_per_deg, tau_max_fs, range_deg):
     k = int(_clamp(round(k_fs_per_deg * 1e6), 0, ALIGN_K_MAX))
     tau = int(_clamp(round(tau_max_fs * 1e4), 0, ALIGN_TAU_MAX))
     return '%d %d %d' % (align_target(theta_a_left_deg, range_deg), k, tau)
+
+
+class FrameCheck:
+    """Does the wheel's measured position follow the game's steering the way the alignment spring assumes? The
+    spring's target is in the driver's position frame (+ toward increasing ABS_X, over the current range); the engine
+    works it out as -steer x range / 2. A wrong sign would pull the wheel toward the mirror image of where the tyres
+    point, a wrong scale (a range the game does not map to its lock) to the wrong angle. Pairs of (expected, measured)
+    degrees are kept for WINDOW seconds, FEED_EVERY apart, while the car moves; the check passes once MIN_SECONDS of
+    them span at least MIN_SPAN of the steering (steer -1..1) with correlation >= MIN_R and a slope within SLOPE.
+    It keeps being judged on the window: a failure turns it off again."""
+
+    WINDOW = 40.0
+    MIN_SECONDS = 20.0
+    MIN_SPAN = 0.15
+    MIN_R = 0.95
+    SLOPE = (0.8, 1.25)
+    FEED_EVERY = 0.05
+    JUDGE_EVERY = 1.0
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._pairs = []                 # (t, steer, expected, measured)
+        self._fed = None
+        self._judged = None
+        self.ok = False
+        self.reason = None               # why not, once judged ('waiting' until there is enough)
+        self.r = self.slope = None
+        self.reasons_logged = set()
+
+    def feed(self, t, steer, expected, measured):
+        """One pair (the caller feeds moving samples only); judged once a second."""
+        if self._fed is not None and 0.0 <= t - self._fed < self.FEED_EVERY:
+            return self.ok
+        self._fed = t
+        pairs = self._pairs
+        pairs.append((t, steer, expected, measured))
+        while pairs and t - pairs[0][0] > self.WINDOW:
+            pairs.pop(0)
+        if self._judged is None or not 0.0 <= t - self._judged < self.JUDGE_EVERY:
+            self._judged = t
+            self._judge()
+        return self.ok
+
+    def _judge(self):
+        pairs = self._pairs
+        self.ok, self.r, self.slope = False, None, None
+        if len(pairs) * self.FEED_EVERY < self.MIN_SECONDS:
+            self.reason = 'waiting'
+            return
+        steers = [p[1] for p in pairs]
+        if max(steers) - min(steers) < self.MIN_SPAN:
+            self.reason = 'waiting'
+            return
+        n = len(pairs)
+        mx = sum(p[2] for p in pairs) / n
+        my = sum(p[3] for p in pairs) / n
+        sxx = sum((p[2] - mx) ** 2 for p in pairs)
+        syy = sum((p[3] - my) ** 2 for p in pairs)
+        sxy = sum((p[2] - mx) * (p[3] - my) for p in pairs)
+        if sxx <= 1e-9 or syy <= 1e-9:
+            self.reason = 'waiting'
+            return
+        self.r, self.slope = sxy / math.sqrt(sxx * syy), sxy / sxx
+        if self.r < self.MIN_R:
+            self.reason = ("correlation %.2f (inverted axis or another range)" if self.r < 0 else "correlation %.2f") % self.r
+        elif not self.SLOPE[0] <= self.slope <= self.SLOPE[1]:
+            self.reason = "scale %.2f of the expected" % self.slope
+        else:
+            self.reason = None
+            self.ok = True
+
+    def failed(self):
+        """The reason the wheel does not match, None while waiting or when it does."""
+        return None if self.ok or self.reason in (None, 'waiting') else self.reason
 
 
 class Dynamics:

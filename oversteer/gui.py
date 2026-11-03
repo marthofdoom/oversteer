@@ -514,6 +514,7 @@ class Gui:
             if self.device.is_ready():
                 self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
                 self.ffb_engine.set_device(self.device.dev_path)
+                self.ffb_engine.set_position_source(self._position_source(self.device))
             self.apply_wheel_correction()
 
     # Today (before the "apply on plug" flag) a hot-plugged wheel only got
@@ -574,6 +575,7 @@ class Gui:
         # The old wheel's game force is restored by the engine before it takes the new one
         self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
         self.ffb_engine.set_device(self.device.dev_path if ready else None)
+        self.ffb_engine.set_position_source(self._position_source(self.device) if ready else None)
         self.ffb_pending = {}
         self.ui.safe_call(self.ui.reset_ffb_meter)
 
@@ -703,9 +705,32 @@ class Gui:
             if live[2] > 0.0:
                 self._note_live_friction(live[0] / 1e4)
             extra.append(_("wheel friction {:.1f} %").format(live[0] / 100.0))
+        note = getattr(self.ffb_engine, 'align_note', None)
+        if note:
+            extra.append(note)
         if extra:
             wheel = '; '.join(filter(None, [wheel] + extra))
         return car, wheel
+
+    def _position_source(self, device):
+        """For the engine: a callable giving the physical wheel's ABS_X (0..65535) now, None when it can't be read.
+        The wheel's own node, not a proxy's virtual device: the driver's alignment target is in the wheel's axis. It
+        opens the node when first called and again after an error."""
+        if device is None or not getattr(device, 'dev_name', None):
+            return None
+        state = {'dev': None}
+
+        def read():
+            from evdev import InputDevice, ecodes
+            try:
+                if state['dev'] is None:
+                    state['dev'] = InputDevice(device.dev_name)
+                value = state['dev'].absinfo(ecodes.ABS_X).value
+                return device._normalized_axis(ecodes.ABS_X, value)[1]
+            except (OSError, AttributeError):
+                state['dev'] = None
+                return None
+        return read
 
     LIVE_FRICTION_STEP = 0.15           # the live friction must move this share from the one applied to be applied again
 

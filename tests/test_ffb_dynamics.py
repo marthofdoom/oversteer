@@ -53,11 +53,12 @@ def test_a_result_without_the_figures_gives_none(bad):
 def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_own():
     d, f = fd.column_targets(0.4, 2.1, (470, 670, 500, 1250, 5000))
     assert d == round(0.17 * math.pi / 180 * 0.4 / 2.1 * 1e6) and f == round(0.75 * 0.4 / 2.1 * 1e4)
-    # a light scale: below the wheel's own, held at it unless removal is asked for
+    # a light scale: friction held at the wheel's own unless removal is asked for; damping is the car's (the driver
+    # renders target - own and limits what it removes)
     d, f = fd.column_targets(0.1, 2.1, (470, 670, 500, 1250, 5000))
-    assert d == 470 and f == 500
+    assert d == round(0.17 * math.pi / 180 * 0.1 / 2.1 * 1e6) < 470 and f == 500
     d, f = fd.column_targets(0.1, 2.1, (470, 670, 500, 1250, 5000), removal=True)
-    assert d == 470 and f == round(0.75 * 0.1 / 2.1 * 1e4) < 500
+    assert f == round(0.75 * 0.1 / 2.1 * 1e4) < 500
     # an unknown wheel counts as the G29's 2.1 Nm; the figures stay in the driver's range
     assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 2.1)
     assert fd.column_targets(50.0, 2.1) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
@@ -306,8 +307,32 @@ def dyn_wheel(tmp_path, **extra):
     return path
 
 
+class Pos:
+    """The physical wheel's ABS_X as the engine reads it: follows the game's steering (steer + = left = decreasing
+    ABS_X); `sign` -1 is an inverted axis, `scale` another range than the game maps."""
+
+    def __init__(self, sign=1.0, scale=1.0):
+        self.sign, self.scale, self.raw = sign, scale, 32767
+
+    def __call__(self):
+        return self.raw
+
+    def follow(self, steer):
+        self.raw = int(round(min(max((1.0 - self.sign * self.scale * steer) / 2.0, 0.0), 1.0) * 65535))
+
+
+POS = Pos()
+
+
+@pytest.fixture(autouse=True)
+def _short_frame_window(monkeypatch):
+    monkeypatch.setattr(fd.FrameCheck, 'MIN_SECONDS', 2.0)
+    POS.sign, POS.scale, POS.raw = 1.0, 1.0, 32767
+
+
 def playing_engine(path):
     engine = fe.FfbEngine(clock=lambda: 0.0, driver=tfe.FakeDriver)
+    engine.set_position_source(POS)
     engine.set_device(path)
     engine.set_enabled(True)
     engine.step(0.0)
@@ -323,6 +348,7 @@ def feed(engine, t, seconds, **kw):
         s.tyre_slip_angle, s.pos, s.forward = (0.04, 0.04, 0, 0), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
         for k, v in kw.items():
             setattr(s, k, v)
+        POS.follow(s.steer)
         tfe.upload(tfe.game_raw(s))
         engine.offer(t, s)
         engine.step(t)
@@ -335,7 +361,7 @@ def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp
     engine, t = playing_engine(path)
     want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak)
     assert (int(open(path + '/ffb_dyn_damping').read()), int(open(path + '/ffb_dyn_friction').read())) == want
-    assert want[0] >= 470 and want[1] >= 500
+    assert want[1] >= 500
     engine.set_enabled(False)
     engine.step(t)
     feed(engine, t, 1.0)
@@ -367,8 +393,8 @@ def test_the_spring_plays_only_when_the_split_is_ready_and_the_driver_has_it(tmp
     m = engine.model
     m.ratio_known = m.lock_known = True
     m._align.s[0] = 1e4
-    t = feed(engine, t, 0.5)
-    assert m.align_on
+    t = feed(engine, t, 3.5)
+    assert m.align_on and engine.align_note is None
     words = open(path + '/ffb_align').read().split()
     assert len(words) == 3 and int(words[1]) > 0 and 0 < int(words[2]) <= 8000
     # the toggle off: the spring is set to 0 and the whole torque goes through ext_force again
@@ -378,13 +404,109 @@ def test_the_spring_plays_only_when_the_split_is_ready_and_the_driver_has_it(tmp
     engine.stop()
 
 
+def ready_engine(path):
+    engine, t = playing_engine(path)
+    m = engine.model
+    m.ratio_known = m.lock_known = True
+    m._align.s[0] = 1e4
+    return engine, m, t
+
+
+def test_an_inverted_axis_keeps_the_spring_off_and_says_why(tmp_path, caplog):
+    POS.sign = -1.0
+    engine, m, t = ready_engine(dyn_wheel(tmp_path))
+    with caplog.at_level('WARNING'):
+        t = feed(engine, t, 6.0)
+    assert not m.align_on and open(engine._path + '/ffb_align').read().startswith('0 0 0')
+    assert "doesn't match the game's steering" in engine.align_note and 'inverted' in engine.align_note
+    assert len([r for r in caplog.records if "doesn't match" in r.getMessage()]) == 1       # said once
+    engine.stop()
+
+
+def test_a_wheel_range_the_game_does_not_map_keeps_it_off(tmp_path):
+    POS.scale = 0.5                                                     # half the travel for the same steering
+    engine, m, t = ready_engine(dyn_wheel(tmp_path))
+    feed(engine, t, 6.0)
+    assert not m.align_on and 'scale' in engine.align_note
+    engine.stop()
+
+
+def test_a_matching_wheel_turns_it_on_only_after_the_window_and_a_failure_turns_it_off(tmp_path):
+    engine, m, t = ready_engine(dyn_wheel(tmp_path))
+    t = feed(engine, t, 1.0)
+    assert not m.align_on                                               # not enough movement seen yet
+    t = feed(engine, t, 4.0)
+    assert m.align_on and engine.align_note is None
+    POS.sign = -1.0                                                     # the axis is inverted from now on (a proxy)
+    t = feed(engine, t, 40.0)
+    assert not m.align_on and engine.align_note
+    engine.stop()
+
+
+def test_no_wheel_position_means_no_spring(tmp_path):
+    engine, m, t = ready_engine(dyn_wheel(tmp_path))
+    engine.set_position_source(None)
+    feed(engine, t, 6.0)
+    assert not m.align_on and 'unavailable' in engine.align_note
+    engine.stop()
+
+
+def test_a_range_change_or_a_new_source_resets_the_check(tmp_path):
+    path = dyn_wheel(tmp_path)
+    engine, m, t = ready_engine(path)
+    t = feed(engine, t, 5.0)
+    assert m.align_on
+    open(path + '/range', 'w').write('540\n')                           # the user changes the range
+    engine._dyn._poll_at = None                                         # (read again at the next sample)
+    t = feed(engine, t, 0.1)
+    assert not m.align_on and not engine._frame.ok                      # the window starts again
+    t = feed(engine, t, 5.0)
+    assert m.align_on
+    engine.set_position_source(Pos())
+    engine.step(t)
+    assert not engine._frame.ok and engine._frame._pairs == []
+    engine.stop()
+
+
+def test_the_games_force_sign_gate_is_required_too(tmp_path):
+    engine, m, t = ready_engine(dyn_wheel(tmp_path))
+    t = feed(engine, t, 5.0)
+    assert m.align_on
+    m.ready = False
+    assert not m.align_ready()
+    engine.stop()
+
+
+def test_the_frame_check_needs_movement_correlation_slope_and_time():
+    def run(sign=1.0, scale=1.0, seconds=25.0, amp=0.3, offset=0.0):
+        c = fd.FrameCheck()
+        c.MIN_SECONDS = 20.0
+        t = 0.0
+        while t < seconds:
+            steer = amp * math.sin(2 * math.pi * 0.3 * t)
+            c.feed(t, steer, -steer * 450.0, sign * scale * -steer * 450.0 + offset)
+            t += 0.05
+        return c
+    assert run().ok and run().failed() is None
+    assert not run(seconds=15.0).ok and run(seconds=15.0).failed() is None           # waiting
+    assert not run(sign=-1.0).ok and 'inverted' in run(sign=-1.0).failed()
+    assert not run(scale=0.5).ok and 'scale' in run(scale=0.5).failed()
+    assert not run(scale=1.4).ok
+    assert run(scale=0.85).ok and run(scale=1.2).ok
+    assert not run(amp=0.05).ok and run(amp=0.05).failed() is None                  # steering barely moved
+    assert run(offset=20.0).ok                                                        # a centre offset is fine
+    c = run()
+    c.reset()
+    assert not c.ok and c._pairs == []
+
+
 def test_a_car_reset_in_the_engine_writes_k_zero(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
     m = engine.model
     m.ratio_known = m.lock_known = True
     m._align.s[0] = 1e4
-    t = feed(engine, t, 0.5)
+    t = feed(engine, t, 3.5)
     assert int(open(path + '/ffb_align').read().split()[1]) > 0
     t = feed(engine, t, 0.01, pos=(900.0, 0.0, 40.0))
     assert open(path + '/ffb_align').read().split()[1] == '0'
@@ -489,6 +611,8 @@ def test_the_info_line_shows_hands_and_the_live_friction(tmp_path):
     for name in ('ffb_hands', 'ffb_dyn_live'):
         os.remove(path + '/' + name)
     assert Gui.countersteer_info(gui)[1] == 'Wheel motor heat: 12 %'
+    gui.ffb_engine.align_note = "wheel position doesn't match the game's steering (x): the alignment spring is off"
+    assert "doesn't match the game's steering" in Gui.countersteer_info(gui)[1]
 
 
 # -- the profile keys --
@@ -561,7 +685,7 @@ def test_the_engine_logs_what_an_offline_replay_needs(tmp_path):
         m = engine.model
         m.ratio_known = m.lock_known = True
         m._align.s[0] = 1e4
-        feed(engine, t, 1.0)
+        feed(engine, t, 3.5)
         engine.stop()
     finally:
         sampler.stop()

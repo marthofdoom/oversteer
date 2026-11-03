@@ -1274,6 +1274,11 @@ class FfbEngine:
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
         self._dyn_req = (True, True, False)     # column feel, local alignment spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
+        self._pos_req = None             # () -> (ABS_X 0..65535, ...) of the physical wheel, or None (ffb_dynamics.FrameCheck)
+        self._pos_src = None
+        self._frame = ffb_dynamics.FrameCheck()
+        self._frame_range = None
+        self.align_note = None           # why the alignment spring is not played (the info line shows it)
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
@@ -1362,6 +1367,12 @@ class FfbEngine:
         """The profile's switches for the driver's virtual steering dynamics: the car's column feel (damping and
         friction), the local alignment spring, and friction removal (a column lighter than the wheel's own)."""
         self._dyn_req = (bool(column), bool(align), bool(removal))
+        self._wake.set()
+
+    def set_position_source(self, source):
+        """A callable returning the physical wheel's ABS_X now (0..65535 over its range), None if it can't be read:
+        the alignment spring is played only once the wheel's position is seen to follow the game's steering."""
+        self._pos_req = (source,)
         self._wake.set()
 
     def set_wheel_result(self, result):
@@ -1518,6 +1529,9 @@ class FfbEngine:
             self._inhibit_req = False
             self._quick_release('inhibited', now)
         self._dyn_apply()
+        if self._pos_req is not None and self._pos_req[0] is not self._pos_src:
+            self._pos_src = self._pos_req[0]
+            self._frame.reset()
         path = self._path_req
         if path != self._path:
             self._release('device', now)
@@ -1526,6 +1540,7 @@ class FfbEngine:
                 self._driver.close()
             self._path, self._driver, self._available, self._broken = path, None, False, False
             self._dyn = None
+            self._frame.reset()
             if path is not None:
                 self._dyn = ffb_dynamics.DynStage(path, ffb_record.log)
                 self._dyn_apply()
@@ -1573,7 +1588,37 @@ class FfbEngine:
         if stage is not None:
             stage.start(t)
 
-    def _dyn_play(self, t):
+    def _frame_ok(self, t, sample, stage):
+        """The wheel's measured position follows the game's steering (FrameCheck), judged from the moving samples
+        while the spring is off; False (and a note, a log line once) when it does not or cannot be seen."""
+        check = self._frame
+        if stage.range != self._frame_range:
+            self._frame_range = stage.range
+            check.reset()                # a new range: the window says nothing about it
+        steer = getattr(sample, 'steer', None)
+        if self._pos_src is not None and stage.range and steer is not None and math.isfinite(steer) \
+                and (sample.speed or 0.0) > MIN_SPEED:
+            try:
+                raw = self._pos_src()
+            except Exception:
+                raw = None
+            if raw is not None:
+                half = stage.range / 2.0
+                check.feed(t, steer, -steer * half, raw / 65535.0 * stage.range - half)
+        if self._pos_src is None:
+            self.align_note = _("wheel position unavailable: the alignment spring stays off")
+        elif check.failed():
+            reason = check.failed()
+            self.align_note = _("wheel position doesn't match the game's steering ({}): the alignment spring is off").format(reason)
+            if reason.split()[0] not in check.reasons_logged:
+                check.reasons_logged.add(reason.split()[0])
+                logging.warning("Countersteer FFB: wheel position doesn't match the game's steering: %s; the aligning "
+                                "spring stays off", reason)
+        else:
+            self.align_note = None
+        return check.ok and self._pos_src is not None
+
+    def _dyn_play(self, t, sample):
         """The driver's virtual steering dynamics beside ACR's force: the car's column damping and friction, and the
         local alignment spring (the model plays the residual) once the car's ratio and lock are known and the fit is
         ready, the driver reports a spring and the wheel's range is known."""
@@ -1586,7 +1631,8 @@ class FfbEngine:
             # the spring is written scaled by the overall strength: the driver's limit on k is on the scaled value
             model.align_k_limit = stage.k_limit / max(self._strength, 0.05)
         model.wheel_range = stage.range
-        want = stage.can_align() and model.align_ready()
+        # (align_ready includes the rack force's own gate: the game's raw force agrees with our sign)
+        want = stage.can_align() and model.align_ready() and self._frame_ok(t, sample, stage)
         if model.align_on and not want:
             stage.align_off(t)
         if want and not model.align_on:
@@ -1737,7 +1783,7 @@ class FfbEngine:
         return 1.0
 
     def _play(self, t, sample):
-        self._dyn_play(t)
+        self._dyn_play(t, sample)
         rack = self.model.force(sample) * self._strength
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
         self._out(t, rack + self.texture.force(t, sample, rack))
