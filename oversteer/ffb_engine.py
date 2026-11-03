@@ -104,8 +104,16 @@ REPLACE_GAP = 0.020                      # s: the longest gap allowed to go gree
 # packet must not hand the force back and forth, 200 ms ramps each way); a
 # gap past STALL stops it anyway.
 HOLD_RATE = 200.0
-HOLD_GAP = 0.050
-STALL = 0.050                            # s without a sample while replacing: stop
+HOLD_GAP = 0.050                         # s: a gap in the packets that the game's physics did not catch up on
+# A game hitch (ACR: the physics step counter stalls, then the packets come in a burst with the counter catching
+# up) is not a fault of the stream: it is held through (the last value written again, easing down) up to HITCH_GAP.
+HITCH_GAP = 0.300
+STALL = 0.300                            # s without a packet while replacing: stop (no burst can follow a gap this long)
+HITCH_CATCHUP = 0.25                     # s after a gap's end in which a step burst marks it a hitch
+HITCH_BURST = 2.0                        # a burst: the step counter moved this many times what the time explains ...
+BURST_SPAN = 0.008                       # s: the step counter's rate is judged over at least this
+HITCH_BURST_MIN = 3                      # ... and at least this many steps
+STEP_RATE = 333.0                        # physics steps a second until the stream shows its own
 NONE_AFTER = 1.0                         # s without a sample: no telemetry
 FH_RATE = 30.0                           # Forza Horizon packets/s for the add-on (it sends ~60, frame-locked)
 FH_RAW_RATE = 30.0                       # the game's constant uploads a second for the add-on ...
@@ -159,6 +167,7 @@ class SupportClassifier:
     def __init__(self):
         self.has_game_ffb_raw = False    # the driver exposes the game's raw force
         self.raw_rate = None             # the game's constant uploads a second (the engine measures it): RBR's force
+        self.external_gaps = False       # the gaps come from note() (every packet), not from the samples fed
         self.reset()
 
     def reset(self, game=None):
@@ -172,6 +181,12 @@ class SupportClassifier:
         self._moving = 0                       # moving entries in the window
         self._first = None                     # when this game's stream started
         self._last = None
+        self._hitch = _WindowMax()             # gaps that ended in a step burst (the game's hitches)
+        self._pending = []                     # (end, gap) of gaps still waiting for a burst to be told from a loss
+        self._prev = None                      # (t, packet_id) of the newest packet noted
+        self._step_rate = STEP_RATE
+        self._recent = collections.deque()     # (t, packet_id) over the last BURST_SPAN or so
+        self._plain_gap = 0.0                  # the longest gap that was not a hitch (the last verdict's)
         self._mz_seen = False                  # this stream has sent front Mz
         self._mz_missing = 0                   # samples in a row without it
         self.mz_live = None                    # Mz judged live (True) or flat (False); None not yet
@@ -182,7 +197,7 @@ class SupportClassifier:
             self.reset(game)
         if self._first is None:
             self._first = t
-        if self._last is not None:
+        if self._last is not None and not self.external_gaps:
             self._gaps.push(t, t - self._last)
         self._last = t
         v5 = sample.packet_id is not None
@@ -202,8 +217,56 @@ class SupportClassifier:
                 self._mz_min.push(t, -mz)
         self._expire(t)
 
+    def note(self, t, packet_id):
+        """One packet's arrival (every one, in order, from the listener: not only the samples the engine took).
+        A gap over REPLACE_GAP is a hitch when the step counter then moves HITCH_BURST times faster than the time
+        explains within HITCH_CATCHUP of its end (the game catching up); until then it waits as pending, held to
+        the hitch limit, and past it without a burst it is a loss."""
+        self.external_gaps = True
+        prev, self._prev = self._prev, (t, packet_id)
+        if prev is None or t - prev[0] > NONE_AFTER or t < prev[0]:
+            self._pending = []
+            self._recent.clear()
+            self._recent.append((t, packet_id))
+            return
+        dt = t - prev[0]
+        steps = None if packet_id is None or prev[1] is None else packet_id - prev[1]
+        # a burst: over the last BURST_SPAN or more the counter moved far faster than the time explains
+        recent = self._recent
+        recent.append((t, packet_id))
+        while len(recent) > 1 and t - recent[1][0] >= BURST_SPAN:
+            recent.popleft()
+        span = t - recent[0][0]
+        moved = None if packet_id is None or recent[0][1] is None else packet_id - recent[0][1]
+        burst = moved is not None and span >= BURST_SPAN and moved >= HITCH_BURST_MIN \
+            and moved >= HITCH_BURST * self._step_rate * span
+        if not burst and steps is not None and steps > 0 and 0.002 < dt < 0.025:
+            rate = min(max(steps / dt, 100.0), 1000.0)
+            self._step_rate += (rate - self._step_rate) * 0.01
+        keep = []
+        for end, gap in self._pending:
+            if burst and t - end <= HITCH_CATCHUP:
+                self._hitch.push(end, gap)
+            elif t - end > HITCH_CATCHUP:
+                self._gaps.push(end, gap)
+            else:
+                keep.append((end, gap))
+        self._pending = keep
+        if dt > REPLACE_GAP:
+            if burst:
+                self._hitch.push(t, dt)
+            else:
+                self._pending.append((t, dt))
+
     def _expire(self, now):
         before = now - WINDOW
+        if self._pending:
+            late = [g for g in self._pending if now - g[0] > HITCH_CATCHUP]
+            if late:
+                for end, gap in late:
+                    self._gaps.push(end, gap)
+                self._pending = [g for g in self._pending if now - g[0] <= HITCH_CATCHUP]
+        self._hitch.expire(before)
         entries = self._entries
         while entries and entries[0][0] < before:
             _t, arrivals, v5, moving = entries.popleft()
@@ -222,7 +285,14 @@ class SupportClassifier:
         self._expire(now)
         game = self.game
         span = min(WINDOW, now - self._first)
-        gap = max(self._gaps.max() or 0.0, now - self._last)
+        if self.external_gaps and self._prev is not None:
+            plain = self._gaps.max() or 0.0
+            hitch = max([self._hitch.max() or 0.0] + [g[1] for g in self._pending] + [now - self._prev[0]])
+            gap = max(plain, hitch)
+            self._plain_gap = plain
+        else:
+            gap = max(self._gaps.max() or 0.0, now - self._last)
+            self._plain_gap = gap
         gap_ms = gap * 1000.0
         if span < WINDOW * 0.9:
             return Verdict('none', 'measuring', game, 0.0, gap_ms)
@@ -248,7 +318,7 @@ class SupportClassifier:
             return Verdict('add-on', 'old-bridge', game, rate, gap_ms)
         if rate < (HOLD_RATE if holding else REPLACE_RATE):
             return Verdict('add-on', 'low-rate', game, rate, gap_ms)
-        if gap > (HOLD_GAP if holding else REPLACE_GAP):
+        if self._plain_gap > (HOLD_GAP if holding else REPLACE_GAP) or gap > (HITCH_GAP if holding else REPLACE_GAP):
             return Verdict('add-on', 'gaps', game, rate, gap_ms)
         if not self._mz_seen or self._mz_missing >= MZ_MISSING_RUN:
             return Verdict('add-on', 'no-mz', game, rate, gap_ms)
@@ -385,9 +455,10 @@ class RackForce:
       over MIN_SPREAD Nm (corners), r(raw, Mz) of READY_FIT or more (positive:
       the sign matches, since ext_force = scale * Mz with scale > 0).
     - While ready: r(raw, Mz) over SHORT_TAU s under KEEP_FIT (while Mz
-      moves) for MISMATCH_FOR s, or no fresh raw for RAW_STALE s while front
-      Mz moved RAW_STALE_DMZ from where it was at the last one, drops it
-      ('mismatch' / 'raw'); the fit then starts again from nothing. Stale
+      moves) for MISMATCH_FOR s drops it ('mismatch'; the fit then starts again
+      from nothing); no fresh raw for RAW_STALE s while front Mz moved what the
+      game's force is due an upload for (_stale_dmz) withdraws it ('raw') with
+      the fit frozen, judged again at the next upload. Stale
       raw with Mz steady (a straight, a game that uploads only on change)
       freezes the fit and keeps it playing.
     - r(raw, Mz) at REVERSED_FIT or lower over the long window: refused
@@ -423,8 +494,11 @@ class RackForce:
     KEEP_FIT = 0.3
     MISMATCH_FOR = 0.5                   # s
     REVERSED_FIT = -0.5
-    RAW_STALE = 0.5                      # s without a fresh raw level while ready ...
-    RAW_STALE_DMZ = 20.0                 # ... and front Mz this far (Nm) from where it was then: dropped
+    RAW_STALE = 2.0                      # s without a fresh raw level while ready ...
+    RAW_STALE_DMZ = None                 # ... and front Mz this far (Nm) from where it was then: held off (None: relative
+    RAW_STALE_FS = 0.1                   # to the force it should have moved: this share of full scale at the fit's scale,
+    RAW_STALE_P99 = 0.15                 # or this share of the car's p99 of |front torque|, whichever is more)
+    STALE_FREEZES = True                 # stale raw freezes the fit until uploads return (False: the fit starts again)
     LOW_SLIP = 0.05                      # rad: front slip angle under this counts for the centring hint
     LEARNS = True                        # the car's trail and scrub are learnt from the game's force (ffb_carprops)
     POOLED_P99 = 540.0                   # Nm: p99 of |front torque| over marth's dump (per car 233-857), the prior
@@ -445,6 +519,7 @@ class RackForce:
     wheel_range = None                   # degrees: the wheel's range. Set, the split is worked out in the wheel's own
                                          # position frame (steer x range / 2, what the driver's target is in); None: in
                                          # the car's steering wheel degrees
+    wheel_slope = 1.0                    # the measured wheel position per degree of -steer x range / 2 (FrameCheck.slope)
     ALIGN_RESET_JUMP = 15.0              # m beyond what the speed explains between two samples: a reset/teleport
     ALIGN_RESET_TURN = 0.5               # cos of the heading change between two samples (60 deg) under which it is one
     ALIGN_RESET_HOLD = 0.5               # s the spring is held at k = 0 after one (the driver fades it in 50 ms)
@@ -533,6 +608,7 @@ class RackForce:
         self.ready = False
         self.waiting = 'raw'             # why not ready: 'raw', 'corners', 'fit', 'mismatch'
         self.fit = self.fit_now = None
+        self._stale = False              # ready was withdrawn on stale raw; the fit is kept and judged again at the next upload
 
     def _torque(self, sample):
         return front_torque(sample, self.trail, self.scrub)
@@ -567,6 +643,8 @@ class RackForce:
         if raw is None:
             self._check_raw(t, mz)
             return                       # the fit is frozen until the game uploads again
+        if self._stale:
+            self._stale = False          # uploads are back: the frozen fit is judged again
         self.moving_time += dt
         self._long.add(mz, raw, dt, abs(raw) < self.RAW_CLIPPED)
         if abs(raw) < self.RAW_CLIPPED:
@@ -611,6 +689,13 @@ class RackForce:
         self.trail, self.scrub = learner.trail, learner.scrub
         ffb_carprops.STORE.put(self.car, self.trail, self.scrub)
 
+    def _stale_dmz(self):
+        """How far front Mz (Nm) must have moved for the game's force to be due an upload: the change that makes
+        RAW_STALE_FS of full scale at the fit's scale, or RAW_STALE_P99 of the car's p99, the larger."""
+        if self.RAW_STALE_DMZ is not None:
+            return self.RAW_STALE_DMZ
+        return max(self.RAW_STALE_FS * FULL / max(self.scale, 1e-6), self.RAW_STALE_P99 * self.p99)
+
     def _check_raw(self, t, mz):
         """No fresh raw level. A game may upload its constant force only when
         it changes: on a steady straight that is no sign of trouble, and ours
@@ -621,12 +706,15 @@ class RackForce:
         stale = self._raw_at is None or t - self._raw_at > self.RAW_STALE
         if not stale:
             return
-        moved = self._mz_at_raw is None or abs(mz - self._mz_at_raw) > self.RAW_STALE_DMZ
+        moved = self._mz_at_raw is None or abs(mz - self._mz_at_raw) > self._stale_dmz()
         if self.ready and moved:
             logging.info("Countersteer FFB: %s: front Mz moved %.0f Nm with no new constant force from the game "
                          "in %.1f s", self.car, abs(mz - (self._mz_at_raw or 0.0)),
                          t - (self._raw_at if self._raw_at is not None else t))
-            self._restart()
+            if self.STALE_FREEZES:
+                self.ready, self._stale = False, True        # the fit is frozen as it is; judged at the next upload
+            else:
+                self._restart()
             self.waiting = 'raw'
         elif not self.ready:
             self.waiting = 'raw'
@@ -827,7 +915,9 @@ class RackForce:
                     # of the wheel is `g` degrees of the car's steering wheel (the torque is the same, so k is per
                     # wheel degree); the target is held to the wheel's range
                     half = self.wheel_range / 2.0
-                    g = half / max(self.lock * self.ratio * 180.0 / math.pi, 1e-6)
+                    # (the game may map less or more of the wheel's range than the steering sweeps: `wheel_slope`
+                    # is the measured wheel position per expected degree, 1.0 when the mapping is the full range)
+                    g = half / max(self.lock * self.ratio * 180.0 / math.pi, 1e-6) * self.wheel_slope
                     theta, theta_a, k_fs = theta * g, theta_a * g, k_fs / g
                     theta_a = min(max(theta_a, -half), half)
                 if self._reset_jump(sample):
@@ -876,7 +966,9 @@ class BeamNGRack(RackForce):
     SCALE_RANGE = (FULL / 200000.0, FULL / 20.0)
     MIN_SPREAD = 150.0                   # N
     SHORT_SPREAD = 80.0
+    RAW_STALE = 0.5
     RAW_STALE_DMZ = 150.0
+    STALE_FREEZES = False
     SIDE_SLIP_LOW = 1.5                  # front |side slip| (the game's unit, a slip speed in m/s?) under: low slip
     CENTRE_LATCH = 0.6
     CENTRE_FLIP = 0.5                    # r * centre_sign at or under -this over the short window: turned round
@@ -1225,6 +1317,17 @@ FH_FRESH_UPLOADS = 3.0                   # Forza: raw is fresh for this many of 
 FH_FRESH_MIN = 0.03                      # ... at least (s), at most RAW_FRESH
 FH_SCALE_KEEP = 0.2                      # s: game_const_scale written at least this often while under 100 (the
                                          # driver's watchdog: 500 ms)
+SOFT_REASONS = ('gaps', 'low-rate')      # verdicts that must persist SOFT_HOLD before ours is handed back (the rest at once)
+SOFT_HOLD = 0.75                         # s
+BACKOFF_COUNT = 3                        # releases within BACKOFF_WITHIN s: stay on the game's force for BACKOFF_FOR s
+BACKOFF_WITHIN = 30.0
+BACKOFF_FOR = 30.0
+GLIDE_IN = 2.5                           # s: from the game's level to our model's after a take-over
+GLIDE_OUT = 0.5                          # s: from ours back to the game's level before a planned handback's crossfade
+HOLD_DECAY_FROM = 0.03                   # s without a packet: the last value starts easing down (the driver holds it 30 ms) ...
+HOLD_DECAY = 0.15                        # ... over this long ...
+HOLD_FLOOR = 0.5                         # ... to this share
+HOLD_RECOVER = 0.1                       # s for the eased value to come back to the force once packets return
 FH_REARM = 0.3                           # s after a release before the add-on starts again (the game is never
                                          # muted, so no crossfade to protect: only no flapping)
 
@@ -1278,6 +1381,7 @@ class FfbEngine:
         self._pos_src = None
         self._frame = ffb_dynamics.FrameCheck()
         self._frame_range = None
+        self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
         self.align_note = None           # why the alignment spring is not played (the info line shows it)
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
@@ -1339,6 +1443,19 @@ class FfbEngine:
         self._closed = False             # stop() has begun: never take over again
         self._seen = 0                   # the last slot seq taken
         self._last_t = None              # arrival time of the newest sample taken
+        self._arrive = collections.deque(maxlen=8192)    # (arrival time, packet_id) of every packet, from the listener
+        self._arrived_at = None          # arrival time of the newest packet (the stall check; may be newer than _last_t)
+        self._base_value = 0             # the last ext_force written by _out (before any easing in a gap)
+        self._hold_f = 1.0               # the share of the force the easing in a gap left (back to 1 after HOLD_RECOVER)
+        self._hold_at = None
+        self._w = 0.0                    # 0: the game's level, 1: our model's (glides at a take-over and a handback)
+        self._glide_at = None
+        self._handback = False           # a planned handback is gliding down to the game's level
+        self._soft_since = None          # when the verdict first turned soft-bad (SOFT_REASONS) this time
+        self._stalls = collections.deque()      # times of the recent stall / soft releases
+        self._backoff_until = None
+        self._taken_skipped = 0          # self.skipped at the take-over (the release log says how many since)
+        self._lag = 0.0                  # s the engine was behind the newest sample when it took it
         self._verdict = Verdict('none', 'no-telemetry', None, 0.0, None)
         self._status_at = None
         self.last_stop = None            # why the force last stopped ('off', 'state', 'stall', ...)
@@ -1353,6 +1470,7 @@ class FfbEngine:
         (monotonic s). O(1): the slot is replaced, the engine woken."""
         self._seq += 1
         self._slot = (self._seq, now, sample)
+        self._arrive.append((now, getattr(sample, 'packet_id', None)))
         if not self._wake.is_set():
             self._wake.set()
 
@@ -1485,6 +1603,7 @@ class FfbEngine:
         if now is None:
             now = self._clock()
         self._requests(now)
+        self._drain()
         slot = self._slot
         if self._broken:
             if slot is not None:
@@ -1493,7 +1612,7 @@ class FfbEngine:
             return
         self._watchdog(now)
         if slot is not None and slot[0] != self._seen:
-            self._sample(slot)
+            self._sample(slot, now)
         else:
             self._idle(now)
         self._sources(now)
@@ -1504,6 +1623,17 @@ class FfbEngine:
             self._beamng_tick(now)
         elif self._mode == 'forza':
             self._forza_tick(now)
+
+    def _drain(self):
+        """Every packet the listener offered since the last pass, in order, to the classifier's gap measure."""
+        queue = self._arrive
+        while True:
+            try:
+                t, packet_id = queue.popleft()
+            except IndexError:
+                return
+            self.classifier.note(t, packet_id)
+            self._arrived_at = t
 
     def _fast(self):
         """RBR, BeamNG or Forza's add-on playing or about to: their force is read each FAST_POLL, not per telemetry sample."""
@@ -1631,8 +1761,14 @@ class FfbEngine:
             # the spring is written scaled by the overall strength: the driver's limit on k is on the scaled value
             model.align_k_limit = stage.k_limit / max(self._strength, 0.05)
         model.wheel_range = stage.range
+        slope = self._frame.slope
+        model.wheel_slope = slope if self._frame.ok and slope else 1.0
+        if self._frame.ok and slope and not self._slope_logged and abs(slope - 1.0) > 0.05:
+            self._slope_logged = True
+            logging.info("Countersteer FFB: wheel mapping: %.2f x the game's steering", slope)
         # (align_ready includes the rack force's own gate: the game's raw force agrees with our sign)
-        want = stage.can_align() and model.align_ready() and self._frame_ok(t, sample, stage)
+        want = stage.can_align() and model.align_ready() and self._frame_ok(t, sample, stage) \
+            and self._w >= 1.0 and not self._handback      # (while gliding between the levels the spring would add its own)
         if model.align_on and not want:
             stage.align_off(t)
         if want and not model.align_on:
@@ -1730,11 +1866,12 @@ class FfbEngine:
                 logging.warning("Countersteer FFB: game_ffb_level read back 100: the driver gave the game its force back")
                 self._release('level', now)
 
-    def _sample(self, slot):
+    def _sample(self, slot, now=None):
         seq, t, sample = slot
         arrivals = seq - self._seen      # the ones skipped arrived too: the rate counts them
         self.skipped += arrivals - 1
         self._seen, self._last_t = seq, t
+        self._lag = 0.0 if now is None else max(now - t, 0.0)
         self.classifier.feed(t, sample, arrivals)
         self._mode = self._mode_of(sample.game, t)
         self._mode_at = t
@@ -1757,11 +1894,24 @@ class FfbEngine:
         self.model.feed(t, sample, *self._raw(t, stops=True))
         playing = self._phase in ('in', 'on')
         verdict = self._verdict = self.classifier.verdict(t, holding=playing)
-        want = (self._enabled and self._available and not self._broken and verdict.state == 'replace'
-                and self.model.ready)
-        if playing and not want:
-            self._fade_out(t, 'off' if not self._enabled else 'state')
-        elif self._phase == 'idle' and want and (self._released_at is None or t - self._released_at >= REARM):
+        fit = self._enabled and self._available and not self._broken and self.model.ready
+        want = fit and verdict.state == 'replace'
+        if playing:
+            if want:
+                self._soft_since = None
+                self._handback = False
+            elif fit and verdict.reason in SOFT_REASONS:
+                # a soft verdict (a gap, a rate dip) must last SOFT_HOLD before ours is handed back, and then
+                # glides down to the game's level first; the rest (a refused fit, no Mz, off, ...) hands back at once
+                if self._soft_since is None:
+                    self._soft_since = t
+                if t - self._soft_since >= SOFT_HOLD:
+                    self._handback = True
+            else:
+                self._fade_out(t, 'off' if not self._enabled else 'state',
+                               self._why(verdict) if self._enabled else None)
+        elif self._phase == 'idle' and want and (self._released_at is None or t - self._released_at >= REARM) \
+                and (self._backoff_until is None or t >= self._backoff_until):
             self._activate(t)
         if self._phase in ('in', 'on') and self.model.ready:
             self.model.hold()                    # what plays: kept through the fade out if a new car resets the fit
@@ -1769,7 +1919,21 @@ class FfbEngine:
             self.model.release()
         if self._phase != 'idle':
             self._play(t, sample)
+            if self._handback and self._w <= 0.0 and self._phase in ('in', 'on'):
+                self._fade_out(t, 'state', self._why(verdict), soft=True)
         self._publish(t)
+
+    def _why(self, verdict):
+        """What the classifier (or the fit) said, with its numbers, for the release log line."""
+        reason = verdict.reason
+        if verdict.state == 'replace' or reason == 'ok':
+            m = self.model
+            return 'fit: %s' % (m.refused or m.waiting or 'not ready')
+        if reason == 'gaps':
+            return 'gaps %.0f ms' % (verdict.gap_ms or 0.0)
+        if reason == 'low-rate':
+            return 'rate %.0f/s' % verdict.rate
+        return reason
 
     def _gain(self, t):
         if self._phase == 'in':
@@ -1782,11 +1946,36 @@ class FfbEngine:
             return max(self._fade_from - (t - self._fade_at) / FADE, 0.0)
         return 1.0
 
+    def _glide(self, t):
+        """The share of our model's force in what plays: 0 (the game's level) at a take-over, up to 1 over GLIDE_IN;
+        down to 0 over GLIDE_OUT while a planned handback is under way."""
+        last, self._glide_at = self._glide_at, t
+        if last is not None:
+            dt = min(max(t - last, 0.0), 0.1)
+            if self._handback:
+                self._w = max(self._w - dt / GLIDE_OUT, 0.0)
+            else:
+                self._w = min(self._w + dt / GLIDE_IN, 1.0)
+        return self._w
+
+    def _game_level(self, sample):
+        """The game's own force now in ext_force units as the fit has it (the scale times the front torque)."""
+        torque = self.model._torque(sample)
+        if torque is None or not math.isfinite(torque):
+            return 0.0
+        return min(max(self.model.scale * torque, -FULL), FULL)
+
     def _play(self, t, sample):
         self._dyn_play(t, sample)
-        rack = self.model.force(sample) * self._strength
+        ours = self.model.force(sample) * self._strength
         # The texture on top (0.0 exactly when off: the steering force then goes out unchanged)
-        self._out(t, rack + self.texture.force(t, sample, rack))
+        texture = self.texture.force(t, sample, ours)
+        w = self._glide(t)
+        if w >= 1.0:
+            self._out(t, ours + texture)
+        else:
+            game = self._game_level(sample)
+            self._out(t, game + w * (ours - game) + w * texture)
 
     def _shape(self, t, force):
         """Spike gate and slew on the force (before the fade). A jump of over SPIKE of full scale from the last
@@ -1819,7 +2008,7 @@ class FfbEngine:
             force = self._shape(t, force)
         # What is meant to be delivered; the driver multiplies ext_force by the user's master gain, so the value
         # written is divided by it (Countersteer's strength is the same at any gain; the game's own force is not)
-        level = force * g
+        level = force * g * self._hold_gain(t)
         comp = self._master(t) if compensate else 1.0
         value = int(round(level / comp))
         saturated = abs(value) > FULL
@@ -1829,7 +2018,7 @@ class FfbEngine:
         try:
             self._driver.force(value)
             self.writes += 1
-            self._last_value = value
+            self._last_value = self._base_value = value
             if ffb_record.current is not None:
                 ffb_record.log(t, 'ext_force', value)
             if self._cap_level is not None:
@@ -1843,6 +2032,16 @@ class FfbEngine:
         if self._phase == 'out' and g <= 0.0:
             self._phase = 'idle'         # faded out (0 written last): the game has its force back
             self._let_go()
+
+    def _hold_gain(self, t):
+        """1.0, or the share the easing in a gap left, coming back to 1 over HOLD_RECOVER once packets return."""
+        f = self._hold_f
+        if f >= 1.0:
+            return 1.0
+        last, self._hold_at = self._hold_at, t
+        if last is not None:
+            f = self._hold_f = min(f + max(t - last, 0.0) / HOLD_RECOVER * (1.0 - HOLD_FLOOR), 1.0)
+        return f
 
     def _master(self, t):
         """The driver's master gain as a share of 100 %, read every GAIN_POLL s and followed with GAIN_TAU (1.0
@@ -1866,13 +2065,20 @@ class FfbEngine:
         return self._comp
 
     def _rewrite(self, now):
-        """The last value again (a gap between ACR samples; STALL ends it)."""
+        """The last value again (a gap between ACR packets; STALL ends it). Past HOLD_DECAY_FROM of silence it eases
+        down to HOLD_FLOOR of the value over HOLD_DECAY (a game hitch: held, not dropped)."""
+        silent = 0.0 if self._arrived_at is None else now - self._arrived_at
+        f = 1.0 - (1.0 - HOLD_FLOOR) * min(max(silent - HOLD_DECAY_FROM, 0.0) / HOLD_DECAY, 1.0)
+        value = int(round(self._base_value * f))
+        if f < 1.0:
+            self._hold_f, self._hold_at = f, None
         try:
-            self._driver.force(self._last_value)
+            self._driver.force(value)
+            self._last_value = value
             self.writes += 1
             self._written_at = now
             if ffb_record.current is not None:
-                ffb_record.log(now, 'ext_force', self._last_value)
+                ffb_record.log(now, 'ext_force', value)
             if self._dyn is not None:
                 self._dyn.keep(now)          # the spring is held too: the driver drops one not written for 20 ms
         except OSError as e:
@@ -1881,8 +2087,8 @@ class FfbEngine:
             self._release('write', now)
 
     def _idle(self, now):
-        if self._phase != 'idle' and self._played_mode == 'acr' and self._last_t is not None \
-                and now - self._last_t > STALL:
+        seen = self._arrived_at if self._arrived_at is not None else self._last_t
+        if self._phase != 'idle' and self._played_mode == 'acr' and seen is not None and now - seen > STALL:
             self._release('stall', now)
         elif self._phase != 'idle' and self._played_mode == 'acr' and not self._broken and self._written_at is not None \
                 and now - self._written_at >= KEEP_WRITE:
@@ -2215,6 +2421,8 @@ class FfbEngine:
         self._muted = True
         self._phase, self._fade_at = 'in', t
         self._played_mode = self._mode
+        self._w, self._glide_at, self._handback, self._soft_since = 0.0, None, False, None
+        self._hold_f, self._hold_at, self._taken_skipped = 1.0, None, self.skipped
         self._read_gains()
         if self._mode == 'rbr':
             logging.info("Countersteer FFB: replacing Richard Burns Rally's force with NGP's curve undone (game "
@@ -2254,8 +2462,9 @@ class FfbEngine:
         self._clipped = 0.0
         self.rbr.set_ceiling(self._cap_level)    # RBR's knee ends under the driver's cap: it never clips there
 
-    def _fade_out(self, t, reason):
-        """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out."""
+    def _fade_out(self, t, reason, detail=None, soft=False):
+        """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out. `detail`: what the
+        classifier said, for the log; `soft`: a verdict that lasted (counts toward the back-off)."""
         self._fade_from = self._gain(t)
         self._phase, self._fade_at = 'out', t
         # The add-on never lowered it: nothing to write (its level stays the game's 100)
@@ -2263,7 +2472,27 @@ class FfbEngine:
             self._muted = False
         self._released_at = t
         self.last_stop = reason
-        logging.info("Countersteer FFB: handing the force back (%s)", reason)
+        if detail is None:
+            logging.info("Countersteer FFB: handing the force back (%s)", reason)
+        else:
+            logging.info("Countersteer FFB: handing the force back (%s: %s; engine skipped %d samples since the "
+                         "take-over, %.0f ms behind)", reason, detail, self.skipped - self._taken_skipped,
+                         self._lag * 1000.0)
+        if soft:
+            self._note_stall(t)
+
+    def _note_stall(self, t):
+        """A release the telemetry's own stalls caused: BACKOFF_COUNT within BACKOFF_WITHIN s and ours stays off the wheel
+        for BACKOFF_FOR s (the game's force plays; one line in the log)."""
+        stalls = self._stalls
+        stalls.append(t)
+        while stalls and t - stalls[0] > BACKOFF_WITHIN:
+            stalls.popleft()
+        if len(stalls) >= BACKOFF_COUNT:
+            stalls.clear()
+            self._backoff_until = t + BACKOFF_FOR
+            logging.info("Countersteer FFB: the game's telemetry keeps stalling; staying on its force for %.0f s",
+                         BACKOFF_FOR)
 
     def _release(self, reason, now):
         """Stop playing at once (the driver's watchdog fades the last
@@ -2280,6 +2509,8 @@ class FfbEngine:
             if playing or self.last_stop is None:
                 self.last_stop = reason
             logging.info("Countersteer FFB: the game's force is back (%s)", reason)
+            if reason == 'stall' and playing:
+                self._note_stall(now)
 
     def _quick_release(self, reason, now):
         """The wheel wanted elsewhere, or quitting: the game's level back at

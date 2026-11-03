@@ -313,14 +313,30 @@ def test_a_game_force_that_stops_following_drops_it_and_it_learns_again():
     assert not model.ready and model.waiting == 'mismatch' and model.refused is None
 
 
-def test_no_fresh_game_force_while_ready_drops_it():
+def test_no_fresh_game_force_while_ready_withdraws_it_and_the_fit_is_judged_again_at_the_next_upload():
     model = fitted()
-    for t, s in stream(0.4, t0=8.0):
+    for t, s in stream(1.9, t0=8.0, rate_mz=700.0):
         model.feed(t, s, None)
-    assert model.ready
-    for t, s in stream(0.2, t0=8.4):
+    assert model.ready                                       # 2 s is the window now (the game uploads on change)
+    for t, s in stream(1.0, t0=9.9, rate_mz=700.0):
         model.feed(t, s, None)
     assert not model.ready and model.waiting == 'raw'
+    assert model.fit is not None and model._long.spread() > 0   # frozen, not forgotten
+    for t, s in stream(0.5, t0=11.0):
+        model.feed(t, s, game_raw(s))
+    assert model.ready                                       # back at the next uploads, no relearning
+
+
+def test_a_move_the_games_force_is_not_due_an_upload_for_is_not_stale():
+    model = fitted()
+    assert model._stale_dmz() >= 0.1 * fe.FULL / model.scale
+    t0 = 8.0
+    s = acr(t0)
+    model.feed(t0, s, game_raw(s))
+    small = model._stale_dmz() * 0.5
+    for t, s in stream(3.0, t0=t0 + 0.01, rate_mz=small / 0.3):
+        model.feed(t, s, None)
+    assert model.ready
 
 
 def test_a_new_car_fits_again():
@@ -386,7 +402,7 @@ def test_switching_off_crossfades_back_to_the_game(tmp_path):
 ])
 def test_the_state_dropping_restores_the_game(tmp_path, drop, why):
     engine, path, t = active(tmp_path)
-    run(engine, t, 1.5, **drop)
+    run(engine, t, 4.0, **drop)           # (a rate dip must also last SOFT_HOLD and glide down before the crossfade)
     assert levels() == [0, 100] and read(path, 'game_ffb_level') == 100
     assert engine.last_stop == 'state' and engine.status.reason == why
     assert forces()[-1] == 0                     # faded out to nothing
@@ -399,17 +415,17 @@ def test_the_games_force_turning_against_ours_hands_it_back(tmp_path):
     assert engine.status.waiting in ('mismatch', 'corners')
 
 
-def test_a_stall_over_50_ms_restores_the_game_and_it_waits_before_taking_over_again(tmp_path):
+def test_a_real_stall_over_300_ms_restores_the_game_and_it_waits_before_taking_over_again(tmp_path):
     engine, path, t = active(tmp_path)
     last = t - 1 / HZ
-    engine.step(last + 0.04)
-    assert levels() == [0]                      # 40 ms: still ours (the driver holds the last value)
-    engine.step(last + 0.055)
+    engine.step(last + 0.2)
+    assert levels() == [0]                      # 200 ms: still ours (held, easing down; the driver's watchdog behind)
+    engine.step(last + 0.31)
     assert levels() == [0, 100] and engine.last_stop == 'stall'
     # Back and clean after a second, but not ours again until REARM after the release
-    t = run(engine, last + 0.1, 2.0)
+    t = run(engine, last + 0.35, 2.0)
     assert levels() == [0, 100]
-    run(engine, t, 1.0)
+    run(engine, t, 1.5)
     assert levels() == [0, 100, 0]
 
 
@@ -651,6 +667,195 @@ def test_raw_from_two_effects_or_gone_quiet_is_not_used(tmp_path):
 
 # -- the listener is never held up --
 
+# -- game hitches: held through, not handed back --
+
+def hitch(engine, t, gap, burst_ms=20.0, polls=0.005):
+    """ACR's physics hitch at `t`: no packet for `gap` s (the engine polls meanwhile), then one packet and a burst of
+    them with the step counter catching up (what the game missed arrives within burst_ms). Returns the time after."""
+    last = t - 1 / HZ
+    x = last + polls
+    while x < t + gap:
+        engine.step(x)
+        x += polls
+    t += gap
+    step0 = int(last * HZ)
+    n = int(round((gap + burst_ms / 1000.0) * HZ))
+    for k in range(1, n + 1):
+        at = t + burst_ms / 1000.0 * k / n if k > 1 else t         # the first one ends the gap, the rest come in a burst
+        s = acr(at, step=step0 + k)
+        upload(game_raw(s))
+        engine.offer(at, s)
+        engine.step(at)
+    return t + burst_ms / 1000.0
+
+
+def test_a_hitch_with_a_catch_up_burst_is_held_through_not_handed_back(tmp_path):
+    engine, path, t = active(tmp_path)
+    for gap in (0.06, 0.13, 0.25):
+        t = hitch(engine, t, gap)
+        t = run(engine, t, 2.0)
+        assert levels() == [0] and engine.status.active, gap
+    assert engine.last_stop is None and not engine._stalls
+
+
+def test_a_hitch_is_held_at_the_last_value_easing_down_then_comes_back_smoothly(tmp_path):
+    engine, path, t = active(tmp_path)
+    value = forces()[-1]
+    n = len(forces())
+    t = hitch(engine, t, 0.2)
+    gap = forces()[n:]
+    assert len(gap) > 15                                         # rewritten through the gap (the driver's hold is 30 ms)
+    assert gap[0] == value and abs(min(abs(v) for v in gap[:-20])) <= abs(value) * 0.6 + 5
+    assert all(abs(a) >= abs(b) - 2 for a, b in zip(gap[:15], gap[1:16])) or abs(value) < 100
+    t = run(engine, t, 1.0)
+    assert levels() == [0]
+
+
+def test_gaps_without_a_burst_are_losses_and_hand_back_only_after_the_hysteresis(tmp_path):
+    engine, path, t = active(tmp_path)
+
+    def loss(t):
+        last = t - 1 / HZ
+        x = last
+        while x < last + 0.13:
+            x += 0.005
+            engine.step(x)
+        return run(engine, last + 0.13, 0.3)             # the counter ran on through the gap: nothing to catch up
+    t = loss(t)
+    assert levels() == [0] and engine.status.active      # one loss: soft, and it has to last
+    for _ in range(8):
+        t = loss(t)
+    assert engine.last_stop == 'state' and levels() == [0, 100]
+
+
+def test_a_real_400_ms_stall_still_releases_and_a_window_of_gaps_reads_in_the_log(tmp_path, caplog):
+    import logging
+    engine, path, t = active(tmp_path)
+    with caplog.at_level(logging.INFO):
+        engine.step(t + 0.4)
+    assert engine.last_stop == 'stall' and levels() == [0, 100]
+
+
+def test_the_classifier_tells_a_hitch_from_a_loss_by_the_step_counter():
+    def stream_with_gap(burst):
+        c = fe.SupportClassifier()
+        c.has_game_ffb_raw = True
+        t, pid = 0.0, 0
+        def packet(at, step):
+            c.note(at, step)
+            c.feed(at, acr(at, step=step))
+        while t < 1.0:
+            packet(t, pid)
+            t, pid = t + 1 / HZ, pid + 1
+        if burst:                                        # 130 ms silent, the counter stalled; then 43 steps in 20 ms
+            t += 0.13
+            packet(t, pid + 1)
+            pid += 1
+            for _ in range(20):
+                t, pid = t + 0.001, pid + 2
+                packet(t, pid)
+        else:                                            # 130 ms silent, the counter ran on
+            t, pid = t + 0.13, pid + int(0.13 * HZ)
+        while t < 1.6:
+            t, pid = t + 1 / HZ, pid + 1
+            packet(t, pid)
+        return c, t
+    c, t = stream_with_gap(True)
+    v = c.verdict(t, holding=True)
+    assert v.state == 'replace' and v.gap_ms >= 125.0 and c._plain_gap == 0.0
+    assert c.verdict(t).reason == 'gaps'                 # to go green again the window must be free of gaps over 20 ms
+    c, t = stream_with_gap(False)
+    assert c.verdict(t, holding=True).reason == 'gaps' and c._plain_gap >= 0.12
+
+
+def test_a_soft_verdict_must_last_before_ours_is_handed_back_and_a_hard_fault_does_not_wait(tmp_path):
+    engine, path, t = active(tmp_path)
+    t = run(engine, t, 0.45, hz=60.0)                    # a rate dip that clears within the hysteresis
+    t = run(engine, t, 3.0)
+    assert levels() == [0] and engine.status.active and engine._soft_since is None
+    t = run(engine, t, 5.0, hz=100.0)                    # one that lasts
+    assert levels() == [0, 100] and engine.last_stop == 'state'
+    FakeDriver.log.clear()
+    engine2, path2, t2 = active(tmp_path, name='wheel2')
+    run(engine2, t2, 0.6, mz=False)                      # no Mz: at once (the crossfade is 200 ms)
+    assert engine2.last_stop == 'state' and levels(path2) == [0, 100]
+
+
+def test_the_release_line_says_what_the_classifier_saw(tmp_path, caplog):
+    import logging
+    engine, path, t = active(tmp_path)
+    with caplog.at_level(logging.INFO):
+        run(engine, t, 6.0, hz=100.0)
+    line = [r.getMessage() for r in caplog.records if 'handing the force back' in r.getMessage()]
+    assert len(line) == 1 and 'state: rate ' in line[0] and 'engine skipped' in line[0] and 'behind' in line[0]
+
+
+def test_three_stalls_within_30_s_back_off_to_the_games_force_for_30_s_and_say_so_once(tmp_path, caplog):
+    import logging
+    engine, path, t = active(tmp_path)
+    with caplog.at_level(logging.INFO):
+        for i in range(3):
+            last = t - 1 / HZ
+            engine.step(last + 0.31)
+            assert engine.last_stop == 'stall'
+            t = run(engine, last + 0.35, 4.0)
+            if i < 2:
+                assert levels().count(0) == i + 2 and engine.status.active      # taken over again after REARM
+        assert levels().count(0) == 3 and not engine.status.active           # the third: it stays away
+        t = run(engine, t, 20.0)
+        assert levels().count(0) == 3
+        run(engine, t, 10.0)
+    assert levels().count(0) == 4 and engine.status.active
+    said = [r for r in caplog.records if 'keeps stalling; staying on its force for 30 s' in r.getMessage()]
+    assert len(said) == 1
+
+
+def test_a_take_over_starts_at_the_games_level_and_glides_to_ours_over_2_5_s(tmp_path):
+    engine, path = engine_on(tmp_path)
+    t = 0.0
+    start = None
+    seen = []
+    while t < 14.0:
+        s = acr(t, game_gain=0.5)                        # the game plays half of what the model would (the fit's scale
+        upload(game_raw(s))                              # is the game's own, the model's level is ours)
+        engine.offer(t, s)
+        engine.step(t)
+        if engine.status.active and start is None:
+            start = t
+        if start is not None:
+            ours = engine.model.force(s) * engine._strength
+            game = engine._game_level(s)
+            seen.append((t - start, forces()[-1], game, ours, engine._w))
+        t += 1 / HZ
+    assert start is not None
+    # right after the driver's ramp (g = 1) the output is the game's level plus the glide's share of the difference
+    for at, out, game, ours, w in seen:
+        if 0.25 < at < 0.3:
+            assert w == pytest.approx(at / fe.GLIDE_IN, abs=0.01)
+            assert out == pytest.approx(game + w * (ours - game), abs=300)
+        if at > fe.GLIDE_IN + 0.1:
+            assert w == 1.0 and abs(out - ours) <= 300
+
+
+def test_a_planned_handback_glides_down_to_the_games_level_before_the_crossfade(tmp_path):
+    engine, path, t = active(tmp_path)
+    t = run(engine, t, 3.0)
+    assert engine._w == 1.0
+    began = None
+    trace = []
+    while t < 30.0 and len(levels()) < 2:
+        t = run(engine, t, 0.01, hz=100.0)               # a lasting rate dip
+        if engine._handback and began is None:
+            began = t
+        if began is not None:
+            trace.append((t - began, engine._w, len(levels())))
+    assert began is not None and len(levels()) == 2
+    assert all(n == 1 for at, w, n in trace if at < fe.GLIDE_OUT - 0.05)         # the game stays muted while it glides
+    mid = [w for at, w, n in trace if 0.2 < at < 0.3]
+    assert mid and all(0.3 < w < 0.7 for w in mid)                                # on its way down
+    assert engine.last_stop == 'state'
+
+
 def test_the_listener_never_waits_for_the_engine(tmp_path):
     """The real thread, made to take 5 ms a sample (15 times slower than the stream): offer() stays O(1),
     nothing queues, the engine skips to the newest sample and still counts every arrival for the rate."""
@@ -700,7 +905,7 @@ def test_the_listener_hands_every_decoded_sample_over():
 
 
 def test_the_thread_stops_writing_on_a_stall(tmp_path):
-    """The real thread on a clock the test holds: samples stop, 30 ms on it is still ours, past 50 ms the
+    """The real thread on a clock the test holds: samples stop, 30 ms on it is still ours, past 300 ms the
     game's force is back within a few polls."""
     clock = [0.0]
     engine, path = engine_on(tmp_path, clock=lambda: clock[0])
@@ -711,7 +916,7 @@ def test_the_thread_stops_writing_on_a_stall(tmp_path):
     try:
         time.sleep(0.1)                          # ten polls
         assert engine.status.active and levels() == [0]
-        clock[0] = last + 0.06
+        clock[0] = last + 0.32
         deadline = time.monotonic() + 1.0
         while engine.last_stop != 'stall' and time.monotonic() < deadline:
             time.sleep(0.001)
@@ -758,7 +963,7 @@ def test_a_straight_with_no_new_upload_keeps_ours_playing(tmp_path):
 
 def test_a_corner_with_no_new_upload_hands_back(tmp_path):
     engine, path, t = active(tmp_path)
-    run(engine, t, 1.5, raw=False)
+    run(engine, t, 3.0, raw=False, rate_mz=1000.0)
     assert levels() == [0, 100] and engine.last_stop == 'state' and engine.status.waiting == 'raw'
 
 
@@ -867,7 +1072,7 @@ def test_a_stop_published_as_0_is_no_game_force_for_the_fit(tmp_path):
     assert model._long.s == before and model.moving_time == moving
     assert engine._raw(t, stops=True) == (None, False) and engine._raw(t)[0] == 0
     # As with no upload at all: once front Mz moves on with none, the fit is dropped and waits for the game
-    run(engine, t, 1.0, raw=False)
+    run(engine, t, 2.6, raw=False)
     assert not model.ready and model.waiting == 'raw'
 
 

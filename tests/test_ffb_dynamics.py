@@ -243,6 +243,24 @@ def test_the_spring_is_worked_out_in_the_wheels_own_position_frame():
     assert seen[-1][0] == 450.0
 
 
+def test_a_measured_wheel_slope_scales_the_target_and_the_stiffness():
+    r = rack()
+    r.align_on = True
+    r.wheel_range = 900.0
+    seen = []
+    r.align_writer = lambda *a: seen.append(a)
+    s = slip_sample(0.0, steer=0.5, alpha=0.0)
+    r._now = 0.0
+    r.force(s)
+    theta_a1, k1, _ = seen[-1]
+    r.wheel_slope = 0.6
+    r._now = 0.005
+    r.force(s)
+    theta_a2, k2, _ = seen[-1]
+    assert theta_a2 == pytest.approx(0.6 * theta_a1)                    # the wheel turns 0.60 of the expected angle
+    assert k2 == pytest.approx(k1 / 0.6)                                # the same torque per (fewer) wheel degrees
+
+
 def test_a_reset_writes_k_zero_first_and_comes_back_after_the_hold():
     r = rack()
     r.align_on = True
@@ -424,10 +442,19 @@ def test_an_inverted_axis_keeps_the_spring_off_and_says_why(tmp_path, caplog):
 
 
 def test_a_wheel_range_the_game_does_not_map_keeps_it_off(tmp_path):
-    POS.scale = 0.5                                                     # half the travel for the same steering
+    POS.scale = 0.15                                                    # a sixth of the travel for the same steering
     engine, m, t = ready_engine(dyn_wheel(tmp_path))
     feed(engine, t, 6.0)
     assert not m.align_on and 'scale' in engine.align_note
+    engine.stop()
+
+
+def test_a_game_mapping_less_of_the_wheel_plays_with_the_measured_slope(tmp_path):
+    POS.scale = 0.6                                                     # ACR: 540 deg of game lock on the 900 deg wheel
+    engine, m, t = ready_engine(dyn_wheel(tmp_path))
+    feed(engine, t, 6.0)
+    assert m.align_on and engine.align_note is None
+    assert m.wheel_slope == pytest.approx(0.6, abs=0.02)
     engine.stop()
 
 
@@ -490,9 +517,11 @@ def test_the_frame_check_needs_movement_correlation_slope_and_time():
     assert run().ok and run().failed() is None
     assert not run(seconds=15.0).ok and run(seconds=15.0).failed() is None           # waiting
     assert not run(sign=-1.0).ok and 'inverted' in run(sign=-1.0).failed()
-    assert not run(scale=0.5).ok and 'scale' in run(scale=0.5).failed()
-    assert not run(scale=1.4).ok
+    assert not run(scale=0.2).ok and 'scale' in run(scale=0.2).failed()
+    assert not run(scale=2.5).ok
+    assert run(scale=0.6).ok and run(scale=0.6).slope == pytest.approx(0.6)       # ACR: 540 deg lock on a 900 deg wheel
     assert run(scale=0.85).ok and run(scale=1.2).ok
+    assert not run(sign=-1.0, scale=0.6).ok
     assert not run(amp=0.05).ok and run(amp=0.05).failed() is None                  # steering barely moved
     assert run(offset=20.0).ok                                                        # a centre offset is fine
     c = run()

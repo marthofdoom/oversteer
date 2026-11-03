@@ -77,7 +77,7 @@ def test_game_level_read_back_as_100_while_muted_is_a_release(tmp_path):
 
 # -- ACR write gaps --
 
-def test_the_last_value_is_written_again_in_a_gap_until_the_stall(tmp_path):
+def test_the_last_value_is_written_again_in_a_gap_easing_down_until_the_stall(tmp_path):
     engine, path, t = active(tmp_path)
     last = t - 1 / HZ
     n, value = len(forces()), forces()[-1]
@@ -86,8 +86,13 @@ def test_the_last_value_is_written_again_in_a_gap_until_the_stall(tmp_path):
     engine.step(last + 0.012)
     assert len(forces()) == n + 1 and forces()[-1] == value
     engine.step(last + 0.024)
-    assert len(forces()) == n + 2
-    engine.step(last + 0.055)
+    assert len(forces()) == n + 2 and forces()[-1] == value
+    engine.step(last + 0.105)                                # 75 ms into the easing: half way to 50 %
+    assert forces()[-1] == pytest.approx(value * 0.75, abs=abs(value) * 0.02 + 2)
+    engine.step(last + 0.25)
+    assert forces()[-1] == pytest.approx(value * 0.5, abs=abs(value) * 0.02 + 2)
+    assert engine.last_stop is None
+    engine.step(last + 0.31)
     assert engine.last_stop == 'stall'
 
 
