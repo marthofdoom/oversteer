@@ -845,7 +845,7 @@ class Recorder:
         if not self.ffb_tuning or self._ffb_log is not None:
             return
         try:
-            self._ffb_log = ffb_record.FfbSampler(self.path + FFB_SUFFIX, origin, {
+            self._ffb_log = ffb_record.sampler(self.path + FFB_SUFFIX, origin, {
                 'capture': os.path.basename(self.path), 'oversteer': self.version, 'started': self._started})
             self._ffb_log.start()
         except OSError as e:

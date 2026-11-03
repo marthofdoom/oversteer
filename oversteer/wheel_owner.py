@@ -27,15 +27,27 @@ API (a wheel is its sysfs directory, Device.dev_path):
   "try" effects: exclusive for the demo's length, never inhibiting;
   False if anyone holds the wheel (the caller says who: current()).
 - current(wheel) -> (owner, exclusive) or None.
+- watch(callback) / unwatch(callback): callback(wheel, holder) after each
+  change of this process's holder of `wheel` ((owner, exclusive) or None),
+  called without the module lock held.
+- set_remote(wheel, holder): a holder in another process ((owner,
+  exclusive), None for none). Countersteer FFB's engine runs in a process
+  of its own (ffb_process): the GUI's other owners are mirrored into it so
+  the engine never takes a wheel held there (a local shared holder is asked
+  to let go at once), and the engine's own holding is mirrored back into
+  the GUI's registry, where the exclusive owners wait for it as before.
 
 Exclusive owners: gui.start_test (the wheel test, released when the test
 ends or is aborted) and, once it merges, the calibration (branch
 ffb-calib): acquire(dev_path, 'calibration', exclusive=True) before its
 first write, release() after restoring the defaults."""
+import logging
 import threading
 
 _cond = threading.Condition()
 _held = {}                  # wheel -> (owner, exclusive, on_inhibit)
+_remote = {}                # wheel -> (owner, exclusive) held in another process (set_remote)
+_watchers = []
 
 
 DEMO = 'demo'
@@ -43,9 +55,55 @@ DEMO_SECONDS = 2.3          # Device.play_demo's 2 s and the 0.2 s it waits afte
 _demo_generation = {}       # wheel -> the newest demo's number: only its timer lets go
 
 
-def acquire(wheel, owner, exclusive=False, on_inhibit=None, timeout=0.5, inhibit=True):
+def _notify(wheel):
     with _cond:
         held = _held.get(wheel)
+        holder = None if held is None else held[:2]
+    for callback in list(_watchers):
+        try:
+            callback(wheel, holder)
+        except Exception:
+            logging.exception("wheel owner watcher")
+
+
+def watch(callback):
+    _watchers.append(callback)
+
+
+def unwatch(callback):
+    try:
+        _watchers.remove(callback)
+    except ValueError:
+        pass
+
+
+def set_remote(wheel, holder):
+    ask = None
+    with _cond:
+        if holder is None:
+            _remote.pop(wheel, None)
+            return
+        _remote[wheel] = tuple(holder)[:2]
+        held = _held.get(wheel)
+        if held is not None and held[0] != holder[0] and not held[1]:
+            ask = held[2]
+    if ask is not None:
+        ask()                                   # outside the lock: the holder may release() from here
+
+
+def acquire(wheel, owner, exclusive=False, on_inhibit=None, timeout=0.5, inhibit=True):
+    granted = _acquire(wheel, owner, exclusive, on_inhibit, timeout, inhibit)
+    if granted:
+        _notify(wheel)
+    return granted
+
+
+def _acquire(wheel, owner, exclusive, on_inhibit, timeout, inhibit):
+    with _cond:
+        held = _held.get(wheel)
+        remote = _remote.get(wheel)
+        if held is None and remote is not None and remote[0] != owner:
+            return False                        # held in the other process
         if held is None or held[0] == owner:
             _held[wheel] = (owner, exclusive, on_inhibit)
             return True
@@ -66,15 +124,17 @@ def acquire(wheel, owner, exclusive=False, on_inhibit=None, timeout=0.5, inhibit
 def release(wheel, owner):
     with _cond:
         held = _held.get(wheel)
-        if held is not None and held[0] == owner:
-            del _held[wheel]
-            _cond.notify_all()
+        if held is None or held[0] != owner:
+            return
+        del _held[wheel]
+        _cond.notify_all()
+    _notify(wheel)
 
 
 def current(wheel):
     with _cond:
         held = _held.get(wheel)
-        return None if held is None else held[:2]
+        return _remote.get(wheel) if held is None else held[:2]
 
 
 def hold_for_demo(wheel, seconds):

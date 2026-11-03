@@ -260,6 +260,9 @@ class FrameCheck:
         return None if self.ok or self.reason in (None, 'waiting') else self.reason
 
 
+POSITION_FIELDS = ('id', 'vendor_id', 'product_id', 'usb_id', 'dev_path', 'dev_name', 'name', 'max_range')
+
+
 def position_source(device, opener=None):
     """A callable returning the wheel's ABS_X now as 0..65535, None when it can't be read, for FrameCheck. It reads
     `device._input_node()`: the wheel's own node when readable, else the virtual device of the proxy that holds it
@@ -269,6 +272,7 @@ def position_source(device, opener=None):
     when the node, or the device behind its name, changes (a proxy restart) or an error."""
     if device is None:
         return None
+    default = opener is None
     if opener is None:
         from evdev import InputDevice
         opener = InputDevice
@@ -294,6 +298,9 @@ def position_source(device, opener=None):
         except (OSError, AttributeError):
             state['dev'] = None
             return None
+    # What Countersteer FFB's engine process (ffb_process) builds the same reader from (a Device of these fields): a
+    # callable does not cross the process boundary
+    read.spec = {name: getattr(device, name, None) for name in POSITION_FIELDS} if default else None
     return read
 
 
