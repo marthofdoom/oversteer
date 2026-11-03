@@ -33,6 +33,8 @@ CHANNELS = {name: i for i, name in enumerate((
 NAMES = {i: name for name, i in CHANNELS.items()}
 
 current = None                           # the running FfbSampler, None when nothing is recorded
+remote = None                            # (path, origin, header) -> a sampler in Countersteer FFB's engine process
+                                         # (ffb_process), None while the engine runs in this one
 
 
 def active():
@@ -44,6 +46,14 @@ def log(t, channel, *values):
     sampler = current
     if sampler is not None:
         sampler.add(t, channel, values)
+
+
+def sampler(path, origin, header=None):
+    """The sidecar's sampler, with start() and stop(): where the engine runs. With the engine in its own process
+    (ffb_process) the sidecar is written there, on the same clock (CLOCK_MONOTONIC is the machine's): its records never
+    cross the process boundary and the engine never waits for the GUI."""
+    make = remote
+    return FfbSampler(path, origin, header) if make is None else make(path, origin, header)
 
 
 def _numbers(values):

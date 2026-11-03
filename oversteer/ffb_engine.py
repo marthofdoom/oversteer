@@ -72,7 +72,10 @@ Three parts:
   clamp and the fade gain, very low by default. ACR only for now.
 
 Every sysfs write happens on the engine thread; the GUI only sets requests
-(set_enabled, set_device) and reads `status`."""
+(set_enabled, set_device) and reads `status`. In the app the engine runs in a
+process of its own (ffb_process: its own interpreter and GIL, so nothing else
+in Countersteer can hold up its passes); tests and the replay scripts use
+these classes in-process."""
 import atexit
 import collections
 import faulthandler
@@ -1682,14 +1685,21 @@ class FfbEngine:
 
     # -- the listener's side: never blocks --
 
-    def offer(self, now, sample):
+    def offer(self, now, sample, seq=None):
         """The listener thread: a decoded sample that arrived at `now`
-        (monotonic s). O(1): the slot is replaced, the engine woken."""
-        self._seq += 1
+        (monotonic s). O(1): the slot is replaced, the engine woken. `seq`: the
+        arrival's number when it is counted elsewhere (the engine process: the
+        GUI's listener numbers every packet, ffb_process), else the next."""
+        self._seq = self._seq + 1 if seq is None else seq
         self._slot = (self._seq, now, sample)
         self._arrive.append((now, getattr(sample, 'packet_id', None)))
         if not self._wake.is_set():
             self._wake.set()
+
+    def arrived(self, now, packet_id):
+        """A packet that arrived at `now` and was never offered (a newer one came with it to the engine process): its
+        arrival still counts for the classifier's gaps; offer(..., seq) counts it for the rate."""
+        self._arrive.append((now, packet_id))
 
     # -- the GUI's side --
 
@@ -1765,6 +1775,17 @@ class FfbEngine:
         model = self.model
         return None if model.car is None else (model.car, model.trail, model.scrub)
 
+    def details(self):
+        """What the FFB tab's read-only lines show besides the status (gui.countersteer_details), as plain values: the
+        engine process sends this to the GUI's EngineProcess (ffb_process)."""
+        model = self.model
+        try:
+            impedance = model.impedance()
+        except Exception:
+            impedance = None
+        return {'car_properties': self.car_properties(), 'align_note': self.align_note, 'ratio': model.ratio,
+                'assist': model.assist, 'impedance': impedance}
+
     @property
     def usb_id(self):
         return self._usb_id
@@ -1820,9 +1841,14 @@ class FfbEngine:
             self._stop_source()
 
     def _run(self):
+        self.loop(self._wake.wait)
+
+    def loop(self, wait):
+        """The passes until stop(): `wait(timeout)` returns at a sample or a request (the thread's Event; in the engine
+        process its sockets, ffb_process) or after `timeout` s."""
         while self._running:
             busy = self._phase != 'idle' or (self._enabled and self._path is not None)
-            self._wake.wait(FAST_POLL if self._fast() else self.POLL if busy else IDLE_POLL)
+            wait(FAST_POLL if self._fast() else self.POLL if busy else IDLE_POLL)
             self._wake.clear()           # before the slot is read: an offer after this wakes the next wait
             if not self._running:
                 break
@@ -2981,6 +3007,10 @@ def status_text(status, listening=True):
     switch is on)."""
     if not status.device:
         return 'off', _("No wheel")
+    if status.last_stop == 'engine-restart' and not status.available:
+        return 'off', _("Countersteer FFB's engine stopped: starting it again")
+    if status.last_stop == 'engine-failed' and not status.available:
+        return 'off', _("Countersteer FFB's engine kept stopping and is off until the app restarts: see the log")
     if not status.available and status.last_stop in ('write', 'error'):
         return 'off', _("The wheel stopped taking the force: plug it in again")
     if not status.available:
