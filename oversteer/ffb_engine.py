@@ -388,8 +388,7 @@ def front_mz(sample):
 # names) was not decodable, and the dump has no surface input (grip 0 throughout), so one trail serves every car
 # and surface; 27 mm is also a typical rally-car mechanical trail.
 CASTER_TRAIL = 0.027                    # m
-SCRUB = 0.0155                          # m: also the physical scrub radius the steering force is played with
-SCRUB_MIN = 0.010                       # m: the least scrub the steering force is played with (the learnt one is a fit parameter)
+SCRUB = 0.0155                          # m: the physical scrub radius (the Kickback's couple; the steering force plays none)
 
 
 class Kickback:
@@ -594,8 +593,8 @@ class RackForce:
       inside it; an unknown wheel counts as the G29's 2.1 Nm) so the car's top torque (top_torque()) lands at
       wheel_torque.STEER_BUDGET of full scale, which is also its hard clamp: the rest stays free for texture and
       impacts. The column's damping, friction and stiffness the driver renders keep a frozen scale
-      (COLUMN_SCALE, impedance()). The steering force is played with the physical scrub radius (SCRUB), not the
-      learnt one, which only serves the cross-check against the game's force. A gated kickback (Kickback) rides on
+      (COLUMN_SCALE, impedance()). The steering force plays no scrub couple (the drive's left/right split is absorbed by
+      the suspension; the learnt scrub only serves the cross-check against the game's force). A gated kickback (Kickback) rides on
       top, outside the steering budget; the output never passes RIM_SAFE_NM at the rim. The ratio is learnt per car from the road-wheel angle where the steering
       wheel's lock is known (ffb_carprops.RatioLearner), from the car table (+ a 0.13 m steering arm) until
       then. The car's
@@ -1029,7 +1028,10 @@ class RackForce:
         where it has, the game's own gain-against-load curve (fitted live, AssistDetector.curve) scaled so the
         car's p99 lands where our class model puts it, so the assist is not stacked."""
         trail = self.trail if trail is None else trail
-        scrub = max(SCRUB if scrub is None else scrub, SCRUB_MIN)      # (the learnt scrub is not played)
+        # no scrub couple in the steering force: Fx_FL - Fx_FR is mostly the drive's left/right split, which the
+        # suspension and steering geometry absorb (drive 20261102-235822 with the physical scrub: force reversals 1.1
+        # -> 2.8 per second, "it felt like disruption"); a one-sided kerb or lift plays through the gated Kickback
+        scrub = 0.0 if scrub is None else scrub
         mz = front_torque(sample, trail, scrub)
         if mz is None:
             return None
@@ -1132,7 +1134,7 @@ class RackForce:
         speed = getattr(sample, 'speed', None)
 
         def slope():
-            mz = front_torque(sample, self.trail, max(SCRUB, SCRUB_MIN))
+            mz = front_torque(sample, self.trail, 0.0)
             return ffb_carprops.driver_slope((mz or 0.0) / self.ratio, speed, cls)
         kick = self._kick.update(self._now, sample, self.car, self.ratio, slope)
         kick = min(max(kick / peak * self.strength, -self.KICK_CAP), self.KICK_CAP)

@@ -269,7 +269,7 @@ def run(drive, hz=50.0, wheel_peak=None, texture_level=None, align_on=None):
 
 def _first_principles_rim(s, rack, cls):
     """The driver's rim torque (Nm) worked out again from the tyre forces: kingpin torque (FL+FR Mz, the caster arm
-    -trail*(Fy_FL+Fy_FR), the scrub couple -scrub*(Fx_FL-Fx_FR)) through the column ratio and the boost curve (the
+    -trail*(Fy_FL+Fy_FR), no scrub couple, as the engine plays it) through the column ratio and the boost curve (the
     class the engine uses), where the model's assist applies. NaN without Mz."""
     mz, fy, fx = s.tyre_mz, s.tyre_fy, s.tyre_fx
     if mz is None:
@@ -277,8 +277,6 @@ def _first_principles_rim(s, rack, cls):
     tq = mz[0] + mz[1]
     if fy is not None:
         tq -= rack.trail * (fy[0] + fy[1])
-    if fx is not None:
-        tq -= max(fe.SCRUB, fe.SCRUB_MIN) * (fx[0] - fx[1])      # (the physical scrub the engine plays)
     if not math.isfinite(tq):
         return math.nan
     return cp.driver_from_column(tq / rack.ratio, s.speed, cls)
