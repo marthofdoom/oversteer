@@ -97,6 +97,31 @@ def test_countersteer_state(tmp_path):
         cs = state['countersteer']
         assert set(cs) == {'light', 'text', 'car', 'wheel', 'calibration'}
         assert cs['light'] == 'off' and cs['text'] and 'caster trail 30 mm' in cs['car'] and cs['calibration']
+        assert 'steering ratio 14.0' in cs['car'] and 'impedance scale 0.80' in cs['car'] and 'power steering' in cs['car']
+        assert s['countersteer_column'] == {'value': True, 'enabled': False}
+        assert s['countersteer_align'] == {'value': True, 'enabled': False}
+        assert s['countersteer_friction_removal'] == {'value': False, 'enabled': False}
+    finally:
+        r.stop()
+
+
+def test_the_steering_toggles_write_only_when_paired(tmp_path):
+    r = cs_rig(tmp_path)
+    try:
+        body = {'set': {'countersteer_column': False, 'countersteer_align': False, 'countersteer_friction_removal': True}}
+        assert r.post(body, token=None)[0] == 401
+        assert r.post(body, headers={'Origin': 'http://evil.example'})[0] == 403
+        m = r.model
+        assert m.get_countersteer_dynamics() == (True, True, False)
+        assert r.post(body)[0] == 200
+        assert m.get_countersteer_dynamics() == (False, False, True)
+        assert ('set_dynamics', False, False, True) in r.controller.ffb_engine.calls
+        assert ('set_countersteer_toggles', False, False, True) in r.ui.calls
+        assert r.post({'set': {'countersteer_column': 1}})[0] == 400
+        assert r.post({'set': {'countersteer_ffb': True}})[0] == 200
+        flags = r.state()['settings']
+        assert flags['countersteer_column'] == {'value': False, 'enabled': True}
+        assert flags['countersteer_friction_removal'] == {'value': True, 'enabled': True}
     finally:
         r.stop()
 
@@ -166,3 +191,30 @@ def test_countersteer_ranges_are_clamped_and_types_checked(tmp_path):
         assert r.post({'set': {'countersteer_texture_road': 'yes'}})[0] == 400
     finally:
         r.stop()
+
+
+def test_the_countersteer_page_builds_and_follows_the_toggles():
+    gi = __import__('gi')
+    gi.require_version('Gtk', '3.0')
+    from types import SimpleNamespace
+    from gi.repository import Gtk
+    from oversteer.gtk_ui import GtkUi
+    ui = GtkUi.__new__(GtkUi)
+    ui.main_notebook = Gtk.Notebook()
+    for label in ('Controls', 'Force Feedback', 'Tools'):
+        ui.main_notebook.append_page(Gtk.Box(), Gtk.Label(label=label))
+    sets = []
+    ui.controller = SimpleNamespace(model=SimpleNamespace(
+        set_countersteer_dynamics=lambda k, v: sets.append((k[len('countersteer_'):], v)),
+        set_countersteer_ffb=lambda v: None))
+    GtkUi._build_countersteer_page(ui)
+    assert ui.main_notebook.get_n_pages() == 4
+    assert ui.main_notebook.get_tab_label_text(ui.main_notebook.get_nth_page(2)) == 'Countersteer FFB'
+    assert hasattr(ui, 'calibrate_button') and hasattr(ui, 'wheel_friction_comp')
+    assert ui.wheel_friction_comp.get_adjustment().get_upper() == 50
+    GtkUi.set_countersteer_toggles(ui, True, False, True)
+    assert [s.get_active() for s in ui.countersteer_toggles.values()] == [True, False, True]
+    ui.countersteer_toggles['align'].set_active(True)
+    assert ('align', True) in sets
+    GtkUi.set_countersteer_toggles(ui, None, None, None)           # a driver without replace mode: untouched
+    assert ui.countersteer_toggles['align'].get_active()

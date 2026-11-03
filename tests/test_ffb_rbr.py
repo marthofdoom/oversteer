@@ -431,6 +431,27 @@ def test_profiles_keep_the_linearity(tmp_path):
     assert Model(FakeDevice(), None).data['countersteer_linearity'] is None
 
 
+def test_profiles_keep_the_steering_toggles(tmp_path):
+    from oversteer.model import Model
+    from tests.fake_wheel import FakeDevice
+    device = FakeDevice(ext_force_support=True)
+    model = Model(device, None)
+    assert model.data['countersteer_column'] is True and model.data['countersteer_align'] is True
+    assert model.data['countersteer_friction_removal'] is False
+    assert model.get_countersteer_dynamics() == (True, True, False)
+    model.data.update(countersteer_column=False, countersteer_align=False, countersteer_friction_removal=True)
+    profile = str(tmp_path / 'p.ini')
+    model.save(profile)
+    fresh = Model(device, None)
+    fresh.load(profile)
+    assert fresh.get_countersteer_dynamics() == (False, False, True)
+    (tmp_path / 'old.ini').write_text('[DEFAULT]\nrange = 900\ncountersteer_ffb = 1\n')
+    fresh.load(str(tmp_path / 'old.ini'))
+    assert fresh.get_countersteer_dynamics() == (True, True, False)
+    plain = Model(FakeDevice(), None)
+    assert plain.data['countersteer_column'] is None and plain.data['countersteer_friction_removal'] is None
+
+
 # -- re-review: the peak per stream, pending writes, app_gain read again, the ini's mtime --
 
 def test_the_peak_counts_only_the_games_own_levels():

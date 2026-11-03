@@ -712,6 +712,33 @@ class Gui:
             wheel = '; '.join(filter(None, [wheel] + extra))
         return car, wheel
 
+    def countersteer_details(self):
+        """The Countersteer FFB tab's read-only lines, {key: text} ('' for what is not known): the calibration,
+        what is learnt for the current car (ratio, caster trail, scrub, impedance scale, power steering) and the
+        wheel (motor heat, derating, hands, live friction, the alignment spring's note: all from countersteer_info())."""
+        engine = self.ffb_engine
+        car = ''
+        props = engine.car_properties()
+        if props is not None:
+            model = getattr(engine, 'model', None)
+            parts = []
+            if model is not None:
+                parts.append(_("steering ratio %.1f") % model.ratio)
+            parts += [_("caster trail %.0f mm") % (props[1] * 1000.0), _("scrub radius %.0f mm") % (props[2] * 1000.0)]
+            if model is not None:
+                try:
+                    parts.append(_("impedance scale %.2f") % model.impedance())
+                except Exception:
+                    pass
+                from . import ffb_carprops
+                if ffb_carprops.power_settings()[0] == 'off':
+                    parts.append(_("power steering: off in the INI"))
+                else:
+                    parts.append(_("power steering: detected") if model.assist > 0.5 else _("power steering: absent"))
+            car = ", ".join(parts)
+        wheel = self.countersteer_info()[1]
+        return {'calibration': self.wheel_calibration_text(), 'car': car, 'wheel': wheel}
+
     def _position_source(self, device):
         """For the engine: a callable giving the wheel's ABS_X (0..65535) now, None when it can't be read (see
         ffb_dynamics.position_source)."""

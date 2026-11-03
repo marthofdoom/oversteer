@@ -982,6 +982,8 @@ class Model:
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])
         self.ui.set_countersteer_lightness(data['countersteer_lightness'])
+        self.ui.set_countersteer_toggles(data['countersteer_column'], data['countersteer_align'],
+                                         data['countersteer_friction_removal'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()

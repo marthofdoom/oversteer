@@ -116,6 +116,7 @@ class FakeEngine:
     def __init__(self):
         self.calls = []
         self.status = SimpleNamespace(device=None, available=False, last_stop=None)
+        self.model = SimpleNamespace(ratio=14.0, assist=1.0, impedance=lambda: 0.8)
 
     def __getattr__(self, name):
         if name.startswith('set_'):
@@ -140,6 +141,7 @@ class FakeController:
     apply_countersteer_dynamics = Gui.apply_countersteer_dynamics
     countersteer_view = Gui.countersteer_view
     countersteer_info = Gui.countersteer_info
+    countersteer_details = Gui.countersteer_details
     _countersteer_wanted = Gui._countersteer_wanted
 
     def __init__(self, profile_path, device=None, enabled=True, token='pair-me-1234'):
