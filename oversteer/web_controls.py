@@ -439,6 +439,10 @@ class Bridge:
         if 'range' in settings:
             settings['range']['presets'] = [d for d in RANGE_PRESETS if d <= top]
         number('sensitivity', 0, 100)
+        if 'sensitivity' in settings:
+            warning = c.sensitivity_warning()
+            if warning:
+                settings['sensitivity']['warning'] = warning
         if data.get('combine_pedals') is not None:
             settings['combine_pedals'] = {'value': int(data['combine_pedals']), 'options': [0, 1, 2], 'enabled': True}
         flag('ffb_enabled')

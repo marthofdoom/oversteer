@@ -85,6 +85,15 @@ def set_(rig, **changes):
     return rig.post({'set': changes})
 
 
+def test_a_sensitivity_off_50_carries_the_warning_while_ffb_is_on(rig):
+    assert 'warning' not in rig.state()['settings']['sensitivity']
+    assert set_(rig, sensitivity=75)[0] == 200
+    warning = rig.state()['settings']['sensitivity']['warning']
+    assert 'bends the wheel' in warning and '×11 at 1°' in warning
+    assert set_(rig, sensitivity=50)[0] == 200
+    assert 'warning' not in rig.state()['settings']['sensitivity']
+
+
 # -- who may change anything --
 
 def test_reading_is_open_and_shows_the_wheel(rig):

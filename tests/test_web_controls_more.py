@@ -95,7 +95,7 @@ def test_countersteer_state(tmp_path):
         assert s['countersteer_texture']['max'] == 100 and 'countersteer_linearity' in s and 'countersteer_lightness' in s
         assert all(s['countersteer_texture_' + p]['value'] is True for p in ('road', 'impact', 'lock', 'engine'))
         cs = state['countersteer']
-        assert set(cs) == {'light', 'text', 'car', 'wheel', 'calibration'}
+        assert set(cs) == {'light', 'text', 'car', 'wheel', 'calibration', 'sensitivity'}
         assert cs['light'] == 'off' and cs['text'] and 'caster trail 30 mm' in cs['car'] and cs['calibration']
         assert 'steering ratio 14.0' in cs['car'] and 'impedance scale 0.80' in cs['car'] and 'power steering' in cs['car']
         assert s['countersteer_column'] == {'value': True, 'enabled': False}

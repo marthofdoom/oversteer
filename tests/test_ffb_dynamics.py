@@ -844,3 +844,65 @@ def _drive_with_node(tmp_path, invert):
 def test_a_passthrough_proxy_turns_the_spring_on_and_an_inverting_one_keeps_it_off(tmp_path):
     assert _drive_with_node(tmp_path / 'a', invert=False) is True
     assert _drive_with_node(tmp_path / 'b', invert=True) is False
+
+
+# -- the driver's steering sensitivity curve --
+
+def test_the_sensitivity_curve_mirrors_the_drivers_and_inverts():
+    assert fd.sensitivity_curve(0.3, 50) == 0.3
+    assert fd.sensitivity_curve(1.0, 75) == pytest.approx(1.0) and fd.sensitivity_curve(-1.0, 25) == pytest.approx(-1.0)
+    assert fd.sensitivity_curve(0.25, 75) == pytest.approx(0.5 * 0.25 + 0.5 * 0.5)       # 0.5 x + 0.5 sqrt(x)
+    assert fd.sensitivity_curve(0.5, 25) == pytest.approx(0.5 * 0.5 + 0.5 * 0.25)        # 0.5 x + 0.5 x^2
+    assert fd.sensitivity_curve(-0.25, 75) == pytest.approx(-0.375)
+    for s in (0, 25, 49, 50, 51, 75, 100):
+        for y in (-1.0, -0.4, -0.01, 0.0, 0.02, 0.3, 0.9, 1.0):
+            assert fd.sensitivity_curve(fd.sensitivity_inverse(y, s), s) == pytest.approx(y, abs=1e-6)
+    assert fd.sensitivity_inverse(0.3, None) is None and fd.sensitivity_inverse(0.3, 140) is None
+    assert fd.sensitivity_gain(75, 1.0, 900.0) == pytest.approx(11.1, abs=0.2)           # the field finding
+    assert fd.sensitivity_gain(50) == 1.0 and fd.sensitivity_gain(25, 1.0, 900.0) < 1.0
+
+
+def test_the_sensitivity_warning_only_off_50():
+    assert fd.sensitivity_warning(50, 900) is None and fd.sensitivity_warning(None, 900) is None
+    text = fd.sensitivity_warning(75, 900)
+    assert "×11 at 1°" in text and "game's steering lock/ratio" in text and "shake" in text
+
+
+def test_the_frame_check_keeps_a_bent_position_off_but_a_linear_one_on():
+    def run(sens, linear=True, sweep=0.5):
+        c = fd.FrameCheck()
+        c.MIN_SECONDS = 20.0
+        c.linear = linear
+        t = 0.0
+        while t < 25.0:
+            steer = sweep * math.sin(2 * math.pi * 0.3 * t)
+            evdev = -steer                                       # the game's steering is linear in the evdev position
+            raw = fd.sensitivity_inverse(evdev, sens)            # the spring's frame
+            c.feed(t, steer, -steer * 450.0, raw * 450.0)
+            t += 0.05
+        return c
+    assert run(50).ok                                            # linear: the same as before
+    bent = run(75)
+    assert not bent.ok and 'not linear' in bent.failed()
+    assert run(75, linear=False).slope is not None               # (without the test the fit alone would pass or not)
+    assert run(51).ok                                            # a slight bend is within 20 %
+    assert not run(75, sweep=0.02).ok                            # too small a sweep to judge: waiting or failing, never on
+
+
+def test_a_bent_sensitivity_keeps_the_alignment_spring_off_and_50_plays_it(tmp_path):
+    for sens, plays in ((50, True), (75, False)):
+        (tmp_path / str(sens)).mkdir()
+        path = dyn_wheel(tmp_path / str(sens), sensitivity='%d\n' % sens)
+        engine, t = playing_engine(path)
+        m = engine.model
+        m.ratio_known = m.lock_known = True
+        m._align.s[0] = 1e4
+        t = feed(engine, t, 6.0)
+        assert engine._dyn.sensitivity == sens
+        assert m.align_on is plays
+        if not plays:
+            assert 'linear' in (engine.align_note or ''), (engine._frame.reason, len(engine._frame._pairs), engine._frame.linear)
+        open(path + '/sensitivity', 'w').write('50\n')           # the sensitivity changes: the check starts again
+        t = feed(engine, t, 6.0)
+        assert engine._frame_sens == 50 and m.align_on
+        engine.stop()

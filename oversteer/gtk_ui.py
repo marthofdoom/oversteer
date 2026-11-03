@@ -1192,10 +1192,16 @@ class GtkUi:
         anchor.get_parent().insert(row, anchor.get_index() + 1)
         row.show_all()
         self._countersteer_polling = False
+        self.sensitivity_note = self._status_label()
+        self.sensitivity_row = self._setting_row(_("Steering sensitivity"), None, None, (), self.sensitivity_note)
+        self.sensitivity_row.show_all()
+        self.sensitivity_row.set_no_show_all(True)
+        self.sensitivity_row.set_visible(False)         # shown while the sensitivity warning applies
+        anchor.get_parent().insert(self.sensitivity_row, row.get_index() + 1)
         pointer = self._setting_row(_("More Countersteer settings"),
                                     _("Steering, texture, game-specific settings and the wheel correction are on the "
                                       "Countersteer FFB tab."))
-        anchor.get_parent().insert(pointer, row.get_index() + 1)
+        anchor.get_parent().insert(pointer, row.get_index() + 2)
         pointer.show_all()
         self._build_countersteer_page()
 
@@ -1271,7 +1277,7 @@ class GtkUi:
                                      (self.countersteer_page_light,), self.countersteer_page_status))
         self.countersteer_lines = {}
         for key, title in (('calibration', _("Wheel calibration")), ('car', _("Learnt for this car")),
-                           ('wheel', _("Wheel"))):
+                           ('wheel', _("Wheel")), ('sensitivity', _("Steering sensitivity"))):
             self.countersteer_lines[key] = self._status_label()
             status.add(self._setting_row(title, None, _(self.COUNTERSTEER_STATUS_TOOLTIP), (),
                                          self.countersteer_lines[key]))
@@ -1421,6 +1427,10 @@ class GtkUi:
             for key, text in self.controller.countersteer_details().items():
                 if self.countersteer_lines[key].get_text() != text:
                     self.countersteer_lines[key].set_text(text)
+        warning = self.controller.sensitivity_warning()
+        if self.sensitivity_note.get_text() != warning:
+            self.sensitivity_note.set_text(warning)
+            self.sensitivity_row.set_visible(bool(warning))
         shown = self.controller.countersteer_view()
         if shown != self._countersteer_shown:
             self._countersteer_shown = shown

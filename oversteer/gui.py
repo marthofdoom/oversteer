@@ -684,6 +684,23 @@ class Gui:
         from .ffb_engine import status_text
         return status_text(self.ffb_engine.status, listening=self.telemetry is not None)
 
+    def sensitivity_warning(self):
+        """The warning for a steering sensitivity other than 50 while force feedback is in use (the switch on, or
+        Countersteer FFB on), '' otherwise; logged once per change. The setting is left as the user made it."""
+        from .ffb_dynamics import sensitivity_warning
+        model = self.model
+        if model is None:
+            return ''
+        data = model.data
+        in_use = bool(data.get('ffb_enabled')) or bool(data.get('countersteer_ffb'))
+        text = sensitivity_warning(data.get('sensitivity'), data.get('range')) if in_use else None
+        key = (data.get('sensitivity'), data.get('range')) if text else None
+        if key != getattr(self, '_sens_warned', None):
+            self._sens_warned = key
+            if text:
+                logging.warning("Steering sensitivity %s: %s", data.get('sensitivity'), text)
+        return _(text) if text else ''
+
     def countersteer_info(self):
         """(car text, wheel text) for the FFB tab's read-only lines: the learnt caster trail and scrub of the
         current car, and the driver's ffb_thermal when it has one; '' for what is not there."""
@@ -740,7 +757,8 @@ class Gui:
                     parts.append(_("power steering: detected") if model.assist > 0.5 else _("power steering: absent"))
             car = ", ".join(parts)
         wheel = self.countersteer_info()[1]
-        return {'calibration': self.wheel_calibration_text(), 'car': car, 'wheel': wheel}
+        return {'calibration': self.wheel_calibration_text(), 'car': car, 'wheel': wheel,
+                'sensitivity': self.sensitivity_warning()}
 
     def _position_source(self, device):
         """For the engine: a callable giving the wheel's ABS_X (0..65535) now, None when it can't be read (see
@@ -772,7 +790,12 @@ class Gui:
             return _("Not available with this driver")
         result = (self._wheel_entry() or {}).get('result') or {}
         if result:
-            return _("Calibrated {}: {}").format(str(result.get('date', ''))[:10], summary(result))
+            text = _("Calibrated {}: {}").format(str(result.get('date', ''))[:10], summary(result))
+            candidate = (self._wheel_entry() or {}).get('candidate')
+            if isinstance(candidate, dict):
+                text += " " + _("A newer measurement ({}) was inconsistent with this one and is not applied: "
+                                "recalibrate.").format(str(candidate.get('date', ''))[:10])
+            return text
         return _("Not calibrated")
 
     def launch_options(self):
@@ -2561,14 +2584,29 @@ class Gui:
             path = self._wheel_store()
             store = wcal.load_store(path)
             key = getattr(cal, 'store_key', None) or wcal.wheel_key(device)
-            store[key] = wcal.new_entry(result, store.get(key))
+            old = store.get(key)
+            why = wcal.inconsistency(result, (old.get('result') if isinstance(old, dict) else None))
+            if why and wcal.valid_entry(old):
+                # The new measurement is kept beside the entry, not applied: the previous correction stays
+                result['inconsistent'] = why
+                old['candidate'] = result
+                store[key] = old
+                logging.warning("wheel calibration: inconsistent with the previous calibration (%s); "
+                                "the previous correction stays applied", why)
+            else:
+                store[key] = wcal.new_entry(result, old)
             try:
                 wcal.save_store(path, store)
             except OSError as e:
                 logging.warning("wheel calibration store: %s", e)
             self.apply_wheel_correction()
             self.refresh_wheel_correction()
-            self.ui.info_dialog(_("Wheel calibrated."), wcal.summary(result))
+            if why and wcal.valid_entry(old):
+                text = _("This measurement is inconsistent with the previous calibration ({}). The previous "
+                         "correction stays applied. Let the wheel cool down and recalibrate?").format(why)
+                self.ui.info_dialog(_("Wheel calibrated, but inconsistent."), wcal.summary(result) + "\n\n" + text)
+            else:
+                self.ui.info_dialog(_("Wheel calibrated."), wcal.summary(result))
         else:
             self.apply_wheel_correction()       # the run put back what was there: the correction goes on again
             self.refresh_wheel_correction()
