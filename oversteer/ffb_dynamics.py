@@ -117,14 +117,15 @@ class FrameCheck:
     works it out as -steer x range / 2. A wrong sign would pull the wheel toward the mirror image of where the tyres
     point, a wrong scale (a range the game does not map to its lock) to the wrong angle. Pairs of (expected, measured)
     degrees are kept for WINDOW seconds, FEED_EVERY apart, while the car moves; the check passes once MIN_SECONDS of
-    them span at least MIN_SPAN of the steering (steer -1..1) with correlation >= MIN_R and a slope within SLOPE.
-    It keeps being judged on the window: a failure turns it off again."""
+    them span at least MIN_SPAN of the steering (steer -1..1) with correlation >= MIN_R (so the sign agrees) and a slope within SLOPE. The measured slope (wheel degrees per
+    expected degree) is the game's mapping of its steering onto the wheel; the engine uses it for the spring's target
+    and stiffness. It keeps being judged on the window: a failure turns it off again."""
 
     WINDOW = 40.0
     MIN_SECONDS = 20.0
     MIN_SPAN = 0.15
     MIN_R = 0.95
-    SLOPE = (0.8, 1.25)
+    SLOPE = (0.3, 2.0)                   # any linear mapping in this (ACR maps its 540 deg lock onto a 900 deg wheel: 0.60)
     FEED_EVERY = 0.05
     JUDGE_EVERY = 1.0
 
