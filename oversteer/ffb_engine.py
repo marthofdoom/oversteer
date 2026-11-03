@@ -1494,6 +1494,9 @@ class FfbEngine:
         self._frame_range = None
         self._frame_sens = None          # the driver's sensitivity the check was fed under
         self._lock_stop = LockStop()
+        self._prov = None                # the stored wheel slope for this car / range / sensitivity, until the live check judges
+        self._prov_key = None            # (car, range, sensitivity) it was read for
+        self._prov_saved = None          # (key, slope) last handed to the store
         self._pos_cache = None           # (t, measured degrees, raw frame) of the last wheel position read
         self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
         self.align_note = None           # why the alignment spring is not played (the info line shows it)
@@ -2107,6 +2110,35 @@ class FfbEngine:
                 self._w = min(self._w + dt / GLIDE_IN, 1.0)
         return self._w
 
+    PROV_TOL = 0.10                      # the live slope may differ from the stored one by this share
+
+    def _lock_slope(self, stage):
+        """The wheel mapping the lock stop uses: the live FrameCheck's once it passes, else the one stored for this car,
+        wheel range and sensitivity (provisional: the alignment spring still waits for the live check). A live slope that
+        disagrees with the stored one (sign, or beyond PROV_TOL) drops the stored one (logged once); the stop then waits
+        for the live slope. A passing live slope is stored."""
+        car = self.model.car
+        key = (car, stage.range, stage.sensitivity)
+        if key != self._prov_key:
+            self._prov_key = key
+            self._prov = ffb_carprops.STORE.get_frame(car, stage.range, stage.sensitivity)
+        check = self._frame
+        live = check.slope if check.ok and check.slope else None
+        if live is None:
+            return self._prov
+        prov = self._prov
+        if prov is not None:
+            self._prov = None
+            if live * prov <= 0.0 or abs(live / prov - 1.0) > self.PROV_TOL:
+                ffb_carprops.STORE.set_frame(car, stage.range, stage.sensitivity, None)
+                logging.info("Countersteer FFB: the wheel's measured mapping %.2f disagrees with the stored %.2f for this "
+                             "car and wheel setup: stored value dropped", live, prov)
+        saved = self._prov_saved
+        if saved is None or saved[0] != key or abs(live / saved[1] - 1.0) > 0.02:
+            self._prov_saved = (key, live)
+            ffb_carprops.STORE.set_frame(car, stage.range, stage.sensitivity, live)
+        return live
+
     def _lock_stop_force(self, t, sample):
         """The lock stop's push (LockStop), at the overall strength and inside the rim ceiling; 0 when the wheel's
         position can't be read or the car is not ACR."""
@@ -2115,9 +2147,8 @@ class FfbEngine:
             stop.reset()
             return 0.0
         pos, _converted = self._wheel_position(t, stage)
-        lock_deg = None
-        if self._frame.ok and self._frame.slope:
-            lock_deg = stage.range / 2.0 * self._frame.slope        # (at or past the range: the wheel's own stop)
+        slope = self._lock_slope(stage)
+        lock_deg = None if slope is None else stage.range / 2.0 * slope     # (at or past the range: the wheel's own stop)
         push = stop.force(t, getattr(sample, 'steer', None), pos, lock_deg) * self._strength
         limit = FULL * self.model._ceiling()
         return min(max(push, -limit), limit)
