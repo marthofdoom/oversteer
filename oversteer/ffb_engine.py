@@ -1450,6 +1450,7 @@ class RbrRack(RackForce):
     FLOOR_AY = 15.0                      # m/s^2: the most lateral force the floor believes: an impact's spike is not grip
     FLOOR_BETA = (0.05, 0.15)            # rad of body slip: the floor fades in over this ...
     FLOOR_SPEED = (5.0, 8.0)             # ... and over this speed (m/s)
+    FLOOR_BIG = (0.40, 0.80, 0.5)        # rad, rad, share: a big slide's fade (ACR's played force over Newton's Fy_f falls like this past 0.4 rad)
     FLOOR_SLOW_HZ = 2.0                  # the column torque's slow low-pass the floor is held against
     FLOOR_LIFT_HZ = 10.0                 # the lift's low-pass: it cannot step
     FLOOR_FY_MIN = 100.0                 # N: under this |Fy_f| the floor's sign is kept
@@ -1610,6 +1611,7 @@ class RbrRack(RackForce):
             self.floor_sign = -math.copysign(1.0, fy)
         beta = abs(math.atan2(vel[1], abs(vel[0])))
         w = self._ramp(beta, self.FLOOR_BETA) * self._ramp(speed, self.FLOOR_SPEED)
+        w *= 1.0 - (1.0 - self.FLOOR_BIG[2]) * self._ramp(beta, self.FLOOR_BIG[:2])
         return self.floor_level * w * ffb_carprops.RALLY_TRAIL * abs(fy) / self.ratio
 
     def _floor_step(self, t, sample):

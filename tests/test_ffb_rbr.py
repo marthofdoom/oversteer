@@ -6,6 +6,7 @@ latch, the classifier's states and the hand-over; nothing is played without fres
 real wheel or /sys."""
 import math
 import random
+import types
 
 import pytest
 
@@ -1228,3 +1229,17 @@ def test_the_caster_setting_reaches_the_rack_and_the_snapshot(tmp_path):
     engine.set_caster_floor(40)
     engine.step(0.01)
     assert engine.rbr_rack.floor_level == pytest.approx(0.4) and engine.settings_snapshot()['profile']['caster_floor'] == 40.0
+
+
+def test_a_big_slide_fades_the_floor_as_acr_does():
+    """Past 0.4 rad the floor falls to half by 0.8 rad, not lower."""
+    rack = fe.RbrRack()
+    rack.reset(None)
+    sizes = {}
+    for beta in (0.3, 0.6, 0.8, 1.2):
+        rack._restart_floor()
+        sample = types.SimpleNamespace(speed=20.0, accel=(0.0, 6.0, 0.0), vel=(20.0 * math.cos(beta), 20.0 * math.sin(beta), 0.0), yaw_rate=0.0, game_time=None, drivetrain=None)
+        sizes[beta] = rack._floor_size(1.0, sample)
+    assert sizes[0.6] == pytest.approx(sizes[0.3] * 0.75)
+    assert sizes[0.8] == pytest.approx(sizes[0.3] * 0.5)
+    assert sizes[1.2] == pytest.approx(sizes[0.3] * 0.5)
