@@ -117,6 +117,12 @@ STRENGTH_SLEW = 0.2                      # 1/s: the applied strength moves this 
 PLATEAU_BAND = 8.0                       # ext_force units under the game's top that count as at the top (a clipped force
                                          # repeats its top level; the grid's steps there are 3.3 apart at most)
 PLATEAU_UPLOADS, PLATEAU_SECONDS = 100, 4    # uploads at the top, in this many different seconds: the top is a clip
+PLATEAU_SPEED = 5.0                      # m/s: the car moves (a clip is seen only while driving, never in a stage load or at rest)
+PLATEAU_QUIET = 10.0                     # s after an upload restart or a stage change in which no plateau is counted
+PLATEAU_FRESH = 1.0                      # s: the telemetry sample that says the car moves is no older than this
+PLATEAU_TOP_MIN = 0.15                   # the top, share of full scale, under which no clip is believed (10 % would be noise)
+PLATEAU_RISE = 0.7                       # a second counts when the levels in it were this share of the top or less ...
+PLATEAU_RISES = 2                        # ... in this many of the seconds at the top: the top was reached by rising
 PEAK_MARGIN = 1.0                        # ours never past the game's own peak times this
 FIT_STEPS = tuple(round(0.1 + 0.01 * i, 2) for i in range(91))     # candidate strengths 0.10 .. 1.00
 FIT_HZ = 20.0                            # the fit takes telemetry at this rate
@@ -403,6 +409,10 @@ class RbrForce:
         self._top = 0.0                  # the level the plateau is counted at, its uploads and the seconds they fell in
         self._top_n = 0
         self._top_secs = set()
+        self._sec_min = {}               # second -> lowest moving level in it (a real top is reached by rising)
+        self._speed, self._speed_t = None, None     # the telemetry's speed and when it came
+        self._quiet_until = None         # no plateau counted before this (an upload restart, a stage change)
+        self._restarted = False
         self._clear_s()
         self._last_level = None
         self._last_t = None
@@ -424,6 +434,8 @@ class RbrForce:
             logging.info("Countersteer FFB: RBR: %s: the game's own peak is measured again", why)
         self.peak = 0.0
         self._top, self._top_n, self._top_secs = 0.0, 0, set()
+        self._sec_min = {}
+        self._restarted = True           # (the quiet time starts with the next time stamp)
         self.fit.peak = 0.0              # (the fit's moments and a plateau found stay: a restart keeps the STRENGTH)
 
     def _clear_s(self):
@@ -529,6 +541,9 @@ class RbrForce:
     def feed_physics(self, t, sample, level):
         """A telemetry sample with the raw level now: the strength fit (StrengthFit), and the applied strength gliding
         toward what the evidence shows (never a step: STRENGTH_SLEW of the way per second)."""
+        self._speed, self._speed_t = getattr(sample, 'speed', None), t
+        if self._restarted:
+            self._restarted, self._quiet_until = False, t + PLATEAU_QUIET
         accel = getattr(sample, 'accel', None)
         ay = accel[1] if accel is not None and len(accel) > 1 else None
         moved = self.fit.feed(t, ay, getattr(sample, 'yaw_rate', None), getattr(sample, 'speed', None), level)
@@ -537,17 +552,22 @@ class RbrForce:
             # once (a lighter force: the safe direction for a step), until a clipped top shows the new one
             logging.info("Countersteer FFB: RBR %s: a level of %d is over the kept STRENGTH %.2f: back to 1 until it "
                          "is seen again", self.car, self.peak, self.s_kept)
-            self.s_kept = None
+            self.s_kept = None           # (the file stays: only a later confirmed value overwrites it)
             self.s_applied = 1.0
         target = self.target_s()
         if (self.s_plateau is not None or (self.fit.converged and self.fit.s != 1.0)) and (
                 self.s_kept is None or abs(target - self.s_kept) > 0.005):
             self.s_kept = target
             keep_strength(target)
+        if target < self.s_applied and self.s_plateau is None:
+            target = self.s_applied      # heavier only on a confirmed clipped top; a fit alone never lowers it
         dt = 0.0 if self._phys_t is None else min(max(t - self._phys_t, 0.0), 0.25)
         self._phys_t = t
         before = self.s_applied
-        self.s_applied += (1.0 - math.exp(-STRENGTH_SLEW * dt)) * (target - self.s_applied)
+        if target > self.s_applied:
+            self.s_applied = target      # lighter: at once on the evidence
+        else:
+            self.s_applied += (1.0 - math.exp(-STRENGTH_SLEW * dt)) * (target - self.s_applied)    # heavier: glided
         full = max(FULL * self.s_applied, self.peak, abs(level or 0))
         if moved:
             logging.info("Countersteer FFB: RBR %s: game STRENGTH %s", self.car, self.fit.describe())
@@ -563,6 +583,15 @@ class RbrForce:
     def _plateau(self, t, a):
         """Count the uploads at the game's top: a force that clips repeats its top level, and that level is C (a game at
         STRENGTH 1 whose top is far under full scale does not sit on it for seconds on end)."""
+        if self._restarted:
+            self._restarted, self._quiet_until = False, t + PLATEAU_QUIET
+        if (self._speed is None or self._speed <= PLATEAU_SPEED or t - self._speed_t > PLATEAU_FRESH
+                or t < self._speed_t - PLATEAU_FRESH or (self._quiet_until is not None and t < self._quiet_until)):
+            return                       # at rest, no telemetry, or just after a restart (a stage load): says nothing
+        sec = int(t)
+        self._sec_min[sec] = min(a, self._sec_min.get(sec, a))
+        for old in [k for k in self._sec_min if k < sec - 30]:
+            del self._sec_min[old]
         if a > self._top + PLATEAU_BAND:
             self._top, self._top_n, self._top_secs = a, 0, set()
         if a >= self._top - PLATEAU_BAND:
@@ -570,7 +599,9 @@ class RbrForce:
             self._top_n += 1
             self._top_secs.add(int(t))
             if (self.s_plateau is None and self._top_n >= PLATEAU_UPLOADS and len(self._top_secs) >= PLATEAU_SECONDS
-                    and self._top < 0.9 * FULL):
+                    and PLATEAU_TOP_MIN * FULL <= self._top < 0.9 * FULL
+                    and sum(1 for k in self._top_secs if self._sec_min.get(k, self._top) <= PLATEAU_RISE * self._top)
+                    >= PLATEAU_RISES):
                 self.s_plateau = min(max(round(self._top / FULL, 2), FIT_STEPS[0]), 1.0)
                 logging.info("Countersteer FFB: RBR %s: game STRENGTH %.2f: its force clips at %.0f", self.car,
                              self.s_plateau, self._top)

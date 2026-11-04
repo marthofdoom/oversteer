@@ -330,7 +330,8 @@ def test_the_car_key_narrowing_keeps_the_fit_and_the_force(tmp_path):
     assert engine.rbr.changes > changes and engine.rbr.peak >= peak and engine.rbr.s == 100.0
 
 
-def test_app_gain_on_is_refused(tmp_path):
+def test_app_gain_on_does_not_refuse_rbr(tmp_path):
+    # the raw level is read before any gain and RbrRack computes its own force: the driver's app_gain is no matter
     engine, path = engine_on(tmp_path)
     with open(path + '/app_gain', 'w') as f:
         f.write('1\n')
@@ -339,7 +340,7 @@ def test_app_gain_on_is_refused(tmp_path):
     engine.set_device(path)
     engine.step(0.0)
     Drive(engine).run(7.0)
-    assert engine.status[:2] == ('model', 'rbr-app-gain') and FakeDriver.log == []
+    assert engine.status.active and engine.status.reason != 'rbr-app-gain'
 
 
 def test_never_two_writes_in_a_millisecond_and_fades_keep_writing(tmp_path, monkeypatch):
@@ -495,14 +496,14 @@ def test_a_value_within_a_millisecond_is_written_on_the_next_pass(tmp_path):
     assert len(forces()) == n + 1
 
 
-def test_app_gain_turned_on_while_playing_hands_rbr_back(tmp_path):
+def test_app_gain_turned_on_while_playing_goes_on_playing(tmp_path):
     engine, path = engine_on(tmp_path)
     drive = Drive(engine).run(7.0)
     assert engine.status.active
     with open(path + '/app_gain', 'w') as f:
         f.write('1\n')
     drive.run(1.5)
-    assert not engine.status.active and engine.status.reason == 'rbr-app-gain' and levels() == [0, 100]
+    assert engine.status.active and engine.status.reason != 'rbr-app-gain'
 
 
 def test_the_ini_is_read_again_when_it_changes(tmp_path):
@@ -802,6 +803,24 @@ def test_a_20_percent_game_is_not_held_back_by_its_peak():
     assert force.ready and force.refused is None and force.waiting is None
 
 
+def moving_sample(speed=20.0):
+    sample = Sample(5000.0, gear=3, speed=speed, car=CAR, game='rbr')
+    sample.steer, sample.accel, sample.yaw_rate = 0.0, (0.0, 0.0, 0.0), 0.0
+    return sample
+
+
+def clip_drive(force, top, sample, seconds, t0=0.0, rise=True, dt=0.004):
+    """Uploads that rise from half the top and clip at it (rise False: the top alone, a constant value); returns t."""
+    half = abs(r.round_trip(-(top // 2)))                 # (on the grid, or it is not counted)
+    t = t0
+    while t < t0 + seconds:
+        level = -top if (not rise or (t % 1.0) < 0.6) else -half
+        force.feed(t, level, holding=True)
+        force.feed_physics(t, sample, level)
+        t += dt
+    return t
+
+
 def test_the_strength_glides_to_a_clipped_top_and_a_restart_keeps_it():
     force = r.RbrForce()
     top = -r.level_of(r.magnitude(1.0, 0.2))
@@ -839,22 +858,14 @@ def test_the_confirmed_strength_is_kept_and_starts_the_next_session(caplog):
     top = -r.level_of(r.magnitude(1.0, 0.2))
     sample = Sample(5000.0, gear=3, speed=20.0, car=CAR, game='rbr')
     sample.steer, sample.accel, sample.yaw_rate = 0.0, (0.0, 0.0, 0.0), 0.0
-    t = 0.0
-    while t < 8.0:
-        first.feed(t, -top, holding=True)
-        first.feed_physics(t, sample, -top)
-        t += 0.004
+    clip_drive(first, top, sample, 8.0)
     assert first.s_plateau == pytest.approx(0.2, abs=0.01) and r.kept_strength() == pytest.approx(0.2, abs=0.01)
     second = r.RbrForce()                                    # the next session
     assert second.s_applied == pytest.approx(0.2, abs=0.01) and second.full < 0.25 * r.FULL
     assert second.target_s() == second.s_kept                # (the fit saying 1 does not undo it)
     assert 'kept from the last session' in caplog.text
     other = -r.level_of(r.magnitude(1.0, 0.5))               # another top: glide to it and overwrite
-    t = 0.0
-    while t < 8.0:
-        second.feed(t, -other, holding=True)
-        second.feed_physics(t, sample, -other)
-        t += 0.004
+    clip_drive(second, other, sample, 8.0)
     assert second.s_plateau == pytest.approx(0.5, abs=0.01) and r.kept_strength() == pytest.approx(0.5, abs=0.01)
     assert 0.5 <= second.s_applied < 1.0                       # (back to the light prior on the first impossible level, then down to it)
 
@@ -866,3 +877,108 @@ def test_a_level_over_the_kept_strength_drops_it_at_once():
     f.peak = int(0.5 * ffb_rbr.FULL)           # only a STRENGTH of 0.5 or more makes this level
     f.feed_physics(1.0, None, 0)
     assert f.s_kept is None and f.s_applied > 0.9
+
+
+# -- the clipped-top detector's gates and the asymmetric strength (2026-11-03 17:26: 0.10 from a stage load) --
+
+def test_a_plateau_needs_the_car_moving():
+    top = -r.level_of(r.magnitude(1.0, 0.2))
+    f = r.RbrForce()
+    clip_drive(f, top, moving_sample(speed=2.0), 8.0)
+    assert f.s_plateau is None                               # a held force at rest (a stage load) is no clip
+    f = r.RbrForce()
+    clip_drive(f, top, moving_sample(speed=20.0), 8.0)
+    assert f.s_plateau == pytest.approx(0.2, abs=0.01)
+
+
+def test_a_plateau_needs_telemetry():
+    top = -r.level_of(r.magnitude(1.0, 0.2))
+    f = r.RbrForce()
+    t = 0.0
+    sample = moving_sample()
+    f.feed_physics(0.0, sample, -top)                        # one sample, then only uploads
+    half = r.round_trip(-(top // 2))
+    for i in range(2500):
+        t = i * 0.004
+        f.feed(t, -top if (t % 1.0) < 0.6 else half, holding=True)
+    assert f.s_plateau is None
+
+
+def test_no_plateau_within_10_s_of_a_restart_or_a_stage_change():
+    top = -r.level_of(r.magnitude(1.0, 0.2))
+    for why in ('the uploads restarted', 'a new stage or a restart'):
+        f = r.RbrForce()
+        sample = moving_sample()
+        f.feed_physics(0.0, sample, 0)
+        f.new_stream(why)
+        t = clip_drive(f, top, sample, 9.0, t0=0.1)
+        assert f.s_plateau is None, why                      # (the 2.9 s after the restart in the real log)
+        clip_drive(f, top, sample, 8.0, t0=t)
+        assert f.s_plateau == pytest.approx(0.2, abs=0.01)
+
+
+def test_a_constant_top_is_no_plateau_but_a_rise_to_it_is():
+    top = -r.level_of(r.magnitude(1.0, 0.2))
+    f = r.RbrForce()
+    clip_drive(f, top, moving_sample(), 20.0, rise=False)
+    assert f.s_plateau is None
+    f = r.RbrForce()
+    clip_drive(f, top, moving_sample(), 8.0)
+    assert f.s_plateau is not None
+
+
+def test_a_top_under_15_percent_of_full_scale_is_no_plateau():
+    top = -r.level_of(r.magnitude(1.0, 0.1))
+    f = r.RbrForce()
+    clip_drive(f, top, moving_sample(), 12.0)
+    assert f.s_plateau is None and abs(top) < 0.15 * r.FULL
+
+
+def test_a_stage_load_at_strength_100_writes_nothing(tmp_path):
+    # 17:26:17..20 of the real session: uploads restarted, a held level, a speed that is not a drive
+    f = r.RbrForce()
+    sample = moving_sample(speed=0.0)
+    t = clip_drive(f, 6918, sample, 6.0, rise=False)
+    assert f.s_plateau is None and r.kept_strength() is None
+
+
+def test_the_applied_strength_rises_at_once_and_only_a_plateau_makes_it_heavier():
+    f = r.RbrForce()
+    sample = moving_sample()
+    f.s_applied = 0.3
+    f.fit.converged, f.fit.s = True, 0.6
+    f.feed_physics(1.0, sample, 0)
+    assert f.s_applied == pytest.approx(0.6)                 # lighter: at once, on the fit
+    f.fit.s = 0.4
+    for i in range(200):
+        f.feed_physics(1.0 + 0.01 * i, sample, 0)
+    assert f.s_applied == pytest.approx(0.6)                 # a fit alone never makes it heavier
+    f.s_plateau = 0.4
+    f.feed_physics(10.0, sample, 0)
+    f.feed_physics(10.1, sample, 0)
+    assert 0.59 > f.s_applied > 0.55                         # a plateau does, gliding
+    assert f.s_applied > 0.5
+
+
+def test_a_converged_fit_alone_keeps_the_kept_strength_from_being_lowered():
+    r.keep_strength(0.5)
+    f = r.RbrForce()
+    f.fit.converged, f.fit.s = True, 0.2
+    for i in range(100):
+        f.feed_physics(i * 0.1, moving_sample(), 0)
+    assert f.s_applied == pytest.approx(0.5)
+
+
+def test_keep_strength_is_written_for_a_plateau_or_a_fit_not_for_the_drop():
+    r.keep_strength(0.2)
+    f = r.RbrForce()
+    f.peak = int(0.5 * r.FULL)
+    f.feed_physics(1.0, None, 0)
+    assert f.s_kept is None and f.s_applied == 1.0
+    assert r.kept_strength() == pytest.approx(0.2)           # the drop leaves the file alone
+    for i in range(50):
+        f.feed_physics(1.0 + i, None, 0)
+    assert r.kept_strength() == pytest.approx(0.2)           # ... and so does what follows it
+    f.fit.converged, f.fit.s = True, 0.7
+    f.feed_physics(100.0, None, 0)
+    assert r.kept_strength() == pytest.approx(0.7)           # only a later confirmed value overwrites it

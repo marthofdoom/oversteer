@@ -3310,9 +3310,6 @@ class FfbEngine:
         v = self.classifier.verdict(now, holding=playing)
         if v.state == 'replace' and (self.rbr.refused or self.rbr_rack.refused):
             v = Verdict('model', 'rbr-' + (self.rbr.refused or self.rbr_rack.refused), v.game, v.rate, v.gap_ms)
-        elif v.state == 'replace' and self._app_gain:
-            # The driver would scale the game's force by its FF_GAIN and not ours: the strengths would differ
-            v = Verdict('model', 'rbr-app-gain', v.game, v.rate, v.gap_ms)
         self._verdict = v
         want = (self._enabled and self._available and v.state == 'replace' and self.rbr.ready
                 and self.rbr_rack.ready and level is not None)
@@ -3899,8 +3896,6 @@ def status_text(status, listening=True):
         'rbr-grid': _("its force is not on DirectInput's steps (another program's force on the wheel?)"),
         'rbr-strength': _("waiting for its force to reach its top once (a big hit) to know its strength; set the "
                           "game's force feedback strength to 100 % and use the wheel's own"),
-        'rbr-app-gain': _("the driver's app_gain is on: it would scale the game's force but not Countersteer's, "
-                          "turn app_gain off"),
         'rbr-inverse': _("the game's DIRECTION is inverted (its force turns the wrong way): set it to normal in the "
                          "game's force feedback settings"),
         'beamng-no-mod': _("no rack force from the Countersteer BeamNG mod: install it from the FFB tab"),
