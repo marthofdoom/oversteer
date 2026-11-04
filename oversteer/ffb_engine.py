@@ -98,6 +98,7 @@ from . import car_data
 from . import ffb_carprops
 from . import ffb_dynamics
 from . import ffb_forza
+from . import ffb_gear
 from . import ffb_handforce
 from . import ffb_kick
 from . import ffb_record
@@ -2159,6 +2160,10 @@ class FfbEngine:
         self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
         self._kick_req = None            # "Kickback": (on, level %) from the GUI
+        self._gear_req = None            # "Gear guard": (on, level %, wheel drive type) from the GUI
+        self._gear = ffb_gear.GearGuard()      # (used by the engine thread only)
+        self._gear_on = False
+        self._gear_drive = 'gear'
         self._damping_req = None         # "Column damping" (% of the real column's) from the GUI
         self._rim_req = None             # the wheel's rim diameter (mm, 0: the table's) from the GUI
         self._car_wheel_req = None       # the car's steering wheel diameter (mm, profile INI only) from the GUI
@@ -2376,6 +2381,12 @@ class FfbEngine:
         self._kick_req = (bool(on), min(max(float(level), 0.0), 100.0))
         self._wake.set()
 
+    def set_gear_guard(self, on, level, drive='gear'):
+        """Gear guard (ffb_gear): on or off, at `level` % of its preload; `drive`: the wheel's drive type (for the log and
+        the capture's header)."""
+        self._gear_req = (bool(on), min(max(float(level), 0.0), 100.0), drive)
+        self._wake.set()
+
     def set_column_damping(self, pct):
         """Column damping: 0..100 % of the real steering column's damping played in the knee mapping; the dynamics stage
         rewrites ffb_dyn_damping when its target changes."""
@@ -2425,7 +2436,8 @@ class FfbEngine:
             'strength': round(self._strength * 100.0, 3), 'knee': round(model.knee * 100.0, 3), 'mapping': model.mapping,
             'rbr_cut_hz': self.rbr_rack.cut_hz,
             'column_damping': model.damping_pct, 'drive_pull': [bool(model.pull_on), round(model.pull_level * 100.0, 3)],
-            'kick': [bool(model.kick_on), round(model.kick_level * 100.0, 3)], 'rim_mm': model.rim_user,
+            'kick': [bool(model.kick_on), round(model.kick_level * 100.0, 3)],
+            'gear_guard': [self._gear_on, round(self._gear.level * 100.0, 3)], 'wheel_drive': self._gear_drive, 'rim_mm': model.rim_user,
             'car_wheel_mm': model.car_wheel_mm, 'forza_car_wheel_mm': fz.car_wheel_mm,
             'power_class': ffb_carprops.power_class(), 'texture_level': round(self.texture.level, 4),
             'texture_parts': dict(self.texture.parts), 'column': bool(column), 'align': bool(align),
@@ -2686,6 +2698,10 @@ class FfbEngine:
         if self._kick_req is not None:
             for rack in (self.model, self.forza_rack):
                 rack.kick_on, rack.kick_level = self._kick_req[0], self._kick_req[1] / 100.0
+        if self._gear_req is not None:
+            self._gear_on, self._gear.level, self._gear_drive = self._gear_req[0], self._gear_req[1] / 100.0, self._gear_req[2]
+            if not self._gear_on:
+                self._gear.takeover()
         if self._damping_req is not None:
             for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.damping_pct = self._damping_req
@@ -3164,7 +3180,8 @@ class FfbEngine:
 
     def _takeover_extra(self):
         """(the assist class, the previous drive's hand-force summary or '') for the take-over log lines."""
-        return ffb_carprops.power_class(), '; last drive: ' + self._hand_last if self._hand_last else ''
+        return ffb_carprops.power_class(), self._gear_drive, \
+            '%.0f %%' % (self._gear.level * 100.0) if self._gear_on else 'off', '; last drive: ' + self._hand_last if self._hand_last else ''
 
     def _hand_report(self):
         """' ; hand force ...' for the drive just ended (once: the summary starts over), '' when nothing was counted."""
@@ -3208,6 +3225,8 @@ class FfbEngine:
         # What is meant to be delivered; the driver multiplies ext_force by the user's master gain, so the value
         # written is divided by it (Countersteer's strength is the same at any gain; the game's own force is not)
         level = force * g * self._hold_gain(t)
+        if compensate:
+            level = self._guard(t, level, g)
         comp = self._master(t) if compensate else 1.0
         value = int(round(level / comp))
         saturated = abs(value) > FULL
@@ -3241,6 +3260,14 @@ class FfbEngine:
         if self._phase == 'out' and g <= 0.0:
             self._phase = 'idle'         # faded out (0 written last): the game has its force back
             self._let_go()
+
+    def _guard(self, t, level, g):
+        """The gear guard (ffb_gear) on what is meant to be delivered (ext_force units); its preload follows the glide weight
+        and the fade, so it is out while the force is the game's and in the hand-back."""
+        if not self._gear_on:
+            return level
+        weight = g if self._played_mode == 'beamng' else min(self._w, g)
+        return FULL * self._gear.step(t, level / FULL, weight)
 
     def _range_wanted(self):
         """True while our force fully plays (after the glide-in, game muted, no handback under way)."""
@@ -3817,13 +3844,14 @@ class FfbEngine:
         self._hold_f, self._hold_at, self._taken_skipped = 1.0, None, self.skipped
         self._hand.reset()
         self._hand_t = None
+        self._gear.takeover()
         self._read_gains()
         if self._mode == 'rbr':
             k = self.rbr_rack
             p99 = k.tau_p99()
             logging.info("Countersteer FFB: replacing Richard Burns Rally's force with its column torque through our chain "
                          "(game uploads %s/s; car %s, S %s, column torque p99 %s Nm so far, hand-force scale %.2f "
-                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, RBR force cut %s, texture %s, countersteer_power_class %s%s)",
+                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, RBR force cut %s, texture %s, countersteer_power_class %s, wheel drive %s, gear guard %s%s)",
                          'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, self.rbr.car,
                          'unknown (100 assumed)' if self.rbr.s is None else '%.1f' % self.rbr.s,
                          'none' if p99 is None else '%.1f' % p99, k.rho(), k.rim_mm(), k.car_wheel_mm,
@@ -3835,7 +3863,7 @@ class FfbEngine:
             k = self.forza_rack
             logging.info("Countersteer FFB: replacing Forza Horizon's force with our own from the car's motion through our chain "
                          "(%.0f packets/s, game uploads %s/s; car %s, mass %.0f kg (%s), hand-force scale %.2f (%.0f/%.0f mm), "
-                         "1:1 up to %.0f %%, column damping %.0f %%, drive pull %s, kickback %s, texture %s, countersteer_power_class %s%s)",
+                         "1:1 up to %.0f %%, column damping %.0f %%, drive pull %s, kickback %s, texture %s, countersteer_power_class %s, wheel drive %s, gear guard %s%s)",
                          self._verdict.rate, 'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, k.car, k.mass,
                          'learnt' if k.mass_l.known else 'prior', k.rho(), k.rim_mm(), k.car_wheel_mm, k.knee * 100.0,
                          k.damping_pct, '%.0f %%' % (k.pull_level * 100.0) if k.pull_on else 'off',
@@ -3854,7 +3882,7 @@ class FfbEngine:
         m = self.model
         logging.info("Countersteer FFB: replacing %s's force (%.0f/s, game uploads %s/s, %.1f per Nm, r %.2f, "
                      "finalFF cross-check %s, centring hint %s, rim model %.1f:1 assist %.1f wheel %.1f Nm (car p99 %.0f Nm), "
-                     "mapping %s, hand-force scale %.2f (%.0f/%.0f mm), 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s, countersteer_power_class %s%s)", self._verdict.game, self._verdict.rate,
+                     "mapping %s, hand-force scale %.2f (%.0f/%.0f mm), 1:1 up to %.0f %%, compressed to a top of %.1f Nm, drive pull %s, kickback %s, column damping %.0f %%, texture %s%s, countersteer_power_class %s, wheel drive %s, gear guard %s%s)", self._verdict.game, self._verdict.rate,
                      'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, m.scale, m.fit,
                      'none' if m.cross is None else '%.2f' % m.cross,
                      'none' if m.centring is None else '%.2f' % m.centring,

@@ -37,10 +37,11 @@ COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, STRENGTH_MAX), '
                         'countersteer_column_damping': (0, 100),
                         'countersteer_rim_mm': wheel_torque.RIM_RANGE, 'countersteer_car_wheel_mm': wheel_torque.CAR_WHEEL_RANGE,
                         'countersteer_drive_pull_level': (0, 100), 'countersteer_kick_level': (0, 100),
+                        'countersteer_gear_guard_level': (0, 100),
                         'countersteer_texture': (0, 100),
                         'countersteer_linearity': (0, 100), 'countersteer_lightness': (0, 100)}
 COUNTERSTEER_TOGGLES = ('countersteer_column', 'countersteer_align', 'countersteer_friction_removal')
-COUNTERSTEER_FLAGS = ('countersteer_ffb', 'countersteer_drive_pull', 'countersteer_kick') + COUNTERSTEER_TOGGLES + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
+COUNTERSTEER_FLAGS = ('countersteer_ffb', 'countersteer_drive_pull', 'countersteer_kick', 'countersteer_gear_guard') + COUNTERSTEER_TOGGLES + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
 # Greyed in the GTK window while force feedback is off (GtkUi.set_ffb_enabled)
 NEEDS_FFB = ('ff_gain', 'app_gain', 'inertia_mode') + LEVELS
 
@@ -349,6 +350,8 @@ class Bridge:
                 group = 'countersteer_drive_pull'
             elif key.startswith('countersteer_kick'):
                 group = 'countersteer_kick'
+            elif key.startswith('countersteer_gear_guard'):
+                group = 'countersteer_gear_guard'
             elif key.startswith('rev_leds'):
                 group = 'rev_leds' if key != 'rev_leds_launch' else 'rev_options'
             else:
@@ -372,6 +375,8 @@ class Bridge:
                     ui.set_countersteer_drive_pull(data['countersteer_drive_pull'], data['countersteer_drive_pull_level'])
                 elif group == 'countersteer_kick':
                     ui.set_countersteer_kick(data['countersteer_kick'], data['countersteer_kick_level'])
+                elif group == 'countersteer_gear_guard':
+                    ui.set_countersteer_gear_guard(data['countersteer_gear_guard'], data['countersteer_gear_guard_level'])
                 elif group == 'countersteer_toggles':
                     ui.set_countersteer_toggles(*(data[k] for k in COUNTERSTEER_TOGGLES))
                 elif group == 'ffb_enabled':
@@ -502,13 +507,15 @@ class Bridge:
         on = bool(data.get('countersteer_ffb'))
         for key, (low, high) in COUNTERSTEER_NUMBERS.items():
             number(key, low, high, enabled=on and (key != 'countersteer_drive_pull_level' or bool(data.get('countersteer_drive_pull')))
-                   and (key != 'countersteer_kick_level' or bool(data.get('countersteer_kick'))))
+                   and (key != 'countersteer_kick_level' or bool(data.get('countersteer_kick')))
+                   and (key != 'countersteer_gear_guard_level' or bool(data.get('countersteer_gear_guard'))))
         if 'countersteer_rim_mm' in settings:
             settings['countersteer_rim_mm']['value'] = model.get_countersteer_rim_mm()      # 0 (the table's) shown as its figure
         for key in COUNTERSTEER_TOGGLES:
             flag(key, on)
         flag('countersteer_drive_pull', on)
         flag('countersteer_kick', on)
+        flag('countersteer_gear_guard', on)
         for part in model.TEXTURE_PARTS:
             flag('countersteer_texture_' + part, on)
         combined = bool(data.get('combine_pedals'))

@@ -670,6 +670,7 @@ class Gui:
         self.apply_countersteer_power_class()
         self.apply_countersteer_drive_pull()
         self.apply_countersteer_kick()
+        self.apply_countersteer_gear_guard()
         self.apply_countersteer_linearity()
         self.apply_countersteer_lightness()
         self.apply_countersteer_dynamics()
@@ -717,6 +718,11 @@ class Gui:
     def apply_countersteer_kick(self):
         """Kickback's switch and level (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_kick(self.model.get_countersteer_kick(), self.model.get_countersteer_kick_level())
+
+    def apply_countersteer_gear_guard(self):
+        """Gear guard's switch and level (FFB tab, under the Countersteer switch) and the wheel's drive type to the engine."""
+        self.ffb_engine.set_gear_guard(self.model.get_countersteer_gear_guard(), self.model.get_countersteer_gear_guard_level(),
+                                       self.model.get_countersteer_wheel_drive())
 
     def apply_countersteer_linearity(self):
         """Richard Burns Rally's linearity (FFB tab, under the Countersteer switch) to the engine."""

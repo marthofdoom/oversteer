@@ -1245,6 +1245,9 @@ class GtkUi:
                                  "it. On by default. Saved with the profile.")
     COUNTERSTEER_KICK_LEVEL_TOOLTIP = ("How strong the kickback's tug is, 0 to 100 % of its amplitude. 100 % is the "
                                        "physically correct value and the default. Saved with the profile.")
+    COUNTERSTEER_GEAR_GUARD_TOOLTIP = ("Keeps the gears loaded on one side so small force reversals don't rattle the backlash. "
+                                       "Fast detail stays, but can't flip the force's direction.")
+    COUNTERSTEER_GEAR_GUARD_LEVEL_TOOLTIP = ("How much preload the guard holds, 0 to 100 % of its default. 100 % is the default.")
     COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
                                  "in the others.")
     COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
@@ -1385,6 +1388,17 @@ class GtkUi:
         self._dependent_rows.append(self._setting_row(
             _("Kickback level"), None, _(self.COUNTERSTEER_KICK_LEVEL_TOOLTIP), (self._response_row(kick),)))
         steering.add(self._dependent_rows[-1])
+        row, self.countersteer_gear_guard = self._switch_row(
+            _("Gear guard"), _(self.COUNTERSTEER_GEAR_GUARD_TOOLTIP), lambda state: self.controller.model.set_countersteer_gear_guard(state))
+        self._dependent_rows.append(row)
+        steering.add(row)
+        guard = self._response_scale(0, 100, 5)
+        guard.set_size_request(160, -1)
+        guard.connect('value-changed', lambda w: self.controller.model.set_countersteer_gear_guard_level(int(w.get_value())))
+        self.countersteer_gear_guard_level = guard
+        self._dependent_rows.append(self._setting_row(
+            _("Gear guard level"), None, _(self.COUNTERSTEER_GEAR_GUARD_LEVEL_TOOLTIP), (self._response_row(guard),)))
+        steering.add(self._dependent_rows[-1])
         self.countersteer_toggles = {}
         for key, title, tooltip in (
                 ('column', _("Real column feel"), self.COUNTERSTEER_COLUMN_TOOLTIP),
@@ -1515,6 +1529,15 @@ class GtkUi:
             self.countersteer_kick.set_active(bool(value))
         if level is not None and int(self.countersteer_kick_level.get_value()) != int(level):
             self.countersteer_kick_level.set_value(int(level))
+
+    def set_countersteer_gear_guard(self, value, level):
+        """The gear guard switch and its level, 0..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_gear_guard') or value is None:
+            return
+        if self.countersteer_gear_guard.get_active() != bool(value):
+            self.countersteer_gear_guard.set_active(bool(value))
+        if level is not None and int(self.countersteer_gear_guard_level.get_value()) != int(level):
+            self.countersteer_gear_guard_level.set_value(int(level))
 
     def set_countersteer_texture(self, level, parts):
         """The texture's level (0..100, None where the driver has no replace mode) and parts."""
