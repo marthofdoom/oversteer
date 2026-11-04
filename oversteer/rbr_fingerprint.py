@@ -581,6 +581,24 @@ class Recogniser:
         return self._close_epoch()
 
 
+def steering_range(key):
+    """(degrees, agree) the wheel's range should be for the car `key` names: twice the car's steering_wheel_lock_deg
+    (centre to full lock), rounded to a degree, since RBR maps the wheel's whole range to the car's full lock. A
+    candidate set ('rbr/11+104@6') gives the median of its candidates' locks, `agree` False where they differ. (None,
+    True) where no candidate has a lock (an unknown car, a car of ours with no table entry)."""
+    game, _, rest = (key or '').partition('/')
+    if game != 'rbr':
+        return None, True
+    locks = []
+    for i in rest.split('@', 1)[0].split('+'):
+        found = (car_data.cars().get('rbr/' + i) or {}).get('steering_wheel_lock_deg')
+        if found:
+            locks.append(2.0 * found)
+    if not locks:
+        return None, True
+    return int(round(statistics.median(locks))), len(set(round(v) for v in locks)) == 1
+
+
 def shared_entry(key):
     """The shipped data of a candidate set key ('rbr/11+104@6') where every candidate's agrees (one limiter, one
     default gearing, torque within TORQUE_AGREE at each point): the first candidate's entry; else None. A set of one
