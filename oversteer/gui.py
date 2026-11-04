@@ -663,6 +663,7 @@ class Gui:
         self.apply_countersteer_mapping()
         self.apply_countersteer_forza_model()
         self.apply_countersteer_rbr_spring()
+        self.apply_countersteer_rbr_source()
         self.apply_countersteer_knee()
         self.apply_countersteer_rbr_cut()
         self.apply_countersteer_caster_floor()
@@ -693,6 +694,10 @@ class Gui:
     def apply_countersteer_rbr_spring(self):
         """RBR's aligning spring on or off (profile INI only) to the engine."""
         self.ffb_engine.set_rbr_spring(self.model.get_countersteer_rbr_spring())
+
+    def apply_countersteer_rbr_source(self):
+        """RBR's force, derived from the physics or NGP's (profile INI only) to the engine."""
+        self.ffb_engine.set_rbr_source(self.model.get_countersteer_rbr_source())
 
     def apply_countersteer_knee(self):
         """The "1:1 up to" share of the wheel's peak (FFB tab, under the Countersteer switch) to the engine."""
