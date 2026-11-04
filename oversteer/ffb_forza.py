@@ -63,6 +63,39 @@ def kingpin(fy, s, tp_scale=1.0, caster=CASTER):
     return -(caster + tp_scale * trail(s)) * fy
 
 
+class LowPass:
+    """A causal low-pass at `hz`, first or second order (Butterworth), exact for an input held over each (irregular) step dt
+    (the same closed form as RbrRack._low_pass). A gap over `gap` s (or time going back) starts it again at the input."""
+
+    def __init__(self, hz, order=2, gap=0.1):
+        self.hz, self.order, self.gap = float(hz), int(order), gap
+        self.reset()
+
+    def reset(self):
+        self.y = self.v = self.at = None
+
+    def step(self, t, u):
+        last, self.at = self.at, t
+        dt = 0.0 if last is None else t - last
+        if self.y is None or dt < 0.0 or dt > self.gap:
+            self.y, self.v = u, 0.0
+            return u
+        if dt == 0.0:
+            return self.y
+        w = 2.0 * math.pi * self.hz
+        if self.order == 1:
+            self.y += (1.0 - math.exp(-w * dt)) * (u - self.y)
+            return self.y
+        a = w / math.sqrt(2.0)                    # z w, and w_d: the same at z = 1/sqrt 2
+        decay = math.exp(-a * dt)
+        c, sn = math.cos(a * dt), math.sin(a * dt)
+        e0, v0 = self.y - u, self.v
+        b = (v0 + a * e0) / a
+        self.y = u + decay * (e0 * c + b * sn)
+        self.v = decay * (v0 * c - (w * w * e0 + a * v0) / a * sn)
+        return self.y
+
+
 class _Box:
     """A causal moving average over the last `width` s."""
 

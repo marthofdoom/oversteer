@@ -139,6 +139,7 @@ class FakeController:
     apply_countersteer_mapping = Gui.apply_countersteer_mapping
     apply_countersteer_forza_model = Gui.apply_countersteer_forza_model
     apply_countersteer_rbr_spring = Gui.apply_countersteer_rbr_spring
+    apply_countersteer_rbr_source = Gui.apply_countersteer_rbr_source
     apply_countersteer_knee = Gui.apply_countersteer_knee
     apply_countersteer_rbr_cut = Gui.apply_countersteer_rbr_cut
     apply_countersteer_caster_floor = Gui.apply_countersteer_caster_floor

@@ -15,6 +15,14 @@ from oversteer.telemetry_formats import Sample
 from tests.test_ffb_engine import FakeDriver, forces, levels, upload, wheel  # noqa: F401 (the autouse fixture)
 from tests.test_ffb_engine import _clean_log  # noqa: F401
 
+@pytest.fixture(autouse=True)
+def _ngp_source(request, monkeypatch):
+    """The tests below are NGP's path (countersteer_rbr_source = ngp); the derived path's own tests are named test_derived_*."""
+    if not request.node.name.startswith('test_derived'):
+        monkeypatch.setattr(fe.RbrRack, 'source', 'ngp')
+        monkeypatch.setattr(fe, 'OVERALL_RBR_SOURCE', 'ngp')
+
+
 r_latch = 0.5
 CAR = 'rbr/11'                    # Ford Fiesta WRC 2019 in the shipped table (ffb_sensitivity 100)
 
@@ -1492,6 +1500,200 @@ def test_the_ini_switch_reaches_the_rack_and_the_capture_settings(tmp_path):
     assert engine.rbr_rack.spring_on is False and engine.settings_snapshot()['profile']['rbr_spring'] is False
 
 
+# -- the derived source (countersteer_rbr_source): the kingpin torque of the car's physics --
+
+def derived_rack(car=CAR):
+    rack = table_rack(car)
+    rack.source = 'derived'
+    return rack
+
+
+def physics_sample(t, ay=5.0, speed=20.0, yaw=0.0, load=None, steer=0.0):
+    """A moving car at the front axle's static load unless `load` (the fronts' sum) says otherwise."""
+    s = spring_sample(steer=steer, speed=speed, vx=speed, yaw=yaw)
+    s.accel, s.game_time = (0.0, ay, 0.0), t
+    static = fe.RbrRack.FLOOR_MASS * fz.front_share('awd') * fz.G
+    s.tyre_load = (0.5 * (static if load is None else load),) * 2 + (3000.0, 3000.0)
+    return s
+
+
+def run_derived(rack, seconds, hz=236.0, start=0.0, **kw):
+    t, rows = start, []
+    while t < start + seconds:
+        s = physics_sample(t, **kw)
+        rack.feed(t, s, None)
+        rack.play_t = t
+        rows.append((t, rack.derived, rack.rim_torque(s)))
+        t += 1.0 / hz
+    return rows
+
+
+def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
+    for ay in (5.0, -5.0, 2.0):
+        rack = derived_rack()
+        run_derived(rack, 0.2, ay=ay)
+        entry = fe.car_data.entry(CAR)
+        fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0)
+        expect = -(fe.ffb_carprops.RALLY_TRAIL + fz.TP0) * fy / rack.ratio      # (no slip: the whole pneumatic trail)
+        assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
+        assert rack.fy_f == pytest.approx(fy)
+    big = derived_rack()
+    run_derived(big, 0.2, ay=40.0)                                  # an impact's spike is not grip: ay and Fy_f are capped
+    cap = fz.front_share('awd') * fe.car_data.entry(CAR)['mass_kg'] * fe.RbrRack.FLOOR_AY
+    assert big.fy_f == pytest.approx(cap)
+
+
+def test_derived_torque_does_not_read_the_games_level():
+    a, b = derived_rack(), derived_rack()
+    t = 0.0
+    while t < 0.3:
+        s = physics_sample(t)
+        b.set_level(t, level_for(0.9), 100.0)
+        a.feed(t, s, None)
+        b.feed(t, s, level_for(0.9))
+        a.play_t = b.play_t = t
+        assert a.rim_torque(s) == b.rim_torque(s)
+        t += 1 / 236.0
+    assert a.column is None and a.rim_torque(physics_sample(t)) is not None      # (no level: the physics still plays)
+
+
+def test_derived_torque_fades_to_zero_at_low_speed():
+    out = {}
+    for speed in (1.0, 2.5, 3.75, 5.0, 12.0):
+        rack = derived_rack()
+        run_derived(rack, 0.2, speed=speed)
+        out[speed] = rack.derived
+    assert out[1.0] == 0.0 and out[2.5] == 0.0
+    assert out[12.0] == pytest.approx(out[5.0]) and out[12.0] < 0.0
+    assert out[12.0] < out[3.75] < 0.0 and out[3.75] == pytest.approx(0.5 * out[12.0])
+
+
+def test_derived_torque_fades_out_within_50_ms_when_the_fronts_are_unloaded_and_back_in():
+    rack = derived_rack()
+    run_derived(rack, 0.2)
+    full = rack.derived
+    rows = run_derived(rack, 0.1, start=0.2, load=0.05 * fe.RbrRack.FLOOR_MASS * fz.front_share('awd') * fz.G)    # 5 % of static: the air
+    by_t = {round(t - 0.2, 3): v for t, v, _ in rows}
+    assert abs(by_t[0.03]) < abs(full) and abs(by_t[0.03]) > 0.0
+    assert rows[-1][1] == 0.0 and abs(rows[round(0.055 * 236)][1]) < 1e-9
+    rows = run_derived(rack, 0.1, start=0.3)
+    assert rows[-1][1] == pytest.approx(full) and rows[0][1] != rows[-1][1]
+
+
+def test_derived_torque_fades_on_stale_or_missing_telemetry_and_does_not_hold():
+    rack = derived_rack()
+    run_derived(rack, 0.2)
+    t0 = rack._fed_at
+    s = physics_sample(t0)
+    seen = []
+    for age in (0.0, 0.1, 0.125, 0.19, 0.25, 0.4):
+        rack.play_t = t0 + age
+        seen.append(rack.rim_torque(s))
+    assert seen[0] == seen[1] != 0.0 == seen[-1] == seen[-2]
+    assert abs(seen[2]) > abs(seen[3]) > 0.0 and abs(seen[3]) < abs(seen[0])
+    # telemetry that stops carrying the lateral acceleration: the last value fades out in 50 ms, it is not held
+    bad = physics_sample(0.2)
+    bad.accel = None
+    t = 0.2
+    for _ in range(int(0.06 * 236)):
+        t += 1 / 236.0
+        rack.feed(t, bad, None)
+    assert rack.derived == 0.0
+
+
+def test_ngp_source_is_exactly_the_games_column_and_the_floor_lift():
+    rack = table_rack()
+    rack.source = 'ngp'
+    twin = table_rack()
+    twin.source = 'ngp'
+    twin.DERIVED_AY_HZ, twin.DERIVED_SLIP_PEAK = 3.0, 0.02             # nothing of the derived path touches it
+    for r_ in (rack, twin):
+        rows = run_floor(r_, level_for(0.2), vy=4.0, seconds=0.5)
+    assert rack.derived is None and rack.floor_lift != 0.0
+    s = slide_sample(t=1.0)
+    hyd = not rack.classic()
+    expect = fe.ffb_carprops.driver_from_column(rack.column + rack.floor_lift, s.speed, rack.ASSIST * rack.assist_level(), hyd)
+    assert rack.rim_torque(s) == expect == twin.rim_torque(s)
+    assert rows
+
+
+def test_derived_ignores_the_caster_floor_and_the_force_cut():
+    plain, odd = derived_rack(), derived_rack()
+    odd.floor_level, odd.cut_hz = 0.0, 1.0
+    plain.floor_level, plain.cut_hz = 1.0, None
+    t = 0.0
+    while t < 0.6:
+        s = slide_sample(t=t, vy=5.0)
+        s.tyre_load = (4000.0, 4000.0, 3000.0, 3000.0)
+        for r_ in (plain, odd):
+            r_.set_level(t, level_for(0.1 if t < 0.3 else 0.8), 100.0)
+            r_.feed(t, s, None)
+            r_.play_t = t
+        assert plain.rim_torque(s) == odd.rim_torque(s) and plain.floor_lift == odd.floor_lift == 0.0
+        t += 1 / 236.0
+    assert plain.derived != 0.0
+
+
+def test_derived_leaves_the_takeover_logic_on_the_games_level():
+    """The sign latch, ready and refusal read the game's level only: the same under either source."""
+    results = {}
+    for source, direction in (('derived', 1.0), ('ngp', 1.0), ('derived', -1.0), ('ngp', -1.0)):
+        rack = table_rack()
+        rack.source = source
+        rack.ready = False
+        rack.restart_sign()
+        t = 0.0
+        while t < 4.0:
+            steer = 0.5 * math.sin(2.0 * math.pi * 0.7 * t)
+            s = physics_sample(t, ay=0.5, steer=steer)
+            level = int(-direction * 12000 * steer)
+            rack.set_level(t, level, 100.0)
+            rack.feed(t, s, level)
+            t += 1 / 236.0
+        results[(source, direction)] = (rack.direction, rack.ready, rack.refused, rack.waiting, rack.sign_r)
+    assert results[('derived', 1.0)] == results[('ngp', 1.0)] and results[('derived', 1.0)][:3] == ('normal', True, None)
+    assert results[('derived', -1.0)] == results[('ngp', -1.0)] and results[('derived', -1.0)][2] == 'inverse'
+
+
+def test_derived_spring_follows_the_derived_shape_and_stays_on():
+    rack = derived_rack()
+    assert rack.align_stiffness() == rack.DERIVED_ALIGN_K0 and rack.align_ready()
+    twin = table_rack()
+    twin.source = 'ngp'
+    assert twin.align_stiffness() == twin.ALIGN_K0
+    # the shape is the saturating force times the trail's share: its slope stays positive past the peak, and k never goes negative
+    for alpha in (0.0, 0.05, 0.15, 0.3, 0.5):
+        assert 1.0 / rack._sat_div(alpha) >= rack.DERIVED_SLOPE_MIN - 1e-12
+        s = spring_sample(steer=0.1 + alpha / rack.lock, vx=20.0, vy=0.0)
+        split = rack.align(s)
+        assert split is not None and split['k'] > 0.0 and math.isfinite(split['k'])
+    # the learner is fed the derived column (before the fades), not NGP's
+    run_derived(rack, 0.3, steer=0.1)
+    assert rack.derived_raw is not None and rack._align.s[0] > 0.0 and rack.column is None
+
+
+def test_derived_ini_switch_reaches_the_rack_and_the_capture_settings():
+    from oversteer import ffb_process
+    from oversteer.model import Model
+    engine = fe.FfbEngine(driver=FakeDriver, beamng_source=None)
+    assert fe.OVERALL_RBR_SOURCE == 'derived' and engine.rbr_rack.source == 'derived'
+    assert Model.types['countersteer_rbr_source'] == 'string' and Model._texture_defaults(True)['countersteer_rbr_source'] == 'derived'
+    assert Model._texture_defaults(False)['countersteer_rbr_source'] is None
+    assert 'set_rbr_source' in ffb_process.SETTERS and hasattr(ffb_process.EngineProcess, 'set_rbr_source')
+    assert engine.settings_snapshot()['profile']['rbr_source'] == 'derived'
+    engine.set_rbr_source('NGP')
+    engine.step(0.0)
+    assert engine.rbr_rack.source == 'ngp' and engine.settings_snapshot()['profile']['rbr_source'] == 'ngp'
+    engine.set_rbr_source('nonsense')
+    engine.step(0.0)
+    assert engine.rbr_rack.source == 'derived'
+    model = Model.__new__(Model)
+    model.data = {}
+    assert model.get_countersteer_rbr_source() == 'derived'
+    model.data = {'countersteer_rbr_source': ' NGP '}
+    assert model.get_countersteer_rbr_source() == 'ngp'
+    model.data = {'countersteer_rbr_source': 'x'}
+    assert model.get_countersteer_rbr_source() == 'derived'
 def test_the_aligning_spring_is_never_the_only_force():
     """Field: at front slip under 0.02 rad the spring was 77-105 % of the total, a force locked to the wheel's position:
     its limit follows the steering force, so ext_force carries the rest."""
