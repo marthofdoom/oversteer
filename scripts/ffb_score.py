@@ -38,6 +38,7 @@ from oversteer import ffb_carprops as cp  # noqa: E402
 from oversteer import ffb_engine as fe  # noqa: E402
 from oversteer import ffb_handforce as fh  # noqa: E402
 from oversteer import ffb_metrics as fm  # noqa: E402
+from oversteer import ffb_record  # noqa: E402
 from oversteer import ffb_spring  # noqa: E402
 from oversteer import ffb_texture as ft  # noqa: E402
 from oversteer import wheel_calibration as wcal  # noqa: E402
@@ -686,6 +687,24 @@ def safety(tr):
     return out
 
 
+def stamp(path):
+    """{"build", "oversteer", "settings"} from the capture's `.ffb.gz` sidecar header (the capture's own header for the
+    build), whatever an older file lacks left out."""
+    out = {}
+    try:
+        from oversteer import telemetry_capture as tc
+        meta, _ = tc.read_capture(path)
+        out.update({k: meta[k] for k in ('build', 'oversteer') if meta.get(k)})
+    except Exception:
+        pass
+    try:
+        meta, _ = ffb_record.load(path + ffb_record.SUFFIX)
+        out.update({k: meta[k] for k in ('build', 'oversteer', 'settings') if meta.get(k)})
+    except Exception:
+        pass
+    return out
+
+
 def score(drive, hz=50.0, wheel_path=WHEEL, friction_comp=0, derate=1.0, wheel_peak=None, texture_level=None,
           align_on=None, events=24, mapping=None, column_damping=None, power_class=None):
     """Everything, as one JSON-able dict. `power_class` (rally / street / off) sets the assist class for this scoring."""
@@ -702,7 +721,7 @@ def score(drive, hz=50.0, wheel_path=WHEEL, friction_comp=0, derate=1.0, wheel_p
              mapping=mapping)
     fit = WheelFit(load_wheel(wheel_path), friction_comp, derate)
     result = {
-        'schema': SCHEMA, 'source': drive.source, 'kind': drive.kind, 'rows': int(len(tr['t'])),
+        'schema': SCHEMA, 'source': drive.source, 'kind': drive.kind, 'stamp': stamp(str(drive.source)), 'rows': int(len(tr['t'])),
         'duration_s': _duration(tr),
         'real_rate_hz': _rate(tr), 'engine_hz': hz, 'wheel': os.path.basename(wheel_path),
         'align_on': tr['align_on'], 'mapping': tr['mapping'], 'ready_share': float(np.mean(tr['ready'])) if len(tr['t']) else 0.0,
@@ -744,6 +763,14 @@ def report(r, title=''):
     lines = ['%s%s: %d rows, %.0f s, real rate %s Hz, engine %g Hz, ready %.0f %%, align_on %s' % (
         title + ' ' if title else '', os.path.basename(str(r['source'])), r['rows'], r['duration_s'],
         _f(r['real_rate_hz'], '%.0f'), r['engine_hz'], 100 * r['ready_share'], r['align_on'])]
+    st = r.get('stamp') or {}
+    if st:
+        lines.append('BUILD    %s (Oversteer %s)' % (st.get('build', 'unknown'), st.get('oversteer', '-')))
+        settings = st.get('settings')
+        if settings:
+            lines.append('SETTINGS ' + ', '.join('%s %s' % (k, json.dumps(v, sort_keys=True))
+                                                for k, v in sorted(settings.get('profile', {}).items())))
+            lines.append('LEARNT   ' + ', '.join('%s %s' % (k, json.dumps(v)) for k, v in sorted(settings.get('learnt', {}).items())))
     c = p.get('consistency')
     if c:
         lines += ['PHYSICS  consistency: rms %s FS, worst %s FS over %d free rows; gated: budget %.1f %%, game assist %.1f %% '

@@ -1,5 +1,6 @@
 conf = configuration_data()
 conf.set('VERSION', meson.project_version())
+conf.set('BUILD', build_id)
 conf.set('localedir', join_paths(prefix, get_option('localedir')))
 conf.set('pkgdatadir', pkgdatadir)
 conf.set('PYTHON', py_installation.full_path())

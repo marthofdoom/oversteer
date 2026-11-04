@@ -6,7 +6,7 @@ with the data that shows them, and tests can use real drives. The file is
 a gzip stream:
 
     b'OVCAP1\\n'
-    one JSON line: {"started": <epoch>, "port": <udp port>, "oversteer": <version>, "note": ""}
+    one JSON line: {"started": <epoch>, "port": <udp port>, "oversteer": <version>, "build": <commit>, "note": ""}
     records: struct '<dIH' (seconds since the first packet, source IPv4 as
              an unsigned 32-bit number, length) followed by the bytes
 
@@ -50,7 +50,7 @@ import threading
 import time
 import zlib
 
-from . import ffb_record
+from . import buildinfo, ffb_record
 from .telemetry_formats import OVST4_SIZE, OVST5_SIZE, OVST_MAGIC
 
 MAGIC = b'OVCAP1\n'
@@ -124,7 +124,7 @@ class CaptureWriter:
         self._file = gzip.open(path, 'wb')
         self._file.write(MAGIC)
         meta = {'started': time.time() if started is None else started, 'port': port, 'oversteer': version,
-                'note': note}
+                'build': buildinfo.BUILD, 'note': note}
         meta.update(extra or {})                     # more keys of the header line: a reader takes the ones it knows
         self._file.write(json.dumps(meta).encode() + b'\n')
         # Readable at once: labelling a session reads when a capture still
@@ -846,7 +846,8 @@ class Recorder:
             return
         try:
             self._ffb_log = ffb_record.sampler(self.path + FFB_SUFFIX, origin, {
-                'capture': os.path.basename(self.path), 'oversteer': self.version, 'started': self._started})
+                'capture': os.path.basename(self.path), 'oversteer': self.version, 'build': buildinfo.BUILD,
+                'started': self._started})
             self._ffb_log.start()
         except OSError as e:
             logging.warning("ffb sidecar: %s", e)
