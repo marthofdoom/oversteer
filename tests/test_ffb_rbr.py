@@ -1490,3 +1490,25 @@ def test_the_ini_switch_reaches_the_rack_and_the_capture_settings(tmp_path):
     engine.set_rbr_spring(0)
     engine.step(0.0)
     assert engine.rbr_rack.spring_on is False and engine.settings_snapshot()['profile']['rbr_spring'] is False
+
+
+def test_the_aligning_spring_is_never_the_only_force():
+    """Field: at front slip under 0.02 rad the spring was 77-105 % of the total, a force locked to the wheel's position:
+    its limit follows the steering force, so ext_force carries the rest."""
+    rack = table_rack()
+    rack.cut_hz = None               # (each level plays at once)
+    s = spring_sample(steer=0.2)
+    seen = []
+    rack.align_writer = lambda *a: seen.append(a)
+    limits = {}
+    for level in (0.3, 0.9):          # NGP force level
+        rack.align_on = False
+        rack.set_level(0.0, level_for(level), 100.0)
+        plain = abs(rack.force(s)) / fe.FULL
+        rack.align_on = True
+        rack._now = 1.0
+        rack.force(s)
+        limits[level] = (plain, seen[-1][2])
+    for plain, tau in limits.values():
+        assert tau == pytest.approx(max(rack.ALIGN_SHARE_MAX * plain, rack.ALIGN_TAU_MIN), abs=0.01)
+    assert limits[0.3][1] < limits[0.9][1]

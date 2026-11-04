@@ -640,6 +640,8 @@ class RackForce:
     ALIGN_PK = 0.04                      # rad: front slip angle at which the kingpin torque's growth has halved
     ALIGN_K0 = 5700.0                    # Nm/rad: the small-signal kingpin torque per front slip angle (pooled dump)
     ALIGN_K_RANGE = (300.0, 20000.0)     # the per-car learnt stiffness is held in this (dump cars: 650-9100 linear)
+    ALIGN_SHARE_MAX = 0.35               # the spring's most, as a share of the steering force now (measured 0.14-0.32 at front slip over 0.03 rad, left as it was)
+    ALIGN_TAU_MIN = 0.01                 # ... and never under this share of full scale
     ALIGN_MIN_N = 600.0                  # samples of weight before the learnt stiffness replaces the prior
     ALIGN_EPS = 1e-3                     # rad: under this slip the small-signal stiffness is used
     ENGINE_OFF_RPM = 50.0                # rpm under which the engine is off (the power steering pump with it: no assist) ...
@@ -1171,7 +1173,9 @@ class RackForce:
                 else:
                     k_fs = split['k'] * rho * wheel_torque.rim_share_slope(torque * rho, self.wheel_peak, self.strength,
                                                                            x_top, self.knee) * self.strength / peak
-                tau = wheel_torque.TOP
+                # never the only force: near zero slip the spring was 77-105 % of the total and ext_force about 0, a clean
+                # force locked to the wheel's position; held to a share of the total there, ext_force carries the rest
+                tau = min(wheel_torque.TOP, max(self.ALIGN_SHARE_MAX * abs(share), self.ALIGN_TAU_MIN))
                 theta_a, theta = split['theta_a_deg'], split['theta_deg']
                 if self.wheel_range:
                     # the wheel's own position frame: the game maps the wheel's travel to steer -1..1, so one degree
