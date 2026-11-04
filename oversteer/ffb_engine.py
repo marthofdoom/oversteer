@@ -1447,6 +1447,7 @@ class RbrRack(RackForce):
     SIGN_SPREAD = 0.02                   # ... and the steering input's spread (of -1..1) under it: a straight's noise
                                          # alone never latches
     FLOOR_MASS = 1390.0                  # kg: the caster floor's car mass when the table has none
+    FLOOR_AY = 15.0                      # m/s^2: the most lateral force the floor believes: an impact's spike is not grip
     FLOOR_BETA = (0.05, 0.15)            # rad of body slip: the floor fades in over this ...
     FLOOR_SPEED = (5.0, 8.0)             # ... and over this speed (m/s)
     FLOOR_SLOW_HZ = 2.0                  # the column torque's slow low-pass the floor is held against
@@ -1593,7 +1594,7 @@ class RbrRack(RackForce):
 
     def _floor_size(self, t, sample):
         """What mechanical caster alone gives at the column (Nm) in a slide, 0 in grip or without the fields; sets the floor's sign.
-        floor = level w CASTER |Fy_f| / ratio, w the body slip's and the speed's ramps; the column torque has the sign opposite Fy_f."""
+        floor = level w RALLY_TRAIL |Fy_f| / ratio, w the body slip's and the speed's ramps; the column torque has the sign opposite Fy_f."""
         rdot = self._track_yaw(t, sample)
         accel, vel = getattr(sample, 'accel', None), getattr(sample, 'vel', None)
         speed, drivetrain = getattr(sample, 'speed', None), getattr(sample, 'drivetrain', None)
@@ -1603,11 +1604,13 @@ class RbrRack(RackForce):
         entry = car_data.entry(self.car)
         mass = (entry.get('mass_kg') if entry else None) or self.FLOOR_MASS
         fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot)
+        limit = ffb_forza.front_share(drivetrain) * mass * self.FLOOR_AY
+        fy = min(max(fy, -limit), limit)
         if abs(fy) >= self.FLOOR_FY_MIN:
             self.floor_sign = -math.copysign(1.0, fy)
         beta = abs(math.atan2(vel[1], abs(vel[0])))
         w = self._ramp(beta, self.FLOOR_BETA) * self._ramp(speed, self.FLOOR_SPEED)
-        return self.floor_level * w * ffb_forza.CASTER * abs(fy) / self.ratio
+        return self.floor_level * w * ffb_carprops.RALLY_TRAIL * abs(fy) / self.ratio
 
     def _floor_step(self, t, sample):
         """The lift: the floor less the column torque's slow part (along the floor's sign, never negative), through a

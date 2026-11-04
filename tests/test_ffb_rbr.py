@@ -1125,7 +1125,7 @@ def run_floor(rack, level, seconds=1.0, hz=236.0, start=0.0, **kw):
 
 def floor_nm(rack, ay=6.0):
     fy = fz.front_lateral(rack.FLOOR_MASS, fz.front_share('awd'), ay, 0.0)
-    return fz.CASTER * abs(fy) / rack.ratio
+    return fe.ffb_carprops.RALLY_TRAIL * min(abs(fy), fz.front_share(None) * rack.FLOOR_MASS * rack.FLOOR_AY) / rack.ratio
 
 
 def test_grip_leaves_the_column_torque_exactly():
