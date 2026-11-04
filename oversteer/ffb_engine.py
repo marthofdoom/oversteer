@@ -1462,18 +1462,20 @@ class RbrRack(RackForce):
         self.s_note = None
         self._tau_q = ffb_carprops.Quantile()
         self._tau_at = None
+        self.direction = None
         self.restart_sign()
         self.direction = None            # 'normal' or 'inverse' once latched: the game's DIRECTION, kept through cars
 
     def restart_sign(self):
         """The sign is judged again (a new stream: the game's DIRECTION may have been changed in its menus)."""
-        self.direction = None
+        prior, self.direction = self.direction, None
         self._sign = _Moments(self.TAU)
         self.sign_time = 0.0
         self.sign_r = None
         self.refused = None
-        self.waiting = 'direction'
-        self.ready = False
+        keep = prior == 'normal'         # (judged again, but a latched 'normal' goes on playing meanwhile)
+        self.waiting = None if keep else 'direction'
+        self.ready = keep
         self._sign_at = None
 
     def set_car(self, car):
@@ -2050,6 +2052,7 @@ class FfbEngine:
         self.classifier = SupportClassifier()
         self.model = RackForce()         # ACR (and AC, ACC): from the front tyres' Mz
         self.rbr = RbrForce()            # Richard Burns Rally: the gates on the game's force (the upload grid, its strength) and S
+        self._rbr_why = None             # the last reason logged for not playing
         self.rbr_rack = RbrRack()        # ... and its column torque through our chain (RackForce's)
         self.beamng = BeamNGRack()       # BeamNG: the mod's rack force
         self.addon = ForzaLightness()    # Forza Horizon: lighter as the front tyres run out of grip
@@ -3313,6 +3316,12 @@ class FfbEngine:
         self._verdict = v
         want = (self._enabled and self._available and v.state == 'replace' and self.rbr.ready
                 and self.rbr_rack.ready and level is not None)
+        why = None if want else (self.rbr.refused or self.rbr_rack.refused or (
+            v.reason if v.state != 'replace' else None) or self.rbr.waiting or self.rbr_rack.waiting
+            or ('no fresh raw level' if level is None else None))
+        if self._enabled and why != self._rbr_why:
+            self._rbr_why = why
+            logging.info("Countersteer FFB: RBR: %s", "waiting/refused: " + why if why else "ready to take over")
         self._decide(now, playing, want, 'raw' if level is None else 'state')
         if self._phase != 'idle' and self._played_mode == 'rbr':
             if self._write_due(now, new):

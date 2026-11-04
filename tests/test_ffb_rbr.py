@@ -181,7 +181,7 @@ def test_rbr_goes_green_and_plays_the_column_torque(tmp_path):
     engine, path = engine_on(tmp_path)
     drive = Drive(engine).run(1.5)
     assert engine.status.state == 'replace' and not engine.status.active    # learning: drive a few corners
-    assert engine.status.waiting in ('raw', 'corners')
+    assert engine.status.waiting in ('raw', 'corners', 'direction')
     drive.run(4.0)
     st = engine.status
     assert st.state == 'replace' and st.active and st.ready and st.game == 'rbr'
@@ -309,8 +309,7 @@ def test_a_strength_under_1_never_makes_ours_the_stronger(tmp_path, strength):
     drive = Drive(engine, amp=60.0, strength=strength).run(12.0)
     game_peak = engine.rbr.peak
     assert game_peak <= strength * r.FULL + 4
-    assert engine.status[:2] == ('model', 'rbr-strength') and FakeDriver.log == []
-    assert 'strength' in fe.status_text(engine.status)[1]
+    assert engine.rbr.ceiling <= game_peak + 1          # ours never past the game's own top, the strength still assumed 1
     assert drive
 
 
@@ -602,7 +601,11 @@ def test_a_restarted_stream_judges_the_sign_again():
     rack = drive_rack(fe.RbrRack(), 4.0)
     assert rack.ready
     rack.restart_sign()
-    assert not rack.ready and rack.direction is None and rack.waiting == 'direction'
+    assert rack.direction is None and rack.sign_time == 0.0
+    assert rack.ready and rack.waiting is None            # a latched 'normal' goes on playing while it is judged again
+    fresh = fe.RbrRack()
+    fresh.restart_sign()
+    assert not fresh.ready and fresh.waiting == 'direction'
 
 
 def test_the_engine_refuses_an_inverted_direction(tmp_path):
@@ -790,13 +793,40 @@ def test_the_strength_is_1_until_converged_and_the_force_never_heavier():
     assert force._x(level) > abs(level) / r.FULL
 
 
-def test_a_fitted_strength_lets_a_20_percent_game_play():
+def test_a_20_percent_game_is_not_held_back_by_its_peak():
     force = r.RbrForce()
-    force.peak = 0.2 * r.FULL                            # the game's top at its 20 %: proven only against C = 0.2 FULL
-    force.changes, force.force_time = 500, 10.0
+    force.peak = 0.2 * r.FULL
+    force.changes, force.force_time = 500, 0.0
     force._grid.add(True, 1.0)
     force._judge(False)
-    assert force.refused == 'strength'                   # at C = 32767 a 20 % peak is not proof
-    force.full = r.FULL * 0.2
-    force._judge(False)
-    assert force.ready
+    assert force.ready and force.refused is None and force.waiting is None
+
+
+def test_the_strength_glides_to_a_clipped_top_and_a_restart_keeps_it():
+    force = r.RbrForce()
+    top = -r.level_of(r.magnitude(1.0, 0.2))
+    half = r.level_of(r.magnitude(0.5, 0.2))
+    t = 0.0
+    sample = Sample(5000.0, gear=3, speed=20.0, car=CAR, game='rbr')
+    sample.steer, sample.accel, sample.yaw_rate = 0.0, (0.0, 0.0, 0.0), 0.0
+    applied = []
+    while t < 40.0:
+        force.feed(t, -top if (t % 1.0) < 0.6 else half, holding=True)
+        force.feed_physics(t, sample, -top)
+        applied.append(force.s_applied)
+        t += 0.004
+    assert force.s_plateau == pytest.approx(0.2, abs=0.01)
+    assert applied[0] == 1.0 and applied[-1] == pytest.approx(0.2, abs=0.02)
+    steps = [abs(b - a) for a, b in zip(applied, applied[1:])]
+    assert max(steps) < 0.001                              # no step: a smooth glide
+    assert 0.3 < applied[int(10.0 / 0.004)] < 0.9 and applied[int(25.0 / 0.004)] < 0.25
+    force.new_stream('the uploads restarted')
+    assert force.peak == 0.0 and force.s_plateau is not None and force.target_s() == force.s_plateau
+    assert force.ceiling >= 0.99 * top                     # (not 1: a restart does not leave the wheel limp)
+
+
+def test_the_engine_takes_over_in_seconds_on_a_20_percent_game(tmp_path):
+    engine, path = engine_on(tmp_path)
+    Drive(engine, amp=60.0, strength=0.2).run(8.0)
+    assert engine.status.active
+    assert engine.rbr.strength > 0.9                       # still the prior 1: light until the evidence glides it
