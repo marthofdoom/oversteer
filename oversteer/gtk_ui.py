@@ -1254,11 +1254,6 @@ class GtkUi:
                                     "wheel's full force, the engine alone near 1 %. 30 % by default, every part "
                                     "on. Assetto Corsa Rally only for now. Saved with the profile.")
     COUNTERSTEER_TEXTURE_PARTS = (('road', "Road"), ('impact', "Landings"), ('lock', "Front lock"), ('engine', "Engine"))
-    COUNTERSTEER_LINEARITY_TOOLTIP = ("Richard Burns Rally only. The game squeezes its steering force through a curve "
-                                      "that flattens it as it grows; Countersteer undoes it. 0 % plays the game's "
-                                      "curve as it is; 100 % plays the steering torque straight, clipped at full "
-                                      "force. In between the force is exact up to that share of full force and "
-                                      "rounds off smoothly above it. 70 % by default. Saved with the profile.")
     COUNTERSTEER_LIGHTNESS_TOOLTIP = ("Forza Horizon only. Forza keeps its own force feedback; Countersteer makes "
                                       "it lighter as the front tyres run out of grip (from the front slip in the "
                                       "game's telemetry), so understeer is felt in the wheel. 0 % leaves the game's "
@@ -1413,14 +1408,6 @@ class GtkUi:
         texture.add(self._dependent_rows[-1])
 
         game = self._page_list(page, _("Game-specific"), _("Each setting below works in its own game only"))
-        linear = self._response_scale(0, 100, 10)
-        linear.set_size_request(160, -1)
-        linear.connect('value-changed',
-                       lambda w: self.controller.model.set_countersteer_linearity(int(w.get_value())))
-        self.countersteer_linearity = linear
-        self._dependent_rows.append(self._setting_row(_("RBR linearity"), None, _(self.COUNTERSTEER_LINEARITY_TOOLTIP),
-                                                      (self._response_row(linear),)))
-        game.add(self._dependent_rows[-1])
         light = self._response_scale(0, 100, 10)
         light.set_size_request(160, -1)
         light.connect('value-changed',
@@ -1525,11 +1512,8 @@ class GtkUi:
                 box.set_active(bool(value))
 
     def set_countersteer_linearity(self, value):
-        """Richard Burns Rally's linearity, 0..100 (None where the driver has no replace mode)."""
-        if not hasattr(self, 'countersteer_linearity') or value is None:
-            return
-        if int(self.countersteer_linearity.get_value()) != int(value):
-            self.countersteer_linearity.set_value(int(value))
+        """No control any more: RBR plays through the shared chain; the profile key stays for the model."""
+        return
 
     def set_countersteer_lightness(self, value):
         """Forza Horizon's understeer lightness, 0..100 (None where the driver has no replace mode)."""
