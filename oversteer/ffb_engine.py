@@ -152,7 +152,7 @@ STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied insi
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
 OVERALL_RBR_CUT = 30                     # "RBR force cut" default (Hz): the low-pass corner on RBR's column torque
 RBR_CUT_OFF = 120                        # ... and the top of its range: no filter
-OVERALL_ENGINE_FEEL = 300                # "Engine feel" default (profile key countersteer_engine_feel, %): the engine hum as a share of ffb_texture's EngineHum.CAP, 0 = off
+OVERALL_ENGINE_FEEL = 600                # "Engine feel" default (profile key countersteer_engine_feel, %): the engine hum as a share of ffb_texture's EngineHum.CAP, 0 = off
 OVERALL_CASTER_FLOOR = 100               # "Caster in slides" default (profile key countersteer_caster_floor, %): 0 = off
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
@@ -1484,6 +1484,7 @@ class RbrRack(RackForce):
     # 15-30 Hz .342 / .694 (.49). Only a_y's 3-15 Hz is over (the 0.5-3 Hz band is 1.60 over too: that drive was harder, relative
     # to it the band is .95); 1.0 is not reachable inside 15 ms (a second-order corner of 5.3 Hz would need 42 ms), so a_y takes
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
+    DERIVED_RATIO = 13.0                 # the derived torque's ratio for now: the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     DERIVED_AY_HZ = 16.1                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
     # Slip and spring shape, from RBR 20261104-143327 (speed over 10 m/s, _slip bins: median |a_y| 4.0 m/s^2 at .08-.1 rad, 6.1 at
@@ -1516,6 +1517,7 @@ class RbrRack(RackForce):
 
     def reset(self, car=None):
         super().reset(car)
+        self._frame_car = car
         self._table_frame(car)
         self.assist = self.ASSIST
         self.column = None               # the column torque (Nm, signed like the level, low-passed), None without a level
@@ -1562,8 +1564,9 @@ class RbrRack(RackForce):
 
     def set_car(self, car):
         """The telemetry's car key (it may narrow): the table ratio and lock (the aligning spring's frame)."""
-        if car != self.car:
-            self.car = car
+        self.car = car
+        if car != self._frame_car:       # (self.car alone misses it: field, ratio_known False all drive with the car already set)
+            self._frame_car = car
             self._table_frame(car)
 
     def set_level(self, t, level, s, strength=1.0):
@@ -1786,7 +1789,7 @@ class RbrRack(RackForce):
             self.fy_f = min(max(fy, -limit), limit)
             alpha = self._slip(sample)
             s = 0.0 if alpha is None else alpha / self.DERIVED_SLIP_PEAK
-            self.derived_raw = ffb_forza.kingpin(self.fy_f, s, 1.0, ffb_carprops.RALLY_TRAIL) / self.ratio
+            self.derived_raw = ffb_forza.kingpin(self.fy_f, s, 1.0, ffb_carprops.RALLY_TRAIL) / self.DERIVED_RATIO
             lo, hi = (self.DERIVED_SPEED[0] * self.ALIGN_SPEED, self.DERIVED_SPEED[1] * self.ALIGN_SPEED)
             self._derived_fade = self._ramp(speed, (lo, hi))
         elif self.derived_raw is None:
@@ -2672,7 +2675,7 @@ class FfbEngine:
 
     def set_engine_feel(self, value):
         """The "Engine feel": the engine hum's strength in % of its base level (0..300; 0 is off)."""
-        self._engine_feel_req = min(max(float(value), 0.0), 300.0)
+        self._engine_feel_req = min(max(float(value), 0.0), 600.0)
         self._wake.set()
 
     def set_mapping(self, value):

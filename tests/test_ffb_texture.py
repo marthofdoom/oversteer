@@ -613,3 +613,12 @@ def test_thermal_is_read_only_and_may_be_absent(tmp_path):
     assert D(tmp_path).get_ffb_thermal() == (37, 1, 74)
     (tmp_path / 'ffb_thermal').write_text('junk\n')
     assert D(tmp_path).get_ffb_thermal() is None
+
+
+def test_engine_feel_is_outside_the_limiter_and_can_be_felt_with_little_steering():
+    """Field: nothing to feel at 300 %: under 0.5 % of full scale once the limiter and a small steering force had their say."""
+    peak = lambda v: max(abs(x) for x in v[-333:])
+    tx = texture(1.0, engine=True)
+    tx.engine.feel = 6.0
+    loud = drive(tx, [revving(900.0, throttle=1.0)] * int(1.5 * HZ), steering=500.0)
+    assert peak(loud) == pytest.approx(6.0 * ft.EngineHum.CAP * FULL, rel=0.1)

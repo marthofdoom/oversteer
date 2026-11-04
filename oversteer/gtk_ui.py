@@ -1362,7 +1362,7 @@ class GtkUi:
         self._dependent_rows.append(self._setting_row(
             _("Caster in slides"), None, _(self.COUNTERSTEER_CASTER_TOOLTIP), (self._response_row(caster),)))
         steering.add(self._dependent_rows[-1])
-        feel = self._response_scale(0, 300, 10)
+        feel = self._response_scale(0, 600, 10)
         feel.set_size_request(160, -1)
         feel.connect('value-changed', lambda w: self.controller.model.set_countersteer_engine_feel(int(w.get_value())))
         self.countersteer_engine_feel = feel
@@ -1531,7 +1531,7 @@ class GtkUi:
             self.countersteer_caster_floor.set_value(int(value))
 
     def set_countersteer_engine_feel(self, value):
-        """The "Engine feel" share, 0..300 (None where the driver has no replace mode)."""
+        """The "Engine feel" share, 0..600 (None where the driver has no replace mode)."""
         if not hasattr(self, 'countersteer_engine_feel') or value is None:
             return
         if int(self.countersteer_engine_feel.get_value()) != int(value):
