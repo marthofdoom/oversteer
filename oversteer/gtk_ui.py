@@ -1228,6 +1228,8 @@ class GtkUi:
                                  "quarters of the wheel's range. Lower: a stronger squeeze of the heavy moments, more "
                                  "headroom; higher: more of the car's real weight, less room at the top. 30 to 60 %, "
                                  "50 % by default. Saved with the profile.")
+    COUNTERSTEER_RBR_CUT_TOOLTIP = ("RBR's own force is used below this frequency; faster vibration comes from the Texture "
+                                    "settings instead.")
     COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, as a share of a real steering column's. Lower "
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
                                     "after a slide. 100 % is the physically correct value (the real column's, in the force your hands feel) and the default.")
@@ -1331,6 +1333,13 @@ class GtkUi:
         self.countersteer_knee = knee
         self._dependent_rows.append(self._setting_row(
             _("1:1 up to"), None, _(self.COUNTERSTEER_KNEE_TOOLTIP), (self._response_row(knee),)))
+        steering.add(self._dependent_rows[-1])
+        cut = self._response_scale(15, 120, 5)
+        cut.set_size_request(160, -1)
+        cut.connect('value-changed', lambda w: self.controller.model.set_countersteer_rbr_cut(int(w.get_value())))
+        self.countersteer_rbr_cut = cut
+        self._dependent_rows.append(self._setting_row(
+            _("RBR force cut"), None, _(self.COUNTERSTEER_RBR_CUT_TOOLTIP), (self._response_row(cut, percent=False),)))
         steering.add(self._dependent_rows[-1])
         rim = Gtk.SpinButton.new_with_range(*wheel_torque.RIM_RANGE, 1)
         rim.set_value(wheel_torque.DEFAULT_RIM_MM)
@@ -1453,6 +1462,13 @@ class GtkUi:
             return
         if int(self.countersteer_knee.get_value()) != int(value):
             self.countersteer_knee.set_value(int(value))
+
+    def set_countersteer_rbr_cut(self, value):
+        """The "RBR force cut" corner, 15..120 Hz (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_rbr_cut') or value is None:
+            return
+        if int(self.countersteer_rbr_cut.get_value()) != int(value):
+            self.countersteer_rbr_cut.set_value(int(value))
 
     updating_countersteer_rim = False
 
