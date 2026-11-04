@@ -642,6 +642,8 @@ class RackForce:
     ALIGN_PK = 0.04                      # rad: front slip angle at which the kingpin torque's growth has halved
     ALIGN_K0 = 5700.0                    # Nm/rad: the small-signal kingpin torque per front slip angle (pooled dump)
     ALIGN_K_RANGE = (300.0, 20000.0)     # the per-car learnt stiffness is held in this (dump cars: 650-9100 linear)
+    ALIGN_SHARE_MAX = 0.35               # the spring's most, as a share of the steering force now (measured 0.14-0.32 at front slip over 0.03 rad, left as it was)
+    ALIGN_TAU_MIN = 0.01                 # ... and never under this share of full scale
     ALIGN_MIN_N = 600.0                  # samples of weight before the learnt stiffness replaces the prior
     ALIGN_EPS = 1e-3                     # rad: under this slip the small-signal stiffness is used
     ENGINE_OFF_RPM = 50.0                # rpm under which the engine is off (the power steering pump with it: no assist) ...
@@ -1177,7 +1179,9 @@ class RackForce:
                 else:
                     k_fs = split['k'] * rho * wheel_torque.rim_share_slope(torque * rho, self.wheel_peak, self.strength,
                                                                            x_top, self.knee) * self.strength / peak
-                tau = wheel_torque.TOP
+                # never the only force: near zero slip the spring was 77-105 % of the total and ext_force about 0, a clean
+                # force locked to the wheel's position; held to a share of the total there, ext_force carries the rest
+                tau = min(wheel_torque.TOP, max(self.ALIGN_SHARE_MAX * abs(share), self.ALIGN_TAU_MIN))
                 theta_a, theta = split['theta_a_deg'], split['theta_deg']
                 if self.wheel_range:
                     # the wheel's own position frame: the game maps the wheel's travel to steer -1..1, so one degree
@@ -2485,6 +2489,7 @@ class FfbEngine:
         self._pos_cache = None           # (t, measured degrees, raw frame) of the last wheel position read
         self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
         self.align_note = None           # why the aligning spring is not played (the info line shows it)
+        self._align_why = ''             # the reason last logged (None: playing)
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
@@ -3230,6 +3235,13 @@ class FfbEngine:
         if rbr:
             # RBR's slip is worked out from the sample: it must be a live one (its level may outlast the telemetry)
             want = want and model._fed_at is not None and 0.0 <= t - model._fed_at <= model.ALIGN_FRESH
+        why = None if want else next((name for name, ok in (
+            ('the driver or the profile', stage.can_align()), ('car or fit not ready', model.align_ready()),
+            ('wheel position check: %s' % self._frame.reason, frame_ok), ('glide', self._w >= 1.0),
+            ('hand-back', not self._handback)) if not ok), 'telemetry not fresh')
+        if why != self._align_why:
+            self._align_why = why                # (each change once: a spring that never plays must show in the log)
+            logging.info("Countersteer FFB: aligning spring %s", 'on' if why is None else 'off: ' + why)
         if model.align_on and not want:
             stage.align_off(t)
         if want and not model.align_on:
