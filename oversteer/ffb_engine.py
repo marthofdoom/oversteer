@@ -1827,6 +1827,35 @@ class _Wake(threading.Event):
             os.close(fd)
 
 
+class RangeState:
+    """What full range changed on one wheel: ext_force_cap and master gain, each (original, ours) or None where it
+    was left alone, and the gain the driver should show now."""
+    __slots__ = ('cap_orig', 'cap_ours', 'gain_orig', 'gain_ours', 'gain_now')
+
+    def __init__(self, cap_orig, cap_ours, gain_orig, gain_ours, gain_now):
+        self.cap_orig, self.cap_ours, self.gain_orig, self.gain_ours, self.gain_now = \
+            cap_orig, cap_ours, gain_orig, gain_ours, gain_now
+
+    def wire(self):
+        return (self.cap_orig, self.cap_ours, self.gain_orig, self.gain_ours)
+
+
+def apply_restore(driver, state):
+    """The originals back, each only where the driver still shows ours (a value changed meanwhile is the user's).
+    `state`: a RangeState or its wire tuple. Failures are logged, not raised."""
+    cap_orig, cap_ours, gain_orig, gain_ours = state.wire() if isinstance(state, RangeState) else state
+    for name, orig, ours, read, write in (
+            ('ext_force_cap', cap_orig, cap_ours, driver.ext_force_cap, driver.set_ext_force_cap),
+            ('gain', gain_orig, gain_ours, driver.master_gain, driver.set_master_gain)):
+        if orig is None:
+            continue
+        try:
+            if read() == ours:
+                write(orig)
+        except OSError as e:
+            logging.warning("Countersteer FFB: full range: restoring %s: %s", name, e)
+
+
 class DriverReplace:
     """The driver's replace-mode attributes of one wheel (its sysfs
     directory): ext_force and game_const_scale each through one file kept
@@ -1897,6 +1926,20 @@ class DriverReplace:
     def ext_force_cap(self):
         """ext_force's ceiling, % of full scale after the gain."""
         return self._int('ext_force_cap')
+
+    def set_ext_force_cap(self, value):
+        self._write_attr('ext_force_cap', value)
+
+    def set_master_gain(self, value):
+        self._write_attr('gain', value)
+
+    def _write_attr(self, name, value):
+        """A rare write (full range at a take-over and its restore), opened for each."""
+        fd = os.open(self._file(name), os.O_WRONLY)
+        try:
+            os.write(fd, b'%d\n' % value)
+        finally:
+            os.close(fd)
 
     NOTIFY_EVENTS = select.POLLPRI | select.POLLERR      # what sysfs_notify wakes on game_ffb_raw
 
@@ -2195,6 +2238,9 @@ class FfbEngine:
         self._cap_level = None           # the cap in the master gain's own frame (what is meant to be delivered)
         self._gain_at = None             # when the master gain was last read
         self._gain_seen = None           # master gain, share of 100 % (None unknown)
+        self._range = None               # RangeState while the driver's cap and gain are raised for our force
+        self._range_failed = False       # nothing to raise, or a write failed, in this take-over: not tried again
+        self.range_hook = None           # (wheel, RangeState or None): the host tells the GUI what to restore if this process dies
         self._comp = 1.0                 # the gain we divide by (smoothed)
         self._comp_at = None
         self._clipped = 0.0              # EW share of writes past it
@@ -3154,6 +3200,7 @@ class FfbEngine:
     def _out(self, t, force):
         """`force` (ext_force units, before the fade) clamped, faded and written."""
         g = self._gain(t)
+        self._full_range(t)
         force = min(max(force, -FULL), FULL)
         compensate = self._played_mode != 'forza'
         if compensate:                       # the add-on's is added to the game's own force, which steps: it must too
@@ -3195,6 +3242,95 @@ class FfbEngine:
             self._phase = 'idle'         # faded out (0 written last): the game has its force back
             self._let_go()
 
+    def _range_wanted(self):
+        """True while our force fully plays (after the glide-in, game muted, no handback under way)."""
+        if self._phase != 'on' or not self._muted or self._handback or self._played_mode == 'forza':
+            return False
+        return self._played_mode == 'beamng' or self._w >= 1.0      # (BeamNG has no glide)
+
+    def _full_range(self, t):
+        """Full range: while our force fully plays, the driver's ext_force_cap is 100 % and its master gain at least
+        100 % (the mapping tops out near 92 % of full scale, and min(|ext| * gain, cap) would clip it at the user's
+        values). The compensation follows at once (no GAIN_TAU transient: what is delivered does not step). Restored
+        before the glide-out and on every way out."""
+        if self._range is not None:
+            if not self._range_wanted():
+                self._restore_range(refresh=self._driver is not None)
+            return
+        if self._range_failed or not self._range_wanted():
+            return
+        driver = self._driver
+        try:
+            cap, gain = driver.ext_force_cap(), driver.master_gain()
+        except OSError:
+            cap = gain = None
+        new_cap = cap is not None and cap < 100
+        new_gain = gain is not None and 0 < gain < 65535
+        if not new_cap and not new_gain:
+            self._range_failed = True            # already at 100 %, or unreadable (nothing could be restored)
+            if cap is None and gain is None:
+                logging.info("Countersteer FFB: full range: the driver's ext_force_cap and gain are unreadable; left as they are")
+            return
+        state = RangeState(cap if new_cap else None, 100 if new_cap else None,
+                           gain if new_gain else None, 65535 if new_gain else None, gain)
+        # Told to the host first: a process killed between the write and the report would leave the values raised
+        if self.range_hook is not None:
+            self.range_hook(self._path, state)
+        self._range = state
+        try:
+            if new_cap:
+                driver.set_ext_force_cap(100)
+            if new_gain:
+                driver.set_master_gain(65535)
+        except OSError as e:
+            logging.warning("Countersteer FFB: full range: %s", e)
+            self._range_failed = True
+            self._restore_range(refresh=True)
+            return
+        if new_gain:
+            state.gain_now = 65535
+        self._read_gains()                   # the compensation, the clip point, RBR's ceiling: now, with no transient
+        logging.info("Countersteer FFB: full range: cap %s -> 100, gain %s -> 100, restored at hand-back",
+                     '?' if cap is None else cap, '?' if gain is None else '%.0f' % (gain * 100.0 / 65535.0))
+
+    def _adopt_gain(self, raw):
+        """The user changed the master gain while we play (the GUI's apply): that is the original now, and ours is
+        asserted again. Returns the gain the compensation should use."""
+        state = self._range
+        if raw < 65535:
+            state.gain_orig, state.gain_ours = raw, 65535
+        else:
+            state.gain_orig = state.gain_ours = None
+        state.gain_now = 65535 if raw < 65535 else raw
+        logging.info("Countersteer FFB: full range: the master gain was set to %.0f %%; that is the original now",
+                     raw * 100.0 / 65535.0)
+        if self.range_hook is not None:
+            self.range_hook(self._path, state)
+        if raw < 65535:
+            try:
+                self._driver.set_master_gain(65535)
+            except OSError as e:
+                logging.warning("Countersteer FFB: full range: gain: %s", e)
+                state.gain_now = raw
+                return raw
+            return 65535
+        return raw
+
+    def _restore_range(self, refresh=False):
+        """Cap and gain back to the originals (each only where still ours), safe twice. `refresh`: our force is still
+        playing or fading out, so the compensation follows at once."""
+        state, self._range = self._range, None
+        if state is None:
+            return
+        driver = self._driver
+        if driver is not None:
+            apply_restore(driver, state)
+        if self.range_hook is not None:
+            self.range_hook(self._path, None)
+        if refresh and driver is not None:
+            self._read_gains()
+            logging.info("Countersteer FFB: full range: cap and gain back to the user's")
+
     def _hold_gain(self, t):
         """1.0, or the share the easing in a gap left, coming back to 1 over HOLD_RECOVER once packets return."""
         f = self._hold_f
@@ -3214,6 +3350,8 @@ class FfbEngine:
                 raw = self._driver.master_gain()
             except OSError:
                 raw = None
+            if self._range is not None and raw is not None and raw != self._range.gain_now:
+                raw = self._adopt_gain(raw)
             self._gain_seen = raw / 65535.0 if raw else None
         want = self._gain_seen or 1.0
         last = self._comp_at
@@ -3672,6 +3810,7 @@ class FfbEngine:
             self._let_go()
             return
         self._muted = True
+        self._range_failed = False
         self._phase, self._fade_at = 'in', t
         self._played_mode = self._mode
         self._w, self._glide_at, self._handback, self._soft_since = 0.0, None, False, None
@@ -3746,6 +3885,7 @@ class FfbEngine:
         """Crossfade back: the game ramps in (game_ffb_level 100 now) while ours fades out. `detail`: what the
         classifier said, for the log; `soft`: a verdict that lasted (counts toward the back-off)."""
         self._fade_from = self._gain(t)
+        self._restore_range(refresh=True)
         self._phase, self._fade_at = 'out', t
         # The add-on never lowered it: nothing to write (its level stays the game's 100)
         if (self._muted or self._played_mode != 'forza') and self._safe_game_level(100):
@@ -3814,6 +3954,7 @@ class FfbEngine:
         self._release(reason, now)
 
     def _let_go(self):
+        self._restore_range()
         self._dyn_stop(self._last_t if self._last_t is not None else self._clock())
         self._smooth = self._smooth_at = self._spike = None
         self._written_at = None

@@ -1153,7 +1153,8 @@ def test_a_wheel_wanted_elsewhere_fades_the_last_value_quickly(tmp_path):
     assert levels() == [0, 100]
 
 
-def test_app_gain_and_the_cap_are_said(tmp_path):
+def test_app_gain_and_the_cap_are_said(tmp_path, monkeypatch):
+    monkeypatch.setattr(fe.FfbEngine, '_range_wanted', lambda self: False)      # (full range would raise the 5 % cap to 100 %)
     engine, path = engine_on(tmp_path)
     with open(path + '/app_gain', 'w') as f:
         f.write('1\n')
