@@ -59,13 +59,13 @@ def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_
     d, f = fd.column_targets(0.1, 3.5, (470, 670, 500, 1250, 5000))
     assert d == round(0.17 * math.pi / 180 * 0.1 / 3.5 * 1e6) < 470 and f == 500
     d, f = fd.column_targets(0.1, 3.5, (470, 670, 500, 1250, 5000), removal=True)
-    assert f == round(0.75 * 0.1 / 3.5 * 1e4) < 500
+    assert f == round(0.75 * 0.1 * fd.COLUMN_FRICTION_GAIN / 3.5 * 1e4) < 500
     # an unknown wheel counts as the G29's 3.5 Nm; the figures stay in the driver's range
     assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 3.5)
     assert fd.column_targets(50.0, 3.5) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
     # the damping's own scale (1:1 with the torque under the knee): the friction keeps the impedance scale
     d, f = fd.column_targets(0.3, 3.5, (470, 670, 500, 1250, 5000), damping_scale=1.0)   # 1:1 (100 %)
-    assert d == round(0.17 * math.pi / 180 / 3.5 * 1e6) > 470 and f == round(0.75 * 0.3 / 3.5 * 1e4)
+    assert d == round(0.17 * math.pi / 180 / 3.5 * 1e6) > 470 and f == round(0.75 * 0.3 * fd.COLUMN_FRICTION_GAIN / 3.5 * 1e4)
 
 
 def test_the_alignment_target_is_in_wheel_position_units_with_abs_xs_sign():
