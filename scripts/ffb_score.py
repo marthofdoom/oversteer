@@ -505,17 +505,22 @@ def wheel(tr, fit):
 
 
 def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_limit, delay_s, seconds, h=0.002,
-               scale=None, column_damping=None, rho=1.0):
+               scale=None, column_damping=None, rho=1.0, gear=None):
     """A released wheel (steering wheel degrees) at theta0 under the model's restoring torque toward theta_a, through
     the driver's shaping and the fitted wheel. The engine's part sees the state `delay_s` late (the telemetry loop);
     with align_on the driver's spring (ffb_spring.DriverSpring) renders the engine-subtracted part locally (no delay
-    in its position). Returns (settle_s or None, overshoot share of the first error, zero crossings, final error)."""
+    in its position). `gear`: the driver's crossing stage (ffb_gear.Crossing) on the summed force, before the shaping.
+    Returns (settle_s or None, overshoot share of the first error, zero crossings, final error)."""
     result = fit.result
     a_fs, f, beta = result['a_fs'], result['friction'], result['damping']
-    # the column damping the driver adds (ffb_dynamics.column_targets: a total, the wheel's own included)
+    # the column damping the driver adds (ffb_dynamics.column_targets: classic, a total with the wheel's own included;
+    # knee, on top of the wheel's own)
     classic = scale is not None
-    damping = scale if classic else (fe.RackForce.DAMPING_SCALE if column_damping is None else column_damping / 100.0)
-    beta = max(beta, fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * damping * math.pi / 180.0 / peak)
+    column = fe.ffb_dynamics.COLUMN_DAMPING_NMS_RAD * math.pi / 180.0 / peak
+    if classic:
+        beta = max(beta, column * scale)
+    else:
+        beta += column * rho * rho * (fe.RackForce.DAMPING_SCALE if column_damping is None else column_damping / 100.0)
     stick = fit.tau(result['breakaway'])
     lat = delay_s + fit.latency_ms / 1000.0
     delay = int(round(lat / h))
@@ -560,7 +565,10 @@ def _sim_slide(rack, fit, theta0, theta_a, speed, cls, x_top, peak, align_on, k_
             k_now = (scale * al_now['k'] / peak) if classic else \
                 al_now['k'] * rho * wheel_torque.rim_share_slope(al_now['model'] * rho, peak, 1.0, x_top * rho, wheel_torque.KNEE) / peak
             cmd += spring_d.force(al_now['theta_a_deg'], theta, k_now, tau, k_limit, h)
-        u = fit.command(min(max(cmd, -1.0), 1.0))
+        cmd = min(max(cmd, -1.0), 1.0)
+        if gear is not None:
+            cmd = gear.step(cmd, h, omega, False)        # released: the observer's hands off
+        u = fit.command(cmd)
         tq = fit.tau(u)
         if omega == 0.0 and abs(tq) <= stick:
             acc = 0.0

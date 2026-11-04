@@ -380,20 +380,50 @@ def feed(engine, t, seconds, **kw):
     return t
 
 
-def test_the_default_column_damping_writes_rho_squared_times_the_real_columns(tmp_path):
+def test_the_default_column_damping_adds_15_percent_to_the_wheels_own(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
-    assert engine.model.damping_pct == 100
-    scale = engine.model.rho() ** 2
-    assert int(open(path + '/ffb_dyn_damping').read()) == round(scale * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.5) * 1e6)
-    assert fd.column_targets(0.3, 3.5, damping_scale=0.64)[0] == round(0.64 * 848)
+    assert engine.model.damping_pct == 15
+    add = 0.15 * engine.model.rho() ** 2 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.5) * 1e6
+    assert int(open(path + '/ffb_dyn_damping').readline()) == round(engine._dyn.own[0] + add)
+    assert fd.column_targets(0.3, 3.5, damping_scale=0.64)[0] == round(0.64 * 848)      # the classic mapping's total
+
+
+def test_the_slider_adds_to_the_wheels_own_and_rises_from_0_to_100():
+    own = (511, 569, 442, 1402, 5000)
+    rho2 = (279.0 / 350.0) ** 2
+    add = 0.17 * math.pi / 180 / 3.5 * 1e6
+    last = None
+    for pct in range(0, 101):
+        d = fd.column_targets(0.3, 3.5, own, damping_scale=pct / 100.0 * rho2, additive=True)[0]
+        if pct == 0:
+            assert d == 0                                       # off: the driver leaves the wheel's own alone
+        else:
+            assert d >= own[0] and d == round(own[0] + pct / 100.0 * rho2 * add)     # never below its own: nothing removed
+            assert last is None or d >= last
+            last = d
+
+
+def test_the_classic_mapping_stays_a_total():
+    own = (511, 569, 442, 1402, 5000)
+    assert fd.column_targets(0.1, 3.5, own, damping_scale=0.1)[0] == round(0.1 * 848)
+
+
+def test_the_slider_reaches_the_driver_on_top_of_the_calibrated_own(tmp_path):
+    path = dyn_wheel(tmp_path)
+    engine, t = playing_engine(path)
+    engine.set_column_damping(100)
+    t = feed(engine, t, 0.5)
+    own = engine._dyn.own[0]
+    assert int(open(path + '/ffb_dyn_damping').readline()) == round(own + engine.model.rho() ** 2 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.5) * 1e6)
+    engine.stop()
 
 
 def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
-    want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, damping_scale=engine.model.damping_scale())
-    assert (int(open(path + '/ffb_dyn_damping').read()), int(open(path + '/ffb_dyn_friction').read())) == want
+    want = fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, engine._dyn.own, damping_scale=engine.model.damping_scale(), additive=True)
+    assert (int(open(path + '/ffb_dyn_damping').readline()), int(open(path + '/ffb_dyn_friction').readline())) == want
     assert want[1] >= 500
     engine.set_enabled(False)
     engine.step(t)
@@ -753,17 +783,17 @@ def test_the_calibration_result_is_written_to_the_driver_when_playing_starts(tmp
 
 def test_a_calibration_writes_the_stage_off_and_puts_it_back():
     sim = SimWheel()
-    sim.attrs.update(ffb_dyn_damping='600', ffb_dyn_friction='1400', ffb_align='12 3000 4000 60000')
+    sim.attrs.update(ffb_dyn_damping='600', ffb_dyn_friction='1400', ffb_align='12 3000 4000 60000', ffb_gear_cross='200 1500 800 3300 40000')
     cal = wcal.Calibration(sim)
     cal._prepare()
     assert sim.attrs['ffb_dyn_damping'] == '0' and sim.attrs['ffb_dyn_friction'] == '0' \
-        and sim.attrs['ffb_align'] == '0 0 0'
+        and sim.attrs['ffb_align'] == '0 0 0' and sim.attrs['ffb_gear_cross'] == '0 0 0 0 0'
     first = [n for _t, n, _v in sim.writes if n in wcal.DYN_ATTRS]
     assert sorted(first) == sorted(wcal.DYN_ATTRS)
     assert cal.saved['ffb_align'] == '12 3000 4000'                    # k_limit, a read-only field, is not written back
     cal._restore()
     assert sim.attrs['ffb_dyn_damping'] == '600' and sim.attrs['ffb_dyn_friction'] == '1400' \
-        and sim.attrs['ffb_align'] == '12 3000 4000'
+        and sim.attrs['ffb_align'] == '12 3000 4000' and sim.attrs['ffb_gear_cross'] == '200 1500 800 3300 40000'
     assert sim.last('ext_force') == '0' and sim.last('game_ffb_level') == '100'
 
 

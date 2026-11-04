@@ -117,6 +117,7 @@ def test_the_setters_reach_the_child_and_the_status_comes_back(tmp_path, proxy):
     p.set_mapping('classic')
     p.set_drive_pull(True, 40)
     p.set_kick(True, 60)
+    p.set_gear_guard(True, 80, 'belt', 20)
     p.set_column_damping(45)
     p.set_rim_mm(300)
     p.set_car_wheel_mm(400)
@@ -132,6 +133,7 @@ def test_the_setters_reach_the_child_and_the_status_comes_back(tmp_path, proxy):
     got = p.probe()
     assert got['enabled'] is True and got['path'] == path and got['usb_id'] == '046d:c24f'
     assert got['strength'] == 90 and got['knee'] == 45 and got['rbr_cut'] == 45 and got['mapping'] == 'classic'
+    assert got['gear_guard'] == (True, 80.0, 'belt', 20.0)
     assert got['pull'] == (True, 40.0) and got['kick'] == (True, 60.0) and got['damping'] == 45.0
     assert got['rim'] == 300.0 and got['car_wheel'] == 400.0 and got['power_class'] == 'street'
     assert got['lightness'] == 70 and got['linearity'] == 30

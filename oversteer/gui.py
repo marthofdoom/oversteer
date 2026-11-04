@@ -664,12 +664,13 @@ class Gui:
         self.apply_countersteer_forza_model()
         self.apply_countersteer_knee()
         self.apply_countersteer_rbr_cut()
-        self.apply_countersteer_column_damping()
+        self.apply_countersteer_column_added()
         self.apply_countersteer_rim_mm()
         self.apply_countersteer_car_wheel_mm()
         self.apply_countersteer_power_class()
         self.apply_countersteer_drive_pull()
         self.apply_countersteer_kick()
+        self.apply_countersteer_gear_guard()
         self.apply_countersteer_linearity()
         self.apply_countersteer_lightness()
         self.apply_countersteer_dynamics()
@@ -694,9 +695,9 @@ class Gui:
         """The "RBR force cut" corner (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_rbr_cut(self.model.get_countersteer_rbr_cut())
 
-    def apply_countersteer_column_damping(self):
+    def apply_countersteer_column_added(self):
         """The column damping share (FFB tab, under the Countersteer switch) to the engine."""
-        self.ffb_engine.set_column_damping(self.model.get_countersteer_column_damping())
+        self.ffb_engine.set_column_damping(self.model.get_countersteer_column_added())
 
     def apply_countersteer_rim_mm(self):
         """The wheel's rim diameter (FFB tab; 0: the table's) to the engine."""
@@ -717,6 +718,34 @@ class Gui:
     def apply_countersteer_kick(self):
         """Kickback's switch and level (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_kick(self.model.get_countersteer_kick(), self.model.get_countersteer_kick_level())
+
+    def apply_countersteer_gear_guard(self):
+        """Gear guard's switch, level and flip point (FFB tab, under the Countersteer switch) and the wheel's drive type to the engine."""
+        self.ffb_engine.set_gear_guard(self.model.get_countersteer_gear_guard(), self.model.get_countersteer_gear_guard_level(),
+                                       self.model.get_countersteer_wheel_drive(), self.model.get_countersteer_gear_flip())
+
+    def countersteer_delay(self):
+        """The estimated delay (ffb_delay) next to the sliders that move it: {'gear': {ms, over, mark}, 'rbr_cut': {ms, over}}.
+        The gear guard's is for the game playing or, between games, the last one seen; the RBR cut's for RBR, the only game
+        it acts on. `mark`: the gear guard level where the estimate is at the soft limit, None if there's none."""
+        from . import ffb_delay
+        model, status = self.model, self.ffb_engine.status
+        game = getattr(status, 'game', None)
+        if game:
+            self._delay_game = game
+        game = getattr(self, '_delay_game', None) or 'acr'
+        stored = self._wheel_entry() if self.device is not None else None
+        result = (stored or {}).get('result') or {}
+        wheel = {'drive': model.get_countersteer_wheel_drive(), 'fit_latency_ms': result.get('fit_latency_ms')}
+        settings = {'gear_guard': model.get_countersteer_gear_guard(), 'gear_level': model.get_countersteer_gear_guard_level(),
+                    'gear_flip': model.get_countersteer_gear_flip(),
+                    'friction_removal': bool(model.data.get('countersteer_friction_removal')),
+                    'rbr_cut_hz': model.get_countersteer_rbr_cut(), 'fh_rate': getattr(status, 'rate', None) or None}
+        gear = ffb_delay.estimated_total_ms(game, settings, wheel)
+        cut = ffb_delay.estimated_total_ms('rbr', settings, wheel)
+        return {'gear': {'ms': gear, 'over': ffb_delay.over_soft(gear), 'text': ffb_delay.text(gear),
+                         'mark': ffb_delay.soft_level(game, settings, wheel)},
+                'rbr_cut': {'ms': cut, 'over': ffb_delay.over_soft(cut), 'text': ffb_delay.text(cut)}}
 
     def apply_countersteer_linearity(self):
         """Richard Burns Rally's linearity (FFB tab, under the Countersteer switch) to the engine."""

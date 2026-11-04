@@ -64,7 +64,7 @@ import sys
 import threading
 import time
 
-from . import ffb_engine, ffb_record, wheel_owner
+from . import ffb_engine, ffb_gear, ffb_record, wheel_owner
 
 HEADER = struct.Struct('<dqq')           # arrival time (monotonic s), the listener's number, packet_id (NO_ID: none)
 NO_ID = -(1 << 63)
@@ -82,7 +82,7 @@ RESTART_DELAYS = (1.0, 3.0, 10.0)        # s before each restart of a child that
 HEALTHY = 60.0                           # s of life after which a death counts as the first again
 CTRL_TIMEOUT = 0.1                       # s a control message may wait for room (a child that hung)
 SETTERS = ('set_enabled', 'set_dynamics', 'set_position_source', 'set_wheel_result', 'set_texture', 'set_linearity',
-           'set_lightness', 'set_strength', 'set_knee', 'set_rbr_cut', 'set_mapping', 'set_forza_model', 'set_drive_pull', 'set_kick', 'set_column_damping', 'set_rim_mm', 'set_car_wheel_mm', 'set_power_class', 'set_device')
+           'set_lightness', 'set_strength', 'set_knee', 'set_rbr_cut', 'set_mapping', 'set_forza_model', 'set_drive_pull', 'set_kick', 'set_gear_guard', 'set_column_damping', 'set_rim_mm', 'set_car_wheel_mm', 'set_power_class', 'set_device')
 PR_SET_PDEATHSIG = 1
 PR_SET_NAME = 15
 
@@ -261,6 +261,7 @@ class EngineProcess:
         self._child_holds = None                 # the wheel the child said it holds (its writes may be live)
         self._held_here = None                   # ... as held in this process's wheel_owner for it
         self._child_range = None                 # (wheel, RangeState.wire()) while the child has the cap/gain raised
+        self._child_gear = None                  # the wheel whose ffb_gear_cross the child has on
         self._available = (None, False)          # (path, DriverReplace.available()) for the status before a child
         self.dropped = 0                         # samples the full socket refused (a child that stalled)
         self.stats = {}                          # the child's latency figures (ALIVE)
@@ -343,6 +344,9 @@ class EngineProcess:
 
     def set_kick(self, on, level):
         self._call('set_kick', on, level)
+
+    def set_gear_guard(self, on, level, drive='gear', flip=15):
+        self._call('set_gear_guard', on, level, drive, flip)
 
     def set_column_damping(self, pct):
         self._call('set_column_damping', pct)
@@ -681,6 +685,8 @@ class EngineProcess:
             self._owned(message[1], message[2])
         elif kind == 'range':
             self._child_range = None if message[2] is None else (message[1], message[2])
+        elif kind == 'gear':
+            self._child_gear = message[1] if message[2] else None
         elif kind == 'record_done':
             done = self._record_done.get(message[1])
             if done is not None:
@@ -724,8 +730,10 @@ class EngineProcess:
         code = None if proc is None else proc.exitcode
         holds, self._child_holds = self._child_holds, None
         raised, self._child_range = self._child_range, None
-        if holds is not None or raised is not None:
-            _restore_wheel(holds if holds is not None else raised[0], raised[1] if raised is not None else None)
+        gear, self._child_gear = self._child_gear, None
+        if holds is not None or raised is not None or gear is not None:
+            _restore_wheel(holds if holds is not None else raised[0] if raised is not None else gear,
+                           raised[1] if raised is not None else None)
         self._release_here()
         self._status = None
         if self._recording is not None:
@@ -778,7 +786,7 @@ def _restore_wheel(path, raised=None):
     """What FfbEngine.stop() does, from the GUI after a child that held the wheel died: the game's level and scale
     back, the dynamics stage zeroed (each write on its own; the driver's watchdog would do the first two), and
     the cap and master gain full range raised (`raised`: the originals the child reported, each put back only
-    where the driver still shows the child's value)."""
+    where the driver still shows the child's value), the gear-crossing stage off."""
     driver = ffb_engine.DriverReplace(path)
     if raised is not None:
         ffb_engine.apply_restore(driver, raised)
@@ -787,6 +795,8 @@ def _restore_wheel(path, raised=None):
             driver.set_game_level(100)
         if driver.has_const_scale() and (driver.const_scale() or 100) < 100:
             driver.set_const_scale(100)
+        if driver.has_gear_cross():
+            driver.set_gear_cross(ffb_gear.OFF)
     except OSError as e:
         logging.warning("Countersteer FFB: restoring the game's force after the engine process: %s", e)
     finally:
@@ -888,6 +898,10 @@ class _Host:
         elif self.owned == wheel:
             self.owned = None
             self.send(('owned', wheel, False))
+
+    def on_gear(self, wheel, on):
+        """The engine turned the driver's gear-crossing stage on or off: for a child that dies."""
+        self.send(('gear', wheel, bool(on)))
 
     def on_range(self, wheel, state):
         """The engine raised (or restored) the driver's cap and gain: the originals to the GUI, for a child that dies."""
@@ -1119,7 +1133,7 @@ class _Host:
         e = self.engine
         return {'enabled': e._enabled_req, 'path': e._path_req, 'usb_id': e.usb_id, 'strength': e._strength_req,
                 'knee': e._knee_req, 'rbr_cut': e._rbr_cut_req, 'mapping': e._mapping_req, 'forza_model': e._forza_model_req, 'pull': e._pull_req,
-                'kick': getattr(e, '_kick_req', None), 'damping': e._damping_req, 'rim': e._rim_req, 'car_wheel': e._car_wheel_req, 'power_class': e._power_class_req, 'lightness': e._lightness_req, 'linearity': e._linearity_req,
+                'kick': getattr(e, '_kick_req', None), 'gear_guard': getattr(e, '_gear_req', None), 'damping': e._damping_req, 'rim': e._rim_req, 'car_wheel': e._car_wheel_req, 'power_class': e._power_class_req, 'lightness': e._lightness_req, 'linearity': e._linearity_req,
                 'texture': None if e._texture_req is None else e._texture_req[1:], 'dynamics': e._dyn_req,
                 'wheel': e._wheel_req, 'position': e._pos_req is not None and e._pos_req[0] is not None,
                 'remote': dict(wheel_owner._remote), 'recording': ffb_record.current is not None,
@@ -1276,6 +1290,7 @@ def _child_main(data, ctrl, up, options, relay=None):
         engine.STALL_DUMPS = options.get('stall_dumps', True)
         host = _Host(engine, data, ctrl, up, relay)
         engine.range_hook = host.on_range
+        engine.gear_hook = host.on_gear
         logging.root.addHandler(_UpHandler(host))
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(signum, host.on_signal)

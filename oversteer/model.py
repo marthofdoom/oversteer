@@ -7,6 +7,11 @@ from . import wheel_torque
 STRENGTH_MIN = 0                     # Countersteer's overall steering strength, %
 STRENGTH_MAX = 130
 MAPPINGS = ('knee', 'classic')       # steering mapping (profile INI only): 1:1 up to a knee and compressed above (default), or the uniform impedance scale
+GEAR_FLIP_RANGE = (3, 30)            # "Gear flip point", % of full scale (ffb_gear.GEAR_FLIP_RANGE)
+# Keys of older profiles, dropped without a word at the next save. countersteer_column_damping meant a total with the wheel's
+# own damping included (0 was off, 5-15 took damping out); countersteer_column_added, on top of the wheel's own, replaces it
+# with no conversion: a profile with only the old key gets the new default.
+RETIRED_KEYS = ('countersteer_column_damping',)
 RBR_CUT_MIN, RBR_CUT_MAX = 15, 120   # "RBR force cut": the low-pass corner on RBR's force, Hz; the top is off
 KNEE_MIN, KNEE_MAX = 30, 60          # "1:1 up to": the share of the wheel's peak torque played 1:1 in Nm, %
 
@@ -86,7 +91,11 @@ class Model:
         'countersteer_drive_pull_level': None,
         'countersteer_kick': None,
         'countersteer_kick_level': None,
-        'countersteer_column_damping': None,
+        'countersteer_gear_guard': None,
+        'countersteer_gear_guard_level': None,
+        'countersteer_gear_flip': None,
+        'countersteer_wheel_drive': None,
+        'countersteer_column_added': None,
         'countersteer_rim_mm': None,
         'countersteer_car_wheel_mm': None,
         'countersteer_power_class': None,
@@ -148,7 +157,11 @@ class Model:
         'countersteer_drive_pull_level': 'integer',
         'countersteer_kick': 'boolean',
         'countersteer_kick_level': 'integer',
-        'countersteer_column_damping': 'integer',
+        'countersteer_gear_guard': 'boolean',
+        'countersteer_gear_guard_level': 'integer',
+        'countersteer_gear_flip': 'integer',
+        'countersteer_wheel_drive': 'string',
+        'countersteer_column_added': 'integer',
         'countersteer_rim_mm': 'integer',
         'countersteer_car_wheel_mm': 'integer',
         'countersteer_power_class': 'string',
@@ -254,20 +267,28 @@ class Model:
             # Countersteer FFB, a feel preference kept per profile; None where the driver has no replace mode
             'countersteer_ffb': False if self.device.get_ext_force_support() else None,
             # Its texture (ffb_texture): the master level in %, and each part on or off
-            **self._texture_defaults(self.device.get_ext_force_support()),
+            **self._texture_defaults(self.device.get_ext_force_support(), getattr(self.device, 'usb_id', None)),
         }
+
+    @staticmethod
+    def wheel_drive(usb_id, override=None):
+        """The wheel's drive type: the profile's countersteer_wheel_drive when valid, else the table's (wheel_torque.DRIVE)."""
+        value = str(override or '').strip().lower()
+        return value if value in wheel_torque.DRIVE_TYPES else wheel_torque.drive_type(usb_id)
 
     TEXTURE_PARTS = ('road', 'impact', 'lock', 'engine')
     DYNAMICS_KEYS = {'countersteer_column': True, 'countersteer_align': True, 'countersteer_friction_removal': False}
 
     @classmethod
-    def _texture_defaults(cls, supported):
+    def _texture_defaults(cls, supported, usb_id=None, drive_override=None):
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_MAPPING, OVERALL_PULL, OVERALL_PULL_LEVEL, \
             OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL, OVERALL_RBR_CUT
         from .ffb_kick import OVERALL_KICK, OVERALL_KICK_LEVEL
         from .ffb_texture import LEVEL
+        from .ffb_gear import OVERALL_GEAR_FLIP, OVERALL_GEAR_GUARD_LEVEL
+        drive = cls.wheel_drive(usb_id, drive_override)
         # The overall Countersteer force in % of the car's real steering torque, and where it stops being played 1:1
         data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
                 'countersteer_knee': int(round(OVERALL_KNEE * 100)) if supported else None,
@@ -278,7 +299,11 @@ class Model:
                 'countersteer_drive_pull_level': OVERALL_PULL_LEVEL if supported else None,
                 'countersteer_kick': OVERALL_KICK if supported else None,
                 'countersteer_kick_level': OVERALL_KICK_LEVEL if supported else None,
-                'countersteer_column_damping': OVERALL_COLUMN_DAMPING if supported else None,
+                'countersteer_gear_guard': (drive == 'gear') if supported else None,     # on for a gear drive, off for the rest
+                'countersteer_gear_guard_level': OVERALL_GEAR_GUARD_LEVEL if supported else None,
+                'countersteer_gear_flip': OVERALL_GEAR_FLIP if supported else None,
+                'countersteer_wheel_drive': '' if supported else None,       # '': from the wheel table
+                'countersteer_column_added': OVERALL_COLUMN_DAMPING if supported else None,
                 'countersteer_rim_mm': 0 if supported else None,       # 0: from the wheel table
                 'countersteer_car_wheel_mm': int(wheel_torque.CAR_WHEEL_MM) if supported else None,
                 'countersteer_power_class': ffb_carprops.DEFAULT_POWER_CLASS if supported else None,
@@ -370,6 +395,8 @@ class Model:
         config.read(profile_file)
         data = self.defaults.copy()
         for (key, value) in config['DEFAULT'].items():
+            if key in RETIRED_KEYS:
+                continue
             if key not in self.types:
                 logging.warning("Unknown profile setting name: %s", key)
                 continue
@@ -448,7 +475,8 @@ class Model:
         if data['countersteer_ffb'] is None:
             data['countersteer_ffb'] = None if self.data.get('countersteer_ffb') is None else False
         # ... or from before its texture: the defaults
-        texture = self._texture_defaults(self.data.get('countersteer_ffb') is not None)
+        texture = self._texture_defaults(self.data.get('countersteer_ffb') is not None, getattr(self.device, 'usb_id', None),
+                                         data['countersteer_wheel_drive'])
         for key, value in texture.items():
             if data[key] is None:
                 data[key] = value
@@ -465,8 +493,8 @@ class Model:
             data['countersteer_rbr_cut'] = min(max(data['countersteer_rbr_cut'], RBR_CUT_MIN), RBR_CUT_MAX)
         if data['countersteer_drive_pull_level'] is not None:
             data['countersteer_drive_pull_level'] = min(max(data['countersteer_drive_pull_level'], 0), 100)
-        if data['countersteer_column_damping'] is not None:
-            data['countersteer_column_damping'] = min(max(data['countersteer_column_damping'], 0), 100)
+        if data['countersteer_column_added'] is not None:
+            data['countersteer_column_added'] = min(max(data['countersteer_column_added'], 0), 100)
         if data['countersteer_rim_mm']:
             data['countersteer_rim_mm'] = int(min(max(data['countersteer_rim_mm'], wheel_torque.RIM_RANGE[0]),
                                                   wheel_torque.RIM_RANGE[1]))
@@ -475,6 +503,10 @@ class Model:
                                                         wheel_torque.CAR_WHEEL_RANGE[1]))
         if data['countersteer_kick_level'] is not None:
             data['countersteer_kick_level'] = min(max(data['countersteer_kick_level'], 0), 100)
+        if data['countersteer_gear_guard_level'] is not None:
+            data['countersteer_gear_guard_level'] = min(max(data['countersteer_gear_guard_level'], 0), 100)
+        if data['countersteer_gear_flip'] is not None:
+            data['countersteer_gear_flip'] = min(max(data['countersteer_gear_flip'], GEAR_FLIP_RANGE[0]), GEAR_FLIP_RANGE[1])
         if data['countersteer_mapping'] is not None and data['countersteer_mapping'] not in MAPPINGS:
             data['countersteer_mapping'] = MAPPINGS[0]
 
@@ -793,15 +825,15 @@ class Model:
         value = self.data.get('countersteer_forza_model')
         return OVERALL_FORZA_MODEL if value is None else bool(value)
 
-    def set_countersteer_column_damping(self, value):
+    def set_countersteer_column_added(self, value):
         """The share of a real steering column's damping the knee mapping plays, 0..100 %."""
         value = min(max(int(value), 0), 100)
-        if self.set_if_changed('countersteer_column_damping', value) and self.ui is not None:
-            self.ui.controller.apply_countersteer_column_damping()
+        if self.set_if_changed('countersteer_column_added', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_column_added()
 
-    def get_countersteer_column_damping(self):
+    def get_countersteer_column_added(self):
         from .ffb_engine import OVERALL_COLUMN_DAMPING
-        value = self.data.get('countersteer_column_damping')
+        value = self.data.get('countersteer_column_added')
         return OVERALL_COLUMN_DAMPING if value is None else value
 
     def set_countersteer_rim_mm(self, value):
@@ -892,6 +924,43 @@ class Model:
         from .ffb_kick import OVERALL_KICK_LEVEL
         value = self.data.get('countersteer_kick_level')
         return OVERALL_KICK_LEVEL if value is None else value
+
+    def set_countersteer_gear_guard(self, value):
+        """Gear guard (ffb_gear) on or off."""
+        if self.set_if_changed('countersteer_gear_guard', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_gear_guard()
+
+    def get_countersteer_gear_guard(self):
+        value = self.data.get('countersteer_gear_guard')
+        if value is None:
+            return self.get_countersteer_wheel_drive() == 'gear'
+        return bool(value)
+
+    def set_countersteer_gear_guard_level(self, value):
+        """Gear guard's level, 0..100 % of its preload."""
+        value = min(max(int(value), 0), 100)
+        if self.set_if_changed('countersteer_gear_guard_level', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_gear_guard()
+
+    def get_countersteer_gear_guard_level(self):
+        from .ffb_gear import OVERALL_GEAR_GUARD_LEVEL
+        value = self.data.get('countersteer_gear_guard_level')
+        return OVERALL_GEAR_GUARD_LEVEL if value is None else value
+
+    def set_countersteer_gear_flip(self, value):
+        """The gear guard's flip point, % of full scale."""
+        value = min(max(int(value), GEAR_FLIP_RANGE[0]), GEAR_FLIP_RANGE[1])
+        if self.set_if_changed('countersteer_gear_flip', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_gear_guard()
+
+    def get_countersteer_gear_flip(self):
+        from .ffb_gear import OVERALL_GEAR_FLIP
+        value = self.data.get('countersteer_gear_flip')
+        return OVERALL_GEAR_FLIP if value is None else value
+
+    def get_countersteer_wheel_drive(self):
+        """'gear', 'belt' or 'direct': the profile's countersteer_wheel_drive (INI only), else the wheel table's."""
+        return self.wheel_drive(getattr(getattr(self, 'device', None), 'usb_id', None), self.data.get('countersteer_wheel_drive'))
 
     def set_countersteer_texture(self, value):
         """The texture's master level, 0..100 %."""
@@ -1190,11 +1259,13 @@ class Model:
         self.ui.set_countersteer_strength(data['countersteer_strength'])
         self.ui.set_countersteer_knee(data['countersteer_knee'])
         self.ui.set_countersteer_rbr_cut(data['countersteer_rbr_cut'])
-        self.ui.set_countersteer_column_damping(data['countersteer_column_damping'])
+        self.ui.set_countersteer_column_added(data['countersteer_column_added'])
         self.ui.set_countersteer_rim_mm(None if data['countersteer_rim_mm'] is None else self.get_countersteer_rim_mm())
         self.ui.set_countersteer_car_wheel_mm(data['countersteer_car_wheel_mm'])
         self.ui.set_countersteer_drive_pull(data['countersteer_drive_pull'], data['countersteer_drive_pull_level'])
         self.ui.set_countersteer_kick(data['countersteer_kick'], data['countersteer_kick_level'])
+        self.ui.set_countersteer_gear_guard(data['countersteer_gear_guard'], data['countersteer_gear_guard_level'])
+        self.ui.set_countersteer_gear_flip(data['countersteer_gear_flip'])
         self.ui.set_countersteer_texture(data['countersteer_texture'],
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])

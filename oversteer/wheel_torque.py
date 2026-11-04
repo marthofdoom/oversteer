@@ -49,6 +49,28 @@ PEAK_NM = {
     wid.CM_C5: (5.0, False),
 }
 
+# usb id: how the motor drives the wheel: 'gear' (Logitech's gear and helical-gear wheels: backlash to keep loaded, ffb_gear),
+# 'belt' or 'direct' (no backlash). An unknown wheel is taken for a gear drive (drive_type).
+DRIVE = {
+    wid.LG_G29: 'gear',
+    wid.LG_G920: 'gear',
+    wid.LG_G923P: 'gear',
+    wid.LG_G923X: 'gear',
+    wid.LG_G27: 'gear',
+    wid.LG_G25: 'gear',
+    wid.LG_DFGT: 'gear',
+    wid.LG_DFP: 'gear',
+    wid.FT_CSL_DD: 'direct',
+    wid.CM_C5: 'direct',
+}
+DRIVE_TYPES = ('gear', 'belt', 'direct')
+
+
+def drive_type(usb_id):
+    """'gear', 'belt' or 'direct' from the table; 'gear' for a wheel not in it."""
+    return DRIVE.get(str(usb_id).lower(), 'gear') if usb_id else 'gear'
+
+
 # usb id: the wheel's rim diameter in mm. The hand feels force = torque / rim radius, so a car's torque at its own steering
 # wheel is scaled by rho = rim / car wheel diameter (RackForce.rho) before rim_share: "1:1" is in hand force. None: unknown
 # (the G29's is taken). Logitech's published figures: G29/G920/G923 11 in (279 mm), G25/G27/DFGT about 270 mm.
