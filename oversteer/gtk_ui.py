@@ -1230,6 +1230,7 @@ class GtkUi:
                                  "50 % by default. Saved with the profile.")
     COUNTERSTEER_RBR_CUT_TOOLTIP = ("RBR's own force is used below this frequency; faster vibration comes from the Texture "
                                     "settings instead.")
+    COUNTERSTEER_CASTER_TOOLTIP = ("How much of the mechanical caster's force stays in a slide. 100 % is physically correct, 0 is off.")
     COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, added to what the wheel already has. Lower "
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
                                     "after a slide. 0 % is the wheel as it is; 100 % adds a real column's damping on top.")
@@ -1351,6 +1352,13 @@ class GtkUi:
         self._dependent_rows.append(self._setting_row(
             _("RBR force cut"), None, _(self.COUNTERSTEER_RBR_CUT_TOOLTIP),
             (self._response_row(cut, percent=False), self.countersteer_cut_delay)))
+        steering.add(self._dependent_rows[-1])
+        caster = self._response_scale(0, 100, 5)
+        caster.set_size_request(160, -1)
+        caster.connect('value-changed', lambda w: self.controller.model.set_countersteer_caster_floor(int(w.get_value())))
+        self.countersteer_caster_floor = caster
+        self._dependent_rows.append(self._setting_row(
+            _("Caster in slides"), None, _(self.COUNTERSTEER_CASTER_TOOLTIP), (self._response_row(caster),)))
         steering.add(self._dependent_rows[-1])
         rim = Gtk.SpinButton.new_with_range(*wheel_torque.RIM_RANGE, 1)
         rim.set_value(wheel_torque.DEFAULT_RIM_MM)
@@ -1505,6 +1513,13 @@ class GtkUi:
             return
         if int(self.countersteer_rbr_cut.get_value()) != int(value):
             self.countersteer_rbr_cut.set_value(int(value))
+
+    def set_countersteer_caster_floor(self, value):
+        """The "Caster in slides" share, 0..100 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_caster_floor') or value is None:
+            return
+        if int(self.countersteer_caster_floor.get_value()) != int(value):
+            self.countersteer_caster_floor.set_value(int(value))
 
     updating_countersteer_rim = False
 
