@@ -155,6 +155,7 @@ RBR_CUT_OFF = 120                        # ... and the top of its range: no filt
 OVERALL_CASTER_FLOOR = 100               # "Caster in slides" default (profile key countersteer_caster_floor, %): 0 = off
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
+OVERALL_RBR_SPRING = True               # RBR's driver-side aligning spring, as ACR's (profile INI only: countersteer_rbr_spring); False: column damping and friction only
 FORZA_CAR_WHEEL_MM = 375.0               # Forza's default car steering wheel (the profile's countersteer_car_wheel_mm wins once set)
 OVERALL_PULL = True                      # "Drive pull" default (the scrub couple of the drive's left/right split in the force)
 OVERALL_PULL_LEVEL = 100                 # ... and its level, % of the physical scrub radius (100 = physically correct)
@@ -1430,8 +1431,11 @@ class RbrRack(RackForce):
     100 with a note when it is not known.
 
     Not used here: the fit to the game's force (ready is the sign latch alone, the upload rate being the
-    classifier's), the trail and scrub learner, the aligning split, the assist detector, Drive pull and Kickback (off
-    for RBR: no tyre forces). The sign latch is BeamNG's centring latch: on samples with little lateral acceleration
+    classifier's), the trail and scrub learner, the assist detector, Drive pull and Kickback (off
+    for RBR: no tyre forces). The aligning spring (RackForce.align, played through the driver as ACR's) works from a
+    kinematic front slip angle (`_slip`: the telemetry has no tyre slip angles), from the car table's ratio and lock.
+
+    The sign latch is BeamNG's centring latch: on samples with little lateral acceleration
     at speed r(level, steer) is negative when the game's DIRECTION is normal; latched after SIGN_TIME s of them at
     |r| >= SIGN_LATCH, a positive r is an inverted DIRECTION, refused ('inverse')."""
 
@@ -1457,6 +1461,11 @@ class RbrRack(RackForce):
     FLOOR_FY_MIN = 100.0                 # N: under this |Fy_f| the floor's sign is kept
     YAW_GAP = 0.1                        # s: yaw-rate samples further apart than this give no rdot
     floor_level = 1.0                    # "Caster in slides" (0..1): 0 = off
+    ALIGN_K0 = 2150.0                    # Nm/rad: the kingpin torque per front slip angle until learnt (150 Nm/rad at the column x ratio 14.3, measured)
+    ALIGN_FIT_SLIP = 0.2                 # rad: the stiffness is learnt on front slip angles under this (the kinematic slip is not small-signal)
+    ALIGN_SPEED = 5.0                    # m/s: under it the kinematic slip angle is not defined
+    ALIGN_FRESH = 0.25                   # s: the spring plays on telemetry no older than this
+    spring_on = OVERALL_RBR_SPRING       # the aligning spring (profile INI only: countersteer_rbr_spring)
 
     @property
     def pull_on(self):
@@ -1476,13 +1485,13 @@ class RbrRack(RackForce):
 
     def reset(self, car=None):
         super().reset(car)
-        table = ffb_carprops.table_ratio(car_data.entry(car)) if car is not None else None
-        self.ratio, self.assist = table or self.STEER_RATIO, self.ASSIST     # (diagnostic: the ratio does not enter)
-        self.ratio_known = bool(table)
+        self._table_frame(car)
+        self.assist = self.ASSIST
         self.column = None               # the column torque (Nm, signed like the level, low-passed), None without a level
         self.column_raw = None           # ... and before the low-pass
         self._cut = None                 # the low-pass's state (y, dy/dt) and the time of its last input
         self._cut_at = None
+        self._fed_at = None              # when the last telemetry sample came
         self.s = None
         self.s_note = None
         self._tau_q = ffb_carprops.Quantile()
@@ -1492,10 +1501,21 @@ class RbrRack(RackForce):
         self.restart_sign()
         self.direction = None            # 'normal' or 'inverse' once latched: the game's DIRECTION, kept through cars
 
+    def _table_frame(self, car):
+        """The car table's steering ratio and, with it, the road wheels' lock (radians(steering wheel lock) / ratio): the
+        aligning spring's frame, known only where the table has them (not stored in the learnt car store)."""
+        entry = car_data.entry(car) if car is not None else None
+        table = ffb_carprops.table_ratio(entry)
+        self.ratio, self.ratio_known = table or self.STEER_RATIO, bool(table)
+        self.lock, self.lock_known = (math.radians(entry['steering_wheel_lock_deg']) / table, True) if table \
+            else (self.ALIGN_LOCK, False)
+
     def restart_sign(self):
         """The sign is judged again (a new stream: the game's DIRECTION may have been changed in its menus), and the
-        low-pass starts again at the next value."""
+        low-pass starts again at the next value. The aligning spring starts again too (its mirror, reset watch)."""
         self._cut = self._cut_at = None
+        self._spring.reset()
+        self._spring_at = self._align_prev = self._align_hold = None
         self._restart_floor()
         prior, self.direction = self.direction, None
         self._sign = _Moments(self.TAU)
@@ -1508,11 +1528,10 @@ class RbrRack(RackForce):
         self._sign_at = None
 
     def set_car(self, car):
-        """The telemetry's car key (it may narrow): the table ratio, for diagnostics only."""
+        """The telemetry's car key (it may narrow): the table ratio and lock (the aligning spring's frame)."""
         if car != self.car:
             self.car = car
-            table = ffb_carprops.table_ratio(car_data.entry(car)) if car is not None else None
-            self.ratio, self.ratio_known = table or self.STEER_RATIO, bool(table)
+            self._table_frame(car)
 
     def set_level(self, t, level, s, strength=1.0):
         """The game's raw level now (None: none fresh), S (None: not known) and the game's STRENGTH (ffb_rbr.StrengthFit,
@@ -1642,9 +1661,15 @@ class RbrRack(RackForce):
         """A telemetry sample with the game's raw level now (None if none fresh): the caster floor, the sign latch."""
         last, self._sign_at = self._sign_at, t
         if sample is not None:
+            self._now = self._fed_at = t
             self._engine(t, sample)
         if new:
             self._floor_step(t, sample)
+        if sample is not None and self.column is not None and self.ratio_known and self.lock_known and last is not None:
+            alpha = self._slip(sample)
+            if alpha is not None and abs(alpha) < self.ALIGN_FIT_SLIP and 0.0 < t - last:
+                # the column torque without the floor's lift, at the kingpin (the ACR path's mz): the stiffness is learnt per drive
+                self._align.add(self._sat(alpha), self.column * self.ratio, min(t - last, 0.1))
         if self.direction is not None or level is None or sample is None:
             return
         dt = 0.0 if last is None else min(max(t - last, 0.0), 0.1)
@@ -1673,6 +1698,28 @@ class RbrRack(RackForce):
             self.direction, self.ready, self.waiting, self.refused = 'inverse', False, None, 'inverse'
             logging.warning("Countersteer FFB: RBR: the game's force follows the steering the wrong way round (r %.2f): "
                             "its DIRECTION is inverted; set it normal", r)
+
+    def _slip(self, sample):
+        """The front slip angle (rad, positive when steered further left than the car travels, as ACR's) from the car's
+        motion: steer x lock less atan2(vy - a r, |vx|), a the front axle's distance to the centre of mass; None without the
+        fields or under ALIGN_SPEED. (RBR has no tyre slip angles.)"""
+        steer, yaw, vel = getattr(sample, 'steer', None), getattr(sample, 'yaw_rate', None), getattr(sample, 'vel', None)
+        speed = getattr(sample, 'speed', None)
+        if vel is None or len(vel) < 2 or not all(ffb_forza.finite(v) for v in (steer, yaw, vel[0], vel[1], speed)) \
+                or speed < self.ALIGN_SPEED:
+            return None
+        a = ffb_forza.WHEELBASE * (1.0 - ffb_forza.front_share(getattr(sample, 'drivetrain', None)))
+        return steer * self.lock - math.atan2(vel[1] - a * yaw, abs(vel[0]))
+
+    @staticmethod
+    def _rear_slip(sample):
+        """None: the ratio learner does not run for RBR."""
+        return None
+
+    def align_ready(self):
+        """The spring may play: the car table's ratio and lock are known and the sign latch is through (the prior stiffness
+        serves until the fit has enough), and the INI has not turned it off."""
+        return bool(self.spring_on and self.ratio_known and self.lock_known and self.ready)
 
     def power_steering(self):
         """'off' (the column torque) or 'model' (ours): the game's force carries no assist to follow."""
@@ -2266,6 +2313,7 @@ class FfbEngine:
         self.forza_filter = ffb_forza.OutputFilter(FULL)
         self._forza_model = OVERALL_FORZA_MODEL      # ForzaRack (True) or ForzaLightness (False) for Forza Horizon
         self._forza_model_req = None     # the profile INI's countersteer_forza_model from the GUI
+        self._rbr_spring_req = None      # the profile INI's countersteer_rbr_spring from the GUI
         self._fz_sample = None           # the last Forza sample (ForzaRack)
         self._fz_force_sample = None     # ... the one the rack's share was last worked out for ...
         self._fz_force = 0.0             # ... and that share (ext_force units, before the output filter)
@@ -2497,6 +2545,12 @@ class FfbEngine:
         self._forza_model_req = bool(on)
         self._wake.set()
 
+    def set_rbr_spring(self, on):
+        """RBR's aligning spring (profile INI only, countersteer_rbr_spring): True plays it through the driver as ACR's,
+        False leaves RBR with the column's damping and friction."""
+        self._rbr_spring_req = bool(on)
+        self._wake.set()
+
     def set_drive_pull(self, on, level):
         """Drive pull: the scrub couple of the drive's left/right split in the steering force, on or off, at `level` %
         of the physical scrub radius."""
@@ -2569,7 +2623,7 @@ class FfbEngine:
             'car_wheel_mm': model.car_wheel_mm, 'forza_car_wheel_mm': fz.car_wheel_mm,
             'power_class': ffb_carprops.power_class(), 'texture_level': round(self.texture.level, 4),
             'texture_parts': dict(self.texture.parts), 'column': bool(column), 'align': bool(align),
-            'friction_removal': bool(removal), 'forza_model': bool(self._forza_model),
+            'friction_removal': bool(removal), 'forza_model': bool(self._forza_model), 'rbr_spring': bool(self.rbr_rack.spring_on),
             'lightness': round(self.addon.strength * 100.0, 3)}
         learnt = {'car': model.car, 'ratio': model.ratio, 'lock': model.lock, 'trail_m': model.trail,
                   'scrub_m': model.scrub, 'forza_car': fz.car, 'forza_mass_kg': fz.mass,
@@ -2846,6 +2900,8 @@ class FfbEngine:
                 self.forza_rack.car_wheel_mm = FORZA_CAR_WHEEL_MM
         if self._forza_model_req is not None:
             self._forza_model = self._forza_model_req
+        if self._rbr_spring_req is not None:
+            self.rbr_rack.spring_on = self._rbr_spring_req
         if self._power_class_req is not None and self._power_class_req != ffb_carprops.power_class():
             ffb_carprops.set_power_class(self._power_class_req)
         lightness = self._lightness_req
@@ -2989,15 +3045,17 @@ class FfbEngine:
         """The driver's virtual steering dynamics beside ACR's force: the car's column damping and friction, and the
         local aligning spring (the model plays the residual) once the car's ratio and lock are known and the fit is
         ready, the driver reports a spring and the wheel's range is known."""
-        stage, model = self._dyn, self.model
+        stage = self._dyn
+        rbr = self._played_mode == 'rbr'
+        model = self.rbr_rack if rbr else self.model
         if stage is None or not stage.usable() or self._played_mode not in ('acr', 'rbr', 'forza-rack'):
             model.align_on = False
             return
         stage.poll(t)
-        if self._played_mode in ('rbr', 'forza-rack'):
-            # RBR, Forza: the column's damping and friction only (no aligning split, no frame check: the lock sits at
-            # the wheel's range / 2)
-            rack = self.rbr_rack if self._played_mode == 'rbr' else self.forza_rack
+        if self._played_mode == 'forza-rack':
+            # Forza: the column's damping and friction only (no aligning split, no frame check: the lock sits at the
+            # wheel's range / 2)
+            rack = self.forza_rack
             stage.column(t, rack.impedance(), rack.wheel_peak, rack.damping_scale(), not rack.classic())
             return
         if stage.k_limit is not None:
@@ -3018,6 +3076,9 @@ class FfbEngine:
             self.align_note = _("engine off: unassisted steering")
         want = stage.can_align() and model.align_ready() and frame_ok \
             and self._w >= 1.0 and not self._handback      # (while gliding between the levels the spring would add its own)
+        if rbr:
+            # RBR's slip is worked out from the sample: it must be a live one (its level may outlast the telemetry)
+            want = want and model._fed_at is not None and 0.0 <= t - model._fed_at <= model.ALIGN_FRESH
         if model.align_on and not want:
             stage.align_off(t)
         if want and not model.align_on:
@@ -3034,7 +3095,7 @@ class FfbEngine:
 
     def _dyn_stop(self, t):
         """Nothing plays: the stage's targets back to 0 (the driver slews them out) and the split off."""
-        self.model.align_on = False
+        self.model.align_on = self.rbr_rack.align_on = False
         stage = self._dyn
         if stage is not None:
             stage.stop(t)

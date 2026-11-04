@@ -88,6 +88,7 @@ class Model:
         'countersteer_caster_floor': None,
         'countersteer_mapping': None,
         'countersteer_forza_model': None,
+        'countersteer_rbr_spring': None,
         'countersteer_drive_pull': None,
         'countersteer_drive_pull_level': None,
         'countersteer_kick': None,
@@ -155,6 +156,7 @@ class Model:
         'countersteer_caster_floor': 'integer',
         'countersteer_mapping': 'string',
         'countersteer_forza_model': 'boolean',
+        'countersteer_rbr_spring': 'boolean',
         'countersteer_drive_pull': 'boolean',
         'countersteer_drive_pull_level': 'integer',
         'countersteer_kick': 'boolean',
@@ -286,7 +288,7 @@ class Model:
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_MAPPING, OVERALL_PULL, OVERALL_PULL_LEVEL, \
-            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL, OVERALL_RBR_CUT, OVERALL_CASTER_FLOOR
+            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL, OVERALL_RBR_SPRING, OVERALL_RBR_CUT, OVERALL_CASTER_FLOOR
         from .ffb_kick import OVERALL_KICK, OVERALL_KICK_LEVEL
         from .ffb_texture import LEVEL
         from .ffb_gear import OVERALL_GEAR_FLIP, OVERALL_GEAR_GUARD_LEVEL
@@ -298,6 +300,7 @@ class Model:
                 'countersteer_caster_floor': OVERALL_CASTER_FLOOR if supported else None,
                 'countersteer_mapping': OVERALL_MAPPING if supported else None,
                 'countersteer_forza_model': OVERALL_FORZA_MODEL if supported else None,
+                'countersteer_rbr_spring': OVERALL_RBR_SPRING if supported else None,
                 'countersteer_drive_pull': OVERALL_PULL if supported else None,
                 'countersteer_drive_pull_level': OVERALL_PULL_LEVEL if supported else None,
                 'countersteer_kick': OVERALL_KICK if supported else None,
@@ -840,6 +843,17 @@ class Model:
         from .ffb_engine import OVERALL_FORZA_MODEL
         value = self.data.get('countersteer_forza_model')
         return OVERALL_FORZA_MODEL if value is None else bool(value)
+
+    def set_countersteer_rbr_spring(self, value):
+        """Richard Burns Rally's aligning spring (profile INI only, no control): True plays it through the driver as ACR's, False
+        leaves RBR with the column's damping and friction."""
+        if self.set_if_changed('countersteer_rbr_spring', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_rbr_spring()
+
+    def get_countersteer_rbr_spring(self):
+        from .ffb_engine import OVERALL_RBR_SPRING
+        value = self.data.get('countersteer_rbr_spring')
+        return OVERALL_RBR_SPRING if value is None else bool(value)
 
     def set_countersteer_column_added(self, value):
         """The share of a real steering column's damping the knee mapping plays, 0..100 %."""
