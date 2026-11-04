@@ -532,6 +532,13 @@ class RbrForce:
         accel = getattr(sample, 'accel', None)
         ay = accel[1] if accel is not None and len(accel) > 1 else None
         moved = self.fit.feed(t, ay, getattr(sample, 'yaw_rate', None), getattr(sample, 'speed', None), level)
+        if self.s_kept is not None and self.s_plateau is None and self.peak > self.s_kept * FULL * 1.05:
+            # a level the kept STRENGTH cannot produce: it was raised in the menus. Back to the conservative prior at
+            # once (a lighter force: the safe direction for a step), until a clipped top shows the new one
+            logging.info("Countersteer FFB: RBR %s: a level of %d is over the kept STRENGTH %.2f: back to 1 until it "
+                         "is seen again", self.car, self.peak, self.s_kept)
+            self.s_kept = None
+            self.s_applied = 1.0
         target = self.target_s()
         if (self.s_plateau is not None or (self.fit.converged and self.fit.s != 1.0)) and (
                 self.s_kept is None or abs(target - self.s_kept) > 0.005):

@@ -856,4 +856,13 @@ def test_the_confirmed_strength_is_kept_and_starts_the_next_session(caplog):
         second.feed_physics(t, sample, -other)
         t += 0.004
     assert second.s_plateau == pytest.approx(0.5, abs=0.01) and r.kept_strength() == pytest.approx(0.5, abs=0.01)
-    assert 0.2 < second.s_applied < 0.5
+    assert 0.5 <= second.s_applied < 1.0                       # (back to the light prior on the first impossible level, then down to it)
+
+
+def test_a_level_over_the_kept_strength_drops_it_at_once():
+    from oversteer import ffb_rbr
+    f = ffb_rbr.RbrForce()
+    f.s_kept, f.s_applied, f.s_plateau = 0.2, 0.2, None
+    f.peak = int(0.5 * ffb_rbr.FULL)           # only a STRENGTH of 0.5 or more makes this level
+    f.feed_physics(1.0, None, 0)
+    assert f.s_kept is None and f.s_applied > 0.9
