@@ -3236,7 +3236,8 @@ class FfbEngine:
             # RBR's slip is worked out from the sample: it must be a live one (its level may outlast the telemetry)
             want = want and model._fed_at is not None and 0.0 <= t - model._fed_at <= model.ALIGN_FRESH
         why = None if want else next((name for name, ok in (
-            ('the driver or the profile', stage.can_align()), ('car or fit not ready', model.align_ready()),
+            ('the driver or the profile', stage.can_align()),
+            ('car or fit not ready: %s' % {k: getattr(model, k, None) for k in ('car', 'ratio_known', 'lock_known', 'ready', 'spring_on')}, model.align_ready()),
             ('wheel position check: %s' % self._frame.reason, frame_ok), ('glide', self._w >= 1.0),
             ('hand-back', not self._handback)) if not ok), 'telemetry not fresh')
         if why != self._align_why:

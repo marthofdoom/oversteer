@@ -751,8 +751,13 @@ class RangeGui:
     def __init__(self, auto=True, max_range=900):
         self.writes = []
         self._rbr_range = None
-        self.device = type('Dev', (), {'get_max_range': lambda s: max_range,
-                                       'set_range': lambda s, v: self.writes.append(v) or True})()
+        self.range = max_range
+        def write(_dev, v):
+            self.writes.append(v)
+            self.range = v
+            return True
+        self.device = type('Dev', (), {'get_max_range': lambda s: max_range, 'get_range': lambda s: self.range,
+                                       'set_range': write})()
         self.model = type('Model', (), {'get_rbr_auto_range': lambda s: auto})()
 
 
@@ -767,6 +772,9 @@ def test_the_range_is_set_when_the_car_is_identified(table, caplog):
         assert Gui.apply_rbr_auto_range(g, 'rbr/106@5', 'Skoda Fabia RS Rally2')
         assert Gui.apply_rbr_auto_range(g, 'rbr/11+106@6', 'A / B')
     assert g.writes == [540, 428, 484]
+    g.range = 900                                     # a profile load wrote the profile's range back: the car's again
+    assert Gui.apply_rbr_auto_range(g, 'rbr/11+106@6', 'A / B')
+    assert g.writes == [540, 428, 484, 484]
     assert "RBR Ford Fiesta WRC 2019: wheel range 540\u00b0 (car's steering lock)" in caplog.text
     assert 'candidates' in caplog.text and 'median' in caplog.text
 
