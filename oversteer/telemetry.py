@@ -783,7 +783,9 @@ class Telemetry:
         end = self._relay_read_to(relay, token)
         if end not in ('mark', 'eof'):
             logging.warning("telemetry: Countersteer FFB's engine process did not hand the UDP ports back in time")
-        logging.info("telemetry: listening on UDP %s here again", ', '.join(str(p) for p in self._socks) or '-')
+        if self.running and self._socks:
+            # (not while stop() runs: the sockets are closed next, nothing listens then)
+            logging.info("telemetry: listening on UDP %s here again", ', '.join(str(p) for p in self._socks))
 
     def _relay_read_to(self, relay, token):
         deadline = time.monotonic() + RELAY_BACK
