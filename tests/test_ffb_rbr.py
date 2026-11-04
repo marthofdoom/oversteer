@@ -1256,3 +1256,212 @@ def test_the_floor_never_cancels_ngp_when_it_pulls_the_other_way():
         rack.feed(t, types.SimpleNamespace(speed=25.0, accel=(0.0, -6.0, 0.0), vel=(25.0 * math.cos(beta), 25.0 * math.sin(beta), 0.0), yaw_rate=0.0, game_time=None, drivetrain=None, gear=3, rpm=5000.0), None)
     assert rack.floor_sign == 1.0
     assert abs(rack.floor_lift) < 1e-3
+
+
+# -- the aligning spring --
+
+def spring_sample(steer=0.3, vx=20.0, vy=0.0, yaw=0.0, speed=20.0, car=CAR, drivetrain='awd'):
+    s = rbr_sample(car, speed=speed, steer=steer)
+    s.vel, s.yaw_rate, s.drivetrain = (vx, vy, 0.0), yaw, drivetrain
+    s.pos, s.forward = (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+    return s
+
+
+def table_rack(car=CAR):
+    rack = fe.RbrRack()
+    rack.wheel_peak = 3.5
+    rack.reset(car)
+    rack.ready = True
+    return rack
+
+
+def test_the_kinematic_slip_is_positive_when_steered_further_left_than_the_car_travels():
+    from oversteer import ffb_carprops as cp
+    rack = table_rack()
+    lock = math.radians(270.0) / rack.ratio
+    assert rack.ratio_known and rack.lock_known and rack.lock == pytest.approx(lock)
+    assert rack._slip(spring_sample(steer=0.0)) == pytest.approx(0.0)
+    assert rack._slip(spring_sample(steer=0.3)) == pytest.approx(0.3 * lock)           # straight on, steered left
+    a = fz.WHEELBASE * (1.0 - fz.front_share('awd'))
+    got = rack._slip(spring_sample(steer=0.3, vy=1.2, yaw=0.15))
+    assert got == pytest.approx(0.3 * lock - math.atan2(1.2 - a * 0.15, 20.0))
+    assert rack._slip(spring_sample(steer=0.0, vy=1.0)) < 0.0                           # sliding left of the heading, wheels straight
+    assert rack._rear_slip(spring_sample()) is None and cp.table_ratio(fe.car_data.entry(CAR)) == pytest.approx(rack.ratio)
+
+
+@pytest.mark.parametrize('field', ['steer', 'yaw_rate', 'vel', 'speed', 'nan', 'slow', 'short_vel'])
+def test_no_kinematic_slip_without_the_fields_or_under_5_ms(field):
+    rack = table_rack()
+    s = spring_sample()
+    assert rack._slip(s) is not None
+    if field == 'nan':
+        s.yaw_rate = float('nan')
+    elif field == 'slow':
+        s.speed = 4.9
+    elif field == 'short_vel':
+        s.vel = (20.0,)
+    else:
+        setattr(s, field, None)
+    assert rack._slip(s) is None
+
+
+def test_the_spring_frame_is_known_only_from_the_table_and_not_stored(tmp_path):
+    from oversteer import ffb_carprops as cp
+    cp.STORE.use(str(tmp_path / 'props.json'))
+    cp.STORE.set_lock('rbr/999999', 0.4)
+    rack = table_rack('rbr/999999')
+    assert not rack.ratio_known and not rack.lock_known and not rack.align_ready()
+    assert rack._slip(spring_sample(car='rbr/999999')) is not None            # (the slip is there, the spring waits for the frame)
+    rack.set_car(CAR)
+    assert rack.ratio_known and rack.lock_known and rack.align_ready()
+    assert cp.STORE.get_lock(CAR) is None
+
+
+def test_the_stiffness_prior_serves_until_learnt_and_ready_does_not_wait_for_it():
+    rack = table_rack()
+    assert fe.RbrRack.ALIGN_K0 == 2150.0 and rack.align_stiffness() == 2150.0
+    assert rack.align_ready() and rack._align.s[0] == 0.0
+    rack.spring_on = False
+    assert not rack.align_ready()
+    rack.spring_on = True
+    stiff, t = 3000.0, 0.0
+    for i in range(3000):
+        t += 1.0 / 236.0
+        steer = 0.3 * math.sin(2 * math.pi * 0.4 * t)
+        s = spring_sample(steer=steer, vy=0.3 * math.sin(2 * math.pi * 0.7 * t))
+        alpha = rack._slip(s)
+        rack.column = -stiff * rack._sat(alpha) / rack.ratio            # the torque the learnt fit should find
+        rack.feed(t, s, None)
+    assert rack.align_stiffness() == pytest.approx(stiff, rel=0.02)
+    assert rack.floor_lift == 0.0 and rack.learner is None
+
+
+def test_a_large_slip_or_a_missing_column_is_not_learnt():
+    rack = table_rack()
+    t = 0.0
+    for i in range(50):
+        t += 0.004
+        rack.column = None
+        rack.feed(t, spring_sample(steer=0.1), None)
+        rack.column = -10.0
+        rack.feed(t + 0.002, spring_sample(steer=1.0, vy=-8.0), None)         # slip well over 0.2 rad
+    assert rack._align.s[0] == 0.0
+
+
+def test_the_split_plays_the_models_share_less_what_the_mirror_renders():
+    from oversteer import ffb_spring
+    rack = table_rack()
+    rack.set_level(0.0, level_for(0.2), 100.0)
+    s = spring_sample(steer=0.2)
+    plain = rack.force(s)
+    rack.align_on = True
+    seen = []
+    rack.align_writer = lambda *a: seen.append(a)
+    mirror, t, last = ffb_spring.DriverSpring(), 0.0, None
+    for i in range(40):
+        t += 0.005
+        rack._now = t
+        got = rack.force(s)
+        split = rack.align(s)
+        theta_a, k, tau = seen[-1]
+        want = mirror.force(theta_a, split['theta_deg'], k, tau, rack.align_k_limit, 0.0 if last is None else t - last)
+        last = t
+        assert got == pytest.approx(plain - fe.FULL * want, abs=1e-6)
+    assert seen[-1][1] > 0.0 and abs(plain - got) > 0.0                      # the spring is carrying part of it
+    from oversteer import ffb_carprops as cp
+    column = -fe.RbrRack.ALIGN_K0 * rack._sat(rack._slip(s)) / rack.ratio      # (the model's torque, through the played boost curve)
+    assert split['model'] == pytest.approx(cp.driver_from_column(column, 20.0, 1.0, True))
+
+
+def spring_engine(tmp_path, monkeypatch, car=CAR, sign=1.0):
+    from oversteer import ffb_dynamics as fd
+    from tests.test_ffb_dynamics import POS
+    monkeypatch.setattr(fd.FrameCheck, 'MIN_SECONDS', 2.0)
+    POS.sign, POS.scale, POS.raw = sign, 1.0, 32767
+    engine, path, pos = dyn_engine(tmp_path)
+
+    class SpringDrive(Drive):
+        def sample(self, t):
+            steer = self.steer(t)
+            pos.follow(steer)
+            return spring_sample(steer=steer, car=car)
+    return engine, path, SpringDrive(engine, car=car)
+
+
+def test_the_spring_plays_for_a_table_car_and_the_total_is_the_models(tmp_path, monkeypatch):
+    engine, path, drive = spring_engine(tmp_path, monkeypatch)
+    drive.run(14.0)
+    rack = engine.rbr_rack
+    assert engine._played_mode == 'rbr' and rack.align_on and engine.align_note is None and not engine.model.align_on
+    assert rack.wheel_range == 900.0 and rack.wheel_slope == pytest.approx(1.0, abs=0.05)
+    words = open(path + '/ffb_align').read().split()
+    assert len(words) == 3 and int(words[1]) > 0 and 0 < int(words[2]) <= 8000
+    engine.set_rbr_spring(False)                                     # the INI's kill switch
+    drive.run(0.3)
+    assert not rack.align_on and open(path + '/ffb_align').read() == '0 0 0'
+    engine.set_rbr_spring(True)
+    drive.run(0.5)
+    assert rack.align_on
+    engine.stop()
+
+
+def test_without_a_table_car_there_is_no_spring_only_the_column(tmp_path, monkeypatch):
+    engine, path, drive = spring_engine(tmp_path, monkeypatch, car='rbr/999999')
+    drive.run(14.0)
+    assert engine._played_mode == 'rbr' and not engine.rbr_rack.align_on
+    assert 'not learnt' in engine.align_note
+    assert open(path + '/ffb_align').read().startswith('0 0 0') and int(open(path + '/ffb_dyn_damping').read()) > 0
+    engine.stop()
+
+
+def test_a_wheel_that_does_not_follow_the_games_steering_keeps_the_spring_off(tmp_path, monkeypatch, caplog):
+    engine, path, drive = spring_engine(tmp_path, monkeypatch, sign=-1.0)
+    with caplog.at_level('WARNING'):
+        drive.run(14.0)
+    assert engine._played_mode == 'rbr' and not engine.rbr_rack.align_on
+    assert "doesn't match the game's steering" in engine.align_note
+    assert open(path + '/ffb_align').read().startswith('0 0 0')
+    engine.stop()
+
+
+def test_the_spring_goes_off_without_telemetry_and_on_a_stream_restart(tmp_path, monkeypatch):
+    engine, path, drive = spring_engine(tmp_path, monkeypatch)
+    drive.run(14.0)
+    rack = engine.rbr_rack
+    assert rack.align_on
+    drive.telemetry = False                                          # the level goes on, the samples stop
+    drive.run(0.6)
+    assert not rack.align_on and open(path + '/ffb_align').read() == '0 0 0'
+    drive.telemetry = True
+    drive.run(0.5)
+    assert rack.align_on
+    rack.restart_sign()
+    assert rack._spring.cur is None and rack._spring_at is None and rack._align_prev is None and rack._align_hold is None
+    engine.stop()
+
+
+def test_forza_stays_column_only_and_a_stop_clears_both_springs(tmp_path, monkeypatch):
+    engine, path, drive = spring_engine(tmp_path, monkeypatch)
+    drive.run(14.0)
+    assert engine.rbr_rack.align_on
+    engine._dyn_stop(drive.t)
+    assert not engine.rbr_rack.align_on and not engine.model.align_on
+    engine._played_mode = 'forza-rack'
+    engine.rbr_rack.align_on = engine.model.align_on = False
+    engine._dyn_play(drive.t, spring_sample())
+    assert not engine.rbr_rack.align_on and not engine.model.align_on and engine.forza_rack.align_writer is None
+    engine.stop()
+
+
+def test_the_ini_switch_reaches_the_rack_and_the_capture_settings(tmp_path):
+    from oversteer import ffb_process
+    from oversteer.model import Model
+    engine = fe.FfbEngine(driver=FakeDriver, beamng_source=None)
+    assert fe.OVERALL_RBR_SPRING is True and engine.rbr_rack.spring_on is True
+    assert Model.types['countersteer_rbr_spring'] == 'boolean' and Model._texture_defaults(True)['countersteer_rbr_spring'] is True
+    assert Model._texture_defaults(False)['countersteer_rbr_spring'] is None
+    assert 'set_rbr_spring' in ffb_process.SETTERS and hasattr(ffb_process.EngineProcess, 'set_rbr_spring')
+    assert engine.settings_snapshot()['profile']['rbr_spring'] is True
+    engine.set_rbr_spring(0)
+    engine.step(0.0)
+    assert engine.rbr_rack.spring_on is False and engine.settings_snapshot()['profile']['rbr_spring'] is False
