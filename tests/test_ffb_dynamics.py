@@ -52,20 +52,20 @@ def test_a_result_without_the_figures_gives_none(bad):
 
 
 def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_own():
-    d, f = fd.column_targets(0.4, 2.1, (470, 670, 500, 1250, 5000))
-    assert d == round(0.17 * math.pi / 180 * 0.4 / 2.1 * 1e6) and f == round(0.75 * 0.4 / 2.1 * 1e4)
+    d, f = fd.column_targets(0.4, 3.5, (470, 670, 500, 1250, 5000))
+    assert d == round(0.17 * math.pi / 180 * 0.4 / 3.5 * 1e6) and f == round(0.75 * 0.4 / 3.5 * 1e4)
     # a light scale: friction held at the wheel's own unless removal is asked for; damping is the car's (the driver
     # renders target - own and limits what it removes)
-    d, f = fd.column_targets(0.1, 2.1, (470, 670, 500, 1250, 5000))
-    assert d == round(0.17 * math.pi / 180 * 0.1 / 2.1 * 1e6) < 470 and f == 500
-    d, f = fd.column_targets(0.1, 2.1, (470, 670, 500, 1250, 5000), removal=True)
-    assert f == round(0.75 * 0.1 / 2.1 * 1e4) < 500
-    # an unknown wheel counts as the G29's 2.1 Nm; the figures stay in the driver's range
-    assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 2.1)
-    assert fd.column_targets(50.0, 2.1) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
+    d, f = fd.column_targets(0.1, 3.5, (470, 670, 500, 1250, 5000))
+    assert d == round(0.17 * math.pi / 180 * 0.1 / 3.5 * 1e6) < 470 and f == 500
+    d, f = fd.column_targets(0.1, 3.5, (470, 670, 500, 1250, 5000), removal=True)
+    assert f == round(0.75 * 0.1 / 3.5 * 1e4) < 500
+    # an unknown wheel counts as the G29's 3.5 Nm; the figures stay in the driver's range
+    assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 3.5)
+    assert fd.column_targets(50.0, 3.5) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
     # the damping's own scale (1:1 with the torque under the knee): the friction keeps the impedance scale
-    d, f = fd.column_targets(0.3, 2.1, (470, 670, 500, 1250, 5000), damping_scale=1.0)   # 1:1 (100 %)
-    assert d == round(0.17 * math.pi / 180 / 2.1 * 1e6) > 470 and f == round(0.75 * 0.3 / 2.1 * 1e4)
+    d, f = fd.column_targets(0.3, 3.5, (470, 670, 500, 1250, 5000), damping_scale=1.0)   # 1:1 (100 %)
+    assert d == round(0.17 * math.pi / 180 / 3.5 * 1e6) > 470 and f == round(0.75 * 0.3 / 3.5 * 1e4)
 
 
 def test_the_alignment_target_is_in_wheel_position_units_with_abs_xs_sign():
@@ -112,7 +112,7 @@ def test_an_older_driver_has_none_of_it(tmp_path):
     dyn.off()                                                          # nothing to set back, no error
     stage = fd.DynStage(wheel_dir(tmp_path, ext_force='0\n'))
     stage.start(0.0)
-    stage.column(0.0, 0.4, 2.1)
+    stage.column(0.0, 0.4, 3.5)
     stage.align(0.0, 10.0, 0.01, 0.75)
     stage.keep(1.0)
     stage.stop(1.0)
@@ -141,13 +141,13 @@ def test_the_stage_writes_the_column_when_it_changes_and_zero_when_off(tmp_path)
     assert stage.range == 900 and stage.k_limit == pytest.approx(0.06)
     read = [v for name, v in seen if name == 'ffb_align_read']
     assert read == [pytest.approx((60000.0, 900.0))]
-    stage.column(0.0, 0.4, 2.1)
-    want = fd.column_targets(0.4, 2.1)
+    stage.column(0.0, 0.4, 3.5)
+    want = fd.column_targets(0.4, 3.5)
     assert (int(open(path + '/ffb_dyn_damping').read()), int(open(path + '/ffb_dyn_friction').read())) == want
     n = len(seen)
-    stage.column(0.1, 0.401, 2.1)                                      # a 0.25 % change: no write
+    stage.column(0.1, 0.401, 3.5)                                      # a 0.25 % change: no write
     assert len(seen) == n
-    stage.column(0.2, 0.2, 2.1)
+    stage.column(0.2, 0.2, 3.5)
     assert int(open(path + '/ffb_dyn_friction').read()) != want[1]
     stage.align(0.3, 20.0, 0.02, 0.75)
     assert open(path + '/ffb_align').read() == fd.align_text(20.0, 0.02, 0.75, 900)
@@ -158,7 +158,7 @@ def test_the_stage_writes_the_column_when_it_changes_and_zero_when_off(tmp_path)
     stage.stop(0.5)                                                    # already off: nothing again
     assert len(seen) == n
     stage.column_on = False
-    stage.column(1.0, 0.4, 2.1)
+    stage.column(1.0, 0.4, 3.5)
     assert open(path + '/ffb_dyn_damping').read() == '0'               # the switch off: 0 written, not the targets
 
 
@@ -189,7 +189,7 @@ def test_the_spring_is_kept_alive_and_dropped_with_k_zero(tmp_path):
 
 # -- the rack force: the spring in the wheel's frame, a reset --
 
-def rack(peak=2.1):
+def rack(peak=3.5):
     r = fe.RackForce()
     r.LEARNS = False
     r.wheel_peak = peak
@@ -235,8 +235,8 @@ def test_the_spring_is_worked_out_in_the_wheels_own_position_frame():
     g = 450.0 / (r.lock * r.ratio * 180.0 / math.pi)
     theta_a, k, tau = seen[-1]
     assert theta_a == pytest.approx(max(-450.0, min(450.0, car['theta_a_deg'] * g)))
-    slope = r.rho() * wheel_torque.rim_share_slope(r.rim_torque(s) * r.rho(), 2.1, 1.0, r.top_torque() * r.rho(), r.knee)
-    assert k == pytest.approx(slope * car['k'] / 2.1 / g)
+    slope = r.rho() * wheel_torque.rim_share_slope(r.rim_torque(s) * r.rho(), 3.5, 1.0, r.top_torque() * r.rho(), r.knee)
+    assert k == pytest.approx(slope * car['k'] / 3.5 / g)
     # steer 1 at the lock puts the zero-slip angle at the wheel's own steer * range / 2, whatever the car's lock
     s = slip_sample(0.01, steer=0.5, alpha=0.0)
     r._now = 0.01
@@ -385,8 +385,8 @@ def test_the_default_column_damping_writes_rho_squared_times_the_real_columns(tm
     engine, t = playing_engine(path)
     assert engine.model.damping_pct == 100
     scale = engine.model.rho() ** 2
-    assert int(open(path + '/ffb_dyn_damping').read()) == round(scale * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 2.1) * 1e6)
-    assert fd.column_targets(0.3, 2.1, damping_scale=0.64)[0] == round(0.64 * 1413)
+    assert int(open(path + '/ffb_dyn_damping').read()) == round(scale * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.5) * 1e6)
+    assert fd.column_targets(0.3, 3.5, damping_scale=0.64)[0] == round(0.64 * 848)
 
 
 def test_playing_writes_the_column_and_the_stage_is_zero_again_when_it_stops(tmp_path):
@@ -1120,7 +1120,7 @@ def test_the_aligning_spring_is_never_stiffer_than_the_assisted_stiffness(speed,
     split = _model_nm(r, speed, alpha)
     err = abs(alpha) * r.ratio * 180.0 / math.pi                        # the angle error, steering wheel degrees
     assert split['k'] * err <= abs(split['model']) * 1.0001             # the tangent never overshoots the (concave) torque
-    peak = 2.1
+    peak = 3.5
     for limit in (None, 0.5 * split['k'] / peak):
         spring = fe.ffb_spring.DriverSpring()
         t = 0.0

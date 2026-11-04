@@ -487,7 +487,7 @@ def test_share_asks_the_rack_for_the_trigger():
 def forza_rack(kick=True, pull=False):
     rack = fe.ForzaRack()
     rack.reset(CAR)
-    rack.kick_on, rack.kick_level, rack.pull_on, rack.wheel_peak = kick, 1.0, pull, 2.1
+    rack.kick_on, rack.kick_level, rack.pull_on, rack.wheel_peak = kick, 1.0, pull, 3.5
     return rack
 
 
@@ -655,7 +655,7 @@ def test_forza_plays_our_force_through_the_chain(tmp_path):
     drive.run(1.0)
     assert len(forces()) - n > 700                                      # written every pass, not at the packet rate
     values = forces()[-700:]
-    assert max(values) > 0.05 * FULL and min(values) < -0.05 * FULL
+    assert max(values) > 0.03 * FULL and min(values) < -0.03 * FULL
     step = max(abs(b - a) for a, b in zip(values, values[1:]))
     assert step < 0.04 * FULL                                           # smooth between the 60/s packets
     light, text = fe.status_text(engine.status)

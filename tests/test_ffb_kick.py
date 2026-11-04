@@ -125,7 +125,7 @@ class Rack(SimpleNamespace):
 
 
 def rack(on=True, level=1.0, strength=1.0):
-    return Rack(kick_on=on, kick_level=level, strength=strength, ratio=RATIO, assist=1.0, wheel_peak=2.1, car='car',
+    return Rack(kick_on=on, kick_level=level, strength=strength, ratio=RATIO, assist=1.0, wheel_peak=3.5, car='car',
                 trail=0.027, _now=0.0)
 
 

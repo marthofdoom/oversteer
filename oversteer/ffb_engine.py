@@ -532,7 +532,7 @@ class RackForce:
       assist class per car, 1.0 road / rally, 0.0 unassisted; an assisted car's driver torque tops out at
       wheel_torque.HYD_TOP_NM). The rim torque in Nm is played 1:1 against the wheel's peak up to the "1:1 up to"
       share of it (knee) and compressed above (wheel_torque.rim_share, with the overall steering strength applied
-      inside it; an unknown wheel counts as the G29's 2.1 Nm) so the car's top torque (top_torque()) lands at
+      inside it; an unknown wheel counts as the G29's 3.5 Nm) so the car's top torque (top_torque()) lands at
       wheel_torque.STEER_BUDGET of full scale, which is also its hard clamp: the rest stays free for texture and
       impacts. The column's damping, friction and stiffness the driver renders keep a frozen scale
       (COLUMN_SCALE, impedance()). The steering force plays the scrub couple only as "Drive pull" (pull_scrub: the
@@ -579,7 +579,7 @@ class RackForce:
     GAME_SHAPE_SPEED = 25.0              # m/s: the speed the game-shaped assist is levelled at (its p99 torque)
     ASSIST = 1.0                         # assist class: 1.0 road / rally power steering, 0.0 unassisted (race cars)
     RIM_SAFE_NM = 10.0                   # hard ceiling on the torque at the rim whatever the car and the wheel
-    wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the 2.1 Nm class
+    wheel_peak = None                    # Nm: the wheel's peak (wheel_torque), None unknown: the 3.5 Nm class
     rim_user = None                      # mm: the user's rim diameter (the profile's), None: the table's
     last_torque = None                   # Nm: the rim torque force() worked out last (ffb_handforce)
     wheel_rim = None                     # mm: the wheel's rim diameter (wheel_torque.rim_mm), None unknown: DEFAULT_RIM_MM
@@ -595,9 +595,11 @@ class RackForce:
     kick_on = ffb_kick.OVERALL_KICK      # "Kickback": the onset pulse of the scrub couple (ffb_kick) ...
     kick_level = ffb_kick.OVERALL_KICK_LEVEL / 100.0   # ... at this share of its amplitude
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
-                                         # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car)
-    CLASSIC_SCALE = COLUMN_SCALE         # the classic mapping's uniform scale: the p99-based impedance scale of the drive
-                                         # the classic feel was tuned on (the Fabia, p99 573 Nm), frozen
+                                         # was the p99-based impedance scale of a 2.1 Nm wheel on the usual car; the Nm values it
+                                         # gives are kept, the driver units follow the peak)
+    CLASSIC_SCALE = 0.30 * 3.5 / 2.1     # the classic mapping's uniform scale: the p99-based impedance scale of the drive
+                                         # the classic feel was tuned on (the Fabia, p99 573 Nm), frozen. Its share was
+                                         # 0.30 T / 2.1; the G29 peak is 3.5 now, so 0.50 keeps share = scale T / peak the same
     DAMPING_SCALE = OVERALL_COLUMN_DAMPING / 100.0   # ('knee' mapping) the share of the real column's damping (0.17 Nm s/rad) played,
                                          # the "Column damping" setting (damping_pct). 1:1 settles best (slide sim, drive
                                          # 20261102-220623: 0.51 s, 4 % overshoot; the wheel's own 0.055 alone rings, 13
@@ -1106,11 +1108,11 @@ class RackForce:
 
     def impedance(self, ratio=None, assist=None):
         """The scale of the column's damping, friction and stiffness sent to the driver (ffb_dynamics.column_targets):
-        COLUMN_SCALE (frozen) on the G29 class, in proportion to the wheel's peak above 3 Nm, at most 1. The torque
+        COLUMN_SCALE (frozen) on the G29 class, in proportion to the wheel's peak above wheel_torque.G29_CLASS_MAX_NM, at most 1. The torque
         itself no longer uses a scale (wheel_torque.rim_share plays it 1:1 up to the knee); the car's p99-based
         wheel_torque.impedance_scale is a diagnostic only."""
         peak = self.wheel_peak or wheel_torque.DEFAULT_PEAK_NM
-        return self.COLUMN_SCALE if peak <= 3.0 else min(1.0, self.COLUMN_SCALE * peak / wheel_torque.DEFAULT_PEAK_NM)
+        return self.COLUMN_SCALE if peak <= wheel_torque.G29_CLASS_MAX_NM else min(1.0, self.COLUMN_SCALE * peak / wheel_torque.DEFAULT_PEAK_NM)
 
     def top_torque(self, ratio=None, assist=None):
         """The driver torque (Nm) the compression lands at the steering budget (rim_share's x_top): the hydraulic top
@@ -1141,7 +1143,7 @@ class RackForce:
         classic = self.classic()
         if classic:
             # the uniform impedance scale (frozen) times the strength, hard-clamped at the budget
-            scale = self.CLASSIC_SCALE if peak <= 3.0 else self.impedance()
+            scale = self.CLASSIC_SCALE if peak <= wheel_torque.G29_CLASS_MAX_NM else self.impedance()
             share = scale * self.strength * torque / peak
             share = max(-wheel_torque.STEER_BUDGET, min(wheel_torque.STEER_BUDGET, share))
         else:

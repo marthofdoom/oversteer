@@ -554,7 +554,7 @@ def test_an_unknown_s_is_100_with_a_note_and_no_level_no_torque():
 
 def test_the_torque_goes_through_the_boost_curve_and_the_mapping():
     rack = fe.RbrRack()
-    rack.wheel_peak = 2.1
+    rack.wheel_peak = 3.5
     rack.set_level(0.0, level_for(0.5), 100.0)
     sample = rbr_sample()
     from oversteer import ffb_carprops as cp
