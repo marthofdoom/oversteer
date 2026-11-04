@@ -1451,8 +1451,8 @@ class RbrRack(RackForce):
     FLOOR_BETA = (0.05, 0.15)            # rad of body slip: the floor fades in over this ...
     FLOOR_SPEED = (5.0, 8.0)             # ... and over this speed (m/s)
     FLOOR_BIG = (0.40, 0.80, 0.5)        # rad, rad, share: a big slide's fade (ACR's played force over Newton's Fy_f falls like this past 0.4 rad)
-    FLOOR_SLOW_HZ = 2.0                  # the column torque's slow low-pass the floor is held against
-    FLOOR_LIFT_HZ = 10.0                 # the lift's low-pass: it cannot step
+    FLOOR_SLOW_HZ = 40.0                 # the column torque's low-pass the floor is held against: quick enough to catch NGP's sudden falls
+    FLOOR_LIFT_HZ = 40.0                 # the lift's low-pass: it cannot step
     FLOOR_FY_MIN = 100.0                 # N: under this |Fy_f| the floor's sign is kept
     YAW_GAP = 0.1                        # s: yaw-rate samples further apart than this give no rdot
     floor_level = 1.0                    # "Caster in slides" (0..1): 0 = off
@@ -1616,7 +1616,7 @@ class RbrRack(RackForce):
 
     def _floor_step(self, t, sample):
         """The lift: the floor less the column torque's slow part (along the floor's sign, never negative), through a
-        10 Hz low-pass. It is held signed, so a change of sign moves it across without a step."""
+        low-pass (FLOOR_LIFT_HZ). It is held signed, so a change of sign moves it across without a step."""
         size = self._floor_size(t, sample) if sample is not None else 0.0
         if self.column is None:
             self.floor_lift, self._slow, self._lift_at = 0.0, None, None
