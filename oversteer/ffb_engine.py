@@ -1453,6 +1453,7 @@ class RbrRack(RackForce):
     FLOOR_BIG = (0.40, 0.80, 0.5)        # rad, rad, share: a big slide's fade (ACR's played force over Newton's Fy_f falls like this past 0.4 rad)
     FLOOR_SLOW_HZ = 40.0                 # the column torque's low-pass the floor is held against: quick enough to catch NGP's sudden falls
     FLOOR_LIFT_HZ = 40.0                 # the lift's low-pass: it cannot step
+    FLOOR_OPPOSE = (-3.0, 0.0)           # Nm of the column torque along the floor's sign: the lift fades out over this
     FLOOR_FY_MIN = 100.0                 # N: under this |Fy_f| the floor's sign is kept
     YAW_GAP = 0.1                        # s: yaw-rate samples further apart than this give no rdot
     floor_level = 1.0                    # "Caster in slides" (0..1): 0 = off
@@ -1629,7 +1630,9 @@ class RbrRack(RackForce):
         elif dt > 0.0:
             self._slow += (1.0 - math.exp(-2.0 * math.pi * self.FLOOR_SLOW_HZ * dt)) * (self.column - self._slow)
         sign = self.floor_sign
-        target = 0.0 if sign is None else sign * max(0.0, size - sign * self._slow)
+        # never against NGP: its force the other way fades the lift out, so the two cannot cancel to nothing
+        along = 0.0 if sign is None else sign * self._slow
+        target = 0.0 if sign is None else sign * max(0.0, size - along) * self._ramp(along, self.FLOOR_OPPOSE)
         if dt > 0.0:
             self.floor_lift += (1.0 - math.exp(-2.0 * math.pi * self.FLOOR_LIFT_HZ * dt)) * (target - self.floor_lift)
             if target == 0.0 and abs(self.floor_lift) < 1e-6:

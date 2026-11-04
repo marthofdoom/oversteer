@@ -1243,3 +1243,16 @@ def test_a_big_slide_fades_the_floor_as_acr_does():
     assert sizes[0.6] == pytest.approx(sizes[0.3] * 0.75)
     assert sizes[0.8] == pytest.approx(sizes[0.3] * 0.5)
     assert sizes[1.2] == pytest.approx(sizes[0.3] * 0.5)
+
+
+def test_the_floor_never_cancels_ngp_when_it_pulls_the_other_way():
+    """Field: NGP at -13.8 Nm with the floor's sign +: the lift of +13 Nm left the wheel at no force for 0.23 s."""
+    rack = fe.RbrRack()
+    rack.reset(None)
+    t, beta = 1.0, 0.3
+    for _ in range(400):
+        t += 1.0 / 236.0
+        rack.column = -13.8
+        rack.feed(t, types.SimpleNamespace(speed=25.0, accel=(0.0, -6.0, 0.0), vel=(25.0 * math.cos(beta), 25.0 * math.sin(beta), 0.0), yaw_rate=0.0, game_time=None, drivetrain=None, gear=3, rpm=5000.0), None)
+    assert rack.floor_sign == 1.0
+    assert abs(rack.floor_lift) < 1e-3
