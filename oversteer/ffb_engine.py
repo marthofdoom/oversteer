@@ -1521,6 +1521,10 @@ class RbrRack(RackForce):
         self._sign.add(steer, level, dt)
         self.sign_time += dt
         r = self.sign_r = self._sign.r()
+        if self.sign_time >= self.SIGN_TIME and not self.ready and self.refused is None:
+            # the generic prior: DIRECTION normal, playing within seconds; judged on until it latches either way, and an
+            # inverted one is refused as soon as it shows (a 20 % STRENGTH can stay undecided for a whole drive)
+            self.ready, self.waiting = True, None
         if self.sign_time < self.SIGN_TIME or r is None or abs(r) < self.SIGN_LATCH:
             return
         spread = self._sign.spread()

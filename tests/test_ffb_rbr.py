@@ -982,3 +982,15 @@ def test_keep_strength_is_written_for_a_plateau_or_a_fit_not_for_the_drop():
     f.fit.converged, f.fit.s = True, 0.7
     f.feed_physics(100.0, None, 0)
     assert r.kept_strength() == pytest.approx(0.7)           # only a later confirmed value overwrites it
+
+
+def test_an_undecided_sign_plays_on_the_normal_prior_and_an_inverted_one_is_still_refused():
+    rack = fe.RbrRack()
+    t = 0.0
+    while t < 3.0:                                          # the level says nothing about the steering: |r| stays low
+        rack.feed(t, rbr_sample(speed=20.0, steer=0.3 * math.sin(2 * math.pi * 0.3 * t), ay=0.0),
+                  level_for(math.sin(2 * math.pi * 11.0 * t)))
+        t += 1.0 / 236.0
+    assert rack.direction is None and rack.ready and rack.waiting is None
+    drive_rack(rack, 30.0, direction=-1.0, start=t)
+    assert rack.direction == 'inverse' and not rack.ready and rack.refused == 'inverse'
