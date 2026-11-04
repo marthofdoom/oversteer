@@ -7,7 +7,7 @@ import pytest
 
 from oversteer import ffb_carprops, ffb_engine as fe, ffb_spring, ffb_texture, wheel_torque
 from oversteer.telemetry_formats import Sample
-from tests.test_ffb_engine import FakeDriver, acr, forces, run, upload, wheel, game_raw, HZ, fitted  # noqa: F401
+from tests.test_ffb_engine import FakeDriver, acr, forces, run, upload, wheel, game_raw, HZ, fitted, read  # noqa: F401
 from tests.test_ffb_engine import _clean_log  # noqa: F401 (the autouse fixture)
 
 
@@ -29,7 +29,7 @@ def delivered_at_gain(tmp_path, gain):
     engine, path = engine_with_gain(tmp_path, gain)
     FakeDriver.log.clear()
     run(engine, 0.0, 8.0)
-    return forces()[-1] * gain / 65535.0, engine
+    return forces()[-1] * read(path, 'gain') / 65535.0, engine      # (full range raises a gain under 100 % to 100 %)
 
 
 @pytest.mark.parametrize('percent', [50, 100, 115, 150])
@@ -41,7 +41,8 @@ def test_the_delivered_force_is_the_same_at_any_master_gain(tmp_path, percent):
     assert engine._clipped == 0.0
 
 
-def test_a_division_past_full_scale_clips_and_is_counted(tmp_path):
+def test_a_division_past_full_scale_clips_and_is_counted(tmp_path, monkeypatch):
+    monkeypatch.setattr(fe.FfbEngine, '_range_wanted', lambda self: False)      # (full range would raise the 5 % to 100 %)
     engine, path = engine_with_gain(tmp_path, 3277, strength=100)        # 5 %: 20x
     run(engine, 0.0, 8.0)
     assert max(abs(v) for v in forces()) <= fe.FULL
