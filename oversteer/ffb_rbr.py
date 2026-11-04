@@ -84,7 +84,9 @@ STRENGTH. The full scale C is 32767 times the game's STRENGTH (0..1), which live
 that is not readable (the 2026-11-03 drive had 0.2: no level past 6554). `StrengthFit` finds it from the drive: x =
 |level| / (32767 s), u(s) = -ln(1 - x) must be linear in the column torque Newton gives (the front's lateral force
 Fy = m (b/L) a_y + I_z rdot / L through a trail prior over the ratio N), on moderate-a_y samples; the s with the best
-correlation r wins (only s above the game's own peak are possible). Until it has converged s is 1: x is smaller, the force
+correlation r >= 0.4 whose implied trail (the slope) is nearest the 37 mm prior wins (r alone does not tell the
+strengths apart); only s above the game's own peak are possible, s = 1 stays when its trail is plausible (20..60 mm),
+and the applied strength may fall to a fit only when it is plausible and has held 10 s. Until it has converged s is 1: x is smaller, the force
 lighter. With s fitted (or a clipped top found) C = 32767 s, applied by gliding.
 """
 import json
@@ -124,13 +126,15 @@ PLATEAU_TOP_MIN = 0.15                   # the top, share of full scale, under w
 PLATEAU_RISE = 0.7                       # a second counts when the levels in it were this share of the top or less ...
 PLATEAU_RISES = 2                        # ... in this many of the seconds at the top: the top was reached by rising
 PEAK_MARGIN = 1.0                        # ours never past the game's own peak times this
-FIT_STEPS = tuple(round(0.1 + 0.01 * i, 2) for i in range(91))     # candidate strengths 0.10 .. 1.00
+FIT_STEPS = tuple(round(0.1 + 0.05 * i, 2) for i in range(19))      # candidate strengths 0.10 .. 1.00 (5 % steps)
 FIT_HZ = 20.0                            # the fit takes telemetry at this rate
 FIT_TAU = 90.0                           # s: its exponential window
 FIT_SPEED, FIT_AY_LO, FIT_AY_HI = 8.0, 1.0, 6.0     # m/s, m/s^2: the samples it looks at
-FIT_MIN_TIME = 25.0                      # s of such samples before it is believed
-FIT_MARGIN = 0.03                        # r over r at s = 1 needed to leave s = 1
-FIT_SWITCH = 0.015                       # r a new s must beat the held one by
+FIT_MIN_TIME = 10.0                      # s of such samples before it is believed
+FIT_R_MIN = 0.4                          # r a candidate needs to be considered
+FIT_TRAIL_PRIOR = 37.0                   # mm: the candidate whose implied trail (at S 100) is nearest this wins
+FIT_TRAIL_OK = (20.0, 60.0)              # mm: the implied trail of a plausible fit
+FIT_STABLE = 10.0                        # s of samples the same s must hold before the applied strength may fall to it
 FIT_SMOOTH = 0.1                         # s: the one-pole filter on Fy and the level
 CAR_M, CAR_L, CAR_B, CAR_IZ, CAR_N = 1390.0, 2.53, 1.24, 1751.0, 14.3   # a WRC (Fiesta/C3/Yaris/i20): the scale k is free
 TRAIL_PRIOR = 0.040                      # m
@@ -291,6 +295,8 @@ class StrengthFit:
         self.s = 1.0                     # the strength in use
         self.r = self.trail = None
         self.converged = False
+        self.plausible = False
+        self._since = 0.0
         self.source = 'assumed 1'
         self._t = None
         self._yaw = None                 # (t, yaw rate)
@@ -351,24 +357,49 @@ class StrengthFit:
             return None
         return (m[2] / w - m[0] / w * self.f1 / w) / math.sqrt(vu * vf)
 
+    def _trail(self, c):
+        """The trail (mm, at S 100) candidate c implies: u per N of Fy times the column scale."""
+        return None if self.f2 <= 0.0 else 0.062862 * 100.0 * CAR_N * (self.mom[c][2] / self.f2) * 1000.0
+
     def _decide(self):
+        """The candidate (s >= the game's peak, r >= FIT_R_MIN) whose implied trail is nearest the prior wins; plausible
+        when that trail is within FIT_TRAIL_OK. s = 1 is kept when it is plausible itself. r alone does not tell the
+        strengths apart; the trail does (a wrong s puts the trail at a few mm or far past 60)."""
         if self.time < FIT_MIN_TIME or self.w <= 0.0:
             return False
-        rs = {c: self._r(c) for c in FIT_STEPS if c >= self.peak - 0.001}     # (a strength under the game's own peak is impossible)
-        rs = {c: v for c, v in rs.items() if v is not None}
-        if not rs or 1.0 not in rs:
-            return False
-        best = max(rs, key=rs.get)
-        held = self.s if self.s in rs else 1.0
-        need = FIT_MARGIN if held == 1.0 else FIT_SWITCH
-        new = best if best != held and rs[best] >= rs[held] + need else held
-        self.r = rs[new]
-        m = self.mom[new]
-        self.trail = m[2] / self.f2 if self.f2 > 0.0 else None        # u per N of Fy
+        cand = {}
+        for c in FIT_STEPS:
+            if c < self.peak - 0.001:      # (a strength under the game's own peak is impossible)
+                continue
+            r = self._r(c)
+            tr = self._trail(c)
+            if r is not None and tr is not None and r >= FIT_R_MIN:
+                cand[c] = (r, tr)
+        lo, hi = FIT_TRAIL_OK
+        if 1.0 in cand and lo <= cand[1.0][1] <= hi:
+            new = 1.0
+        elif cand:
+            new = min(cand, key=lambda c: abs(cand[c][1] - FIT_TRAIL_PRIOR))
+        else:
+            new = 1.0
+        if new != self.s or not self.converged:
+            self._since = self.time
+        if new in cand:
+            self.r, tr = cand[new]
+            self.trail = self.mom[new][2] / self.f2
+            self.plausible = lo <= tr <= hi
+        else:
+            self.r = self.trail = None
+            self.plausible = False
         moved = new != self.s or not self.converged
         self.s, self.converged = new, True
         self.source = 'fitted' if new != 1.0 else 'fitted (1)'
         return moved
+
+    @property
+    def stable(self):
+        """A plausible fit that has held the same s for FIT_STABLE s of samples."""
+        return self.converged and self.plausible and self.time - self._since >= FIT_STABLE
 
     def trail_mm(self, sens):
         """The trail the fit implies (mm) for sensitivity `sens`: tau_col = 0.062862 u S Nm, trail = tau_col N / Fy."""
@@ -534,7 +565,7 @@ class RbrForce:
         """The STRENGTH the evidence shows: a clipped top, else the fit once it left 1, else the conservative prior 1."""
         if self.s_plateau is not None:
             return self.s_plateau
-        if self.fit.converged and (self.fit.s != 1.0 or self.s_kept is None):
+        if self.fit.converged and self.fit.plausible and (self.fit.s != 1.0 or self.s_kept is None):
             return self.fit.s
         return self.s_kept or 1.0
 
@@ -555,12 +586,12 @@ class RbrForce:
             self.s_kept = None           # (the file stays: only a later confirmed value overwrites it)
             self.s_applied = 1.0
         target = self.target_s()
-        if (self.s_plateau is not None or (self.fit.converged and self.fit.s != 1.0)) and (
+        if (self.s_plateau is not None or (self.fit.stable and self.fit.s != 1.0)) and (
                 self.s_kept is None or abs(target - self.s_kept) > 0.005):
             self.s_kept = target
             keep_strength(target)
-        if target < self.s_applied and self.s_plateau is None:
-            target = self.s_applied      # heavier only on a confirmed clipped top; a fit alone never lowers it
+        if target < self.s_applied and self.s_plateau is None and not self.fit.stable:
+            target = self.s_applied      # heavier only on a confirmed clipped top or a plausible, stable fit
         dt = 0.0 if self._phys_t is None else min(max(t - self._phys_t, 0.0), 0.25)
         self._phys_t = t
         before = self.s_applied

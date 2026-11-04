@@ -773,14 +773,39 @@ def fit_drive(strength, seconds=120.0, trail=0.060, hz=100.0):
 
 
 def test_the_fit_finds_a_strength_of_0_2():
-    fit = fit_drive(0.2)
+    fit = fit_drive(0.2, trail=0.040)
     assert fit.converged and abs(fit.s - 0.2) <= 0.02 and fit.r > 0.95
-    assert 55 < fit.trail_mm(100.0) < 65                 # the 60 mm trail it was made with
+    assert 35 < fit.trail_mm(100.0) < 45                 # the 40 mm trail it was made with
 
 
 def test_the_fit_finds_a_strength_of_1():
     fit = fit_drive(1.0, trail=0.030)
     assert fit.s == 1.0 and fit.r > 0.95
+
+
+def test_the_fit_picks_by_trail_100_and_25_percent():
+    fit = fit_drive(1.0, trail=0.040, seconds=40.0)
+    assert fit.s == 1.0 and fit.plausible and fit.stable
+    fit = fit_drive(0.25, trail=0.040, seconds=40.0)
+    assert fit.s == 0.25 and fit.plausible and fit.stable
+    assert 30 < fit.trail_mm(100.0) < 50
+
+
+def test_a_light_early_drive_at_100_percent_stays_at_1():
+    """A low peak (a gentle drive at STRENGTH 1) must not read as a low STRENGTH: s < 1 would put the trail past 60 mm."""
+    light = r.StrengthFit()
+    speed, hz = 20.0, 100.0
+    for i in range(int(40 * hz)):
+        t = i / hz
+        ay = 2.0 + 0.8 * math.sin(2 * math.pi * 0.2 * t) + 0.3 * math.sin(2 * math.pi * 0.77 * t)
+        fy = r.CAR_M * (r.CAR_B / r.CAR_L) * ay + r.CAR_IZ * (0.8 * 2 * math.pi * 0.2 * math.cos(2 * math.pi * 0.2 * t) / speed) / r.CAR_L
+        torque = 2 * math.pi * 0.030 * fy / r.CAR_N
+        light.feed(t, ay, ay / speed, speed, r.level_of(r.magnitude(r.ngp_curve(torque, 100.0), 1.0)))
+    assert light.peak < 0.6 and light.s == 1.0 and light.plausible
+    f = r.RbrForce()
+    for i in range(400):
+        f.feed_physics(i * 0.1, moving_sample(), 0)
+    assert f.s_applied == 1.0
 
 
 def test_the_strength_is_1_until_converged_and_the_force_never_heavier():
@@ -946,7 +971,7 @@ def test_the_applied_strength_rises_at_once_and_only_a_plateau_makes_it_heavier(
     f = r.RbrForce()
     sample = moving_sample()
     f.s_applied = 0.3
-    f.fit.converged, f.fit.s = True, 0.6
+    f.fit.converged, f.fit.plausible, f.fit.s = True, True, 0.6
     f.feed_physics(1.0, sample, 0)
     assert f.s_applied == pytest.approx(0.6)                 # lighter: at once, on the fit
     f.fit.s = 0.4
@@ -963,7 +988,7 @@ def test_the_applied_strength_rises_at_once_and_only_a_plateau_makes_it_heavier(
 def test_a_converged_fit_alone_keeps_the_kept_strength_from_being_lowered():
     r.keep_strength(0.5)
     f = r.RbrForce()
-    f.fit.converged, f.fit.s = True, 0.2
+    f.fit.converged, f.fit.plausible, f.fit.s = True, True, 0.2
     for i in range(100):
         f.feed_physics(i * 0.1, moving_sample(), 0)
     assert f.s_applied == pytest.approx(0.5)
@@ -979,7 +1004,8 @@ def test_keep_strength_is_written_for_a_plateau_or_a_fit_not_for_the_drop():
     for i in range(50):
         f.feed_physics(1.0 + i, None, 0)
     assert r.kept_strength() == pytest.approx(0.2)           # ... and so does what follows it
-    f.fit.converged, f.fit.s = True, 0.7
+    f.fit.converged, f.fit.plausible, f.fit.s = True, True, 0.7
+    f.fit._since, f.fit.time = 0.0, 20.0
     f.feed_physics(100.0, None, 0)
     assert r.kept_strength() == pytest.approx(0.7)           # only a later confirmed value overwrites it
 
