@@ -39,6 +39,7 @@ ALIGN_TARGET_MAX = 32767
 # impedance scale s and the wheel's peak torque like the rest of the steering
 COLUMN_DAMPING_NMS_RAD = 0.17
 COLUMN_COULOMB_NM = 0.75
+COLUMN_FRICTION_GAIN = 5.0 / 3.0         # friction on top of the impedance scale: 0.375 N m at the rim on a G29 (scale 0.3), the value it played before the G29's peak was corrected to 3.5 N m, in the range drivers prefer on what the wheel can carry
 
 K_LIMIT_EVERY = 1.0                      # s between reads of ffb_align's k_limit and the wheel's range
 COLUMN_MIN_STEP = 0.02                   # share a column target must change by before it is written again
@@ -92,7 +93,7 @@ def column_targets(scale, peak_nm, own=DEFAULT_WHEEL, removal=False, damping_sca
     wheel's own, 0 is off and leaves the wheel alone, so the slider never takes damping out and rises from 0 % to 100 %."""
     peak = peak_nm or wheel_torque.DEFAULT_PEAK_NM
     damping = COLUMN_DAMPING_NMS_RAD * math.pi / 180.0 * (scale if damping_scale is None else damping_scale) / peak * 1e6
-    friction = COLUMN_COULOMB_NM * scale / peak * 1e4
+    friction = COLUMN_COULOMB_NM * min(scale * COLUMN_FRICTION_GAIN, 1.0) / peak * 1e4
     if not removal:
         friction = max(friction, own[2])
     if additive and damping > 0.0:
