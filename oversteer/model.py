@@ -85,6 +85,7 @@ class Model:
         'countersteer_strength': None,
         'countersteer_knee': None,
         'countersteer_rbr_cut': None,
+        'countersteer_caster_floor': None,
         'countersteer_mapping': None,
         'countersteer_forza_model': None,
         'countersteer_drive_pull': None,
@@ -151,6 +152,7 @@ class Model:
         'countersteer_strength': 'integer',
         'countersteer_knee': 'integer',
         'countersteer_rbr_cut': 'integer',
+        'countersteer_caster_floor': 'integer',
         'countersteer_mapping': 'string',
         'countersteer_forza_model': 'boolean',
         'countersteer_drive_pull': 'boolean',
@@ -284,7 +286,7 @@ class Model:
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_MAPPING, OVERALL_PULL, OVERALL_PULL_LEVEL, \
-            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL, OVERALL_RBR_CUT
+            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL, OVERALL_RBR_CUT, OVERALL_CASTER_FLOOR
         from .ffb_kick import OVERALL_KICK, OVERALL_KICK_LEVEL
         from .ffb_texture import LEVEL
         from .ffb_gear import OVERALL_GEAR_FLIP, OVERALL_GEAR_GUARD_LEVEL
@@ -293,6 +295,7 @@ class Model:
         data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
                 'countersteer_knee': int(round(OVERALL_KNEE * 100)) if supported else None,
                 'countersteer_rbr_cut': OVERALL_RBR_CUT if supported else None,
+                'countersteer_caster_floor': OVERALL_CASTER_FLOOR if supported else None,
                 'countersteer_mapping': OVERALL_MAPPING if supported else None,
                 'countersteer_forza_model': OVERALL_FORZA_MODEL if supported else None,
                 'countersteer_drive_pull': OVERALL_PULL if supported else None,
@@ -491,6 +494,8 @@ class Model:
             data['countersteer_knee'] = min(max(data['countersteer_knee'], KNEE_MIN), KNEE_MAX)
         if data['countersteer_rbr_cut'] is not None:
             data['countersteer_rbr_cut'] = min(max(data['countersteer_rbr_cut'], RBR_CUT_MIN), RBR_CUT_MAX)
+        if data['countersteer_caster_floor'] is not None:
+            data['countersteer_caster_floor'] = min(max(data['countersteer_caster_floor'], 0), 100)
         if data['countersteer_drive_pull_level'] is not None:
             data['countersteer_drive_pull_level'] = min(max(data['countersteer_drive_pull_level'], 0), 100)
         if data['countersteer_column_added'] is not None:
@@ -801,6 +806,17 @@ class Model:
         from .ffb_engine import OVERALL_RBR_CUT
         value = self.data.get('countersteer_rbr_cut')
         return OVERALL_RBR_CUT if value is None else value
+
+    def set_countersteer_caster_floor(self, value):
+        """RBR's "Caster in slides": the share of the mechanical caster's force kept in a slide, 0..100 % (0: off)."""
+        value = min(max(int(value), 0), 100)
+        if self.set_if_changed('countersteer_caster_floor', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_caster_floor()
+
+    def get_countersteer_caster_floor(self):
+        from .ffb_engine import OVERALL_CASTER_FLOOR
+        value = self.data.get('countersteer_caster_floor')
+        return OVERALL_CASTER_FLOOR if value is None else value
 
     def set_countersteer_mapping(self, value):
         """The steering mapping (profile INI only, no control): 'knee' (1:1 up to the knee, compressed above, the default) or
@@ -1259,6 +1275,7 @@ class Model:
         self.ui.set_countersteer_strength(data['countersteer_strength'])
         self.ui.set_countersteer_knee(data['countersteer_knee'])
         self.ui.set_countersteer_rbr_cut(data['countersteer_rbr_cut'])
+        self.ui.set_countersteer_caster_floor(data['countersteer_caster_floor'])
         self.ui.set_countersteer_column_added(data['countersteer_column_added'])
         self.ui.set_countersteer_rim_mm(None if data['countersteer_rim_mm'] is None else self.get_countersteer_rim_mm())
         self.ui.set_countersteer_car_wheel_mm(data['countersteer_car_wheel_mm'])

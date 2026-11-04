@@ -152,6 +152,7 @@ STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied insi
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
 OVERALL_RBR_CUT = 30                     # "RBR force cut" default (Hz): the low-pass corner on RBR's column torque
 RBR_CUT_OFF = 120                        # ... and the top of its range: no filter
+OVERALL_CASTER_FLOOR = 100               # "Caster in slides" default (profile key countersteer_caster_floor, %): 0 = off
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
 FORZA_CAR_WHEEL_MM = 375.0               # Forza's default car steering wheel (the profile's countersteer_car_wheel_mm wins once set)
@@ -1445,6 +1446,15 @@ class RbrRack(RackForce):
     CUT_GAP = 0.1                        # s: a longer pause between levels starts the low-pass again at the current value
     SIGN_SPREAD = 0.02                   # ... and the steering input's spread (of -1..1) under it: a straight's noise
                                          # alone never latches
+    FLOOR_MASS = 1390.0                  # kg: the caster floor's car mass when the table has none
+    FLOOR_AY = 15.0                      # m/s^2: the most lateral force the floor believes: an impact's spike is not grip
+    FLOOR_BETA = (0.05, 0.15)            # rad of body slip: the floor fades in over this ...
+    FLOOR_SPEED = (5.0, 8.0)             # ... and over this speed (m/s)
+    FLOOR_SLOW_HZ = 2.0                  # the column torque's slow low-pass the floor is held against
+    FLOOR_LIFT_HZ = 10.0                 # the lift's low-pass: it cannot step
+    FLOOR_FY_MIN = 100.0                 # N: under this |Fy_f| the floor's sign is kept
+    YAW_GAP = 0.1                        # s: yaw-rate samples further apart than this give no rdot
+    floor_level = 1.0                    # "Caster in slides" (0..1): 0 = off
 
     @property
     def pull_on(self):
@@ -1476,6 +1486,7 @@ class RbrRack(RackForce):
         self._tau_q = ffb_carprops.Quantile()
         self._tau_at = None
         self.direction = None
+        self._restart_floor()
         self.restart_sign()
         self.direction = None            # 'normal' or 'inverse' once latched: the game's DIRECTION, kept through cars
 
@@ -1483,6 +1494,7 @@ class RbrRack(RackForce):
         """The sign is judged again (a new stream: the game's DIRECTION may have been changed in its menus), and the
         low-pass starts again at the next value."""
         self._cut = self._cut_at = None
+        self._restart_floor()
         prior, self.direction = self.direction, None
         self._sign = _Moments(self.TAU)
         self.sign_time = 0.0
@@ -1506,6 +1518,8 @@ class RbrRack(RackForce):
         self.s_note = None if s is not None else _("the car's sensitivity is not known: 100 assumed")
         if level is None:
             self.column = self.column_raw = self._cut = self._cut_at = None
+            self.floor_lift = 0.0
+            self._slow = self._lift_at = None
             return
         x = min(abs(level) / (FULL * strength), 1.0)
         raw = math.copysign(self.K_COLUMN * ffb_rbr.linear(x) * (self.S_DEFAULT if s is None else s), level) \
@@ -1548,11 +1562,84 @@ class RbrRack(RackForce):
         """The p99 of |column torque| so far (Nm), None before any."""
         return self._tau_q.value()
 
+    def _restart_floor(self):
+        """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
+        self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
+        self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
+        self._slow = None                # the column torque's slow low-pass
+        self._lift_at = None
+        self._yaw = collections.deque(maxlen=3)         # (game time, yaw rate)
+        self._rdot = 0.0
+
+    @staticmethod
+    def _ramp(x, lo_hi):
+        lo, hi = lo_hi
+        return min(max((x - lo) / (hi - lo), 0.0), 1.0)
+
+    def _track_yaw(self, t, sample):
+        """The yaw acceleration, the central difference of the yaw rate over the game's clock (ForzaRack's); None without a yaw rate."""
+        r = getattr(sample, 'yaw_rate', None)
+        if not ffb_forza.finite(r):
+            self._yaw.clear()
+            self._rdot = 0.0
+            return None
+        game = getattr(sample, 'game_time', None)
+        self._yaw.append((game if ffb_forza.finite(game) else t, r))
+        self._rdot = 0.0
+        if len(self._yaw) == 3:
+            (t0, r0), _mid, (t2, r2) = self._yaw
+            if 0.0 < t2 - t0 <= 2.0 * self.YAW_GAP:
+                self._rdot = (r2 - r0) / (t2 - t0)
+        return self._rdot
+
+    def _floor_size(self, t, sample):
+        """What mechanical caster alone gives at the column (Nm) in a slide, 0 in grip or without the fields; sets the floor's sign.
+        floor = level w RALLY_TRAIL |Fy_f| / ratio, w the body slip's and the speed's ramps; the column torque has the sign opposite Fy_f."""
+        rdot = self._track_yaw(t, sample)
+        accel, vel = getattr(sample, 'accel', None), getattr(sample, 'vel', None)
+        speed, drivetrain = getattr(sample, 'speed', None), getattr(sample, 'drivetrain', None)
+        if rdot is None or accel is None or len(accel) < 2 or vel is None or len(vel) < 2 or \
+                not all(ffb_forza.finite(v) for v in (accel[1], vel[0], vel[1], speed)):
+            return 0.0
+        entry = car_data.entry(self.car)
+        mass = (entry.get('mass_kg') if entry else None) or self.FLOOR_MASS
+        fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot)
+        limit = ffb_forza.front_share(drivetrain) * mass * self.FLOOR_AY
+        fy = min(max(fy, -limit), limit)
+        if abs(fy) >= self.FLOOR_FY_MIN:
+            self.floor_sign = -math.copysign(1.0, fy)
+        beta = abs(math.atan2(vel[1], abs(vel[0])))
+        w = self._ramp(beta, self.FLOOR_BETA) * self._ramp(speed, self.FLOOR_SPEED)
+        return self.floor_level * w * ffb_carprops.RALLY_TRAIL * abs(fy) / self.ratio
+
+    def _floor_step(self, t, sample):
+        """The lift: the floor less the column torque's slow part (along the floor's sign, never negative), through a
+        10 Hz low-pass. It is held signed, so a change of sign moves it across without a step."""
+        size = self._floor_size(t, sample) if sample is not None else 0.0
+        if self.column is None:
+            self.floor_lift, self._slow, self._lift_at = 0.0, None, None
+            return
+        last, self._lift_at = self._lift_at, t
+        dt = 0.0 if last is None else t - last
+        if self._slow is None or dt < 0.0 or dt > self.CUT_GAP:
+            self._slow, self.floor_lift = self.column, 0.0       # again from here, no step
+            dt = 0.0
+        elif dt > 0.0:
+            self._slow += (1.0 - math.exp(-2.0 * math.pi * self.FLOOR_SLOW_HZ * dt)) * (self.column - self._slow)
+        sign = self.floor_sign
+        target = 0.0 if sign is None else sign * max(0.0, size - sign * self._slow)
+        if dt > 0.0:
+            self.floor_lift += (1.0 - math.exp(-2.0 * math.pi * self.FLOOR_LIFT_HZ * dt)) * (target - self.floor_lift)
+            if target == 0.0 and abs(self.floor_lift) < 1e-6:
+                self.floor_lift = 0.0                            # (grip: back to exactly the column torque)
+
     def feed(self, t, sample, level, new=True):
-        """A telemetry sample with the game's raw level now (None if none fresh): the sign latch."""
+        """A telemetry sample with the game's raw level now (None if none fresh): the caster floor, the sign latch."""
         last, self._sign_at = self._sign_at, t
         if sample is not None:
             self._engine(t, sample)
+        if new:
+            self._floor_step(t, sample)
         if self.direction is not None or level is None or sample is None:
             return
         dt = 0.0 if last is None else min(max(t - last, 0.0), 0.1)
@@ -1592,9 +1679,10 @@ class RbrRack(RackForce):
             return None
         speed = getattr(sample, 'speed', None)
         hyd = not self.classic()
+        column = self.column + self.floor_lift       # (grip: the lift is exactly 0.0)
         if self.power_steering() == 'off':
-            return ffb_carprops.driver_from_column(self.column, speed, 0.0, hyd)
-        return ffb_carprops.driver_from_column(self.column, speed, self.ASSIST * self.assist_level(), hyd)
+            return ffb_carprops.driver_from_column(column, speed, 0.0, hyd)
+        return ffb_carprops.driver_from_column(column, speed, self.ASSIST * self.assist_level(), hyd)
 
 
 class ForzaRack(RackForce):
@@ -2181,6 +2269,7 @@ class FfbEngine:
         self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
         self._knee_req = None            # the "1:1 up to" share (%) from the GUI
         self._rbr_cut_req = None         # the "RBR force cut" corner (Hz) from the GUI
+        self._caster_req = None          # the "Caster in slides" share (%) from the GUI
         self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
         self._kick_req = None            # "Kickback": (on, level %) from the GUI
@@ -2386,6 +2475,11 @@ class FfbEngine:
         self._rbr_cut_req = value
         self._wake.set()
 
+    def set_caster_floor(self, value):
+        """RBR's "Caster in slides": the share (0..100 %) of the mechanical caster's force kept in a slide; 0 is off."""
+        self._caster_req = min(max(float(value), 0.0), 100.0)
+        self._wake.set()
+
     def set_mapping(self, value):
         """The steering mapping (profile INI only): 'knee' (1:1 in Nm up to the knee, compressed above, hydraulic top
         end) or 'classic' (the uniform impedance scale, the feel before the knee)."""
@@ -2463,7 +2557,7 @@ class FfbEngine:
         column, align, removal = self._dyn_req
         profile = {
             'strength': round(self._strength * 100.0, 3), 'knee': round(model.knee * 100.0, 3), 'mapping': model.mapping,
-            'rbr_cut_hz': self.rbr_rack.cut_hz,
+            'rbr_cut_hz': self.rbr_rack.cut_hz, 'caster_floor': round(self.rbr_rack.floor_level * 100.0, 3),
             'column_damping': model.damping_pct, 'drive_pull': [bool(model.pull_on), round(model.pull_level * 100.0, 3)],
             'kick': [bool(model.kick_on), round(model.kick_level * 100.0, 3)],
             'gear_guard': [self._gear_on, round(self._gear_level, 3)], 'gear_flip': self._gear_flip, 'wheel_drive': self._gear_drive, 'rim_mm': model.rim_user,
@@ -2718,6 +2812,8 @@ class FfbEngine:
         cut = self._rbr_cut_req
         if cut is not None:
             self.rbr_rack.cut_hz = None if cut >= RBR_CUT_OFF else float(max(cut, 1))
+        if self._caster_req is not None:
+            self.rbr_rack.floor_level = self._caster_req / 100.0
         if self._mapping_req is not None:
             for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.mapping = self._mapping_req

@@ -664,6 +664,7 @@ class Gui:
         self.apply_countersteer_forza_model()
         self.apply_countersteer_knee()
         self.apply_countersteer_rbr_cut()
+        self.apply_countersteer_caster_floor()
         self.apply_countersteer_column_added()
         self.apply_countersteer_rim_mm()
         self.apply_countersteer_car_wheel_mm()
@@ -694,6 +695,10 @@ class Gui:
     def apply_countersteer_rbr_cut(self):
         """The "RBR force cut" corner (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_rbr_cut(self.model.get_countersteer_rbr_cut())
+
+    def apply_countersteer_caster_floor(self):
+        """The "Caster in slides" share (FFB tab, under the Countersteer switch) to the engine."""
+        self.ffb_engine.set_caster_floor(self.model.get_countersteer_caster_floor())
 
     def apply_countersteer_column_added(self):
         """The column damping share (FFB tab, under the Countersteer switch) to the engine."""

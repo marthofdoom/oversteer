@@ -9,7 +9,7 @@ import random
 
 import pytest
 
-from oversteer import ffb_engine as fe, ffb_rbr as r
+from oversteer import ffb_engine as fe, ffb_forza as fz, ffb_rbr as r
 from oversteer.telemetry_formats import Sample
 from tests.test_ffb_engine import FakeDriver, forces, levels, upload, wheel  # noqa: F401 (the autouse fixture)
 from tests.test_ffb_engine import _clean_log  # noqa: F401
@@ -1101,3 +1101,130 @@ def test_the_cut_setting_reaches_the_rack_and_the_snapshot(tmp_path):
     engine.set_rbr_cut(120)
     engine.step(0.02)
     assert engine.rbr_rack.cut_hz is None and engine.settings_snapshot()['profile']['rbr_cut_hz'] is None
+
+
+# -- the caster floor: in a slide the column torque never falls below what mechanical caster alone gives --
+
+def slide_sample(ay=6.0, vx=15.0, vy=4.0, yaw=0.0, t=0.0, car=CAR):
+    s = rbr_sample(car=car, speed=math.hypot(vx, vy), ay=ay)
+    s.vel, s.yaw_rate, s.game_time, s.drivetrain = (vx, vy, 0.0), yaw, t, 'awd'
+    return s
+
+
+def run_floor(rack, level, seconds=1.0, hz=236.0, start=0.0, **kw):
+    """Feed the rack a level and a slide sample for `seconds`; the rows are (t, column, lift, rim torque)."""
+    rows, t = [], start
+    while t < start + seconds:
+        rack.set_level(t, level, 100.0)
+        sample = slide_sample(t=t, **kw)
+        rack.feed(t, sample, None)
+        rows.append((t, rack.column, rack.floor_lift, rack.rim_torque(sample)))
+        t += 1.0 / hz
+    return rows
+
+
+def floor_nm(rack, ay=6.0):
+    fy = fz.front_lateral(rack.FLOOR_MASS, fz.front_share('awd'), ay, 0.0)
+    return fe.ffb_carprops.RALLY_TRAIL * min(abs(fy), fz.front_share(None) * rack.FLOOR_MASS * rack.FLOOR_AY) / rack.ratio
+
+
+def test_grip_leaves_the_column_torque_exactly():
+    rack = fe.RbrRack()
+    rows = run_floor(rack, level_for(0.5), vy=0.2)       # body slip 0.013 rad: grip
+    assert all(row[2] == 0.0 for row in rows) and rack.floor_lift == 0.0
+    plain = fe.RbrRack()
+    plain.floor_level = 0.0
+    assert [row[3] for row in rows] == [row[3] for row in run_floor(plain, level_for(0.5), vy=0.2)]
+
+
+def test_a_slide_with_a_low_column_torque_is_lifted_to_the_floor_against_fy():
+    rack = fe.RbrRack()
+    rows = run_floor(rack, level_for(0.02), seconds=1.5)         # NGP is almost silent
+    floor = floor_nm(rack)
+    assert floor > 1.0 and abs(rack.column) < 0.2 * floor
+    assert rack.floor_sign == -1.0 and rack.floor_lift == pytest.approx(-floor + rack.column, abs=0.05 * floor)   # (ay > 0: Fy_f left, floor right)
+    assert rack.column + rack.floor_lift == pytest.approx(-floor, rel=0.05)
+    assert rack.rim_torque(slide_sample()) != fe.RbrRack().rim_torque(slide_sample())
+    rack2 = fe.RbrRack()
+    run_floor(rack2, level_for(0.02), seconds=1.5, ay=-6.0)
+    assert rack2.floor_sign == 1.0 and rack2.floor_lift > 0.0
+
+
+def test_a_zero_level_setting_gives_no_lift():
+    rack = fe.RbrRack()
+    rack.floor_level = 0.0
+    rows = run_floor(rack, level_for(0.02))
+    assert all(row[2] == 0.0 for row in rows)
+
+
+def test_a_column_torque_above_the_floor_gets_no_lift():
+    rack = fe.RbrRack()
+    rows = run_floor(rack, level_for(0.95), seconds=1.5)         # the strong force on the floor's side
+    assert abs(rack.column) > floor_nm(rack) and rack.column * rack.floor_sign > 0.0
+    assert all(abs(row[2]) < 1e-6 for row in rows)
+
+
+def test_the_floor_ramps_with_body_slip_and_speed():
+    rack = fe.RbrRack()
+    run_floor(rack, level_for(0.02), seconds=1.0, vx=15.0, vy=15.0 * math.tan(0.10))
+    half = abs(rack.column + rack.floor_lift)
+    run_floor(rack, level_for(0.02), seconds=1.0, start=1.0)
+    full = abs(rack.column + rack.floor_lift)
+    assert 0.0 < half < full
+    slow = fe.RbrRack()
+    run_floor(slow, level_for(0.02), seconds=1.0, vx=3.0, vy=1.0)
+    assert slow.floor_lift == 0.0
+
+
+def test_the_lift_does_not_step_across_a_sign_change():
+    rack = fe.RbrRack()
+    run_floor(rack, level_for(0.02), seconds=1.0)
+    out, t = [], 1.0
+    while t < 2.0:                       # the lateral acceleration swings from +6 to -6 m/s^2 over half a second
+        rows = run_floor(rack, level_for(0.02), seconds=1.0 / 236.0, start=t, ay=max(6.0 - 24.0 * (t - 1.0), -6.0))
+        out.append(rows[0][1] + rows[0][2])
+        t += 1.0 / 236.0
+    assert max(abs(b - a) for a, b in zip(out, out[1:])) < 1.0
+    assert out[0] < 0.0 < out[-1]
+
+
+def test_missing_or_bad_fields_give_no_lift_and_do_not_fail():
+    rack = fe.RbrRack()
+    run_floor(rack, level_for(0.02), seconds=1.0)
+    assert rack.floor_lift != 0.0
+    t = 1.0
+    for field, value in (('accel', None), ('vel', None), ('yaw_rate', None), ('speed', float('nan'))):
+        sample = slide_sample(t=t)
+        setattr(sample, field, value)
+        rack.set_level(t, level_for(0.02), 100.0)
+        rack.feed(t, sample, None)
+        assert math.isfinite(rack.rim_torque(sample))
+        t += 0.004
+    rack.feed(t, None, None)
+    for _i in range(200):
+        t += 0.004
+        rack.set_level(t, level_for(0.02), 100.0)
+        rack.feed(t, rbr_sample(), None)
+    assert abs(rack.floor_lift) < 1e-6
+
+
+def test_the_floor_state_resets_and_no_level_is_no_lift():
+    rack = fe.RbrRack()
+    run_floor(rack, level_for(0.02))
+    assert rack.floor_lift != 0.0
+    rack.set_level(2.0, None, 100.0)
+    assert rack.floor_lift == 0.0 and rack.rim_torque(slide_sample()) is None
+    run_floor(rack, level_for(0.02), start=3.0)
+    rack.restart_sign()
+    assert rack.floor_lift == 0.0 and rack.floor_sign is None and rack._slow is None
+    run_floor(rack, level_for(0.02), start=5.0)
+    rack.reset(CAR)
+    assert rack.floor_lift == 0.0 and rack.floor_sign is None and rack.column is None
+
+
+def test_the_caster_setting_reaches_the_rack_and_the_snapshot(tmp_path):
+    engine, path = engine_on(tmp_path)
+    assert engine.rbr_rack.floor_level == 1.0
+    engine.set_caster_floor(40)
+    engine.step(0.01)
+    assert engine.rbr_rack.floor_level == pytest.approx(0.4) and engine.settings_snapshot()['profile']['caster_floor'] == 40.0
