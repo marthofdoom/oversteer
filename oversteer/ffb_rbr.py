@@ -76,17 +76,18 @@ no longer comes from `force()`/`shape()` (kept for the replay scripts), the 'no-
   the ceiling anyway.
 - 'no-gain': the gain above.
 
-- 'strength': the game's own force has not yet reached STRENGTH_PROVEN of
-  full scale.
+There is no 'strength' refusal any more: ours plays from the start with STRENGTH 1 assumed (lighter), never past the
+game's own peak (`ceiling`), and the applied STRENGTH glides (STRENGTH_SLEW per second) to what the evidence shows:
+a clipped top (`_plateau`: the game's top level repeated for seconds) or the fit below. A new stream keeps both.
 
 STRENGTH. The full scale C is 32767 times the game's STRENGTH (0..1), which lives in the profile, a binary file
 that is not readable (the 2026-11-03 drive had 0.2: no level past 6554). `StrengthFit` finds it from the drive: x =
 |level| / (32767 s), u(s) = -ln(1 - x) must be linear in the column torque Newton gives (the front's lateral force
 Fy = m (b/L) a_y + I_z rdot / L through a trail prior over the ratio N), on moderate-a_y samples; the s with the best
 correlation r wins (only s above the game's own peak are possible). Until it has converged s is 1: x is smaller, the force
-lighter. With s unknown the 'strength' state below still holds the take-over back until the game's peak is
-STRENGTH_PROVEN of C; with s fitted C = 32767 s, so a 20 % game reaches its own full scale and plays.
+lighter. With s fitted (or a clipped top found) C = 32767 s, applied by gliding.
 """
+import json
 import logging
 import math
 import os
@@ -112,6 +113,10 @@ GRID_EVENTS = 500                        # changed levels the grid share is weig
 TAU_SAT, TAU_GAIN = 5.0, 10.0              # s
 MAX_DT = 0.05                            # s: one upload never counts for more than this (a pause)
 STRENGTH_PROVEN = 0.85                   # the game's own peak, share of full scale, that shows its STRENGTH is near 1
+STRENGTH_SLEW = 0.2                      # 1/s: the applied strength moves this share of its way to the fitted one per second
+PLATEAU_BAND = 8.0                       # ext_force units under the game's top that count as at the top (a clipped force
+                                         # repeats its top level; the grid's steps there are 3.3 apart at most)
+PLATEAU_UPLOADS, PLATEAU_SECONDS = 100, 4    # uploads at the top, in this many different seconds: the top is a clip
 PEAK_MARGIN = 1.0                        # ours never past the game's own peak times this
 FIT_STEPS = tuple(round(0.1 + 0.01 * i, 2) for i in range(91))     # candidate strengths 0.10 .. 1.00
 FIT_HZ = 20.0                            # the fit takes telemetry at this rate
@@ -123,6 +128,8 @@ FIT_SWITCH = 0.015                       # r a new s must beat the held one by
 FIT_SMOOTH = 0.1                         # s: the one-pole filter on Fy and the level
 CAR_M, CAR_L, CAR_B, CAR_IZ, CAR_N = 1390.0, 2.53, 1.24, 1751.0, 14.3   # a WRC (Fiesta/C3/Yaris/i20): the scale k is free
 TRAIL_PRIOR = 0.040                      # m
+STRENGTH_FILE = 'rbr_strength.json'      # the confirmed STRENGTH, kept between sessions (the game's, not the car's)
+STRENGTH_PATH = None                     # None: the data folder's file (tests point it elsewhere)
 INI_RETRY = 30.0                         # s between looks for RichardBurnsRally.ini while none was found
 INI_CHECK = 5.0                          # s between looks at its mtime
 
@@ -214,6 +221,35 @@ def ngp_percents(root):
         if value is not None:
             out[surface] = value
     return out or None
+
+
+def _strength_path():
+    if STRENGTH_PATH:
+        return STRENGTH_PATH
+    from . import diagnostics
+    return os.path.join(diagnostics.data_home(), 'oversteer', STRENGTH_FILE)
+
+
+def kept_strength():
+    """The STRENGTH confirmed in an earlier session (0.10 .. 1.00), None when none is kept or the file is unreadable."""
+    try:
+        with open(_strength_path()) as f:
+            value = float(json.load(f)['strength'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return value if math.isfinite(value) and FIT_STEPS[0] <= value <= 1.0 else None
+
+
+def keep_strength(value):
+    try:
+        path = _strength_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump({'strength': round(float(value), 3)}, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        logging.warning("Countersteer FFB: RBR: the game's STRENGTH could not be kept: %s", e)
 
 
 class _Share:
@@ -354,8 +390,19 @@ class RbrForce:
         """Everything learnt: a new stream (the device set again). A car key narrowing keeps all but S (set_car)."""
         self.car = car
         self.fit = StrengthFit()
-        self.full = float(FULL)          # C: the game's full-scale level (STRENGTH 1.0 until the fit has it)
+        self.s_kept = kept_strength()    # confirmed in an earlier session: the start, re-confirmed by the evidence
+        self.s_applied = self.s_kept or 1.0      # C / FULL, glided toward the target (feed_physics)
+        self.full = FULL * self.s_applied        # C: the game's full-scale level in use (STRENGTH 1.0 until the evidence has it)
+        if self.s_kept is not None:
+            logging.info("Countersteer FFB: RBR: game STRENGTH %.2f (kept from the last session)", self.s_kept)
+        self.s_plateau = None            # the STRENGTH a clipped top shows (kept through new streams)
+        self._phys_t = None
+        self._glide_log = None
         self.peak = 0.0                  # the game's own highest |level| since the stream started
+        self.peak_kept = 0.0             # ... and since the reset (kept through new streams, as the fit's moments)
+        self._top = 0.0                  # the level the plateau is counted at, its uploads and the seconds they fell in
+        self._top_n = 0
+        self._top_secs = set()
         self._clear_s()
         self._last_level = None
         self._last_t = None
@@ -376,7 +423,8 @@ class RbrForce:
         if self.peak:
             logging.info("Countersteer FFB: RBR: %s: the game's own peak is measured again", why)
         self.peak = 0.0
-        self.fit.peak = 0.0              # (its moments stay: a stage restart is mostly the same STRENGTH)
+        self._top, self._top_n, self._top_secs = 0.0, 0, set()
+        self.fit.peak = 0.0              # (the fit's moments and a plateau found stay: a restart keeps the STRENGTH)
 
     def _clear_s(self):
         self.base_s = None               # the car's ForceFeedbackSensitivity_NGP (None: not in the car table)
@@ -389,7 +437,8 @@ class RbrForce:
     def ceiling(self):
         """A: the game's full scale, the driver's cap and the game's own peak, whichever is lowest: ours is never
         stronger than anything the game itself sent (a STRENGTH under 1, not readable, cannot make it so)."""
-        return min(self.full, self.cap or self.full, max(self.peak * PEAK_MARGIN, 1.0))
+        known = self.peak_kept if (self.s_plateau is not None or self.fit.converged) else 0.0      # (a restart keeps what was learnt)
+        return min(self.full, self.cap or self.full, max(self.peak * PEAK_MARGIN, known, 1.0))
 
     def set_linearity(self, value):
         self.linearity = min(max(int(value), 0), 100)
@@ -469,16 +518,62 @@ class RbrForce:
         """The game's STRENGTH in use: fitted, else 1 (conservative: x smaller, the force lighter)."""
         return self.full / FULL
 
+    def target_s(self):
+        """The STRENGTH the evidence shows: a clipped top, else the fit once it left 1, else the conservative prior 1."""
+        if self.s_plateau is not None:
+            return self.s_plateau
+        if self.fit.converged and (self.fit.s != 1.0 or self.s_kept is None):
+            return self.fit.s
+        return self.s_kept or 1.0
+
     def feed_physics(self, t, sample, level):
-        """A telemetry sample with the raw level now: the strength fit (StrengthFit)."""
+        """A telemetry sample with the raw level now: the strength fit (StrengthFit), and the applied strength gliding
+        toward what the evidence shows (never a step: STRENGTH_SLEW of the way per second)."""
         accel = getattr(sample, 'accel', None)
         ay = accel[1] if accel is not None and len(accel) > 1 else None
-        if not self.fit.feed(t, ay, getattr(sample, 'yaw_rate', None), getattr(sample, 'speed', None), level):
-            return
-        full = max(FULL * self.fit.s, self.peak)
-        if full != self.full:
+        moved = self.fit.feed(t, ay, getattr(sample, 'yaw_rate', None), getattr(sample, 'speed', None), level)
+        if self.s_kept is not None and self.s_plateau is None and self.peak > self.s_kept * FULL * 1.05:
+            # a level the kept STRENGTH cannot produce: it was raised in the menus. Back to the conservative prior at
+            # once (a lighter force: the safe direction for a step), until a clipped top shows the new one
+            logging.info("Countersteer FFB: RBR %s: a level of %d is over the kept STRENGTH %.2f: back to 1 until it "
+                         "is seen again", self.car, self.peak, self.s_kept)
+            self.s_kept = None
+            self.s_applied = 1.0
+        target = self.target_s()
+        if (self.s_plateau is not None or (self.fit.converged and self.fit.s != 1.0)) and (
+                self.s_kept is None or abs(target - self.s_kept) > 0.005):
+            self.s_kept = target
+            keep_strength(target)
+        dt = 0.0 if self._phys_t is None else min(max(t - self._phys_t, 0.0), 0.25)
+        self._phys_t = t
+        before = self.s_applied
+        self.s_applied += (1.0 - math.exp(-STRENGTH_SLEW * dt)) * (target - self.s_applied)
+        full = max(FULL * self.s_applied, self.peak, abs(level or 0))
+        if moved:
             logging.info("Countersteer FFB: RBR %s: game STRENGTH %s", self.car, self.fit.describe())
+        if abs(self.s_applied - target) > 0.02:
+            if self._glide_log is None or t - self._glide_log >= 30.0:
+                self._glide_log = t
+                logging.info("Countersteer FFB: RBR %s: game STRENGTH applied %.2f, evidence %.2f (%s)", self.car,
+                             self.s_applied, target, 'a clipped top' if self.s_plateau is not None else self.fit.source)
+        else:
+            self._glide_log = None
         self.full = full
+
+    def _plateau(self, t, a):
+        """Count the uploads at the game's top: a force that clips repeats its top level, and that level is C (a game at
+        STRENGTH 1 whose top is far under full scale does not sit on it for seconds on end)."""
+        if a > self._top + PLATEAU_BAND:
+            self._top, self._top_n, self._top_secs = a, 0, set()
+        if a >= self._top - PLATEAU_BAND:
+            self._top = max(self._top, a)
+            self._top_n += 1
+            self._top_secs.add(int(t))
+            if (self.s_plateau is None and self._top_n >= PLATEAU_UPLOADS and len(self._top_secs) >= PLATEAU_SECONDS
+                    and self._top < 0.9 * FULL):
+                self.s_plateau = min(max(round(self._top / FULL, 2), FIT_STEPS[0]), 1.0)
+                logging.info("Countersteer FFB: RBR %s: game STRENGTH %.2f: its force clips at %.0f", self.car,
+                             self.s_plateau, self._top)
 
     def _x(self, level):
         return min(abs(level) / self.full, 1.0)
@@ -490,7 +585,9 @@ class RbrForce:
         if abs(level) > self.full:
             self.full = float(abs(level))     # the game's STRENGTH is above the assumed: follow it
         if on_grid(level):
-            self.peak = max(abs(level), self.peak)    # only the game's own: another program's level is not its top
+            self.peak = max(abs(level), self.peak)
+            self.peak_kept = max(self.peak_kept, self.peak)    # only the game's own: another program's level is not its top
+            self._plateau(t, abs(level))
         x = self._x(level)
         if level != self._last_level:
             if level:
@@ -522,12 +619,6 @@ class RbrForce:
             return
         if grid < (GRID_HOLD if holding else GRID_GO):
             self._set('grid')
-            return
-        if self.force_time < MIN_FORCE_TIME:
-            self._set(None, 'corners')
-            return
-        if self.peak < STRENGTH_PROVEN * self.full:
-            self._set('strength')        # the game's top not seen yet: its STRENGTH may be under 1 (docstring)
             return
         self._set(None, None)
 

@@ -78,3 +78,10 @@ def _rally_power_class():
 def street():
     """The street class (top end 3.7 Nm): for the tests whose numbers are the commuter car's."""
     ffb_carprops.set_power_class('street')
+
+
+@pytest.fixture(autouse=True)
+def _own_rbr_strength(tmp_path, monkeypatch):
+    """The RBR STRENGTH kept between sessions is a file of the test's own, never the user's."""
+    from oversteer import ffb_rbr
+    monkeypatch.setattr(ffb_rbr, 'STRENGTH_PATH', str(tmp_path / 'rbr_strength.json'))
