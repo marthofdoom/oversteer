@@ -53,7 +53,7 @@ def test_a_result_without_the_figures_gives_none(bad):
 
 def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_own():
     d, f = fd.column_targets(0.4, 3.5, (470, 670, 500, 1250, 5000))
-    assert d == round(0.17 * math.pi / 180 * 0.4 / 3.5 * 1e6) and f == round(0.75 * 0.4 / 3.5 * 1e4)
+    assert d == round(0.17 * math.pi / 180 * 0.4 / 3.5 * 1e6) and f == round(0.75 * 0.4 * fd.COLUMN_FRICTION_GAIN / 3.5 * 1e4)
     # a light scale: friction held at the wheel's own unless removal is asked for; damping is the car's (the driver
     # renders target - own and limits what it removes)
     d, f = fd.column_targets(0.1, 3.5, (470, 670, 500, 1250, 5000))
