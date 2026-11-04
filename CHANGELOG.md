@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Countersteer FFB
+- Gear guard: new-lg4ff's gear-crossing stage (`ffb_gear_cross`) in place of the guard in the engine: it runs on the driver's final
+  force, friction, damping and aligning spring included. Written while our force fully plays on a gear drive, off at hand-back, on
+  every way out and from the GUI if the engine process dies; a driver without it means no guard and one log line. "Gear guard level"
+  is the crossing's speed (1 % steps, 61 % the default, 100 % about 2 FS/s), "Gear flip point" how far the force must reverse first
+  (3-30 %, 15 % by default).
+- The estimated delay of a big force reversal shows beside the sliders that move it, red over 50 ms (a warning only), with a "50 ms"
+  mark on the gear guard level, and in the take-over log line (`oversteer/ffb_delay.py`).
+- Column damping now adds to the wheel's own damping (`countersteer_column_added`, 15 % by default); before, as a total, 5-15 % took
+  damping out. The old key `countersteer_column_damping` is ignored and dropped at the next save: such a profile starts at 15 %.
+
 ## 0.17.0 — 2026-10-26
 
 ### Richard Burns Rally: the same features as Assetto Corsa Rally

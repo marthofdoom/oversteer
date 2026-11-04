@@ -97,3 +97,7 @@ window#overlay-window .overlay-leds levelbar:nth-child(5) block.filled {
 .telemetry-split-ahead { color: #29cc54; }
 .telemetry-split-behind { color: #cc7870; }
 .telemetry-split-lose { color: #cc3729; }
+
+label.error {
+    color: #d32f2f;
+}

@@ -140,7 +140,7 @@ class FakeController:
     apply_countersteer_forza_model = Gui.apply_countersteer_forza_model
     apply_countersteer_knee = Gui.apply_countersteer_knee
     apply_countersteer_rbr_cut = Gui.apply_countersteer_rbr_cut
-    apply_countersteer_column_damping = Gui.apply_countersteer_column_damping
+    apply_countersteer_column_added = Gui.apply_countersteer_column_added
     apply_countersteer_rim_mm = Gui.apply_countersteer_rim_mm
     apply_countersteer_car_wheel_mm = Gui.apply_countersteer_car_wheel_mm
     apply_countersteer_power_class = Gui.apply_countersteer_power_class
@@ -153,6 +153,7 @@ class FakeController:
     countersteer_view = Gui.countersteer_view
     countersteer_info = Gui.countersteer_info
     countersteer_details = Gui.countersteer_details
+    countersteer_delay = Gui.countersteer_delay
     sensitivity_warning = Gui.sensitivity_warning
     _countersteer_wanted = Gui._countersteer_wanted
 

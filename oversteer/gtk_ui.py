@@ -1230,9 +1230,9 @@ class GtkUi:
                                  "50 % by default. Saved with the profile.")
     COUNTERSTEER_RBR_CUT_TOOLTIP = ("RBR's own force is used below this frequency; faster vibration comes from the Texture "
                                     "settings instead.")
-    COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, as a share of a real steering column's. Lower "
+    COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, added to what the wheel already has. Lower "
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
-                                    "after a slide. 100 % is the physically correct value (the real column's, in the force your hands feel) and the default.")
+                                    "after a slide. 0 % is the wheel as it is; 100 % adds a real column's damping on top.")
     COUNTERSTEER_RIM_TOOLTIP = ("Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
                                  "acts on the steering through the scrub radius; the game's own force has it. On: "
@@ -1246,8 +1246,13 @@ class GtkUi:
     COUNTERSTEER_KICK_LEVEL_TOOLTIP = ("How strong the kickback's tug is, 0 to 100 % of its amplitude. 100 % is the "
                                        "physically correct value and the default. Saved with the profile.")
     COUNTERSTEER_GEAR_GUARD_TOOLTIP = ("Keeps the gears loaded on one side so small force reversals don't rattle the backlash. "
-                                       "Fast detail stays, but can't flip the force's direction.")
-    COUNTERSTEER_GEAR_GUARD_LEVEL_TOOLTIP = ("How much preload the guard holds, 0 to 100 % of its default. 100 % is the default.")
+                                       "Fast detail stays; a real change of direction passes the gears slowly and then catches up.")
+    COUNTERSTEER_GEAR_GUARD_LEVEL_TOOLTIP = ("How gently a real change of direction crosses the gears. Stronger is quieter but "
+                                             "later: the figure beside it is the estimated delay of a big force reversal from "
+                                             "the game to the wheel, red over 50 ms (a warning only), and the mark is where it "
+                                             "reaches 50 ms. 61 % is the default; 0 is off.")
+    COUNTERSTEER_GEAR_FLIP_TOOLTIP = ("How far the force must reverse before the gears are moved to the other side. Higher is "
+                                      "quieter, but small direction changes arrive later.")
     COUNTERSTEER_GAME_TOOLTIP = ("Settings that only matter in one game. Each is named for its game and does nothing "
                                  "in the others.")
     COUNTERSTEER_TEXTURE_TOOLTIP = ("Small vibrations Countersteer adds on top of its steering force while it plays "
@@ -1341,8 +1346,11 @@ class GtkUi:
         cut.set_size_request(160, -1)
         cut.connect('value-changed', lambda w: self.controller.model.set_countersteer_rbr_cut(int(w.get_value())))
         self.countersteer_rbr_cut = cut
+        cut.connect('value-changed', lambda w: self._show_countersteer_delay())
+        self.countersteer_cut_delay = self._delay_label()
         self._dependent_rows.append(self._setting_row(
-            _("RBR force cut"), None, _(self.COUNTERSTEER_RBR_CUT_TOOLTIP), (self._response_row(cut, percent=False),)))
+            _("RBR force cut"), None, _(self.COUNTERSTEER_RBR_CUT_TOOLTIP),
+            (self._response_row(cut, percent=False), self.countersteer_cut_delay)))
         steering.add(self._dependent_rows[-1])
         rim = Gtk.SpinButton.new_with_range(*wheel_torque.RIM_RANGE, 1)
         rim.set_value(wheel_torque.DEFAULT_RIM_MM)
@@ -1361,8 +1369,8 @@ class GtkUi:
         steering.add(self._dependent_rows[-1])
         damping = self._response_scale(0, 100, 5)
         damping.set_size_request(160, -1)
-        damping.connect('value-changed', lambda w: self.controller.model.set_countersteer_column_damping(int(w.get_value())))
-        self.countersteer_column_damping = damping
+        damping.connect('value-changed', lambda w: self.controller.model.set_countersteer_column_added(int(w.get_value())))
+        self.countersteer_column_added = damping
         self._dependent_rows.append(self._setting_row(
             _("Column damping"), None, _(self.COUNTERSTEER_DAMPING_TOOLTIP), (self._response_row(damping),)))
         steering.add(self._dependent_rows[-1])
@@ -1392,12 +1400,26 @@ class GtkUi:
             _("Gear guard"), _(self.COUNTERSTEER_GEAR_GUARD_TOOLTIP), lambda state: self.controller.model.set_countersteer_gear_guard(state))
         self._dependent_rows.append(row)
         steering.add(row)
-        guard = self._response_scale(0, 100, 5)
+        guard = self._response_scale(0, 100, 1)
         guard.set_size_request(160, -1)
         guard.connect('value-changed', lambda w: self.controller.model.set_countersteer_gear_guard_level(int(w.get_value())))
         self.countersteer_gear_guard_level = guard
+        guard.connect('value-changed', lambda w: self._show_countersteer_delay())
+        self.countersteer_gear_delay = self._delay_label()
+        self._gear_mark = None
         self._dependent_rows.append(self._setting_row(
-            _("Gear guard level"), None, _(self.COUNTERSTEER_GEAR_GUARD_LEVEL_TOOLTIP), (self._response_row(guard),)))
+            _("Gear guard level"), None, _(self.COUNTERSTEER_GEAR_GUARD_LEVEL_TOOLTIP),
+            (self._response_row(guard), self.countersteer_gear_delay)))
+        steering.add(self._dependent_rows[-1])
+        flip = self._response_scale(3, 30, 1)
+        flip.set_size_request(160, -1)
+        flip.connect('value-changed', lambda w: self.controller.model.set_countersteer_gear_flip(int(w.get_value())))
+        self.countersteer_gear_flip = flip
+        flip.connect('value-changed', lambda w: self._show_countersteer_delay())
+        self.countersteer_flip_delay = self._delay_label()
+        self._dependent_rows.append(self._setting_row(
+            _("Gear flip point"), None, _(self.COUNTERSTEER_GEAR_FLIP_TOOLTIP),
+            (self._response_row(flip), self.countersteer_flip_delay)))
         steering.add(self._dependent_rows[-1])
         self.countersteer_toggles = {}
         for key, title, tooltip in (
@@ -1505,12 +1527,12 @@ class GtkUi:
         if int(self.countersteer_car_wheel_mm.get_value()) != int(value):
             self.countersteer_car_wheel_mm.set_value(int(value))
 
-    def set_countersteer_column_damping(self, value):
+    def set_countersteer_column_added(self, value):
         """The column damping share, 0..100 (None where the driver has no replace mode)."""
-        if not hasattr(self, 'countersteer_column_damping') or value is None:
+        if not hasattr(self, 'countersteer_column_added') or value is None:
             return
-        if int(self.countersteer_column_damping.get_value()) != int(value):
-            self.countersteer_column_damping.set_value(int(value))
+        if int(self.countersteer_column_added.get_value()) != int(value):
+            self.countersteer_column_added.set_value(int(value))
 
     def set_countersteer_drive_pull(self, value, level):
         """The drive pull switch and its level, 0..100 (None where the driver has no replace mode)."""
@@ -1538,6 +1560,13 @@ class GtkUi:
             self.countersteer_gear_guard.set_active(bool(value))
         if level is not None and int(self.countersteer_gear_guard_level.get_value()) != int(level):
             self.countersteer_gear_guard_level.set_value(int(level))
+
+    def set_countersteer_gear_flip(self, value):
+        """The gear flip point, % of full scale (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_gear_flip') or value is None:
+            return
+        if int(self.countersteer_gear_flip.get_value()) != int(value):
+            self.countersteer_gear_flip.set_value(int(value))
 
     def set_countersteer_texture(self, level, parts):
         """The texture's level (0..100, None where the driver has no replace mode) and parts."""
@@ -1572,6 +1601,32 @@ class GtkUi:
                 switch.set_active(bool(value))
         self._show_countersteer_texture(bool(value))
 
+    @staticmethod
+    def _delay_label():
+        """The "about N ms total" beside a slider that moves the estimated delay; the width keeps the track from jumping."""
+        return Gtk.Label(label="", width_chars=17, xalign=0)
+
+    def _show_countersteer_delay(self):
+        """The estimated delay beside its sliders, red over the soft limit, and the gear guard level's "50 ms" mark. A warning
+        only: nothing here touches a value."""
+        if not hasattr(self, 'countersteer_gear_delay') or self.controller is None or getattr(self.controller, 'model', None) is None:
+            return
+        delay = self.controller.countersteer_delay()
+        for label, shown in ((self.countersteer_gear_delay, delay['gear']), (self.countersteer_flip_delay, delay['gear']),
+                             (self.countersteer_cut_delay, delay['rbr_cut'])):
+            if label.get_text() != shown['text']:
+                label.set_text(shown['text'])
+            context = label.get_style_context()
+            (context.add_class if shown['over'] else context.remove_class)('error')
+        mark = delay['gear']['mark']
+        mark = None if mark is None else round(mark, 1)
+        if mark != self._gear_mark:
+            self._gear_mark = mark
+            scale = self.countersteer_gear_guard_level
+            scale.clear_marks()
+            if mark is not None:
+                scale.add_mark(mark, Gtk.PositionType.BOTTOM, _("50 ms"))
+
     def _start_countersteer_poll(self, *args):
         if not self._countersteer_polling:
             self._countersteer_polling = True
@@ -1586,6 +1641,7 @@ class GtkUi:
             for key, text in self.controller.countersteer_details().items():
                 if self.countersteer_lines[key].get_text() != text:
                     self.countersteer_lines[key].set_text(text)
+        self._show_countersteer_delay()
         warning = self.controller.sensitivity_warning()
         if self.sensitivity_note.get_text() != warning:
             self.sensitivity_note.set_text(warning)

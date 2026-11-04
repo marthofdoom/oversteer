@@ -5,6 +5,7 @@ import hashlib
 import http.client
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -496,3 +497,21 @@ def test_qr_codes():
 
 
 QR_A = '6c3c5b03468dadc8da9fef25d26839cbaf067b1a2821f305f430ded1e5a866e9'
+
+
+def test_the_delay_estimate_and_the_50_ms_mark_reach_the_page(tmp_path):
+    rig = Rig(tmp_path, FakeDevice(ext_force_support=True))
+    try:
+        rig.model.data['countersteer_ffb'] = True
+        rig.controller.ffb_engine.status = SimpleNamespace(device=None, available=False, last_stop=None, game='rbr', rate=300.0)
+        settings = rig.state()['settings']
+        level, flip, cut = (settings[k] for k in ('countersteer_gear_guard_level', 'countersteer_gear_flip', 'countersteer_rbr_cut'))
+        assert level['note'].endswith(' ms total') and level['note_bad'] is False and flip['note'] == level['note']
+        assert level['value'] == 61 and flip['value'] == 15 and (flip['min'], flip['max']) == (3, 30) and level['step'] == 1
+        assert level['mark_label'] == '50 ms' and 75 < level['mark'] < 90 and 'mark' not in flip and 'mark' not in cut
+        assert cut['note'].endswith(' ms total')
+        rig.model.data['countersteer_gear_guard_level'] = 100
+        state = rig.state()['settings']['countersteer_gear_guard_level']
+        assert state['note_bad'] is True and state['value'] == 100       # a warning: the value stays
+    finally:
+        rig.stop()

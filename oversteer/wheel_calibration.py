@@ -50,8 +50,8 @@ OPTIONAL_ATTRS = ('ffb_output_cap',)
 # The driver's virtual steering dynamics (new-lg4ff ffb_dyn_*, ffb_align), where it has them: they play in replace mode,
 # so the run writes them off (0 / "0 0 0") and puts back what they were. ffb_align reads a 4th field (k_limit) that
 # is not written back.
-DYN_ATTRS = ('ffb_dyn_damping', 'ffb_dyn_friction', 'ffb_align')
-DYN_OFF = {'ffb_dyn_damping': '0', 'ffb_dyn_friction': '0', 'ffb_align': '0 0 0'}
+DYN_ATTRS = ('ffb_dyn_damping', 'ffb_dyn_friction', 'ffb_align', 'ffb_gear_cross')
+DYN_OFF = {'ffb_dyn_damping': '0', 'ffb_dyn_friction': '0', 'ffb_align': '0 0 0', 'ffb_gear_cross': '0 0 0 0 0'}
 # What a crash record puts back first even while Countersteer FFB plays (the engine needs the cap, gain and range
 # back; the forces and the correction wait until the wheel is free)
 PARTIAL_RESTORE = ('ext_force_cap', 'ffb_output_cap', 'gain', 'range', 'autocenter')

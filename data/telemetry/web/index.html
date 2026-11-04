@@ -387,6 +387,10 @@ tr.adv td { height: auto; padding: 6px 4px 10px; white-space: normal; text-align
 .row-h .val { font: 600 15px var(--mono); white-space: nowrap; }
 .row .hint { color: var(--dim); font-size: 12.5px; margin-top: 2px; line-height: 1.35; }
 .row .hint.warn { color: var(--warn); }
+.row .delay { font-size: 12.5px; color: var(--dim, inherit); margin-top: 2px; }
+.row .delay.bad { color: var(--bad); }
+.row .mark { position: relative; height: 16px; font-size: 11px; color: var(--dim, inherit); }
+.row .mark span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .row input[type="range"] { display: block; width: 100%; height: 40px; margin: 2px 0 0; padding: 0; background: transparent; accent-color: var(--accent); touch-action: pan-y; }
 .row input[type="range"]:disabled { opacity: .5; }
 .row.dis .name, .row.dis .val { color: var(--dim); }
@@ -2480,7 +2484,12 @@ function mkSlider(name, fmt, hint, send) {
   const input = document.createElement("input");
   input.type = "range";
   input.setAttribute("aria-label", name);
-  root.append(head, input);
+  const mark = el("div", null, "mark"), markAt = el("span", "");
+  mark.appendChild(markAt);
+  mark.hidden = true;
+  const delay = el("div", null, "delay num");
+  delay.hidden = true;
+  root.append(head, input, mark, delay);
   if (hint) root.appendChild(el("div", hint, "hint"));
   const warn = el("div", null, "hint warn");
   warn.hidden = true;
@@ -2499,6 +2508,14 @@ function mkSlider(name, fmt, hint, send) {
     root.classList.toggle("dis", input.disabled);
     warn.hidden = !spec.warning;
     warn.textContent = spec.warning || "";
+    delay.hidden = !spec.note;
+    delay.textContent = spec.note || "";
+    delay.classList.toggle("bad", !!spec.note_bad);
+    mark.hidden = spec.mark == null;
+    if (spec.mark != null) {
+      markAt.textContent = "▲ " + (spec.mark_label || "");
+      markAt.style.left = (100 * (spec.mark - spec.min) / (spec.max - spec.min)) + "%";
+    }
     if (!busy(row)) { input.value = spec.value; val.textContent = fmt(spec.value, spec); }
   };
   return row;
@@ -2807,13 +2824,14 @@ function buildCs() {
   const mm = (v) => v + " mm", rimTip = "Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.";
   steer.appendChild(reg(S("Your wheel's rim diameter", mm, rimTip, "countersteer_rim_mm")));
   steer.appendChild(reg(S("Car's steering wheel diameter", mm, rimTip, "countersteer_car_wheel_mm")));
-  steer.appendChild(reg(S("Column damping", percent, "Resistance to turning the wheel quickly, as a share of a real steering column's. Lower feels freer on fast corrections; higher settles the wheel better when you let go after a slide. 100 % is the physically correct value (the real column's, in the force your hands feel) and the default.", "countersteer_column_damping")));
+  steer.appendChild(reg(S("Column damping", percent, "Resistance to turning the wheel quickly, added to what the wheel already has. Lower feels freer on fast corrections; higher settles the wheel better when you let go after a slide. 0 % is the wheel as it is; 100 % adds a real column's damping on top.", "countersteer_column_added")));
   steer.appendChild(reg(T("Drive pull", "The drive's left/right split (the front wheels pulling unevenly under power or braking) acts on the steering through the scrub radius; the game's own force has it. On: Countersteer plays that pull, unfiltered, at the level below. On by default.", "countersteer_drive_pull")));
   steer.appendChild(reg(S("Drive pull level", percent, "How much of the physical scrub radius the drive pull is played at. 0 to 100 %. 100 % is the physically correct value and the default.", "countersteer_drive_pull_level")));
   steer.appendChild(reg(T("Kickback", "A short tug at the moment a kerb, a lifted inside wheel or a dirt edge hits one front wheel, in the direction the new drag pulls, easing back to nothing and never past it. On by default.", "countersteer_kick")));
   steer.appendChild(reg(S("Kickback level", percent, "How strong the kickback's tug is. 0 to 100 % of its amplitude. 100 % is the physically correct value and the default.", "countersteer_kick_level")));
-  steer.appendChild(reg(T("Gear guard", "Keeps the gears loaded on one side so small force reversals don't rattle the backlash. Fast detail stays, but can't flip the force's direction.", "countersteer_gear_guard")));
-  steer.appendChild(reg(S("Gear guard level", percent, "How much preload the guard holds, 0 to 100 % of its default. 100 % is the default.", "countersteer_gear_guard_level")));
+  steer.appendChild(reg(T("Gear guard", "Keeps the gears loaded on one side so small force reversals don't rattle the backlash. Fast detail stays; a real change of direction passes the gears slowly and then catches up.", "countersteer_gear_guard")));
+  steer.appendChild(reg(S("Gear guard level", percent, "How gently a real change of direction crosses the gears. Stronger is quieter but later: the figure under it is the estimated delay of a big force reversal from the game to the wheel, red over 50 ms (a warning only), and the mark is where it reaches 50 ms. 61 % is the default; 0 is off.", "countersteer_gear_guard_level")));
+  steer.appendChild(reg(S("Gear flip point", percent, "How far the force must reverse before the gears are moved to the other side. Higher is quieter, but small direction changes arrive later.", "countersteer_gear_flip")));
   steer.appendChild(reg(T("Real column feel", "The car's own column damping and friction, sent to the driver so the wheel carries its weight and settles like the car's. On by default.", "countersteer_column")));
   steer.appendChild(reg(T("Local aligning spring", "The tyres' self-aligning pull played as a spring inside the driver: the wheel self-steers with about 4 ms response. Off: telemetry only. On by default.", "countersteer_align")));
   steer.appendChild(reg(T("Friction removal", "Takes the wheel's own friction out of the feel: lighter than a real column. Off by default.", "countersteer_friction_removal")));

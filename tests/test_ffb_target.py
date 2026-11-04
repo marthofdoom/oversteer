@@ -479,20 +479,21 @@ def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
     split = rack.align(s)
     assert seen[-1][1] == pytest.approx(fe.RackForce.CLASSIC_SCALE * split["k"] * 0.8 / 3.5)
     rack.mapping = 'knee'
-    assert rack.damping_scale() == pytest.approx(fe.RackForce.DAMPING_SCALE * rack.rho() ** 2)
+    rack.damping_pct = 40.0
+    assert rack.damping_scale() == pytest.approx(0.4 * rack.rho() ** 2)
     rack.mapping = 'classic'
     assert rack.damping_scale() == rack.impedance() == 0.30
 
 
-def test_column_damping_defaults_to_100_and_the_knee_mappings_damping_scale_is_pct_times_rho_squared_clamped_to_0_100():
+def test_column_damping_defaults_to_15_and_the_knee_mappings_damping_scale_is_pct_times_rho_squared_clamped_to_0_100():
     from oversteer.model import Model
-    assert fe.OVERALL_COLUMN_DAMPING == 100 and fe.RackForce.DAMPING_SCALE == 1.0
-    assert Model._texture_defaults(True)['countersteer_column_damping'] == 100
+    assert fe.OVERALL_COLUMN_DAMPING == 15 and fe.RackForce.DAMPING_SCALE == 0.15
+    assert Model._texture_defaults(True)['countersteer_column_added'] == 15
     engine = fe.FfbEngine()
     engine._requests(0.0)
     rho2 = engine.model.rho() ** 2
     assert 0.0 < rho2 < 1.0
-    assert engine.model.damping_pct == 100 and engine.model.damping_scale() == pytest.approx(rho2)
+    assert engine.model.damping_pct == 15 and engine.model.damping_scale() == pytest.approx(0.15 * rho2)
     engine.set_column_damping(25)
     engine._requests(0.0)
     assert engine.model.damping_scale() == pytest.approx(0.25 * rho2)
@@ -506,16 +507,16 @@ def test_column_damping_defaults_to_100_and_the_knee_mappings_damping_scale_is_p
     assert engine.model.damping_scale() == engine.model.impedance()
 
 
-def test_the_model_clamps_the_column_damping_setting_to_0_100_and_defaults_it_to_100():
+def test_the_model_clamps_the_column_added_setting_to_0_100_and_defaults_it_to_15():
     from oversteer.model import Model
     model = Model.__new__(Model)
     model.data, model.ui = {}, None
     model.set_if_changed = lambda key, value: model.data.update({key: value}) or True
-    assert model.get_countersteer_column_damping() == 100
-    model.set_countersteer_column_damping(150)
-    assert model.get_countersteer_column_damping() == 100
-    model.set_countersteer_column_damping(-3)
-    assert model.get_countersteer_column_damping() == 0
+    assert model.get_countersteer_column_added() == 15
+    model.set_countersteer_column_added(150)
+    assert model.get_countersteer_column_added() == 100
+    model.set_countersteer_column_added(-3)
+    assert model.get_countersteer_column_added() == 0
 
 
 def test_the_engine_setter_switches_the_mapping_and_the_profile_defaults_are_knee_with_the_drive_pull_and_kick_on_at_100():
