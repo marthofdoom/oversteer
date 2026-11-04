@@ -539,7 +539,7 @@ class EngineHum:
     - What the wheel can render: the driver writes the force on a 2 ms
       timer (250 Hz sample rate, 125 Hz Nyquist) and the telemetry steps at
       3 ms, so anything above RENDER_MAX_HZ is folded down by whole octaves
-      (200 Hz plays as 100 Hz) rather than aliased to a beat; the phase is
+      (200 Hz plays as 50 Hz) rather than aliased to a beat; the phase is
       continuous across a fold, so there is no step. The G29's motors and
       its gears are mushy past ~100 Hz anyway, and the amplitude is already
       low there. Below RENDER_MIN_HZ (a cranking engine) nothing plays.
@@ -553,11 +553,11 @@ class EngineHum:
 
     CAP = 0.012                          # share of full scale at idle, throttle open (~1.2 % of the wheel's force)
     CYLINDERS = 4
-    RENDER_MAX_HZ = 100.0
+    RENDER_MAX_HZ = 50.0                 # a gear drive carries this band best: at 100 the G29 showed nothing the owner could feel at 300 % (a direct drive could take more)
     RENDER_MIN_HZ = 8.0
     IDLE_FRACTION = 0.12                 # of max rpm, when the game sends no idle rpm
     MAX_RPM = 7000.0                     # when the game sends no max rpm
-    REV_FLOOR = 0.35
+    REV_FLOOR = 0.7                      # (0.35 left the revs that matter, 5000-6500 rpm, at about half the cap)
     LOAD_FLOOR = 0.6
     AMP_TAU = 0.15                       # s
     FEEL_MAX = 3.0                       # the owner's "Engine feel" (1.0 = CAP as above), at most this
