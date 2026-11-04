@@ -830,3 +830,30 @@ def test_the_engine_takes_over_in_seconds_on_a_20_percent_game(tmp_path):
     Drive(engine, amp=60.0, strength=0.2).run(8.0)
     assert engine.status.active
     assert engine.rbr.strength > 0.9                       # still the prior 1: light until the evidence glides it
+
+
+def test_the_confirmed_strength_is_kept_and_starts_the_next_session(caplog):
+    caplog.set_level('INFO')
+    first = r.RbrForce()
+    assert first.s_applied == 1.0 and r.kept_strength() is None
+    top = -r.level_of(r.magnitude(1.0, 0.2))
+    sample = Sample(5000.0, gear=3, speed=20.0, car=CAR, game='rbr')
+    sample.steer, sample.accel, sample.yaw_rate = 0.0, (0.0, 0.0, 0.0), 0.0
+    t = 0.0
+    while t < 8.0:
+        first.feed(t, -top, holding=True)
+        first.feed_physics(t, sample, -top)
+        t += 0.004
+    assert first.s_plateau == pytest.approx(0.2, abs=0.01) and r.kept_strength() == pytest.approx(0.2, abs=0.01)
+    second = r.RbrForce()                                    # the next session
+    assert second.s_applied == pytest.approx(0.2, abs=0.01) and second.full < 0.25 * r.FULL
+    assert second.target_s() == second.s_kept                # (the fit saying 1 does not undo it)
+    assert 'kept from the last session' in caplog.text
+    other = -r.level_of(r.magnitude(1.0, 0.5))               # another top: glide to it and overwrite
+    t = 0.0
+    while t < 8.0:
+        second.feed(t, -other, holding=True)
+        second.feed_physics(t, sample, -other)
+        t += 0.004
+    assert second.s_plateau == pytest.approx(0.5, abs=0.01) and r.kept_strength() == pytest.approx(0.5, abs=0.01)
+    assert 0.2 < second.s_applied < 0.5

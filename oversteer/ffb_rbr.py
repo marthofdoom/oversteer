@@ -87,6 +87,7 @@ Fy = m (b/L) a_y + I_z rdot / L through a trail prior over the ratio N), on mode
 correlation r wins (only s above the game's own peak are possible). Until it has converged s is 1: x is smaller, the force
 lighter. With s fitted (or a clipped top found) C = 32767 s, applied by gliding.
 """
+import json
 import logging
 import math
 import os
@@ -127,6 +128,8 @@ FIT_SWITCH = 0.015                       # r a new s must beat the held one by
 FIT_SMOOTH = 0.1                         # s: the one-pole filter on Fy and the level
 CAR_M, CAR_L, CAR_B, CAR_IZ, CAR_N = 1390.0, 2.53, 1.24, 1751.0, 14.3   # a WRC (Fiesta/C3/Yaris/i20): the scale k is free
 TRAIL_PRIOR = 0.040                      # m
+STRENGTH_FILE = 'rbr_strength.json'      # the confirmed STRENGTH, kept between sessions (the game's, not the car's)
+STRENGTH_PATH = None                     # None: the data folder's file (tests point it elsewhere)
 INI_RETRY = 30.0                         # s between looks for RichardBurnsRally.ini while none was found
 INI_CHECK = 5.0                          # s between looks at its mtime
 
@@ -218,6 +221,35 @@ def ngp_percents(root):
         if value is not None:
             out[surface] = value
     return out or None
+
+
+def _strength_path():
+    if STRENGTH_PATH:
+        return STRENGTH_PATH
+    from . import diagnostics
+    return os.path.join(diagnostics.data_home(), 'oversteer', STRENGTH_FILE)
+
+
+def kept_strength():
+    """The STRENGTH confirmed in an earlier session (0.10 .. 1.00), None when none is kept or the file is unreadable."""
+    try:
+        with open(_strength_path()) as f:
+            value = float(json.load(f)['strength'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return value if math.isfinite(value) and FIT_STEPS[0] <= value <= 1.0 else None
+
+
+def keep_strength(value):
+    try:
+        path = _strength_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump({'strength': round(float(value), 3)}, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        logging.warning("Countersteer FFB: RBR: the game's STRENGTH could not be kept: %s", e)
 
 
 class _Share:
@@ -358,8 +390,11 @@ class RbrForce:
         """Everything learnt: a new stream (the device set again). A car key narrowing keeps all but S (set_car)."""
         self.car = car
         self.fit = StrengthFit()
-        self.full = float(FULL)          # C: the game's full-scale level in use (STRENGTH 1.0 until the evidence has it)
-        self.s_applied = 1.0             # C / FULL, glided toward the target (feed_physics)
+        self.s_kept = kept_strength()    # confirmed in an earlier session: the start, re-confirmed by the evidence
+        self.s_applied = self.s_kept or 1.0      # C / FULL, glided toward the target (feed_physics)
+        self.full = FULL * self.s_applied        # C: the game's full-scale level in use (STRENGTH 1.0 until the evidence has it)
+        if self.s_kept is not None:
+            logging.info("Countersteer FFB: RBR: game STRENGTH %.2f (kept from the last session)", self.s_kept)
         self.s_plateau = None            # the STRENGTH a clipped top shows (kept through new streams)
         self._phys_t = None
         self._glide_log = None
@@ -487,7 +522,9 @@ class RbrForce:
         """The STRENGTH the evidence shows: a clipped top, else the fit once it left 1, else the conservative prior 1."""
         if self.s_plateau is not None:
             return self.s_plateau
-        return self.fit.s if self.fit.converged else 1.0
+        if self.fit.converged and (self.fit.s != 1.0 or self.s_kept is None):
+            return self.fit.s
+        return self.s_kept or 1.0
 
     def feed_physics(self, t, sample, level):
         """A telemetry sample with the raw level now: the strength fit (StrengthFit), and the applied strength gliding
@@ -496,6 +533,10 @@ class RbrForce:
         ay = accel[1] if accel is not None and len(accel) > 1 else None
         moved = self.fit.feed(t, ay, getattr(sample, 'yaw_rate', None), getattr(sample, 'speed', None), level)
         target = self.target_s()
+        if (self.s_plateau is not None or (self.fit.converged and self.fit.s != 1.0)) and (
+                self.s_kept is None or abs(target - self.s_kept) > 0.005):
+            self.s_kept = target
+            keep_strength(target)
         dt = 0.0 if self._phys_t is None else min(max(t - self._phys_t, 0.0), 0.25)
         self._phys_t = t
         before = self.s_applied
