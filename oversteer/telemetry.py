@@ -9,6 +9,7 @@ through :class:`RevLeds`; when no packet arrives for a while the LEDs go
 out so a stale value never stays lit.
 """
 
+import errno
 import glob
 import logging
 import os
@@ -213,6 +214,7 @@ AUTO = 'auto'                                        # the port setting that lis
 FORZA_OWN = range(5200, 5301)
 LOCK_SILENCE = 3.0                                   # s the locked port must be quiet before another port takes over
 BUSY_RETRY = 30.0                                    # s between tries of the Auto ports another app held
+OWN_COPY_WAIT = 1.5                                  # s a new listener waits for the engine process's copy of a port
 RELAY_BACK = 1.0                                     # s the engine process has to hand the ports back (ffb_process)
 
 
@@ -561,6 +563,18 @@ class Telemetry:
             raise
         return sock
 
+    def _bind_own(self, port):
+        """_bind(), but a port still held as the engine process's copy of a previous listener's socket (it lets go
+        when it gets to the handing back) is waited for, not taken as someone else's."""
+        deadline = time.monotonic() + (OWN_COPY_WAIT if getattr(self.ffb, 'relay_release', None) else 0.0)
+        while True:
+            try:
+                return self._bind(port)
+            except OSError as e:
+                if e.errno != errno.EADDRINUSE or time.monotonic() >= deadline:
+                    raise
+            time.sleep(0.05)
+
     def wanted_ports(self):
         """The ports start() binds: Auto's, or the one port."""
         return auto_ports() if self.auto else [self.port]
@@ -573,7 +587,7 @@ class Telemetry:
         socks, busy = {}, {}
         for port in self.wanted_ports():
             try:
-                socks[port] = self._bind(port)
+                socks[port] = self._bind_own(port)
             except (OSError, OverflowError, TypeError) as e:
                 if self.auto:
                     logging.info("telemetry: UDP %d skipped: %s", port, e)

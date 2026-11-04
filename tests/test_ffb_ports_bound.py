@@ -194,3 +194,45 @@ def test_listening_here_again_is_logged_only_while_the_sockets_are_read(tmp_path
     caplog.clear()
     t.stop()                                             # the sockets close next: nothing listens "here again"
     assert not any('here again' in r.message for r in caplog.records)
+
+
+def test_a_fixed_port_listener_rebuilt_while_the_engine_holds_its_socket(tmp_path, proxy):
+    """apply_rev_leds (a device change, a setting): stop(), then a new Telemetry on the same fixed port and engine
+    process. The engine's copy must be let go before the new bind, which never meets EADDRINUSE."""
+    port = free_ports(1)[0]
+    p = started(tmp_path, proxy)
+
+    def build():
+        t = Heard(tl.NoLeds(), port)
+        t.ffb = p
+        return t
+    t = build()
+    assert t.start()
+    assert until(lambda: t._relay is not None and engine_holds(p, [port]), 5.0)
+    for n in range(3):
+        t.stop()
+        t = build()
+        assert t.start(), 'rebuild %d: UDP %d could not be bound again' % (n, port)
+        assert t.listening == [port] and not t.busy
+        assert until(lambda: t._relay is not None and engine_holds(p, [port]), 8.0)
+        check_all(t, [port], 'rebuild-%d' % n)
+    t.stop()
+    assert not bound(port)
+
+
+def test_a_new_listener_waits_for_the_engines_late_copy_of_its_port(tmp_path, proxy):
+    """The engine process answers the hand back late (busy): its copy outlives the old listener's socket. The new
+    listener's bind waits for it instead of failing (the port would be held by nobody once the copy closed)."""
+    import threading
+    port = free_ports(1)[0]
+    p = started(tmp_path, proxy)
+    copy = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)       # the engine's copy, held past the old listener
+    copy.bind(('0.0.0.0', port))
+    threading.Timer(0.5, copy.close).start()
+    t = Heard(tl.NoLeds(), port)
+    t.ffb = p
+    assert t.start() and t.listening == [port] and not t.busy
+    try:
+        check_all(t, [port], 'late')
+    finally:
+        t.stop()
