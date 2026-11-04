@@ -3,7 +3,8 @@ besides the telemetry (the capture itself) and the wheel's position (the capture
 A third sidecar, `<capture>.ffb.gz`: gzip of
 
     b'OVFFB1\\n'
-    one JSON line: {"capture": <file name>, "started": <epoch>, "channels": {<name>: <id>}, "oversteer": <version>,
+    one JSON line: {"capture": <file name>, "started": <epoch>, "channels": {<name>: <id>}, "oversteer": <version>, "build": <commit>,
+                    "settings": {the countersteer_* values in effect, "learnt": {car, ratio, lock, trail, ...}},
                     "clock": "seconds since the capture's first packet", "fields": "t channel a b c d e"}
     records: struct '<dB5d' (seconds since the capture's first packet, channel id, five values; unused ones 0)
 
@@ -12,6 +13,11 @@ as written, uFS and 1e-4 FS units of the driver), ffb_dyn_damping / ffb_dyn_fric
 (damping, inertia, friction, breakaway, latency as written), ffb_align_read (k_limit, range), ffb_hands (torque
 per mille, hands on), ffb_dyn_live (friction, damping, seconds), ffb_thermal (mean square, derating, gain), off
 (the stage set back to 0). `load()` reads one back.
+
+Settings: the header's "settings" is the engine's snapshot (`settings_source`) when the file starts. A value that
+changes later cannot be a record (the format is numbers only), so `FfbSampler.check_settings` logs an INFO line with the
+seconds since the capture's first packet and keeps the change in `changes` (not in the file). Old files have no
+"settings"/"build": readers take what is there.
 
 The engine calls `log()`; with no recording running it does nothing (one attribute test). Times are on the engine's
 clock, which is the listener's (time.monotonic), minus the capture's origin."""
@@ -35,6 +41,7 @@ NAMES = {i: name for name, i in CHANNELS.items()}
 current = None                           # the running FfbSampler, None when nothing is recorded
 remote = None                            # (path, origin, header) -> a sampler in Countersteer FFB's engine process
                                          # (ffb_process), None while the engine runs in this one
+settings_source = None                   # () -> {"profile": {...}, "learnt": {...}} the engine's settings now (FfbEngine sets it)
 
 
 def active():
@@ -54,6 +61,24 @@ def sampler(path, origin, header=None):
     cross the process boundary and the engine never waits for the GUI."""
     make = remote
     return FfbSampler(path, origin, header) if make is None else make(path, origin, header)
+
+
+def check(t):
+    """The engine's pass: log a changed setting of the running recording (one attribute test with none)."""
+    sampler = current
+    if sampler is not None:
+        sampler.check_settings(t)
+
+
+def _snapshot():
+    source = settings_source
+    if source is None:
+        return None
+    try:
+        return source()
+    except Exception:
+        logging.exception("ffb record: settings")
+        return None
 
 
 def _numbers(values):
@@ -78,6 +103,8 @@ class FfbSampler:
         self.path = path
         self.origin = origin
         self.records = 0
+        self.changes = []                # (seconds, key, old, new) of the settings changed since the start
+        self._settings = None
         self._queue = collections.deque()
         self._stop = threading.Event()
         self._thread = None
@@ -86,6 +113,9 @@ class FfbSampler:
             self._file.write(MAGIC)
             meta = {'clock': "seconds since the capture's first packet", 'fields': 't channel a b c d e',
                     'channels': CHANNELS}
+            self._settings = _snapshot()
+            if self._settings is not None:
+                meta['settings'] = self._settings
             meta.update(header or {})
             self._file.write(json.dumps(meta).encode() + b'\n')
             self._file.flush()
@@ -97,6 +127,20 @@ class FfbSampler:
         channel_id = CHANNELS.get(channel)
         if channel_id is not None:
             self._queue.append((t - self.origin, channel_id, _numbers(values)))
+
+    def check_settings(self, t):
+        """Compare the profile values now with those logged last; each change is an INFO line `t` s after the
+        capture's first packet (the learnt values keep changing and are only in the header). Called by the engine."""
+        old = self._settings
+        now = _snapshot()
+        if old is None or now is None:
+            return
+        for key, value in now.get('profile', {}).items():
+            before = old.get('profile', {}).get(key)
+            if value != before:
+                self.changes.append((t - self.origin, key, before, value))
+                logging.info("ffb record: setting %s %r -> %r at %.2f s", key, before, value, t - self.origin)
+        self._settings = now
 
     def pump(self):
         """Write what has been collected (tests call this directly)."""

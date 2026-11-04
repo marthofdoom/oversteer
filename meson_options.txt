@@ -2,6 +2,10 @@ option('python',
        description: 'Override the name of the Python executable',
        type: 'string',
        value: 'python3')
+option('build_id',
+       description: 'The commit to stamp into the app (default: asked of git; "unknown" without one)',
+       type: 'string',
+       value: '')
 option('udev_rules_dir',
        description: 'Installation path for udev rules',
        type: 'string',

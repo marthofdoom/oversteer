@@ -25,6 +25,7 @@ import locale
 sys.path.insert(1, '@pythondir@')
 
 version = '@VERSION@'
+build = '@BUILD@'
 pkgdatadir = '@pkgdatadir@'
 localedir = '@localedir@'
 icondir = '@icondir@'
@@ -49,5 +50,7 @@ locale.setlocale(locale.LC_ALL, '')
 
 if __name__ == '__main__':
     from oversteer.application import Application
+    from oversteer import buildinfo
+    buildinfo.set_build(build)
     app = Application(version, pkgdatadir, icondir)
     sys.exit(app.run(sys.argv))

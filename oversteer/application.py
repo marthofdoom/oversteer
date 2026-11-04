@@ -5,7 +5,7 @@ import os
 import subprocess
 from .device_manager import DeviceManager
 from .model import Model
-from . import beamng_mod, car_data, diagnostics, stage_tables
+from . import beamng_mod, buildinfo, car_data, diagnostics, stage_tables
 import sys
 from xdg.BaseDirectory import save_config_path
 
@@ -101,7 +101,7 @@ class Application:
         file_debug = diagnostics.read_debug_preference(os.path.join(save_config_path('oversteer'), 'config.ini'))
         diagnostics.setup(debug=args.debug, file_debug=file_debug, to_file=not proxy_command)
         diagnostics.install_excepthooks()
-        logging.info("Oversteer %s starting: %s", self.version, ' '.join(argv[1:]))
+        logging.info("Oversteer %s (build %s) starting: %s", self.version, buildinfo.BUILD, ' '.join(argv[1:]))
 
         if args.diagnostics_bundle:
             exit(self.write_diagnostics_bundle(args.diagnostics_bundle))

@@ -2102,6 +2102,7 @@ class FfbEngine:
         self._scale_seen = 0             # the slot seq of the Forza sample the last scale write answered
         self.scale_writes = 0            # game_const_scale writes (tests, the log)
         self.texture = Texture()
+        ffb_record.settings_source = self.settings_snapshot       # (the header of an FFB tuning capture, ffb_record)
         self._mode = 'acr'               # whose force: 'acr' (per telemetry sample), 'rbr', 'beamng', 'forza' (the add-on),
                                          # 'forza-rack' (each pass)
         self._played_mode = None         # the mode of the force playing
@@ -2322,6 +2323,25 @@ class FfbEngine:
         return {'car_properties': self.car_properties(), 'align_note': self.align_note, 'ratio': model.ratio,
                 'assist': model.assist, 'impedance': impedance}
 
+    def settings_snapshot(self):
+        """The profile values in effect ("profile": what a change of is logged) and the learnt ones now ("learnt"), as
+        JSON-able plain values, for the FFB tuning capture's header (ffb_record)."""
+        model, fz = self.model, self.forza_rack
+        column, align, removal = self._dyn_req
+        profile = {
+            'strength': round(self._strength * 100.0, 3), 'knee': round(model.knee * 100.0, 3), 'mapping': model.mapping,
+            'column_damping': model.damping_pct, 'drive_pull': [bool(model.pull_on), round(model.pull_level * 100.0, 3)],
+            'kick': [bool(model.kick_on), round(model.kick_level * 100.0, 3)], 'rim_mm': model.rim_user,
+            'car_wheel_mm': model.car_wheel_mm, 'forza_car_wheel_mm': fz.car_wheel_mm,
+            'power_class': ffb_carprops.power_class(), 'texture_level': round(self.texture.level, 4),
+            'texture_parts': dict(self.texture.parts), 'column': bool(column), 'align': bool(align),
+            'friction_removal': bool(removal), 'forza_model': bool(self._forza_model),
+            'lightness': round(self.addon.strength * 100.0, 3)}
+        learnt = {'car': model.car, 'ratio': model.ratio, 'lock': model.lock, 'trail_m': model.trail,
+                  'scrub_m': model.scrub, 'forza_car': fz.car, 'forza_mass_kg': fz.mass,
+                  'rbr_strength': self.rbr.strength}
+        return {'profile': profile, 'learnt': learnt}
+
     @property
     def usb_id(self):
         return self._usb_id
@@ -2508,6 +2528,7 @@ class FfbEngine:
         if now is None:
             now = self._clock()
         self._requests(now)
+        ffb_record.check(now)                    # (a changed setting of a running FFB tuning capture is logged)
         self._drain()
         slot = self._slot
         if self._broken:

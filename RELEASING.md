@@ -17,7 +17,8 @@ against the wheel and the matching new-lg4ff release exists.
 5. Bump `version` in `meson.build`, add a `<release>` entry to
    `data/io.github.berarma.Oversteer.appdata.xml.in`, add a section to
    `CHANGELOG.md`, and set the oversteer module's `tag:` in
-   `flatpak/io.github.berarma.Oversteer.yaml` to the new tag.
+   `flatpak/io.github.berarma.Oversteer.yaml` to the new tag and its `-Dbuild_id=` to that tag's short commit
+   (`git rev-parse --short=9 vX.Y.Z^{}`; the build id of a Flatpak, which may have no .git).
 6. Commit, tag `vX.Y.Z` (annotated), push `master` and the tag.
 7. `gh release create vX.Y.Z --notes-file <notes>`; state which new-lg4ff
    version the release expects.
