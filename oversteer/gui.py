@@ -98,6 +98,7 @@ class Gui:
         self.shift_buttons = {}           # evdev key code -> 'gear', 'sequential' or 'paddle'
         self.telemetry_status = lambda: None
         self._rbr_range = None                  # the range the RBR car last set (apply_rbr_auto_range)
+        self._rbr_key = self._rbr_name = None   # ... and that car: a profile load writes the profile's range back over it
         from .shift_learner import ShiftLearner
         self.shift_learner = ShiftLearner(threaded=True)
         self.shift_learner.rbr_cars.library.writable = True     # the app keeps the RBR cars it meets (rbr_fingerprint)
@@ -547,6 +548,8 @@ class Gui:
         else:
             # already this profile's: write the model's values (unsaved edits too) to the new device
             self.model.flush_device()
+            if self._rbr_key is not None:
+                self.apply_rbr_auto_range(self._rbr_key, self._rbr_name)
             self.update_pedals()
             self.apply_rev_leds()
 
@@ -2155,6 +2158,8 @@ class Gui:
         self.model.load(profile_file, force)
         self.model.flush_device()
         self.model.flush_ui()
+        if self._rbr_key is not None:
+            self.apply_rbr_auto_range(self._rbr_key, self._rbr_name)      # (the car's range outlives a profile load: field, a whole drive at 900)
         self.update_pedals()
         self.update_learner_directory()
         self.apply_countersteer_texture()
@@ -2704,7 +2709,8 @@ class Gui:
         if wrange is None:
             return False
         wrange = max(40, min(wrange, self.device.get_max_range()))
-        if wrange == self._rbr_range:
+        self._rbr_key, self._rbr_name = key, name
+        if wrange == self._rbr_range and self.device.get_range() == wrange:
             return False
         if not agree:
             logging.info("RBR %s: the candidates' steering locks differ, the median is used", name or key)
