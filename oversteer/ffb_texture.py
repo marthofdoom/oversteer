@@ -560,7 +560,7 @@ class EngineHum:
     REV_FLOOR = 0.7                      # (0.35 left the revs that matter, 5000-6500 rpm, at about half the cap)
     LOAD_FLOOR = 0.6
     AMP_TAU = 0.15                       # s
-    FEEL_MAX = 3.0                       # the owner's "Engine feel" (1.0 = CAP as above), at most this
+    FEEL_MAX = 6.0                       # the owner's "Engine feel" (1.0 = CAP as above), at most this
 
     def __init__(self):
         self.reset()
@@ -692,12 +692,12 @@ class Texture:
         # The road, the landings and the lock need the car rolling; the engine's idle shake does not
         if sample.game in FORZA_GAMES:
             road, impact = self.forza.step(t, dt, sample)
-            total = (gains['road'] * road + gains['impact'] * impact) * moving + gains['engine'] * self.engine.step(dt, sample)
+            total = (gains['road'] * road + gains['impact'] * impact) * moving
         else:
             lock = 0.0 if sample.game in NO_LOCK_GAMES else gains['lock'] * self.lock.step(dt, sample)
             total = (gains['road'] * self.road.step(dt, sample) + gains['impact'] * self.impact.step(dt, sample)
-                     + lock) * moving \
-                + gains['engine'] * self.engine.step(dt, sample)
+                     + lock) * moving
+        engine = gains['engine'] * self.engine.step(dt, sample)       # zero-mean, and outside the limiter: the road's peaks and a small steering force left it nothing to feel
         steering = abs(steering) if math.isfinite(steering) else 0.0
         total = self._dc.step(total, dt)
         # Within the headroom left by the steering force, so the engine's clamp never cuts one side
@@ -705,7 +705,8 @@ class Texture:
         # The limiter: a gain from the peak follower, so the shape is kept and |value| <= limit
         self._env = max(abs(total), self._env * math.exp(-dt / LIMIT_RELEASE))
         gain = limit / self._env if self._env > limit else 1.0     # limit 0: env > 0 gives 0, env 0 gives total 0
-        value = total * gain * self._level * onset
+        room = max(FULL - steering, 0.0)
+        value = min(max((total * gain + engine) * self._level * onset, -room), room)
         if not math.isfinite(value):
             self.reset()
             return 0.0

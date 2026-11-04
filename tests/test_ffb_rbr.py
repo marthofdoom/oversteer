@@ -1259,9 +1259,9 @@ def test_the_engine_feel_setting_reaches_the_hum_and_the_snapshot(tmp_path):
     engine.set_engine_feel(150)
     engine.step(0.01)
     assert engine.texture.engine.feel == pytest.approx(1.5) and engine.settings_snapshot()['profile']['engine_feel'] == 150.0
-    engine.set_engine_feel(900)                                        # clamped to 300 %
+    engine.set_engine_feel(900)                                        # clamped to 600 %
     engine.step(0.02)
-    assert engine.texture.engine.feel == pytest.approx(3.0)
+    assert engine.texture.engine.feel == pytest.approx(6.0)
 
 
 def test_a_big_slide_fades_the_floor_as_acr_does():
@@ -1534,7 +1534,7 @@ def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
         run_derived(rack, 0.2, ay=ay)
         entry = fe.car_data.entry(CAR)
         fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0)
-        expect = -(fe.ffb_carprops.RALLY_TRAIL + fz.TP0) * fy / rack.ratio      # (no slip: the whole pneumatic trail)
+        expect = -(fe.ffb_carprops.RALLY_TRAIL + fz.TP0) * fy / rack.DERIVED_RATIO      # (no slip: the whole pneumatic trail)
         assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
         assert rack.fy_f == pytest.approx(fy)
     big = derived_rack()
@@ -1714,3 +1714,12 @@ def test_the_aligning_spring_is_never_the_only_force():
     for plain, tau in limits.values():
         assert tau == pytest.approx(max(rack.ALIGN_SHARE_MAX * plain, rack.ALIGN_TAU_MIN), abs=0.01)
     assert limits[0.3][1] < limits[0.9][1]
+
+
+def test_the_table_frame_comes_with_the_car_even_if_the_car_was_already_set():
+    """Field: car 'rbr/106@6' with ratio_known and lock_known False for whole drives: the spring never played."""
+    rack = fe.RbrRack()
+    rack.reset(None)
+    rack.car = CAR
+    rack.set_car(CAR)
+    assert rack.ratio_known and rack.lock_known

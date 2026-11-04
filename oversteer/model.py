@@ -506,7 +506,7 @@ class Model:
         if data['countersteer_caster_floor'] is not None:
             data['countersteer_caster_floor'] = min(max(data['countersteer_caster_floor'], 0), 100)
         if data['countersteer_engine_feel'] is not None:
-            data['countersteer_engine_feel'] = min(max(data['countersteer_engine_feel'], 0), 300)
+            data['countersteer_engine_feel'] = min(max(data['countersteer_engine_feel'], 0), 600)
         if data['countersteer_drive_pull_level'] is not None:
             data['countersteer_drive_pull_level'] = min(max(data['countersteer_drive_pull_level'], 0), 100)
         if data['countersteer_column_added'] is not None:
@@ -831,7 +831,7 @@ class Model:
 
     def set_countersteer_engine_feel(self, value):
         """The engine hum's strength in % of its base level, 0..300 (0: off)."""
-        value = min(max(int(value), 0), 300)
+        value = min(max(int(value), 0), 600)
         if self.set_if_changed('countersteer_engine_feel', value) and self.ui is not None:
             self.ui.controller.apply_countersteer_engine_feel()
 
