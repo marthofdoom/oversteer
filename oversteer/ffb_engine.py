@@ -148,6 +148,8 @@ MZ_MISSING_RUN = 10                      # samples in a row without Mz (30 ms at
 OVERALL_STRENGTH = 1.0                   # "Steering strength" default: Countersteer's own force as the model gives it
 STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied inside wheel_torque.rim_share before the mapping
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
+OVERALL_RBR_CUT = 30                     # "RBR force cut" default (Hz): the low-pass corner on RBR's column torque
+RBR_CUT_OFF = 120                        # ... and the top of its range: no filter
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
 FORZA_CAR_WHEEL_MM = 375.0               # Forza's default car steering wheel (the profile's countersteer_car_wheel_mm wins once set)
@@ -1429,12 +1431,14 @@ class RbrRack(RackForce):
     |r| >= SIGN_LATCH, a positive r is an inverted DIRECTION, refused ('inverse')."""
 
     LEARNS = False
+    cut_hz = float(OVERALL_RBR_CUT)      # the column torque's low-pass corner (Hz); None: off (RBR_CUT_OFF and above)
     K_COLUMN = 0.062862                  # Nm per unit of u * S: 1 / (100 * -ln 0.975 * 2 pi)
     S_DEFAULT = 100.0                    # S when the car is not in the table (WRC 2017-21)
     SIGN_AY = 1.5                        # m/s^2: lateral acceleration under which the latch looks
     SIGN_SPEED = 5.0                     # m/s
     SIGN_TIME = 2.0                      # s of such samples
     SIGN_LATCH = 0.5                     # |r| to latch at
+    CUT_GAP = 0.1                        # s: a longer pause between levels starts the low-pass again at the current value
     SIGN_SPREAD = 0.02                   # ... and the steering input's spread (of -1..1) under it: a straight's noise
                                          # alone never latches
 
@@ -1459,7 +1463,10 @@ class RbrRack(RackForce):
         table = ffb_carprops.table_ratio(car_data.entry(car)) if car is not None else None
         self.ratio, self.assist = table or self.STEER_RATIO, self.ASSIST     # (diagnostic: the ratio does not enter)
         self.ratio_known = bool(table)
-        self.column = None               # the column torque (Nm, signed like the level), None without a level
+        self.column = None               # the column torque (Nm, signed like the level, low-passed), None without a level
+        self.column_raw = None           # ... and before the low-pass
+        self._cut = None                 # the low-pass's state (y, dy/dt) and the time of its last input
+        self._cut_at = None
         self.s = None
         self.s_note = None
         self._tau_q = ffb_carprops.Quantile()
@@ -1469,7 +1476,9 @@ class RbrRack(RackForce):
         self.direction = None            # 'normal' or 'inverse' once latched: the game's DIRECTION, kept through cars
 
     def restart_sign(self):
-        """The sign is judged again (a new stream: the game's DIRECTION may have been changed in its menus)."""
+        """The sign is judged again (a new stream: the game's DIRECTION may have been changed in its menus), and the
+        low-pass starts again at the next value."""
+        self._cut = self._cut_at = None
         prior, self.direction = self.direction, None
         self._sign = _Moments(self.TAU)
         self.sign_time = 0.0
@@ -1492,14 +1501,44 @@ class RbrRack(RackForce):
         1 until fitted): the column torque."""
         self.s_note = None if s is not None else _("the car's sensitivity is not known: 100 assumed")
         if level is None:
-            self.column = None
+            self.column = self.column_raw = self._cut = self._cut_at = None
             return
         x = min(abs(level) / (FULL * strength), 1.0)
-        self.column = math.copysign(self.K_COLUMN * ffb_rbr.linear(x) * (self.S_DEFAULT if s is None else s), level) \
+        raw = math.copysign(self.K_COLUMN * ffb_rbr.linear(x) * (self.S_DEFAULT if s is None else s), level) \
             if level else 0.0
+        self.column_raw = raw
+        self.column = self._low_pass(t, raw)
         last, self._tau_at = self._tau_at, t
         if last is not None:
-            self._tau_q.add(abs(self.column), min(max(t - last, 0.0), 0.05))
+            self._tau_q.add(abs(raw), min(max(t - last, 0.0), 0.05))
+
+    def _low_pass(self, t, u):
+        """The column torque through a second-order Butterworth low-pass at cut_hz, exact for an input held over each
+        (irregular) step dt: y'' + 2 z w y' + w^2 y = w^2 u, z = 1/sqrt 2, solved in closed form so any dt is stable.
+        A gap over CUT_GAP s (or a restart) starts it again at u, with no step. Off: u."""
+        cut = self.cut_hz
+        if cut is None or cut >= RBR_CUT_OFF:
+            self._cut = self._cut_at = None
+            return u
+        last, self._cut_at = self._cut_at, t
+        state = self._cut
+        dt = 0.0 if last is None else t - last
+        if state is None or dt < 0.0 or dt > self.CUT_GAP:
+            self._cut = (u, 0.0)
+            return u
+        if dt == 0.0:
+            return state[0]
+        w = 2.0 * math.pi * cut
+        a = w / math.sqrt(2.0)                    # z w
+        wd = a                                    # w sqrt(1 - z^2): the same at z = 1/sqrt 2
+        decay = math.exp(-a * dt)
+        c, sn = math.cos(wd * dt), math.sin(wd * dt)
+        e0, v0 = state[0] - u, state[1]
+        b = (v0 + a * e0) / wd
+        y = u + decay * (e0 * c + b * sn)
+        v = decay * (v0 * c - (w * w * e0 + a * v0) / wd * sn)
+        self._cut = (y, v)
+        return y
 
     def tau_p99(self):
         """The p99 of |column torque| so far (Nm), None before any."""
@@ -2073,6 +2112,7 @@ class FfbEngine:
         self._strength_req = None        # the overall steering strength (%) from the GUI
         self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
         self._knee_req = None            # the "1:1 up to" share (%) from the GUI
+        self._rbr_cut_req = None         # the "RBR force cut" corner (Hz) from the GUI
         self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
         self._kick_req = None            # "Kickback": (on, level %) from the GUI
@@ -2262,6 +2302,11 @@ class FfbEngine:
         self._knee_req = value
         self._wake.set()
 
+    def set_rbr_cut(self, value):
+        """RBR's column torque low-pass corner in Hz (15..120; 120 and above: no filter)."""
+        self._rbr_cut_req = value
+        self._wake.set()
+
     def set_mapping(self, value):
         """The steering mapping (profile INI only): 'knee' (1:1 in Nm up to the knee, compressed above, hydraulic top
         end) or 'classic' (the uniform impedance scale, the feel before the knee)."""
@@ -2332,6 +2377,7 @@ class FfbEngine:
         column, align, removal = self._dyn_req
         profile = {
             'strength': round(self._strength * 100.0, 3), 'knee': round(model.knee * 100.0, 3), 'mapping': model.mapping,
+            'rbr_cut_hz': self.rbr_rack.cut_hz,
             'column_damping': model.damping_pct, 'drive_pull': [bool(model.pull_on), round(model.pull_level * 100.0, 3)],
             'kick': [bool(model.kick_on), round(model.kick_level * 100.0, 3)], 'rim_mm': model.rim_user,
             'car_wheel_mm': model.car_wheel_mm, 'forza_car_wheel_mm': fz.car_wheel_mm,
@@ -2582,6 +2628,9 @@ class FfbEngine:
         if knee is not None:
             for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.knee = min(max(float(knee) / 100.0, wheel_torque.KNEE_RANGE[0]), wheel_torque.KNEE_RANGE[1])
+        cut = self._rbr_cut_req
+        if cut is not None:
+            self.rbr_rack.cut_hz = None if cut >= RBR_CUT_OFF else float(max(cut, 1))
         if self._mapping_req is not None:
             for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.mapping = self._mapping_req
@@ -3635,11 +3684,12 @@ class FfbEngine:
             p99 = k.tau_p99()
             logging.info("Countersteer FFB: replacing Richard Burns Rally's force with its column torque through our chain "
                          "(game uploads %s/s; car %s, S %s, column torque p99 %s Nm so far, hand-force scale %.2f "
-                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, texture %s, countersteer_power_class %s%s)",
+                         "(%.0f/%.0f mm), 1:1 up to %.0f %%, column damping %.0f %%, RBR force cut %s, texture %s, countersteer_power_class %s%s)",
                          'unknown' if self.raw_rate is None else '%.0f' % self.raw_rate, self.rbr.car,
                          'unknown (100 assumed)' if self.rbr.s is None else '%.1f' % self.rbr.s,
                          'none' if p99 is None else '%.1f' % p99, k.rho(), k.rim_mm(), k.car_wheel_mm,
-                         k.knee * 100.0, k.damping_pct, self.texture.describe(), *self._takeover_extra())
+                         k.knee * 100.0, k.damping_pct, 'off' if k.cut_hz is None else '%.0f Hz' % k.cut_hz,
+                         self.texture.describe(), *self._takeover_extra())
             self._dyn_start(t)
             return
         if self._mode == 'forza-rack':

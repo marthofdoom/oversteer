@@ -2803,6 +2803,7 @@ function buildCs() {
   steer.appendChild(reg(T("Countersteer FFB", "Our own steering force from the game's telemetry; it takes over only while the light is green.", "countersteer_ffb")));
   steer.appendChild(reg(S("Steering strength", percent, "100 % = the car's real steering torque played 1:1 in Nm up to the \"1:1 up to\" share of the wheel's peak torque and compressed above it, a quarter of the wheel's range kept free for texture and impacts. 0 to 130 %. Independent of the global gain and of the game's FFB setting. Lower it if the wheel feels heavy or runs warm. 100 % by default.", "countersteer_strength")));
   steer.appendChild(reg(S("1:1 up to", percent, "The share of the wheel's peak torque up to which the car's steering torque is played 1:1 in Nm; above it the torque is compressed so the car's top torque lands at three quarters of the wheel's range. 30 to 60 %, 50 % by default.", "countersteer_knee")));
+  steer.appendChild(reg(S("RBR force cut", (v) => v >= 120 ? "off" : v + " Hz", "RBR's own force is used below this frequency; faster vibration comes from the Texture settings instead.", "countersteer_rbr_cut")));
   const mm = (v) => v + " mm", rimTip = "Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.";
   steer.appendChild(reg(S("Your wheel's rim diameter", mm, rimTip, "countersteer_rim_mm")));
   steer.appendChild(reg(S("Car's steering wheel diameter", mm, rimTip, "countersteer_car_wheel_mm")));

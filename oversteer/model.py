@@ -7,6 +7,7 @@ from . import wheel_torque
 STRENGTH_MIN = 0                     # Countersteer's overall steering strength, %
 STRENGTH_MAX = 130
 MAPPINGS = ('knee', 'classic')       # steering mapping (profile INI only): 1:1 up to a knee and compressed above (default), or the uniform impedance scale
+RBR_CUT_MIN, RBR_CUT_MAX = 15, 120   # "RBR force cut": the low-pass corner on RBR's force, Hz; the top is off
 KNEE_MIN, KNEE_MAX = 30, 60          # "1:1 up to": the share of the wheel's peak torque played 1:1 in Nm, %
 
 
@@ -78,6 +79,7 @@ class Model:
         'countersteer_ffb': None,
         'countersteer_strength': None,
         'countersteer_knee': None,
+        'countersteer_rbr_cut': None,
         'countersteer_mapping': None,
         'countersteer_forza_model': None,
         'countersteer_drive_pull': None,
@@ -139,6 +141,7 @@ class Model:
         'countersteer_ffb': 'boolean',
         'countersteer_strength': 'integer',
         'countersteer_knee': 'integer',
+        'countersteer_rbr_cut': 'integer',
         'countersteer_mapping': 'string',
         'countersteer_forza_model': 'boolean',
         'countersteer_drive_pull': 'boolean',
@@ -262,12 +265,13 @@ class Model:
         from .ffb_addon import STRENGTH
         from .ffb_rbr import LINEARITY
         from .ffb_engine import OVERALL_STRENGTH as OVERALL, OVERALL_KNEE, OVERALL_MAPPING, OVERALL_PULL, OVERALL_PULL_LEVEL, \
-            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL
+            OVERALL_COLUMN_DAMPING, OVERALL_FORZA_MODEL, OVERALL_RBR_CUT
         from .ffb_kick import OVERALL_KICK, OVERALL_KICK_LEVEL
         from .ffb_texture import LEVEL
         # The overall Countersteer force in % of the car's real steering torque, and where it stops being played 1:1
         data = {'countersteer_strength': int(round(OVERALL * 100)) if supported else None,
                 'countersteer_knee': int(round(OVERALL_KNEE * 100)) if supported else None,
+                'countersteer_rbr_cut': OVERALL_RBR_CUT if supported else None,
                 'countersteer_mapping': OVERALL_MAPPING if supported else None,
                 'countersteer_forza_model': OVERALL_FORZA_MODEL if supported else None,
                 'countersteer_drive_pull': OVERALL_PULL if supported else None,
@@ -457,6 +461,8 @@ class Model:
             data['countersteer_strength'] = min(max(data['countersteer_strength'], STRENGTH_MIN), STRENGTH_MAX)
         if data['countersteer_knee'] is not None:
             data['countersteer_knee'] = min(max(data['countersteer_knee'], KNEE_MIN), KNEE_MAX)
+        if data['countersteer_rbr_cut'] is not None:
+            data['countersteer_rbr_cut'] = min(max(data['countersteer_rbr_cut'], RBR_CUT_MIN), RBR_CUT_MAX)
         if data['countersteer_drive_pull_level'] is not None:
             data['countersteer_drive_pull_level'] = min(max(data['countersteer_drive_pull_level'], 0), 100)
         if data['countersteer_column_damping'] is not None:
@@ -752,6 +758,17 @@ class Model:
         from .ffb_engine import OVERALL_KNEE
         value = self.data.get('countersteer_knee')
         return int(round(OVERALL_KNEE * 100)) if value is None else value
+
+    def set_countersteer_rbr_cut(self, value):
+        """RBR's force cut: the low-pass corner on its force in Hz, RBR_CUT_MIN..RBR_CUT_MAX (the top: off)."""
+        value = min(max(int(value), RBR_CUT_MIN), RBR_CUT_MAX)
+        if self.set_if_changed('countersteer_rbr_cut', value) and self.ui is not None:
+            self.ui.controller.apply_countersteer_rbr_cut()
+
+    def get_countersteer_rbr_cut(self):
+        from .ffb_engine import OVERALL_RBR_CUT
+        value = self.data.get('countersteer_rbr_cut')
+        return OVERALL_RBR_CUT if value is None else value
 
     def set_countersteer_mapping(self, value):
         """The steering mapping (profile INI only, no control): 'knee' (1:1 up to the knee, compressed above, the default) or
@@ -1172,6 +1189,7 @@ class Model:
         self.ui.set_countersteer_ffb(data['countersteer_ffb'])
         self.ui.set_countersteer_strength(data['countersteer_strength'])
         self.ui.set_countersteer_knee(data['countersteer_knee'])
+        self.ui.set_countersteer_rbr_cut(data['countersteer_rbr_cut'])
         self.ui.set_countersteer_column_damping(data['countersteer_column_damping'])
         self.ui.set_countersteer_rim_mm(None if data['countersteer_rim_mm'] is None else self.get_countersteer_rim_mm())
         self.ui.set_countersteer_car_wheel_mm(data['countersteer_car_wheel_mm'])

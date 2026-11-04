@@ -194,7 +194,7 @@ def test_rbr_goes_green_and_plays_the_column_torque(tmp_path):
     assert len(forces()) - n > 700
     level = FakeDriver.raw[0]
     rack = engine.rbr_rack
-    assert rack.column == pytest.approx(math.copysign(0.062862 * r.linear(abs(level) / r.FULL) * 100.0, level), rel=1e-6)
+    assert rack.column_raw == pytest.approx(math.copysign(0.062862 * r.linear(abs(level) / r.FULL) * 100.0, level), rel=1e-6)
     assert engine.rbr.torque == pytest.approx(r.ngp_inverse(-level / r.FULL, 100.0), rel=1e-6)
     assert engine.rbr.torque == pytest.approx(drive.torque(drive.next_up - 1 / 870.0), abs=0.2)
     light, text = fe.status_text(engine.status)
@@ -562,6 +562,7 @@ def test_the_torque_goes_through_the_boost_curve_and_the_mapping():
     assert rack.rim_torque(sample) == pytest.approx(cp.driver_from_column(rack.column, 20.0, 1.0, True))
     assert abs(rack.rim_torque(sample)) < abs(rack.column)              # the boost took part of it
     assert rack.force(sample) < 0 and abs(rack.force(sample)) <= fe.FULL    # the level's sign, inside the budget
+    rack.cut_hz = None                                                 # (the low-pass would glide through the sign change)
     rack.set_level(0.001, -level_for(0.5), 100.0)
     assert rack.force(sample) > 0
     assert not rack.LEARNS and rack.learner is None and rack.assist == 1.0
@@ -1020,3 +1021,83 @@ def test_an_undecided_sign_plays_on_the_normal_prior_and_an_inverted_one_is_stil
     assert rack.direction is None and rack.ready and rack.waiting is None
     drive_rack(rack, 30.0, direction=-1.0, start=t)
     assert rack.direction == 'inverse' and not rack.ready and rack.refused == 'inverse'
+
+
+# -- the RBR force cut: the column torque's low-pass --
+
+def cut_rack(cut=30.0, **kw):
+    rack = fe.RbrRack()
+    rack.cut_hz = cut
+    return rack
+
+
+def run_cut(rack, fn, seconds, dts):
+    """(t, y) of the filtered column for the raw column fn(t), sampled at the steps cycling through dts."""
+    out, t, i = [], 0.0, 0
+    while t < seconds:
+        rack.set_level(t, level_for(fn(t)), 100.0)
+        out.append((t, rack.column, rack.column_raw))
+        t += dts[i % len(dts)]
+        i += 1
+    return out
+
+
+def amp(rows, f, skip=0.5):
+    """Amplitude of the component at f Hz in column (index 1) or column_raw (2), after `skip` s."""
+    import numpy as np
+    t = np.array([r[0] for r in rows if r[0] >= skip])
+    return [2 * abs(np.mean(np.array([r[k] for r in rows if r[0] >= skip]) * np.exp(-2j * np.pi * f * t))) for k in (1, 2)]
+
+
+@pytest.mark.parametrize('f, lo, hi', [(100.0, 0.0, 0.15), (5.0, 0.95, 1.05)])
+def test_the_cut_removes_vibration_and_passes_the_slow_force(f, lo, hi):
+    rows = run_cut(cut_rack(), lambda t: 0.2 + 0.1 * math.sin(2 * math.pi * f * t), 2.0, [0.001])
+    filtered, raw = amp(rows, f)
+    assert lo <= filtered / raw <= hi
+
+
+def test_a_step_through_the_cut_does_not_overshoot():
+    rack = cut_rack()
+    rack.set_level(0.0, level_for(0.1), 100.0)
+    rows = run_cut(rack, lambda t: 0.1 if t < 0.05 else 0.4, 0.4, [0.001])
+    start, end = abs(rows[0][2]), abs(rows[-1][2])
+    assert max(abs(r[1]) for r in rows) - end < 0.1 * (end - start) and abs(abs(rows[-1][1]) - end) < 0.01 * end
+
+
+def test_irregular_steps_are_stable():
+    rack = cut_rack()
+    rows = run_cut(rack, lambda t: 0.3, 3.0, [0.0004, 0.0031, 0.0009, 0.02, 0.0013, 0.09])
+    assert all(math.isfinite(r[1]) and abs(r[1] - r[2]) < 1e-6 for r in rows)
+    rows = run_cut(cut_rack(), lambda t: 0.3 + 0.2 * (random.Random(int(t * 1e4)).random() - 0.5), 3.0, [0.0004, 0.0031, 0.0009, 0.02, 0.0013, 0.09])
+    assert max(abs(r[1]) for r in rows) < 1.2 * max(abs(r[2]) for r in rows)
+
+
+def test_a_restart_or_a_gap_does_not_step():
+    rack = cut_rack()
+    for i in range(50):
+        rack.set_level(i * 0.001, level_for(0.3), 100.0)
+    rack.set_level(0.05 + 0.3, level_for(0.6), 100.0)               # a gap over 0.1 s
+    assert rack.column == pytest.approx(rack.column_raw)
+    for i in range(1, 5):
+        rack.set_level(0.35 + i * 0.001, level_for(0.6), 100.0)
+    rack.restart_sign()                                              # a new stream
+    rack.set_level(0.36, level_for(-0.2), 100.0)
+    assert rack.column == pytest.approx(rack.column_raw) and rack.column > 0
+
+
+def test_the_cut_off_passes_the_column_unchanged():
+    for cut in (None, fe.RBR_CUT_OFF):
+        rack = cut_rack(cut)
+        rows = run_cut(rack, lambda t: 0.2 + 0.1 * math.sin(2 * math.pi * 100 * t), 0.2, [0.001])
+        assert all(r[1] == r[2] for r in rows)
+
+
+def test_the_cut_setting_reaches_the_rack_and_the_snapshot(tmp_path):
+    engine, path = engine_on(tmp_path)
+    assert engine.rbr_rack.cut_hz == 30.0
+    engine.set_rbr_cut(60)
+    engine.step(0.01)
+    assert engine.rbr_rack.cut_hz == 60.0 and engine.settings_snapshot()['profile']['rbr_cut_hz'] == 60.0
+    engine.set_rbr_cut(120)
+    engine.step(0.02)
+    assert engine.rbr_rack.cut_hz is None and engine.settings_snapshot()['profile']['rbr_cut_hz'] is None

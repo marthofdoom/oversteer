@@ -21,7 +21,7 @@ import os
 import threading
 
 from . import wheel_torque
-from .model import Model, STRENGTH_MIN, STRENGTH_MAX, KNEE_MIN, KNEE_MAX
+from .model import Model, STRENGTH_MIN, STRENGTH_MAX, KNEE_MIN, KNEE_MAX, RBR_CUT_MIN, RBR_CUT_MAX
 
 PEDALS = Model.PEDAL_RESPONSES
 RANGE_PRESETS = (270, 360, 540, 720, 900)
@@ -33,6 +33,7 @@ ACTIONS = ('reset_ffb', 'load_profile', 'save_profile', 'try_effect', 'calibrate
 EFFECTS = ('constant', 'spring', 'damper', 'friction', 'rumble')
 # Countersteer FFB (its own tab): number settings and the range the GTK scale has; the texture parts are switches
 COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, STRENGTH_MAX), 'countersteer_knee': (KNEE_MIN, KNEE_MAX),
+                        'countersteer_rbr_cut': (RBR_CUT_MIN, RBR_CUT_MAX),
                         'countersteer_column_damping': (0, 100),
                         'countersteer_rim_mm': wheel_torque.RIM_RANGE, 'countersteer_car_wheel_mm': wheel_torque.CAR_WHEEL_RANGE,
                         'countersteer_drive_pull_level': (0, 100), 'countersteer_kick_level': (0, 100),
