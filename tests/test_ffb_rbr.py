@@ -897,6 +897,21 @@ def test_the_confirmed_strength_is_kept_and_starts_the_next_session(caplog):
     assert 0.5 <= second.s_applied < 1.0                       # (back to the light prior on the first impossible level, then down to it)
 
 
+def test_the_kept_strength_beats_the_fit_until_a_plateau_or_a_raised_level():
+    from oversteer import ffb_rbr
+    f = ffb_rbr.RbrForce()
+    f.s_kept, f.s_applied, f.s_plateau = 0.25, 0.25, None
+    f.fit.converged, f.fit.plausible, f.fit.s = True, True, 0.30      # a fit that says 0.30 does not override the kept 0.25
+    assert f.target_s() == 0.25
+    f.s_plateau = 0.4                                                  # a clipped top comes first
+    assert f.target_s() == 0.4
+    f.s_plateau, f.s_kept = None, None                                 # nothing kept: the fit
+    assert f.target_s() == 0.30
+    f.s_kept, f.peak = 0.25, int(0.5 * ffb_rbr.FULL)                   # a level over the kept top: dropped, the fit takes over
+    f.feed_physics(1.0, None, 0)
+    assert f.s_kept is None and f.target_s() == 0.30
+
+
 def test_a_level_over_the_kept_strength_drops_it_at_once():
     from oversteer import ffb_rbr
     f = ffb_rbr.RbrForce()
@@ -1229,6 +1244,16 @@ def test_the_caster_setting_reaches_the_rack_and_the_snapshot(tmp_path):
     engine.set_caster_floor(40)
     engine.step(0.01)
     assert engine.rbr_rack.floor_level == pytest.approx(0.4) and engine.settings_snapshot()['profile']['caster_floor'] == 40.0
+
+
+def test_the_engine_feel_setting_reaches_the_hum_and_the_snapshot(tmp_path):
+    engine, path = engine_on(tmp_path)
+    engine.set_engine_feel(150)
+    engine.step(0.01)
+    assert engine.texture.engine.feel == pytest.approx(1.5) and engine.settings_snapshot()['profile']['engine_feel'] == 150.0
+    engine.set_engine_feel(900)                                        # clamped to 300 %
+    engine.step(0.02)
+    assert engine.texture.engine.feel == pytest.approx(3.0)
 
 
 def test_a_big_slide_fades_the_floor_as_acr_does():
