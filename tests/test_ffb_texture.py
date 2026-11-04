@@ -507,14 +507,14 @@ def test_engine_frequency_follows_the_firing_rate():
     assert e.frequency(revving(1800.0, cylinders=0)) == pytest.approx(60.0)   # unknown: the default
     assert e.frequency(revving(None)) is None and e.frequency(revving(float('nan'))) is None
     # Above what the wheel renders it folds down by octaves
-    assert e.render_frequency(60.0) == 60.0 and e.render_frequency(200.0) == 100.0
-    assert e.render_frequency(240.0) == 60.0
+    assert e.render_frequency(40.0) == 40.0 and e.render_frequency(200.0) == 50.0
+    assert e.render_frequency(240.0) == 30.0
 
 
 def test_engine_is_rev_aware_in_pitch_and_amplitude():
     idle, _ = hum(revving(900.0, throttle=0.0), 1.5)
-    mid, _ = hum(revving(2400.0, throttle=0.0), 1.5)
-    assert dominant_hz(idle[-333:]) == 30 and dominant_hz(mid[-333:]) == 80
+    mid, _ = hum(revving(1200.0, throttle=0.0), 1.5)
+    assert dominant_hz(idle[-333:]) == 30 and dominant_hz(mid[-333:]) == 40
     peak = lambda v: max(abs(x) for x in v[-333:])
     top_open, _ = hum(revving(900.0, throttle=1.0), 1.5)
     top_shut, _ = hum(revving(900.0, throttle=0.0), 1.5)
