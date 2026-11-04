@@ -152,6 +152,7 @@ STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied insi
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
 OVERALL_RBR_CUT = 30                     # "RBR force cut" default (Hz): the low-pass corner on RBR's column torque
 RBR_CUT_OFF = 120                        # ... and the top of its range: no filter
+OVERALL_ENGINE_FEEL = 300                # "Engine feel" default (profile key countersteer_engine_feel, %): the engine hum as a share of ffb_texture's EngineHum.CAP, 0 = off
 OVERALL_CASTER_FLOOR = 100               # "Caster in slides" default (profile key countersteer_caster_floor, %): 0 = off
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
@@ -2322,6 +2323,7 @@ class FfbEngine:
         self._strength = OVERALL_STRENGTH   # ... as applied to ACR's, RBR's and BeamNG's own force
         self._knee_req = None            # the "1:1 up to" share (%) from the GUI
         self._rbr_cut_req = None         # the "RBR force cut" corner (Hz) from the GUI
+        self._engine_feel_req = None     # the "Engine feel" share (%) from the GUI
         self._caster_req = None          # the "Caster in slides" share (%) from the GUI
         self._mapping_req = None         # the steering mapping ('classic' or 'knee') from the GUI
         self._pull_req = None            # "Drive pull": (on, level %) from the GUI
@@ -2533,6 +2535,11 @@ class FfbEngine:
         self._caster_req = min(max(float(value), 0.0), 100.0)
         self._wake.set()
 
+    def set_engine_feel(self, value):
+        """The "Engine feel": the engine hum's strength in % of its base level (0..300; 0 is off)."""
+        self._engine_feel_req = min(max(float(value), 0.0), 300.0)
+        self._wake.set()
+
     def set_mapping(self, value):
         """The steering mapping (profile INI only): 'knee' (1:1 in Nm up to the knee, compressed above, hydraulic top
         end) or 'classic' (the uniform impedance scale, the feel before the knee)."""
@@ -2617,6 +2624,7 @@ class FfbEngine:
         profile = {
             'strength': round(self._strength * 100.0, 3), 'knee': round(model.knee * 100.0, 3), 'mapping': model.mapping,
             'rbr_cut_hz': self.rbr_rack.cut_hz, 'caster_floor': round(self.rbr_rack.floor_level * 100.0, 3),
+            'engine_feel': round(self.texture.engine.feel * 100.0, 3),
             'column_damping': model.damping_pct, 'drive_pull': [bool(model.pull_on), round(model.pull_level * 100.0, 3)],
             'kick': [bool(model.kick_on), round(model.kick_level * 100.0, 3)],
             'gear_guard': [self._gear_on, round(self._gear_level, 3)], 'gear_flip': self._gear_flip, 'wheel_drive': self._gear_drive, 'rim_mm': model.rim_user,
@@ -2873,6 +2881,8 @@ class FfbEngine:
             self.rbr_rack.cut_hz = None if cut >= RBR_CUT_OFF else float(max(cut, 1))
         if self._caster_req is not None:
             self.rbr_rack.floor_level = self._caster_req / 100.0
+        if self._engine_feel_req is not None:
+            self.texture.engine.feel = self._engine_feel_req / 100.0
         if self._mapping_req is not None:
             for rack in (self.model, self.rbr_rack, self.forza_rack):
                 rack.mapping = self._mapping_req

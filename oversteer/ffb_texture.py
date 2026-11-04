@@ -560,9 +560,11 @@ class EngineHum:
     REV_FLOOR = 0.35
     LOAD_FLOOR = 0.6
     AMP_TAU = 0.15                       # s
+    FEEL_MAX = 3.0                       # the owner's "Engine feel" (1.0 = CAP as above), at most this
 
     def __init__(self):
         self.reset()
+        self.feel = 1.0                  # the owner's "Engine feel" as a factor of CAP (0 = off); the Texture total limiter still caps the sum
         self.freq = 0.0                  # Hz as rendered (tests, the log)
 
     def reset(self):
@@ -611,7 +613,7 @@ class EngineHum:
         if hz is not None:
             self.freq = self.render_frequency(hz)
         self._phase = (self._phase + 2.0 * math.pi * self.freq * dt) % (2.0 * math.pi)
-        return self.CAP * FULL * self._amp * math.sin(self._phase)
+        return self.CAP * self.feel * FULL * self._amp * math.sin(self._phase)
 
 
 class Texture:

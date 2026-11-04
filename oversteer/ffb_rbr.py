@@ -562,12 +562,15 @@ class RbrForce:
         return self.full / FULL
 
     def target_s(self):
-        """The STRENGTH the evidence shows: a clipped top, else the fit once it left 1, else the conservative prior 1."""
+        """The STRENGTH the evidence shows: a clipped top, else the kept value (dropped once a level over its top shows
+        the menus were raised), else the fit once it left 1, else the conservative prior 1."""
         if self.s_plateau is not None:
             return self.s_plateau
-        if self.fit.converged and self.fit.plausible and (self.fit.s != 1.0 or self.s_kept is None):
+        if self.s_kept is not None:
+            return self.s_kept
+        if self.fit.converged and self.fit.plausible and self.fit.s != 1.0:
             return self.fit.s
-        return self.s_kept or 1.0
+        return 1.0
 
     def feed_physics(self, t, sample, level):
         """A telemetry sample with the raw level now: the strength fit (StrengthFit), and the applied strength gliding

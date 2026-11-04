@@ -523,6 +523,19 @@ def test_engine_is_rev_aware_in_pitch_and_amplitude():
     assert peak(top_open) <= ft.EngineHum.CAP * FULL + 1
 
 
+def test_engine_feel_scales_the_hum_and_zero_is_off_within_the_total_cap():
+    peak = lambda v: max(abs(x) for x in v[-333:])
+    base, _ = hum(revving(900.0, throttle=1.0), 1.5)
+    tx = texture(1.0, engine=True)
+    tx.engine.feel = 3.0
+    loud = drive(tx, [revving(900.0, throttle=1.0)] * int(1.5 * HZ), steering=8000.0)
+    assert peak(loud) == pytest.approx(3.0 * peak(base), rel=0.05) and tx.peak <= ft.TOTAL_CAP * FULL + 1
+    tx = texture(1.0, engine=True)
+    tx.engine.feel = 0.0
+    off = drive(tx, [revving(900.0, throttle=1.0)] * int(1.5 * HZ), steering=8000.0)
+    assert peak(off) == 0.0
+
+
 def test_engine_is_zero_mean_and_stays_in_the_texture_headroom():
     values, tx = hum(revving(1500.0), 3.0)
     assert abs(sum(values[-666:]) / 666.0) < 0.02 * max(abs(v) for v in values)

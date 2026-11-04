@@ -1230,6 +1230,8 @@ class GtkUi:
                                  "50 % by default. Saved with the profile.")
     COUNTERSTEER_RBR_CUT_TOOLTIP = ("RBR's own force is used below this frequency; faster vibration comes from the Texture "
                                     "settings instead.")
+    COUNTERSTEER_ENGINE_FEEL_TOOLTIP = ("How strongly the engine's revs come through the wheel. Over 100 % is stronger than today's level; "
+                                        "turn it down if the gears get noisy.")
     COUNTERSTEER_CASTER_TOOLTIP = ("How much of the mechanical caster's force stays in a slide. 100 % is physically correct, 0 is off.")
     COUNTERSTEER_DAMPING_TOOLTIP = ("Resistance to turning the wheel quickly, added to what the wheel already has. Lower "
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
@@ -1359,6 +1361,13 @@ class GtkUi:
         self.countersteer_caster_floor = caster
         self._dependent_rows.append(self._setting_row(
             _("Caster in slides"), None, _(self.COUNTERSTEER_CASTER_TOOLTIP), (self._response_row(caster),)))
+        steering.add(self._dependent_rows[-1])
+        feel = self._response_scale(0, 300, 10)
+        feel.set_size_request(160, -1)
+        feel.connect('value-changed', lambda w: self.controller.model.set_countersteer_engine_feel(int(w.get_value())))
+        self.countersteer_engine_feel = feel
+        self._dependent_rows.append(self._setting_row(
+            _("Engine feel"), None, _(self.COUNTERSTEER_ENGINE_FEEL_TOOLTIP), (self._response_row(feel),)))
         steering.add(self._dependent_rows[-1])
         rim = Gtk.SpinButton.new_with_range(*wheel_torque.RIM_RANGE, 1)
         rim.set_value(wheel_torque.DEFAULT_RIM_MM)
@@ -1520,6 +1529,13 @@ class GtkUi:
             return
         if int(self.countersteer_caster_floor.get_value()) != int(value):
             self.countersteer_caster_floor.set_value(int(value))
+
+    def set_countersteer_engine_feel(self, value):
+        """The "Engine feel" share, 0..300 (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_engine_feel') or value is None:
+            return
+        if int(self.countersteer_engine_feel.get_value()) != int(value):
+            self.countersteer_engine_feel.set_value(int(value))
 
     updating_countersteer_rim = False
 
