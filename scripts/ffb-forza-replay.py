@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replay a Forza Horizon capture through ForzaRack (oversteer/ffb_engine.py, ffb_forza.py), as numbers.
 
-    scripts/ffb-forza-replay.py FILE.ovcap.gz [--rim 279] [--peak 2.1]
+    scripts/ffb-forza-replay.py FILE.ovcap.gz [--rim 279] [--peak 3.5]
 
 Pass 1 feeds each car's samples (in capture order) to a ForzaRack: the mass learner runs, the learnt mass per car is
 printed. Pass 2 replays with that mass as the stored one and reports the rim torque (Nm at the wheel's rim, the
@@ -49,7 +49,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('capture')
     ap.add_argument('--rim', type=float, default=279.0)
-    ap.add_argument('--peak', type=float, default=2.1)
+    ap.add_argument('--peak', type=float, default=3.5)
     args = ap.parse_args()
     items = load(args.capture)
     cars = collections.OrderedDict()

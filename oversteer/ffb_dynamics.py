@@ -84,7 +84,7 @@ def wheel_text(values):
 
 def column_targets(scale, peak_nm, own=DEFAULT_WHEEL, removal=False, damping_scale=None):
     """(ffb_dyn_damping, ffb_dyn_friction) for a car on a wheel: the car's column values at the rim times the
-    impedance scale s (the damping times `damping_scale` where given: 1 plays it 1:1 like the torque), as shares of the wheel's peak torque (None: the 2.1 Nm class), in the driver's units. They are
+    impedance scale s (the damping times `damping_scale` where given: 1 plays it 1:1 like the torque), as shares of the wheel's peak torque (None: the 3.5 Nm class), in the driver's units. They are
     the column's TOTAL, the wheel's own included. The driver renders target - own: below the wheel's own it takes friction out (the
     wheel lighter than the column: opt-in, `removal`), so friction is held at the wheel's own without it. Damping is
     not floored: the driver limits what it removes (half the wheel's own) by its passivity budget."""

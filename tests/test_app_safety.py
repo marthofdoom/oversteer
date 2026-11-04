@@ -123,7 +123,7 @@ def test_a_reversing_car_is_bounded_not_faded():
     rack = fe.RackForce()
     rack.reset('acr/a')
     rack.assist = 0.0
-    rack.wheel_peak = 2.1
+    rack.wheel_peak = 3.5
     big = 2000.0
     assert rack.force(front_sample(big, vel=(10.0, 0.0, 0.0))) == pytest.approx(fe.FULL * 0.75, rel=0.01)
     back = rack.force(front_sample(big, vel=(-4.0, 0.0, 0.0)))

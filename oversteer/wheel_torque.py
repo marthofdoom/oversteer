@@ -3,14 +3,15 @@ physical target in ffb_engine.RackForce: the driver's torque at the rim of a rea
 KNEE share of the wheel's peak and compressed above it (rim_share), so the car's top torque lands at STEER_BUDGET.
 
 Only a wheel on the new-lg4ff driver takes ext_force, so only those are `usable`; the rest are listed for later.
-A wheel not here (or not usable) gets None, and the target then assumes the 2.1 Nm class (DEFAULT_PEAK_NM: the
+A wheel not here (or not usable) gets None, and the target then assumes the 3.5 Nm class (DEFAULT_PEAK_NM: the
 G29 and its kin, the wheels Countersteer FFB is built and tested on). The figures are the makers' peak torque, rounded; the Logitech belt and gear
 wheels peak lower than their sheets for long (the thermal limit is the driver's own)."""
 import math
 
 from . import wheel_ids as wid
 
-DEFAULT_PEAK_NM = 2.1                    # an unknown wheel is taken to peak like a G29
+DEFAULT_PEAK_NM = 3.5                    # an unknown wheel is taken to peak like a G29
+G29_CLASS_MAX_NM = 4.0                   # a wheel peaking at most this is the G29 class (frozen column scale; the makers' 2.5 Nm G27 too)
 STEER_BUDGET = 0.75                      # share of full scale the steering torque may reach; the other 25 % stay free
                                          # for texture and impacts (ffb_texture fits in FULL - |steering force|)
 P99_TARGET = 0.70                        # share of full scale the car's p99 driver torque was scaled to land at (impedance_scale)
@@ -31,12 +32,15 @@ def __getattr__(name):
         return ffb_carprops.hyd_top()
     raise AttributeError(name)
 
-# usb id: (peak torque Nm, usable)
+# usb id: (peak torque Nm, usable). The G29, G920 and G923 share the motors: 3.5 Nm, the usable figure. Measured on marth's
+# G29 with hanging weights on the 0.1395 m rim: 2.06 kg lifted 2 inches at about 0.90 of full force, 2.96 kg right at the
+# limit at 1.00, 3.85 kg not lifted: the limit is about 4.0 Nm (motor minus friction), not the makers' 2.1. The top end is
+# nonlinear (0.90 to 1.00 adds about 1.3 Nm), so a single figure is an approximation; the calculations use 3.5.
 PEAK_NM = {
-    wid.LG_G29: (2.1, True),
-    wid.LG_G920: (2.2, True),
-    wid.LG_G923P: (2.2, True),
-    wid.LG_G923X: (2.2, True),
+    wid.LG_G29: (3.5, True),
+    wid.LG_G920: (3.5, True),
+    wid.LG_G923P: (3.5, True),
+    wid.LG_G923X: (3.5, True),
     wid.LG_G27: (2.5, True),
     wid.LG_G25: (2.5, True),
     wid.LG_DFGT: (2.0, True),
