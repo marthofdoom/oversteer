@@ -88,6 +88,7 @@ class Model:
         'countersteer_rim_mm': None,
         'countersteer_car_wheel_mm': None,
         'countersteer_power_class': None,
+        'rbr_auto_range': None,
         'countersteer_texture': None,
         'countersteer_texture_road': None,
         'countersteer_texture_impact': None,
@@ -148,6 +149,7 @@ class Model:
         'countersteer_rim_mm': 'integer',
         'countersteer_car_wheel_mm': 'integer',
         'countersteer_power_class': 'string',
+        'rbr_auto_range': 'boolean',
         'countersteer_texture': 'integer',
         'countersteer_texture_road': 'boolean',
         'countersteer_texture_impact': 'boolean',
@@ -815,6 +817,11 @@ class Model:
     def get_countersteer_power_class(self):
         value = str(self.data.get('countersteer_power_class') or '').strip().lower()
         return value if value in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
+
+    def get_rbr_auto_range(self):
+        """Richard Burns Rally's car sets the wheel's range to its real steering lock (profile INI only, default on)."""
+        value = self.data.get('rbr_auto_range')
+        return True if value is None else bool(value)
 
     def set_countersteer_car_wheel_mm(self, value):
         """The car's steering wheel diameter in mm, 280..420: the hand-force scale is the

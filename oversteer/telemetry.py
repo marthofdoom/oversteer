@@ -398,7 +398,8 @@ class Telemetry:
     the lock."""
 
     def __init__(self, leds, port=DEFAULT_PORT, shift=DEFAULT_SHIFT, shift_rpm=None, on_status=None,
-                 launch=False, inputs=None, on_limiter=None, learner=None, use_learnt=False, rbr_car=None):
+                 launch=False, inputs=None, on_limiter=None, learner=None, use_learnt=False, rbr_car=None,
+                 on_rbr_car=None):
         """`port` is a UDP port, or AUTO.
         `shift` is the shift point as a fraction of the game's max RPM;
         `shift_rpm`, when given, is an absolute shift point instead. With
@@ -431,6 +432,8 @@ class Telemetry:
         self.set_shift(shift, shift_rpm, launch)
         self.inputs = inputs
         self.on_limiter = on_limiter
+        self.on_rbr_car = on_rbr_car      # (car key, name, provisional) whenever Richard Burns Rally's car changes (the GUI's range)
+        self._rbr_told = None
         self.learner = learner
         self.use_learnt = use_learnt
         self.rbr_car = rbr_car            # a replay: the Richard Burns Rally car the capture's header recorded (never set live)
@@ -1081,6 +1084,13 @@ class Telemetry:
                 if self._learner_error_at is None or now - self._learner_error_at >= LEARNER_ERROR_EVERY:
                     self._learner_error_at = now
                     logging.exception("rbr car recognition")
+            told = (sample.car, sample.car_name, sample.car_provisional)
+            if self.on_rbr_car is not None and told != self._rbr_told:
+                self._rbr_told = told
+                try:
+                    self.on_rbr_car(*told)
+                except Exception:
+                    logging.exception("rbr car callback")
             if relayed:
                 # The engine process decodes RBR's packets itself: the car told here goes to it
                 car = (sample.car, sample.car_name, sample.car_epoch, sample.car_provisional)

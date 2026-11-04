@@ -705,3 +705,80 @@ def test_an_adoption_whose_merge_was_not_committed_is_done_again_at_the_start(ta
     assert db.execute("SELECT COUNT(*) FROM sessions s JOIN cars c ON c.id = s.car WHERE c.key = 'rbr/104'"
                       ).fetchone()[0] == 1
     db.close()
+
+
+# -- the wheel's range from the car's steering lock --
+
+def locked(name, lock, gears=WRC):
+    return dict(entry(name, gears), steering_wheel_lock_deg=lock)
+
+
+def test_steering_range_is_twice_the_cars_lock_and_the_median_of_a_sets(table):
+    table.set({'rbr/11': locked('11', 270.0), 'rbr/104': locked('104', 270.0), 'rbr/106': locked('106', 214.2),
+               'rbr/7': locked('7', 300.0), 'rbr/9': entry('9', WRC)})
+    assert fp.steering_range('rbr/11') == (540, True)
+    assert fp.steering_range('rbr/106@5') == (428, True)                    # 0.595 turn
+    assert fp.steering_range('rbr/11+104@6') == (540, True)                 # candidates sharing one lock
+    assert fp.steering_range('rbr/11+106@6') == (484, False)                # they differ: the median
+    assert fp.steering_range('rbr/11+106+7@6') == (540, False)
+    assert fp.steering_range('rbr/9') == (None, True)                       # no lock in the table
+    assert fp.steering_range('rbr/unknown') == (None, True)
+    assert fp.steering_range('rbr/g3') == (None, True)
+    assert fp.steering_range('acr/Skoda') == (None, True)
+
+
+def test_the_shipped_rbr_cars_all_carry_their_steering_lock():
+    cars = [c for k, c in car_data.cars().items() if k.startswith('rbr/')]
+    assert cars and all(c.get('steering_wheel_lock_deg') for c in cars)
+
+
+def test_telemetry_tells_the_car_once_it_is_known(table, tmp_path):
+    table.set({'rbr/11': locked('11', 270.0)})
+    learner, telemetry = learner_drive(tmp_path)
+    told = []
+    telemetry.on_rbr_car = lambda *a: told.append(a)
+    drive = Drive(slot=5)
+    feed(telemetry, drive, drive.through([2, 3], 1.5))
+    feed(telemetry, drive, drive.through([4, 5, 4], 1.5))
+    assert told[0][0] == 'rbr/unknown' and told[-1][0] == 'rbr/11' and len({a[0] for a in told}) == 2
+    assert len(told) == len(set(told))                                      # only on a change
+    learner.close()
+
+
+class RangeGui:
+    """What Gui.apply_rbr_auto_range reads."""
+
+    def __init__(self, auto=True, max_range=900):
+        self.writes = []
+        self._rbr_range = None
+        self.device = type('Dev', (), {'get_max_range': lambda s: max_range,
+                                       'set_range': lambda s, v: self.writes.append(v) or True})()
+        self.model = type('Model', (), {'get_rbr_auto_range': lambda s: auto})()
+
+
+def test_the_range_is_set_when_the_car_is_identified(table, caplog):
+    from oversteer.gui import Gui
+    table.set({'rbr/11': locked('11', 270.0), 'rbr/104': locked('104', 270.0), 'rbr/106': locked('106', 214.2)})
+    g = RangeGui()
+    with caplog.at_level('INFO'):
+        assert Gui.apply_rbr_auto_range(g, 'rbr/11', 'Ford Fiesta WRC 2019')
+        assert not Gui.apply_rbr_auto_range(g, 'rbr/11', 'Ford Fiesta WRC 2019')   # already
+        assert not Gui.apply_rbr_auto_range(g, 'rbr/unknown', None)               # nothing to go by: left alone
+        assert Gui.apply_rbr_auto_range(g, 'rbr/106@5', 'Skoda Fabia RS Rally2')
+        assert Gui.apply_rbr_auto_range(g, 'rbr/11+106@6', 'A / B')
+    assert g.writes == [540, 428, 484]
+    assert "RBR Ford Fiesta WRC 2019: wheel range 540\u00b0 (car's steering lock)" in caplog.text
+    assert 'candidates' in caplog.text and 'median' in caplog.text
+
+
+def test_the_range_ini_switch_off_leaves_the_range(table):
+    from oversteer.gui import Gui
+    from oversteer.model import Model
+    table.set({'rbr/11': locked('11', 270.0)})
+    g = RangeGui(auto=False)
+    assert not Gui.apply_rbr_auto_range(g, 'rbr/11', 'x') and g.writes == []
+    model = Model.__new__(Model)
+    model.data = {}
+    assert model.get_rbr_auto_range() is True                               # default on
+    model.data['rbr_auto_range'] = 0
+    assert model.get_rbr_auto_range() is False

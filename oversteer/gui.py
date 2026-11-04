@@ -22,7 +22,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 from .gtk_ui import GtkUi
-from . import beamng_mod, diagnostics, hotkeys
+from . import beamng_mod, diagnostics, hotkeys, rbr_fingerprint
 from . import wheel_calibration as wcal
 from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
@@ -97,6 +97,7 @@ class Gui:
         self.launch_inputs = {'clutch': None, 'throttle': None, 'handbrake': None, 'shift_press': None}
         self.shift_buttons = {}           # evdev key code -> 'gear', 'sequential' or 'paddle'
         self.telemetry_status = lambda: None
+        self._rbr_range = None                  # the range the RBR car last set (apply_rbr_auto_range)
         from .shift_learner import ShiftLearner
         self.shift_learner = ShiftLearner(threaded=True)
         self.shift_learner.rbr_cars.library.writable = True     # the app keeps the RBR cars it meets (rbr_fingerprint)
@@ -950,7 +951,9 @@ class Gui:
             shown['limiter'] = rpm
             self.ui.safe_call(show)
         port = AUTO if self.model.get_rev_leds_port_auto() else (self.model.get_rev_leds_port() or DEFAULT_PORT)
-        self.telemetry = Telemetry(leds, port, on_status=status,
+        def rbr_car(key, name, provisional):
+            self.ui.safe_call(self.apply_rbr_auto_range, key, name)
+        self.telemetry = Telemetry(leds, port, on_status=status, on_rbr_car=rbr_car,
                                    inputs=lambda: self.launch_inputs, on_limiter=limiter,
                                    learner=self.shift_learner, use_learnt=self.model.get_rev_leds_learnt(),
                                    **self._shift_kwargs())
@@ -2634,6 +2637,26 @@ class Gui:
             leds.show_state(state)
         else:
             leds.show_level(fraction)
+
+    def apply_rbr_auto_range(self, key, name=None):
+        """Richard Burns Rally maps the wheel's whole range to the car's full lock: once the car is told (provisional or
+        confirmed), the wheel's range goes to twice the car's steering-wheel lock (rbr_fingerprint.steering_range; the
+        median where a fingerprint's candidates differ). Written to the device only: the profile's range stays and is
+        back with the next profile load or flush. The car's range is kept through the menus and until the next car
+        (a restore at each stage load would write the range twice a stage). Profile INI `rbr_auto_range` = 0 turns it off."""
+        if self.device is None or not self.model.get_rbr_auto_range():
+            return False
+        wrange, agree = rbr_fingerprint.steering_range(key)
+        if wrange is None:
+            return False
+        wrange = max(40, min(wrange, self.device.get_max_range()))
+        if wrange == self._rbr_range:
+            return False
+        if not agree:
+            logging.info("RBR %s: the candidates' steering locks differ, the median is used", name or key)
+        logging.info("RBR %s: wheel range %d\u00b0 (car's steering lock)", name or key, wrange)
+        self._rbr_range = wrange
+        return self.device.set_range(wrange)
 
     def add_range(self, delta):
         max_range = self.device.get_max_range()
