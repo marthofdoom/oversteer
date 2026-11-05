@@ -77,6 +77,13 @@ def g29_driven():
     return sim, cal, result
 
 
+def test_a_push_that_cannot_reach_the_run_up_speed_is_no_hand_on_the_wheel():
+    # (the field G29's push tops out near 310 deg/s when warm, under V_PULSE_RUN: it stopped the run after 141 s)
+    sim = SimWheel(inertia=1 / 17000.0, damping=0.0, drive_damping=0.008, latency=0.012, slew_s=0.012)
+    result = Calibration(sim).run()
+    assert result['a_fs'] > 0
+
+
 def test_a_stored_fit_from_before_the_pathways_never_blocks_a_new_measurement():
     new = {'pathway': 'gear', 'a_fs': 14000.0, 'knots': [0.5], 'curve': [0.8]}
     old = {'a_fs': 17587.0, 'knots': [0.5], 'curve': [0.59]}

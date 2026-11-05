@@ -106,6 +106,10 @@ class Calibration:
     KICK_START_S = 0.200        # a push that moves nothing in this long: held
     KICK_MAX_S = 0.500
     RUNUP_MAX_S = 0.8           # the run-up after the push reaches its speed in this long, or the wheel is held
+    RUNUP_FLAT_S = 0.15         # ...unless its speed has stopped rising for this long: the push's top speed (it falls as
+                                # the motor warms, under V_PULSE_RUN on the field G29) is as good a start as any
+    STOPPED_S = 0.025           # a pulse is over when the wheel has read still this long: reading still for a moment is
+                                # only the reversal passing through zero
     PUSH_STALL_S = 0.5          # a push of the breakaway force and more that turns nothing for this long stops the run...
     RECOVER_STALL_S = 1.5       # ...in this long while centring after a near-lock (nothing else watches it)
     RESTORE_CENTRE_S = 2.0      # centring before the user's smaller range is put back: at most this long
@@ -1040,7 +1044,8 @@ class Calibration:
             # where the wheel would stop if braked now (KICK's acceleration is a floor for the brake)
             return _sign(self.omega) * self.theta + abs(self.omega) * lead + p * p / (2 * self.a_kick) > end
 
-        t_run = self._now()
+        t_run = t_top = self._now()
+        top = d * self.omega
         while True:                                          # run up
             self._tick(d * self.kick)
             p = peak()
@@ -1049,9 +1054,13 @@ class Calibration:
             run = self._now() - t_run
             if d * self.omega < 0.7 * self.V_KICK:
                 raise self._grabbed(_("it stopped during the run-up"))
+            if d * self.omega > top + 2.0:
+                top, t_top = d * self.omega, self._now()
+            elif self._now() - t_top > self.RUNUP_FLAT_S and top >= 1.5 * self.V_KICK:
+                break
             if run > self.RUNUP_MAX_S:
                 raise self._grabbed(_("it did not reach the run-up speed"))
-        t_pulse = self._now()
+        t_pulse = t_moving = self._now()
         # Above SWEEP_MAX the 150 ms pulse limit; at sweep levels up to 400 ms, which is where the slow end of
         # the coast (friction against damping) and the small forces' data come from
         window = self.PULSE_MAX_S - 0.01 if level > self.SWEEP_MAX else self.SWEEP_PULSE_S
@@ -1064,9 +1073,10 @@ class Calibration:
             if elapsed > window or -d * self.omega >= v_end or (elapsed > lead and abs(self.omega) > self.V_STOP) \
                     or too_far(p):
                 break
-            if elapsed > max(0.03, 2 * lead) and abs(self.omega) < 20.0:
-                break                                        # stopped, and the pulse can't turn it back (a strong
-                                                             # wheel reads 0 on its way through, a lead behind)
+            if abs(self.omega) >= 20.0:
+                t_moving = self._now()
+            elif elapsed > 0.03 and self._now() - t_moving > self.STOPPED_S:
+                break                                        # stopped, and the pulse can't turn it back
         if level not in self._pulse_logged:
             self._pulse_logged.add(level)
             self.log.append((self._now(), 'pulse {:.0f}% lasted {:.0f} ms'.format(level * 100, elapsed * 1000)))
