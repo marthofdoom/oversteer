@@ -1485,6 +1485,7 @@ class RbrRack(RackForce):
     # to it the band is .95); 1.0 is not reachable inside 15 ms (a second-order corner of 5.3 Hz would need 42 ms), so a_y takes
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
     DERIVED_RATIO = 13.0                 # the derived torque's ratio for now: the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
+    # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
     DERIVED_AY_HZ = 16.1                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
     # Slip and spring shape, from RBR 20261104-143327 (speed over 10 m/s, _slip bins: median |a_y| 4.0 m/s^2 at .08-.1 rad, 6.1 at
@@ -1492,12 +1493,12 @@ class RbrRack(RackForce):
     # against alpha / (1 + alpha / PK) x the trail share fits best (K 4800 Nm/rad, r .72 per sample: the kinematic slip is noisy)
     # at PK .08 (the NGP shape's ALIGN_PK .04 gives K 7600 at r .68)
     DERIVED_SLIP_PEAK = 0.15             # rad of front slip at which the normalised slip is 1 (Forza's 1.0 is the grip limit)
-    DERIVED_PK = 0.08                    # rad: the saturating shape's knee (ALIGN_PK's role)
+    DERIVED_PK = 0.04                    # rad: the saturating shape's knee (ALIGN_PK's role)
     DERIVED_SPEED = (0.5, 1.0)           # x ALIGN_SPEED: the derived torque fades in over this speed
     DERIVED_UNLOADED = 0.10              # share of the fronts' static load (m b/L g) under which they are in the air ...
     DERIVED_UNLOADED_S = 0.05            # ... and the torque fades out within this long (and back in)
     DERIVED_ALIGN_K0 = 4800.0            # Nm/rad: the derived kingpin torque per _sat shape until learnt
-    DERIVED_SLOPE_MIN = 0.1              # the spring's k keeps this share of the small-signal slope past the derived shape's peak
+    DERIVED_SLOPE_MIN = 0.01              # the spring's k keeps this share of the small-signal slope past the derived shape's peak
 
     @property
     def pull_on(self):
