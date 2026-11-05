@@ -793,3 +793,68 @@ def test_the_profile_key_defaults_to_on_and_goes_to_the_engine():
     engine.set_forza_model(1)
     engine.step(0.0)
     assert engine._mode_of('forza-fh', 0.0) == 'forza-rack'
+
+
+# -- the front slip's lead (SlipLead) and Forza's aligning spring (countersteer_forza_spring)
+
+def _lead_run(lead, fy, slip, seconds, t0=0.0):
+    out = []
+    for n in range(int(seconds * 60)):
+        out.append(lead.step(t0 + n / 60.0, fy(n / 60.0), slip(n / 60.0)))
+    return out
+
+
+def test_the_slip_lead_changes_no_steady_level_and_leads_a_step():
+    lead = fz.SlipLead()
+    # a steady cornering: the same level with the slip held (whatever the learnt gain)
+    out = _lead_run(lead, lambda t: 3000.0, lambda t: -0.5, 20.0)
+    assert out[-1] == pytest.approx(3000.0, rel=1e-6)
+    # Newton's force steps late (0.2 s) after the slip: the output moves with the slip first, and settles at Newton's
+    lead = fz.SlipLead()
+    _lead_run(lead, lambda t: 0.0, lambda t: 0.0, 1.0)
+    out = _lead_run(lead, lambda t: 0.0 if t < 1.2 else 3000.0, lambda t: 0.0 if t < 1.0 else -0.5, 10.0, 1.0)
+    assert out[-1] == pytest.approx(3000.0, rel=1e-3)
+
+
+def test_the_slip_lead_has_the_sign_of_newtons_force_and_none_without_the_slip():
+    lead = fz.SlipLead()
+    for n in range(600):                       # Forza's slip angle is opposite in sign to Newton's Fy_f
+        s = math.sin(2 * math.pi * 0.4 * n / 60.0)
+        lead.step(n / 60.0, 4000.0 * s, -0.4 * s)
+    assert lead.g > 0.0
+    lead.step(10.0, 4000.0, -0.2)
+    jump = lead.step(10.0 + 1 / 60.0, 4000.0, -0.9) - 4000.0
+    assert jump > 0.0                          # more slip the same way: more of Newton's sign
+    # no slip field: plain Newton, whatever it learnt
+    assert lead.step(10.5, 1234.0, None) == 1234.0
+
+
+def test_the_forza_rack_plays_the_leading_fy_and_plain_newton_without_slip():
+    rack = fe.ForzaRack()
+    rack.reset('forza-fh/x')
+    s = fsample(0.0, speed=30.0, ay=6.0)
+    s.car = 'forza-fh/x'
+    rack.feed(0.0, s, None)
+    plain = rack._front(s, rack.trail, 0.0)
+    s2 = fsample(1 / 60.0, speed=30.0, ay=6.0)
+    s2.car = 'forza-fh/x'
+    s2.slip_angle = None
+    rack.feed(1 / 60.0, s2, None)
+    assert rack._front(s2, rack.trail, 0.0) == pytest.approx(plain)
+
+
+def test_the_forza_spring_switch_is_wired_like_rbrs():
+    from oversteer import ffb_process
+    engine = fe.FfbEngine(driver=FakeDriver, beamng_source=None)
+    assert fe.OVERALL_FORZA_SPRING is True and engine.forza_rack.spring_on is True
+    assert Model.types['countersteer_forza_spring'] == 'boolean' and Model._texture_defaults(True)['countersteer_forza_spring'] is True
+    assert 'set_forza_spring' in ffb_process.SETTERS and hasattr(ffb_process.EngineProcess, 'set_forza_spring')
+    engine.set_forza_spring(0)
+    engine.step(0.0)
+    assert engine.forza_rack.spring_on is False and engine.settings_snapshot()['profile']['forza_spring'] is False
+    rack = fe.ForzaRack()
+    rack.spring_on = True
+    rack.ready = True
+    assert rack.align_ready()
+    rack.spring_on = False
+    assert not rack.align_ready()

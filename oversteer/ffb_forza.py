@@ -279,6 +279,57 @@ class MassLearner:
         self.accepted = True
 
 
+class SlipLead:
+    """The fast part of the front lateral force from the fronts' slip. Forza's Newton Fy_f (front_lateral) rises only when the car
+    has answered; the front tyres' normalised slip angle moves with the steering at once. A complementary filter: Newton's
+    force low-passed, plus the slip estimate (the slip through a saturating tyre curve, scaled online to agree with Newton's
+    at low frequency) less its own low-pass: Fy = LP(Fy_N) + g (f(s) - LP(f(s))). Steady, f(s) = LP(f(s)) and the output
+    is Newton's whatever g is (a step in the slip adds no level); without the slip (None), or g not yet known, plain Newton."""
+
+    HZ = 6.0                             # the complement's corner (Hz): below it Newton's level, above it the slip's change
+    FIT_TAU = 4.0                        # s: the gain's regression remembers this long (moving samples)
+    PEAK = 1.0                           # normalised slip angle at the tyre's peak force
+    SHAPE_C = 1.4                        # the curve sin(C atan(B x)), B so that the peak sits at PEAK
+    G_MIN_SXX = 0.02                     # the slip curve's energy needed before g is trusted
+    GAP = 0.1                            # s: a longer pause starts it again
+    SIGN = -1.0                          # Forza's slip angle is positive for a car turned right of its travel: Newton's Fy_f is to the left
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.y1 = self.y2 = self.at = None
+        self.sxx = self.sxy = 0.0
+        self.g = None
+
+    def curve(self, x):
+        b = math.tan(math.pi / (2.0 * self.SHAPE_C)) / self.PEAK
+        return math.sin(self.SHAPE_C * math.atan(b * abs(x))) * math.copysign(1.0, x) * self.SIGN
+
+    def step(self, t, fy, slip):
+        """Fy_f (N) for Newton's `fy` and the fronts' normalised slip angle `slip` (None: not known)."""
+        last, self.at = self.at, t
+        if slip is None or not finite(slip):
+            self.at = None
+            return fy
+        f = self.curve(slip)
+        dt = 0.0 if last is None else t - last
+        if self.y1 is None or dt < 0.0 or dt > self.GAP:
+            self.y1, self.y2 = fy, f
+            return fy
+        a = 1.0 - math.exp(-2.0 * math.pi * self.HZ * dt)
+        self.y1 += a * (fy - self.y1)
+        self.y2 += a * (f - self.y2)
+        decay = math.exp(-dt / self.FIT_TAU)
+        self.sxx = self.sxx * decay + self.y2 * self.y2 * dt
+        self.sxy = self.sxy * decay + self.y2 * self.y1 * dt
+        if self.sxx >= self.G_MIN_SXX:
+            self.g = max(self.sxy / self.sxx, 0.0)
+        if not self.g:
+            return fy
+        return self.y1 + self.g * (f - self.y2)
+
+
 class OutputFilter:
     """Forza's 60/s steps to what the wheel plays (see the module's docstring). `packet(t)` for each telemetry packet
     (its arrival time), `step(t, x)` every engine pass: x the steering force (ext_force units), returns the filtered,

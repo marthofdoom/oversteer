@@ -667,6 +667,7 @@ class Gui:
         self.apply_countersteer_strength()
         self.apply_countersteer_mapping()
         self.apply_countersteer_forza_model()
+        self.apply_countersteer_forza_spring()
         self.apply_countersteer_rbr_spring()
         self.apply_countersteer_rbr_source()
         self.apply_countersteer_knee()
@@ -695,6 +696,10 @@ class Gui:
     def apply_countersteer_forza_model(self):
         """Forza Horizon's force: ours through the chain or the lightened game force (profile INI only) to the engine."""
         self.ffb_engine.set_forza_model(self.model.get_countersteer_forza_model())
+
+    def apply_countersteer_forza_spring(self):
+        """Forza Horizon's aligning spring on or off (profile INI only) to the engine."""
+        self.ffb_engine.set_forza_spring(self.model.get_countersteer_forza_spring())
 
     def apply_countersteer_rbr_spring(self):
         """RBR's aligning spring on or off (profile INI only) to the engine."""
