@@ -1534,7 +1534,7 @@ def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
         run_derived(rack, 0.2, ay=ay)
         entry = fe.car_data.entry(CAR)
         fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0)
-        expect = -(fe.ffb_carprops.RALLY_TRAIL + fz.TP0) * fy / rack.DERIVED_RATIO      # (no slip: the whole pneumatic trail)
+        expect = -(fe.ffb_carprops.RALLY_TRAIL + rack.DERIVED_TP_B * rack.grip_mu ** rack.DERIVED_TP_N) * fy / rack.DERIVED_RATIO      # (no slip: the whole pneumatic trail)
         assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
         assert rack.fy_f == pytest.approx(fy)
     big = derived_rack()
@@ -1564,8 +1564,8 @@ def test_derived_torque_fades_to_zero_at_low_speed():
         run_derived(rack, 0.2, speed=speed)
         out[speed] = rack.derived
     assert out[1.0] == 0.0 and out[2.5] == 0.0
-    assert out[12.0] == pytest.approx(out[5.0]) and out[12.0] < 0.0
-    assert out[12.0] < out[3.75] < 0.0 and out[3.75] == pytest.approx(0.5 * out[12.0])
+    assert out[12.0] == pytest.approx(out[5.0], rel=0.02) and out[12.0] < 0.0
+    assert out[12.0] < out[3.75] < 0.0 and out[3.75] == pytest.approx(0.5 * out[12.0], rel=0.02)
 
 
 def test_derived_torque_fades_out_within_50_ms_when_the_fronts_are_unloaded_and_back_in():
@@ -1577,7 +1577,7 @@ def test_derived_torque_fades_out_within_50_ms_when_the_fronts_are_unloaded_and_
     assert abs(by_t[0.03]) < abs(full) and abs(by_t[0.03]) > 0.0
     assert rows[-1][1] == 0.0 and abs(rows[round(0.055 * 236)][1]) < 1e-9
     rows = run_derived(rack, 0.1, start=0.3)
-    assert rows[-1][1] == pytest.approx(full) and rows[0][1] != rows[-1][1]
+    assert rows[-1][1] == pytest.approx(full, rel=0.02) and rows[0][1] != rows[-1][1]
 
 
 def test_derived_torque_fades_on_stale_or_missing_telemetry_and_does_not_hold():
@@ -1723,3 +1723,17 @@ def test_the_table_frame_comes_with_the_car_even_if_the_car_was_already_set():
     rack.car = CAR
     rack.set_car(CAR)
     assert rack.ratio_known and rack.lock_known
+
+
+def test_the_trail_follows_the_grip_the_car_has_shown_without_being_told_the_surface():
+    rack = fe.RbrRack()
+    rack.reset(None)
+    assert rack.grip_mu == rack.DERIVED_MU0
+    first = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                  # a light corner: the prior holds
+    assert rack.grip_mu == pytest.approx(rack.DERIVED_MU0, abs=0.01)
+    for _ in range(600):
+        high = rack._grip_trail(4800.0, 4000.0, 0.01, 20.0)               # the fronts show 1.2
+    assert rack.grip_mu == pytest.approx(1.2, abs=0.05) and high > first
+    for _ in range(60000):
+        low = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                # long on a loose road
+    assert rack.grip_mu == rack.DERIVED_MU_RANGE[0] and low < first

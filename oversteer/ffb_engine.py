@@ -1486,6 +1486,13 @@ class RbrRack(RackForce):
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
     DERIVED_RATIO = 13.0                 # the derived torque's ratio for now: the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
+    DERIVED_TP_B = 0.035                 # m: the pneumatic trail at no slip at a grip of 1
+    DERIVED_TP_N = 4.0                   # ... and its power of the grip
+    DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
+    DERIVED_MU_RANGE = (0.6, 1.4)
+    DERIVED_MU_RISE = 0.5                # s
+    DERIVED_MU_FALL = 60.0               # s
+    DERIVED_R_TAU = 0.15                 # s: Fy_f / Fz's smoothing
     DERIVED_AY_HZ = 16.1                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
     # Slip and spring shape, from RBR 20261104-143327 (speed over 10 m/s, _slip bins: median |a_y| 4.0 m/s^2 at .08-.1 rad, 6.1 at
@@ -1632,6 +1639,7 @@ class RbrRack(RackForce):
 
     def _restart_floor(self):
         """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
+        self.grip_mu, self._grip_r = self.DERIVED_MU0, 0.0      # (the derived path's grip: a new stream starts from the prior)
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1790,7 +1798,11 @@ class RbrRack(RackForce):
             self.fy_f = min(max(fy, -limit), limit)
             alpha = self._slip(sample)
             s = 0.0 if alpha is None else alpha / self.DERIVED_SLIP_PEAK
-            self.derived_raw = ffb_forza.kingpin(self.fy_f, s, 1.0, ffb_carprops.RALLY_TRAIL) / self.DERIVED_RATIO
+            fz = load[0] + load[1] if load is not None and len(load) > 1 and ffb_forza.finite(load[0]) \
+                and ffb_forza.finite(load[1]) else bl * mass * ffb_forza.G
+            # (light fronts over a crest say nothing about the grip: Fy_f / Fz would read the ceiling)
+            tp = self._grip_trail(abs(self.fy_f), max(fz, 0.5 * bl * mass * ffb_forza.G), dt, speed) / (1.0 + (abs(s) / ffb_forza.TP_S_HALF) ** ffb_forza.TP_N)
+            self.derived_raw = -(ffb_carprops.RALLY_TRAIL + tp) * self.fy_f / self.DERIVED_RATIO
             lo, hi = (self.DERIVED_SPEED[0] * self.ALIGN_SPEED, self.DERIVED_SPEED[1] * self.ALIGN_SPEED)
             self._derived_fade = self._ramp(speed, (lo, hi))
         elif self.derived_raw is None:
@@ -1798,6 +1810,19 @@ class RbrRack(RackForce):
         else:
             self._d_ay = self._d_rd = None               # (the low-passes start again at the next sample)
         self.derived = self.derived_raw * self._derived_fade * self._gate
+
+    def _grip_trail(self, fy, fz, dt, speed):
+        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: DERIVED_TP_B mu^DERIVED_TP_N,
+        mu rising to the highest Fy_f / Fz within about half a second and falling back slowly, from a sane prior for the first
+        corners. Replayed on 20261104-212111 it read 1.14 on tarmac and 0.85 on gravel; a brush tyre's (1 - grip in use) did not
+        separate the surfaces, this does, as ACR's measured trail does (42-44 mm tarmac, 22-27 mm gravel)."""
+        now = fy / fz
+        self._grip_r += min(dt / self.DERIVED_R_TAU, 1.0) * (now - self._grip_r)
+        if ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED:
+            tau = self.DERIVED_MU_RISE if self._grip_r > self.grip_mu else self.DERIVED_MU_FALL
+            self.grip_mu += min(dt / tau, 1.0) * (self._grip_r - self.grip_mu)
+            self.grip_mu = min(max(self.grip_mu, self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
+        return self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N
 
     def _fresh(self):
         """1 while the telemetry is no older than half of ALIGN_FRESH at this force pass, 0 at ALIGN_FRESH (a line between):
