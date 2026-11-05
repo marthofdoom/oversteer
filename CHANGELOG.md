@@ -1,6 +1,51 @@
 # Changelog
 
-## Unreleased
+## 0.18.0-rc1 — 2026-11-05
+
+### Wheel calibration and peak force
+- This is a prerelease. The slip-based force for every game comes later, so the games do not feel alike yet. The comparisons
+  between games used recordings older than this build.
+- **Run the wheel calibration again after installing** on a gear-driven wheel: the old curve read the wheel too weak at low
+  force, so small forces played too strong. An old stored calibration still applies until then, on the new peak, which makes
+  it heavier. A new run replaces it without the "inconsistent" stop.
+- Calibration: a speed term that grows with the force level replaces the single damping figure; pulses run on measured speed
+  and last 57-116 ms at 33 % force and up; a push at its top speed starts the pulse; one odd push no longer stops a run.
+- The G29 class peak is 3.08 Nm (2 litres of water lifted at 0.92 of full force from the outside of the rim), and each wheel
+  has a Peak force box on the FFB tab.
+- Pedals: clutch response presets (road car, soft take-up, rally, race) and a progressive throttle; linear stays the default.
+- Known issue: a 1 kg hanging-weight test suggests the wheel may still give more than the new curve at low force. Under
+  investigation.
+
+### Countersteer FFB, all games
+- The steering force is the car's real wheel torque in Nm, played 1:1 up to a set share (50 % by default) and compressed above
+  it, with a hydraulic top end; the strength setting works inside that mapping.
+- Countersteer FFB no longer depends on the global gain, and runs in its own process so a busy app cannot starve it.
+- Dedicated Countersteer FFB page in the app and the web view, with the live status, steering, texture and game settings.
+- Texture: a very subtle road, landing and front-lock texture.
+- Column damping and a rim-diameter setting so the hand force matches the car's wheel.
+- Countersteer holds through short game hitches instead of handing back, and hands back and takes over with matched levels.
+- Kickback is one-directional and off by default; Drive pull (default off) replaces the old reversing kickback.
+- "Record for FFB tuning" captures full-rate drives; `scripts/ffb-parity.py` and `scripts/ffb-benchmark.py` compare them with a
+  reference.
+
+### Assetto Corsa Rally
+- The force is the car's rim torque: front aligning torque plus the caster trail and scrub couple, learnt per car, through
+  a power-assist boost curve.
+- The aligning spring runs from the learnt lock and ratio, and a soft stop plays at the game's measured steering lock.
+
+### Richard Burns Rally
+- RBR plays through the same chain as Assetto Corsa Rally, its force derived from physics telemetry by default (the game's own
+  force through the INI key `countersteer_rbr_source = ngp`), and it takes over within seconds.
+- The wheel range follows the identified car's real lock-to-lock, and the aligning spring, Caster in slides and the
+  strength fit are set from the car table.
+
+### Forza Horizon
+- Forza Horizon plays Countersteer's own force through the same chain, with its own texture and kick; before, an add-on
+  lightened the game's force as the front tyres passed their grip.
+
+### BeamNG
+- Countersteer FFB for BeamNG through a vehicle extension (installed with one click) that streams the rack force and per-wheel
+  load and slip.
 
 ### Countersteer FFB
 - Gear guard: new-lg4ff's gear-crossing stage (`ffb_gear_cross`) in place of the guard in the engine: it runs on the driver's final

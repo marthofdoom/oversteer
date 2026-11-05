@@ -220,7 +220,9 @@ def test_texture_is_zero_mean_subtle_and_acr_only():
     assert st['peak_share'] <= ft.TOTAL_CAP * ft.LEVEL + 1e-6
     assert st['impacts'] >= 5
     _out, st0 = R.texture_synthetic(steering_force=0.0)
-    assert st0['peak_share'] <= ft.FLOOR * ft.LEVEL + 1e-6
+    # the limiter holds the road/impact/lock sum to the floor; the engine hum is outside it (gain 1 when the part is on,
+    # feel 1.0 as texture_synthetic runs it), so its own largest swing, CAP, adds at the same level
+    assert st0['peak_share'] <= (ft.FLOOR + ft.EngineHum.CAP) * ft.LEVEL + 1e-6
     off, _st_other = R.texture_synthetic(seconds=5.0, game='acc')
     assert not np.any(off)
     # no pull with the steering force: its sign does not bias the texture

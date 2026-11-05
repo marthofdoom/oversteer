@@ -53,6 +53,7 @@ SG_HALVES_SLOW = (8, 12, 20, 30)     # ...and these when that leaves the curve u
                                      # the longer windows
 # Command levels the speed term is solved at (all free, the one at 0 too: a wheel with constant damping must fit)
 SPEED_KNOTS = (0.0, 0.06, 0.10, 0.13, 0.16, 0.20, 0.30, 0.40, 0.60, 0.80, 1.0)
+MIN_DAMPING = 1e-6            # full scale per deg/s: the damping reported when the speed term can't be told from noise
 DAMPING_LEVELS = (0.13, 0.40)  # the single damping figure is the median of the speed term over these levels
 MOVING_DEG_S = 8.0           # slower than this the wheel counts as stuck (static friction, not the sliding model)
 STUCK_MS = 8                 # ...when it stays so this long; a window holding such a stretch is not used
@@ -557,12 +558,10 @@ def analyse(rec, knots=KNOTS):
                        " was it touched?".format(fit['r2'], uncertainty * 100))
     damping = fit['damping']
     if not damping > 0:
-        # ffb_dynamics.wheel_values needs damping > 0: the largest positive value of the speed term there
+        # ffb_dynamics.wheel_values needs damping > 0, and a speed term lost in the noise is no reason to refuse a good
+        # curve (a heavy wheel's): the largest positive value of it there, or the smallest figure the driver takes
         mid = [v for k, v in zip(SPEED_KNOTS, fit['speed_term']) if DAMPING_LEVELS[0] - 1e-9 <= k <= DAMPING_LEVELS[1] + 1e-9]
-        positive = [v for v in mid if v > 0]
-        if not positive:
-            raise FitError("the wheel's speed term did not come out positive")
-        damping = max(positive)
+        damping = max([v for v in mid if v > 0], default=MIN_DAMPING * a_fs)
     d = dead_zone(knots, r)
     if d > MAX_DEAD_ZONE:
         raise FitError("the motor seemed to give nothing below {:.0f} % (more than {:.0f} % is not plausible)"

@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from oversteer import ffb_carprops as cp, ffb_engine as fe, wheel_owner
+from oversteer import ffb_carprops as cp, ffb_engine as fe, wheel_owner, wheel_torque
 from oversteer.test import Test
 from oversteer.telemetry_formats import Sample
 from tests.test_ffb_engine import _clean_log, FakeDriver, active, forces, levels, run, HZ, acr, upload, game_raw
@@ -125,9 +125,9 @@ def test_a_reversing_car_is_bounded_not_faded():
     rack.assist = 0.0
     rack.wheel_peak = 3.5
     big = 2000.0
-    assert rack.force(front_sample(big, vel=(10.0, 0.0, 0.0))) == pytest.approx(fe.FULL * 0.75, rel=0.01)
+    assert rack.force(front_sample(big, vel=(10.0, 0.0, 0.0))) == pytest.approx(fe.FULL * wheel_torque.TOP, rel=0.01)
     back = rack.force(front_sample(big, vel=(-4.0, 0.0, 0.0)))
-    assert back == pytest.approx(fe.FULL * min(fe.REVERSE_MAX, 0.75), rel=0.01)
+    assert back == pytest.approx(fe.FULL * min(fe.REVERSE_MAX, wheel_torque.TOP), rel=0.01)
     assert rack.force(front_sample(-big, vel=(-4.0, 0.0, 0.0))) == pytest.approx(-back)
     small = rack.force(front_sample(8.0, vel=(-4.0, 0.0, 0.0)))
     assert small == pytest.approx(rack.force(front_sample(8.0, vel=(4.0, 0.0, 0.0))))     # a modest force is unfaded

@@ -58,6 +58,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.18.0-rc1" date="2026-11-05" type="development">
+      <description>
+        <ul>
+          <li>Prerelease: Countersteer FFB for Assetto Corsa Rally, Richard Burns Rally, Forza Horizon and BeamNG, a reworked wheel calibration and a new G29 peak force. Run the wheel calibration again after installing.</li>
+          <li>Pedals: clutch response presets and a progressive throttle.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-10-26">
       <description>
         <ul>
