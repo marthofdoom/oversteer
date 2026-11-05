@@ -255,6 +255,15 @@ def test_spring_brake_preset_is_brakes_only():
         model.set_pedal_preset('clutch', 'spring_brake')
 
 
+def test_every_preset_is_within_what_the_popover_can_show():
+    for name, presets in Model.PEDAL_PRESETS.items():
+        assert presets[0][0] == 'linear'
+        assert len({p[0] for p in presets}) == len(presets)
+        for _pid, _label, (start, end, sensitivity), _note in presets:
+            assert 0 <= start <= Model.RESPONSE_START_MAX and Model.RESPONSE_END_MIN <= end <= 100
+            assert 0 <= sensitivity <= 100
+
+
 def test_a_refused_write_is_not_marked_written():
     model = make_model()
     model.device.set_pedal_response = lambda *a: False
