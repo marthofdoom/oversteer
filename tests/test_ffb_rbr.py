@@ -1317,7 +1317,7 @@ def test_the_kinematic_slip_is_positive_when_steered_further_left_than_the_car_t
     assert rack._slip(spring_sample(steer=0.3)) == pytest.approx(0.3 * lock)           # straight on, steered left
     a = fz.WHEELBASE * (1.0 - fz.front_share('awd'))
     got = rack._slip(spring_sample(steer=0.3, vy=1.2, yaw=0.15))
-    assert got == pytest.approx(0.3 * lock - math.atan2(1.2 - a * 0.15, 20.0))
+    assert got == pytest.approx(0.3 * lock - math.atan2(1.2 + a * 0.15, 20.0))
     assert rack._slip(spring_sample(steer=0.0, vy=1.0)) < 0.0                           # sliding left of the heading, wheels straight
     assert rack._rear_slip(spring_sample()) is None and cp.table_ratio(fe.car_data.entry(CAR)) == pytest.approx(rack.ratio)
 

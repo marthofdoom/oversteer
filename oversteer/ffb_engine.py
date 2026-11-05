@@ -1834,7 +1834,7 @@ class RbrRack(RackForce):
 
     def _slip(self, sample):
         """The front slip angle (rad, positive when steered further left than the car travels, as ACR's) from the car's
-        motion: steer x lock less atan2(vy - a r, |vx|), a the front axle's distance to the centre of mass; None without the
+        motion: steer x lock less atan2(vy + a r, |vx|), a the front axle's distance to the centre of mass; None without the
         fields or under ALIGN_SPEED. (RBR has no tyre slip angles.)"""
         steer, yaw, vel = getattr(sample, 'steer', None), getattr(sample, 'yaw_rate', None), getattr(sample, 'vel', None)
         speed = getattr(sample, 'speed', None)
@@ -1842,7 +1842,7 @@ class RbrRack(RackForce):
                 or speed < self.ALIGN_SPEED:
             return None
         a = ffb_forza.WHEELBASE * (1.0 - ffb_forza.front_share(getattr(sample, 'drivetrain', None)))
-        return steer * self.lock - math.atan2(vel[1] - a * yaw, abs(vel[0]))
+        return steer * self.lock - math.atan2(vel[1] + a * yaw, abs(vel[0]))
 
     @staticmethod
     def _rear_slip(sample):
