@@ -661,7 +661,9 @@ class Gui:
 
     def apply_countersteer_texture(self):
         """The texture's level and parts (FFB tab, under the Countersteer switch) to the engine."""
-        self.ffb_engine.set_texture(*self.model.get_countersteer_texture())
+        level, parts = self.model.get_countersteer_texture()
+        # The engine's vibration stays out of v1: nothing the owner could feel at any level but an ugly buzz at 600 %
+        self.ffb_engine.set_texture(level, dict(parts, engine=False))
         self.apply_countersteer_strength()
         self.apply_countersteer_mapping()
         self.apply_countersteer_forza_model()
