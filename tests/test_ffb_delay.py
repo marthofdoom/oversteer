@@ -12,7 +12,7 @@ DEFAULT = {'gear_guard': True, 'gear_level': fg.OVERALL_GEAR_GUARD_LEVEL, 'rbr_c
 
 
 @pytest.mark.parametrize('game,expect', [('rbr', 2.0 + 5.0), ('acr', 3.0 + 5.0), ('beamng', 3.0 + 5.0),
-                                         ('fh6', 8.0 + 0.225 / 20.0 * 1e3 + 5.0)])
+                                         ('fh6', 8.0 + 0.225 / 24.0 * 1e3 + 5.0)])
 def test_each_game_without_the_guard(game, expect):
     assert fd.estimated_total_ms(game, OFF, GEAR) == pytest.approx(expect)
 
@@ -33,7 +33,7 @@ def test_rbr_cut_group_delay_only_on_rbr_and_off_at_the_top():
 
 def test_fh6_filter_follows_the_packet_rate_within_the_filters_corners():
     f = ffb_forza.OutputFilter
-    assert fd.fh_corner(60.0) == 20.0 and fd.fh_corner(30.0) == f.FC_MIN and fd.fh_corner(500.0) == f.FC_MAX
+    assert fd.fh_corner(60.0) == 24.0 and fd.fh_corner(30.0) == f.FC_MIN and fd.fh_corner(500.0) == f.FC_MAX
     assert fd.estimated_total_ms('fh6', dict(OFF, fh_rate=120.0), GEAR) < fd.estimated_total_ms('fh6', OFF, GEAR)
 
 

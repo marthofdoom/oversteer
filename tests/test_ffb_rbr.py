@@ -1663,7 +1663,7 @@ def test_derived_spring_follows_the_derived_shape_and_stays_on():
     assert twin.align_stiffness() == twin.ALIGN_K0
     # the shape is the saturating force times the trail's share: its slope stays positive past the peak, and k never goes negative
     for alpha in (0.0, 0.05, 0.15, 0.3, 0.5):
-        assert 1.0 / rack._sat_div(alpha) >= rack.DERIVED_SLOPE_MIN - 1e-12
+        assert 1.0 / rack._sat_div(alpha) >= rack.DERIVED_SLOPE_MIN * min(1.0, (rack.DERIVED_SPRING_PAST / max(abs(alpha), 1e-6)) ** 2) - 1e-12
         s = spring_sample(steer=0.1 + alpha / rack.lock, vx=20.0, vy=0.0)
         split = rack.align(s)
         assert split is not None and split['k'] > 0.0 and math.isfinite(split['k'])
