@@ -199,8 +199,26 @@ class Model:
     # Presets the Response popover offers: (id, label, response, note)
     LINEAR_PRESET = ('linear', N_('Linear'), (0, 100, 50), None)
     PEDAL_PRESETS = {
-        'clutch': (LINEAR_PRESET,),
-        'accelerator': (LINEAR_PRESET,),
+        # A real clutch is not linear in its pedal: free play at the top, the bite in a short stretch of the travel, and
+        # fully released well before the floor. The G29's pedal is a plain spring on a linear sensor.
+        'clutch': (LINEAR_PRESET,
+                   ('road', N_('Road car'), (10, 80, 50),
+                    N_("Free play at the top and fully released well before the floor, like a road car. "
+                       "Set the game's own clutch curve to linear.")),
+                   ('road_soft', N_('Road car, soft take-up'), (10, 80, 35),
+                    N_("The road car's travel with a gentler start: finer control near the top of the pedal, "
+                       "where the clutch finishes biting. Set the game's own clutch curve to linear.")),
+                   ('rally', N_('Rally, fast stabs'), (5, 65, 50),
+                    N_("Little free play and fully released early, for quick stabs on the pedal. "
+                       "Set the game's own clutch curve to linear.")),
+                   ('race', N_('Race, short travel'), (15, 55, 50),
+                    N_("A short travel with a sudden bite, like a race clutch: hard to slip, quick to use. "
+                       "Set the game's own clutch curve to linear."))),
+        'accelerator': (LINEAR_PRESET,
+                        ('progressive', N_('Progressive'), (0, 100, 35),
+                         N_("A gentler start for more control at small throttle, on loose surfaces or in a powerful "
+                            "car; the same full throttle. Linear is the realistic choice: the game already models "
+                            "the engine's response. Set the game's own throttle curve to linear."))),
         'brakes': (LINEAR_PRESET,
                    ('spring_brake', N_('Spring brake (recommended)'), (3, 85, 40),
                     N_("Stock spring-and-rubber brakes: full braking where the rubber starts to bite, "
