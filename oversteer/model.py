@@ -90,6 +90,7 @@ class Model:
         'countersteer_mapping': None,
         'countersteer_forza_model': None,
         'countersteer_forza_spring': None,
+        'countersteer_forza_linear_steer': None,
         'countersteer_rbr_spring': None,
         'countersteer_rbr_source': None,
         'countersteer_drive_pull': None,
@@ -161,6 +162,7 @@ class Model:
         'countersteer_mapping': 'string',
         'countersteer_forza_model': 'boolean',
         'countersteer_forza_spring': 'boolean',
+        'countersteer_forza_linear_steer': 'boolean',
         'countersteer_rbr_spring': 'boolean',
         'countersteer_rbr_source': 'string',
         'countersteer_drive_pull': 'boolean',
@@ -326,6 +328,7 @@ class Model:
                 'countersteer_mapping': OVERALL_MAPPING if supported else None,
                 'countersteer_forza_model': OVERALL_FORZA_MODEL if supported else None,
                 'countersteer_forza_spring': OVERALL_FORZA_SPRING if supported else None,
+                'countersteer_forza_linear_steer': False if supported else None,      # Forza's own steering reduction at speed, unless asked
                 'countersteer_rbr_spring': OVERALL_RBR_SPRING if supported else None,
                 'countersteer_rbr_source': OVERALL_RBR_SOURCE if supported else None,
                 'countersteer_drive_pull': OVERALL_PULL if supported else None,
@@ -897,6 +900,15 @@ class Model:
         value = self.data.get('countersteer_forza_spring')
         return OVERALL_FORZA_SPRING if value is None else bool(value)
 
+    def set_countersteer_forza_linear_steer(self, value):
+        """Forza Horizon: "Linear steering at speed": the wheel's position to front-wheel angle stays the same at every speed
+        (the proxy scales the steering by a gain from the speed) instead of Forza turning the front wheels less as it rises."""
+        if self.set_if_changed('countersteer_forza_linear_steer', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_forza_linear_steer()
+
+    def get_countersteer_forza_linear_steer(self):
+        return bool(self.data.get('countersteer_forza_linear_steer'))
+
     def set_countersteer_rbr_spring(self, value):
         """Richard Burns Rally's aligning spring (profile INI only, no control): True plays it through the driver as ACR's, False
         leaves RBR with the column's damping and friction."""
@@ -1369,6 +1381,7 @@ class Model:
                                          {part: data['countersteer_texture_' + part] for part in self.TEXTURE_PARTS})
         self.ui.set_countersteer_linearity(data['countersteer_linearity'])
         self.ui.set_countersteer_lightness(data['countersteer_lightness'])
+        self.ui.set_countersteer_forza_linear_steer(data['countersteer_forza_linear_steer'])
         self.ui.set_countersteer_toggles(data['countersteer_column'], data['countersteer_align'],
                                          data['countersteer_friction_removal'])
         # Last: it greys out the strength controls when force feedback is off

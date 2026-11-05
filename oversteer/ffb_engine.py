@@ -630,6 +630,8 @@ class RackForce:
                                          # position frame (steer x range / 2, what the driver's target is in); None: in
                                          # the car's steering wheel degrees
     wheel_slope = 1.0                    # the measured wheel position per degree of -steer x range / 2 (FrameCheck.slope)
+    steer_gain = 1.0                     # Forza's "linear steering": the proxy puts this on the wheel's position before the game sees it
+                                         # (steer = gain x the wheel's position); the spring's position divides by it
     wheel_lock_deg = None                # the steering wheel's measured lock (degrees, centre to full lock: FrameCheck.slope x
                                          # range / 2), the ratio's numerator where the car table has none; None: not measured
     ALIGN_RESET_JUMP = 15.0              # m beyond what the speed explains between two samples: a reset/teleport
@@ -1192,7 +1194,12 @@ class RackForce:
                     # (the game may map less or more of the wheel's range than the steering sweeps: `wheel_slope`
                     # is the measured wheel position per expected degree, 1.0 when the mapping is the full range)
                     g = half / max(self.lock * self.ratio * 180.0 / math.pi, 1e-6) * self.wheel_slope
-                    theta, theta_a, k_fs = theta * g, theta_a * g, k_fs / g
+                    # (Forza's linear steering: the game's steer is the wheel's position times steer_gain, but the front wheels turn
+                    # as the wheel does, so only the position divides by it: the slip's share and the stiffness per degree of
+                    # wheel are the low-speed ratio's)
+                    error = (theta - theta_a) * g
+                    theta, k_fs = theta * g / self.steer_gain, k_fs / g
+                    theta_a = theta - error
                     theta_a = min(max(theta_a, -half), half)
                 if self._reset_jump(sample):
                     self._align_hold = self._now + self.ALIGN_RESET_HOLD
@@ -1974,7 +1981,10 @@ class ForzaRack(RackForce):
     def _learn_lock(self, t, sample, dt):
         """The aligning spring's frame: the lock and ratio from the car's own motion (RackForce._learn_ratio: Ackermann
         steer-to-road-wheel angle at low lateral acceleration; Forza has no tyre slip angles in rad, no lock, no ratio
-        table), the lock slewing from the start value at LOCK_SLEW rad/s so the spring does not step."""
+        table), the lock slewing from the start value at LOCK_SLEW rad/s so the spring does not step. Not through linear
+        steering's gain: the game's steer is then no longer the wheel's."""
+        if self.steer_gain != 1.0:
+            return
         before = self.lock
         self._learn_ratio(sample, dt)
         learnt, self.lock = self.lock, before
@@ -2466,6 +2476,10 @@ CSB_MAX_RATE = 2000.0                    # CSB1 packets per second of game time 
 CSB_SEQ_SLACK = 20                       # ... plus this: seq running further ahead is another vehicle's
 FZ_STALL = 0.25                          # s without a Forza sample while ForzaRack plays: released (frame hitches are shorter)
 FZ_LOCK_STEER = 0.97                     # |steer| at or over which the lock stop of Forza's wheel acts
+LSTEER_RAMP = 4.0                        # per second: how fast the steering gain moves (towards 1.0 when the game isn't driven)
+LSTEER_REFRESH = 0.05                    # s: the gain file is stamped again at least this often (the proxy trusts 0.25 s)
+LSTEER_QUIET = 0.5                       # s without a Forza sample: the gain goes back to 1.0
+LSTEER_IDLE = 2.0                        # s at gain 1.0 (under the reference speed, or paused) before the file is taken away
 FH_STALL = 0.05                          # s without a Forza sample while adding (3 of its ~60/s): cut at once
 FH_FRESH_UPLOADS = 3.0                   # Forza: raw is fresh for this many of the game's upload intervals ...
 FH_FRESH_MIN = 0.03                      # ... at least (s), at most RAW_FRESH
@@ -2585,6 +2599,13 @@ class FfbEngine:
         self._forza_model = OVERALL_FORZA_MODEL      # ForzaRack (True) or ForzaLightness (False) for Forza Horizon
         self._forza_model_req = None     # the profile INI's countersteer_forza_model from the GUI
         self._forza_spring_req = None    # the profile INI's countersteer_forza_spring from the GUI
+        self._lsteer_req = None          # countersteer_forza_linear_steer from the GUI (True only where the proxy can apply it)
+        self._lsteer_gain = 1.0          # the steering gain written now (it moves at LSTEER_RAMP)
+        self._lsteer_target = 1.0        # ... and where the last Forza sample wants it
+        self._lsteer_applied = 1.0       # what the proxy is taken to be applying: the gain last stored, 1.0 when none is
+        self._lsteer_at = None           # engine clock of the last step; then of the last sample, of the last store and since when the gain is flat
+        self._lsteer_sample_at = self._lsteer_wrote_at = self._lsteer_flat_at = None
+        self._lsteer_writer = None       # proxy.steer_gain.GainWriter, made when first needed
         self._rbr_spring_req = None      # the profile INI's countersteer_rbr_spring from the GUI
         self._rbr_source_req = None      # the profile INI's countersteer_rbr_source from the GUI
         self._fz_sample = None           # the last Forza sample (ForzaRack)
@@ -2825,6 +2846,72 @@ class FfbEngine:
         self._forza_model_req = bool(on)
         self._wake.set()
 
+    def set_forza_linear_steer(self, on):
+        """Forza Horizon (profile key countersteer_forza_linear_steer): the wheel's position to front-wheel angle stays the
+        same at every speed (the proxy scales the steering axis by a gain worked out from the speed, proxy/steer_gain)."""
+        self._lsteer_req = bool(on)
+        self._wake.set()
+
+    def _lsteer_sample(self, t, sample):
+        """A telemetry sample: Forza's moves the steering gain's target to the speed's; any other game, or the option off,
+        takes the gain away."""
+        if not self._lsteer_req or sample.game != 'forza-fh':
+            if self._lsteer_writer is not None or self._lsteer_gain != 1.0:
+                self._lsteer_off()
+            return
+        speed = sample.speed
+        self._lsteer_sample_at = t
+        self._lsteer_target = ffb_forza.linear_steer_gain(speed) if sample.running and ffb_forza.finite(speed) else 1.0
+
+    def _lsteer_step(self, now):
+        """Each pass: the gain moves towards its target (1.0 without a fresh sample) and is stored for the proxy; an mmap
+        store, nothing that waits."""
+        if not self._lsteer_req:
+            if self._lsteer_writer is not None or self._lsteer_gain != 1.0:
+                self._lsteer_off()
+            return
+        last, self._lsteer_at = self._lsteer_at, now
+        if self._lsteer_writer is None and self._lsteer_target == 1.0 and self._lsteer_gain == 1.0:
+            return                              # nothing to say yet: no file
+        target = self._lsteer_target
+        if self._lsteer_sample_at is None or now - self._lsteer_sample_at > LSTEER_QUIET:
+            target = 1.0
+        dt = 0.0 if last is None else min(max(now - last, 0.0), 0.25)
+        step = LSTEER_RAMP * dt
+        gain = self._lsteer_gain
+        gain = min(max(target, gain - step), gain + step)
+        moved = gain != self._lsteer_gain
+        self._lsteer_gain = gain
+        if gain == 1.0 and target == 1.0:
+            if self._lsteer_flat_at is None:
+                self._lsteer_flat_at = now
+            elif now - self._lsteer_flat_at >= LSTEER_IDLE:
+                self._lsteer_off()
+                return
+        else:
+            self._lsteer_flat_at = None
+        if moved or self._lsteer_wrote_at is None or now - self._lsteer_wrote_at >= LSTEER_REFRESH:
+            if self._lsteer_writer is None:
+                try:
+                    from .proxy.steer_gain import GainWriter
+                    self._lsteer_writer = GainWriter()
+                except Exception:
+                    logging.exception("Countersteer FFB: the steering gain can't be handed to the proxy")
+                    self._lsteer_req = False
+                    return
+            if self._lsteer_writer.write(gain):
+                self._lsteer_wrote_at = now
+        stored = self._lsteer_wrote_at is not None and now - self._lsteer_wrote_at < 4 * LSTEER_REFRESH
+        self._lsteer_applied = gain if stored else 1.0
+
+    def _lsteer_off(self):
+        """Gain 1.0 for the proxy, then the file goes."""
+        writer, self._lsteer_writer = self._lsteer_writer, None
+        self._lsteer_gain = self._lsteer_target = self._lsteer_applied = 1.0
+        self._lsteer_sample_at = self._lsteer_wrote_at = self._lsteer_flat_at = None
+        if writer is not None:
+            writer.remove()
+
     def set_forza_spring(self, on):
         """Forza Horizon's aligning spring (profile INI only, countersteer_forza_spring): True plays it through the driver as ACR's,
         False leaves it with the column's damping and friction."""
@@ -2984,7 +3071,9 @@ class FfbEngine:
                     self._safe_game_level(100)
                     self._restore_scale(self._clock())
                     self._let_go()
+                    self._lsteer_off()
                     return
+            self._lsteer_off()
             self._quick_release('quit', self._clock())
             if self._driver is not None:
                 self._driver.close()
@@ -3041,7 +3130,7 @@ class FfbEngine:
         """The passes until stop(): `wait(timeout)` returns at a sample or a request (the thread's Event; in the engine
         process its sockets, ffb_process) or after `timeout` s."""
         while self._running:
-            busy = self._phase != 'idle' or (self._enabled and self._path is not None)
+            busy = self._phase != 'idle' or (self._enabled and self._path is not None) or self._lsteer_writer is not None
             wait(FAST_POLL if self._fast() else self.POLL if busy else IDLE_POLL)
             self._wake.clear()           # before the slot is read: an offer after this wakes the next wait
             if not self._running:
@@ -3120,6 +3209,7 @@ class FfbEngine:
         if now is None:
             now = self._clock()
         self._requests(now)
+        self._lsteer_step(now)
         ffb_record.check(now)                    # (a changed setting of a running FFB tuning capture is logged)
         self._drain()
         slot = self._slot
@@ -3306,6 +3396,8 @@ class FfbEngine:
             if raw is not None:
                 half = stage.range / 2.0
                 measured = raw / 65535.0 * stage.range - half
+                if self._lsteer_applied != 1.0 and getattr(self._pos_src, 'virtual', False):
+                    measured /= self._lsteer_applied        # the proxy's device is in the game's frame: back to the wheel's
                 sens = stage.sensitivity
                 if sens is not None and sens != ffb_dynamics.SENSITIVITY_LINEAR:
                     unbent = ffb_dynamics.sensitivity_inverse(measured / half, sens)
@@ -3339,7 +3431,8 @@ class FfbEngine:
             if not converted:
                 check.reset()
             elif measured is not None:
-                check.feed(t, steer, -steer * half, measured)
+                # (the game's steer is the wheel's position times the steering gain; the check works in the wheel's own frame)
+                check.feed(t, steer, -steer * half / self._lsteer_applied, measured)
         if self._pos_src is None:
             self.align_note = _("wheel position unavailable: the aligning spring stays off")
         elif check.failed():
@@ -3368,6 +3461,7 @@ class FfbEngine:
         if stage.k_limit is not None:
             model.align_k_limit = stage.k_limit      # (the model's k already carries the strength)
         model.wheel_range = stage.range
+        model.steer_gain = self._lsteer_applied if fz else 1.0
         slope = self._frame.slope
         model.wheel_slope = slope if self._frame.ok and slope else 1.0
         model.wheel_lock_deg = slope * stage.range / 2.0 if self._frame.ok and slope and stage.range else None
@@ -3506,6 +3600,7 @@ class FfbEngine:
         self.classifier.feed(t, sample, arrivals)
         self._mode = self._mode_of(sample.game, t)
         self._mode_at = t
+        self._lsteer_sample(t, sample)
         if self._mode != 'acr':
             if self._mode == 'forza':
                 self.addon.feed(t, sample, self._fh_fresh)
@@ -3633,6 +3728,9 @@ class FfbEngine:
         rbr = mode == 'rbr'
         if mode not in ('acr', 'rbr', 'forza-rack') or stage is None or not stage.range:
             stop.reset()
+            return 0.0
+        if mode == 'forza-rack' and self._lsteer_applied > 1.0 / FZ_LOCK_STEER and getattr(self._pos_src, 'virtual', False):
+            stop.reset()                       # the proxy's device saturates at the game's lock: the wheel's own end is out of sight
             return 0.0
         pos, _converted = self._wheel_position(t, stage)
         steer = getattr(sample, 'steer', None)
