@@ -1935,6 +1935,8 @@ class ForzaRack(RackForce):
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
     LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
     spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
+    AY_LEVEL_S = 0.5                     # s: what is slower than this comes from a_y, what is faster from v r
+    VR_GAIN = 0.8                        # a_y over v r, measured 0.78 on 20261104-230426
     YAW_WEIGHT = 2.0                     # the yaw acceleration's weight in Fy_f: replayed on 20261104-223911 steering to force falls from 166 to 66 ms, the force by 2-8 % (1.0 is the k^2 = a b rule of thumb, this car's yaw inertia is not known)
     lead_on = False                      # the front slip's lead on Newton's Fy_f (ffb_forza.SlipLead): off, it moved steering to force by nothing on 20261104-220133
 
@@ -1947,6 +1949,7 @@ class ForzaRack(RackForce):
         self.mass_l = ffb_forza.MassLearner(stored)
         self._yaw = collections.deque(maxlen=3)         # (game time, yaw rate)
         self._lead = ffb_forza.SlipLead()
+        self._ay_lp = self._vr_lp = self._ay_sample = self._ay_at = None
         self._lead_fy = None
         self.rdot = 0.0
         self._sides = (0, 0)                            # the one-sided rumble / puddle now (+1 FL, -1 FR)
@@ -2005,7 +2008,7 @@ class ForzaRack(RackForce):
         if accel is None or len(accel) < 2 or not ffb_forza.finite(accel[1]):
             return None
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT)
+        fy = ffb_forza.front_lateral(self.mass, bl, self._fast_ay(sample, accel[1]), self.rdot, di=self.YAW_WEIGHT)
         lead = self._lead_fy
         if lead is not None and lead[0] is sample:
             fy = lead[1]
@@ -2062,6 +2065,24 @@ class ForzaRack(RackForce):
             self.rdot = (r2 - r0) / (t2 - t0)     # centred on the middle packet
         else:
             self.rdot = 0.0
+
+    def _fast_ay(self, sample, ay):
+        """The lateral acceleration on time. FH6's a_y is about 180 ms behind its own force, its yaw rate about 95 ms (ACR's: 5 and
+        65): a_y keeps the level, speed x yaw rate gives the changes (a_y over a half second + VR_GAIN (v r - v r over a half second))."""
+        r, v, g = sample.yaw_rate, sample.speed, sample.game_time
+        if not (ffb_forza.finite(r) and ffb_forza.finite(v)):
+            self._ay_lp = None
+            return ay
+        vr = v * r
+        if self._ay_lp is None:
+            self._ay_lp, self._vr_lp, self._ay_sample, self._ay_at = ay, vr, sample, g
+        elif sample is not self._ay_sample:
+            dt = g - self._ay_at if ffb_forza.finite(g) and ffb_forza.finite(self._ay_at) else 1.0 / 60.0
+            k = 1.0 - math.exp(-min(max(dt, 0.0), 0.1) / self.AY_LEVEL_S)
+            self._ay_lp += k * (ay - self._ay_lp)
+            self._vr_lp += k * (vr - self._vr_lp)
+            self._ay_sample, self._ay_at = sample, g
+        return self._ay_lp + self.VR_GAIN * (vr - self._vr_lp)
 
     def _events(self, t, sample, bl):
         """The onset of a rumble strip under one front wheel, or of a puddle under one: an event for Kickback."""

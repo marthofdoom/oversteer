@@ -52,6 +52,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
         rack.feed(t, fsample(t, ay=4.0, yaw=0.1 * t * 60.0, dt='awd'), None)    # yaw rate rising 6 rad/s per s
     assert rack.rdot == pytest.approx(6.0, rel=1e-6)
     s = fsample(t, ay=4.0, dt='awd', cs=0.0)
+    rack._ay_lp = None                 # (this sample's yaw rate is unrelated to the ramp above)
     expect = -(0.027 + 0.028) * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
     assert rack._front(s, None, None) == pytest.approx(expect, rel=1e-9)
     assert rack._front(fsample(t, ay=None), None, None) is None if False else True
@@ -858,3 +859,20 @@ def test_the_forza_spring_switch_is_wired_like_rbrs():
     assert rack.align_ready()
     rack.spring_on = False
     assert not rack.align_ready()
+
+
+def test_the_lateral_acceleration_keeps_its_level_and_takes_its_changes_from_the_yaw_rate():
+    rack = fe.ForzaRack()
+    rack.reset(CAR)
+    def at(t, ay, yaw):
+        s = fsample(t, ay=ay, yaw=yaw, speed=20.0, dt='awd')
+        return rack._fast_ay(s, ay)
+    assert at(0.0, 4.0, 0.2) == pytest.approx(4.0)
+    for i in range(1, 300):
+        steady = at(i / 60.0, 4.0, 0.2)
+    assert steady == pytest.approx(4.0, abs=0.01)                 # steady: a_y's level
+    moved = at(300 / 60.0, 4.0, 0.3)                              # the yaw rate moves first
+    assert moved == pytest.approx(4.0 + rack.VR_GAIN * 20.0 * 0.1, rel=0.1)
+    s = fsample(5.1, ay=3.0, dt='awd')
+    s.yaw_rate = None
+    assert rack._fast_ay(s, 3.0) == 3.0                           # no yaw rate: a_y itself
