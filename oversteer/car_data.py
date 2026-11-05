@@ -38,6 +38,9 @@ def find_dir(datadir=None):
             candidates.append(os.path.join(base, 'telemetry', 'cars'))
     candidates.append(os.path.join(here, '..', 'data', 'telemetry', 'cars'))
     candidates.append(os.path.join(sys.prefix, 'share', 'oversteer', 'telemetry', 'cars'))
+    # the package's own prefix (.../lib/pythonX/site-packages/oversteer): the engine process has no DATADIR, and in the
+    # Flatpak sys.prefix is /usr, not /app (field: no car table there, so no ratio, lock or mass, and RBR's spring never played)
+    candidates.append(os.path.join(here, '..', '..', '..', '..', 'share', 'oversteer', 'telemetry', 'cars'))
     for path in candidates:
         if os.path.isdir(path):
             return os.path.normpath(path)

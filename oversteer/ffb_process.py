@@ -1280,6 +1280,9 @@ def _child_main(data, ctrl, up, options, relay=None):
         return                                   # the GUI went before the signal was armed
     logging.root.handlers[:] = []
     logging.root.setLevel(options.get('log_level', logging.INFO))
+    from . import car_data
+    if not car_data.cars():                    # (silently empty, whole drives ran on assumed cars)
+        logging.error("Countersteer FFB: the engine process found no car table: ratios, locks and masses are assumed")
     engine = None
     host = None
     try:

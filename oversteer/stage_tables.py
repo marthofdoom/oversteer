@@ -67,6 +67,7 @@ def find_dir(datadir=None):
             candidates.append(os.path.join(base, 'telemetry', 'stages'))
     candidates.append(os.path.join(here, '..', 'data', 'telemetry', 'stages'))
     candidates.append(os.path.join(sys.prefix, 'share', 'oversteer', 'telemetry', 'stages'))
+    candidates.append(os.path.join(here, '..', '..', '..', '..', 'share', 'oversteer', 'telemetry', 'stages'))     # the engine process (car_data.find_dir)
     for path in candidates:
         if os.path.isdir(path):
             return os.path.normpath(path)
