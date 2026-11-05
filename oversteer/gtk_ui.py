@@ -1334,6 +1334,10 @@ class GtkUi:
             _("Countersteer FFB"), _(self.COUNTERSTEER_TOOLTIP), switched)
         self.countersteer_page_switch.set_sensitive(False)
         steering.add(row)
+        note = Gtk.Label(label=_("It learns each car as you drive: after changing car or tune, give it a few minutes to settle."), xalign=0.0)
+        note.set_line_wrap(True)
+        note.get_style_context().add_class('dim-label')
+        steering.add(note)
         strong = self._response_scale(0, 130, 10)
         strong.set_size_request(160, -1)
         strong.connect('value-changed',
