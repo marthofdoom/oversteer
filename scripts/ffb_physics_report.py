@@ -95,7 +95,7 @@ def replay_acr(d, hz=100.0, learn=True, wheel_peak=None):
     cp.ASYNC = False
     rack = fe.RackForce()
     rack.LEARNS = learn
-    rack.wheel_peak = wheel_peak          # Nm; None: the 3.5 Nm class
+    rack.wheel_peak = wheel_peak          # Nm; None: the 3.08 Nm class
     n = len(d['t'])
     out = np.zeros(n)
     ready = np.zeros(n, dtype=bool)
@@ -657,7 +657,7 @@ def texture_synthetic(seconds=60.0, steering_force=0.3 * FULL, seed=7, game='acr
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--peak-nm', type=float, default=None, help='the wheel peak torque (Nm); default: unknown wheel (3.5 Nm class)')
+    ap.add_argument('--peak-nm', type=float, default=None, help='the wheel peak torque (Nm); default: unknown wheel (3.08 Nm class)')
     ap.add_argument('--dump', default=DUMP)
     ap.add_argument('--hz', type=float, default=100.0)
     ap.add_argument('--fh6', default=FH6)

@@ -27,7 +27,7 @@ def main():
     ap.add_argument('capture', nargs='?', help="the drive (default: the newest FFB capture)")
     ap.add_argument('--ref', metavar='CAPTURE', help="the reference drive (default: the newest of a different game)")
     ap.add_argument('--json', metavar='PATH', help="write every measure to PATH")
-    ap.add_argument('--peak', type=float, metavar='NM', help="the wheel's peak torque if the header lacks it (default 3.5)")
+    ap.add_argument('--peak', type=float, metavar='NM', help="the wheel's peak torque if the header lacks it (default 3.08)")
     args = ap.parse_args()
     try:
         if args.capture:

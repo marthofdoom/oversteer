@@ -82,7 +82,7 @@ RESTART_DELAYS = (1.0, 3.0, 10.0)        # s before each restart of a child that
 HEALTHY = 60.0                           # s of life after which a death counts as the first again
 CTRL_TIMEOUT = 0.1                       # s a control message may wait for room (a child that hung)
 SETTERS = ('set_enabled', 'set_dynamics', 'set_position_source', 'set_wheel_result', 'set_texture', 'set_linearity',
-           'set_lightness', 'set_strength', 'set_knee', 'set_rbr_cut', 'set_caster_floor', 'set_engine_feel', 'set_mapping', 'set_forza_model', 'set_forza_spring', 'set_rbr_spring', 'set_rbr_source', 'set_drive_pull', 'set_kick', 'set_gear_guard', 'set_column_damping', 'set_rim_mm', 'set_car_wheel_mm', 'set_power_class', 'set_device')
+           'set_lightness', 'set_strength', 'set_knee', 'set_rbr_cut', 'set_caster_floor', 'set_engine_feel', 'set_mapping', 'set_forza_model', 'set_forza_spring', 'set_rbr_spring', 'set_rbr_source', 'set_drive_pull', 'set_kick', 'set_gear_guard', 'set_column_damping', 'set_rim_mm', 'set_wheel_peak', 'set_car_wheel_mm', 'set_power_class', 'set_device')
 PR_SET_PDEATHSIG = 1
 PR_SET_NAME = 15
 
@@ -368,6 +368,9 @@ class EngineProcess:
 
     def set_rim_mm(self, value):
         self._call('set_rim_mm', value)
+
+    def set_wheel_peak(self, nm):
+        self._call('set_wheel_peak', nm)
 
     def set_car_wheel_mm(self, value):
         self._call('set_car_wheel_mm', value)

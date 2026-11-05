@@ -3,14 +3,14 @@ physical target in ffb_engine.RackForce: the driver's torque at the rim of a rea
 KNEE share of the wheel's peak and compressed above it (rim_share), so the car's top torque lands at STEER_BUDGET.
 
 Only a wheel on the new-lg4ff driver takes ext_force, so only those are `usable`; the rest are listed for later.
-A wheel not here (or not usable) gets None, and the target then assumes the 3.5 Nm class (DEFAULT_PEAK_NM: the
+A wheel not here (or not usable) gets None, and the target then assumes the 3.08 Nm class (DEFAULT_PEAK_NM: the
 G29 and its kin, the wheels Countersteer FFB is built and tested on). The figures are the makers' peak torque, rounded; the Logitech belt and gear
 wheels peak lower than their sheets for long (the thermal limit is the driver's own)."""
 import math
 
 from . import wheel_ids as wid
 
-DEFAULT_PEAK_NM = 3.5                    # an unknown wheel is taken to peak like a G29
+DEFAULT_PEAK_NM = 3.08                   # an unknown wheel is taken to peak like a G29
 G29_CLASS_MAX_NM = 4.0                   # a wheel peaking at most this is the G29 class (frozen column scale; the makers' 2.5 Nm G27 too)
 STEER_BUDGET = 0.75                      # share of full scale the steering torque may reach; the other 25 % stay free
                                          # for texture and impacts (ffb_texture fits in FULL - |steering force|)
@@ -32,15 +32,15 @@ def __getattr__(name):
         return ffb_carprops.hyd_top()
     raise AttributeError(name)
 
-# usb id: (peak torque Nm, usable). The G29, G920 and G923 share the motors: 3.5 Nm, the usable figure. Measured on marth's
-# G29 with hanging weights on the 0.1395 m rim: 2.06 kg lifted 2 inches at about 0.90 of full force, 2.96 kg right at the
-# limit at 1.00, 3.85 kg not lifted: the limit is about 4.0 Nm (motor minus friction), not the makers' 2.1. The top end is
-# nonlinear (0.90 to 1.00 adds about 1.3 Nm), so a single figure is an approximation; the calculations use 3.5.
+# usb id: (peak torque Nm, usable). The G29, G920 and G923 share the motors: 3.08 Nm. Measured on marth's G29 (2026-11-05) with
+# water hanging from the outside of the 0.1395 m rim: 2 litres lifted at 0.92 of full force, so the limit lies between 2 litres
+# and what the last 8 % adds; 2.25 litres x 9.80665 x 0.1395 m = 3.08 Nm, motor minus friction. A single figure is an
+# approximation of a nonlinear top end (wheel_calibration measures the shape, not the Nm).
 PEAK_NM = {
-    wid.LG_G29: (3.5, True),
-    wid.LG_G920: (3.5, True),
-    wid.LG_G923P: (3.5, True),
-    wid.LG_G923X: (3.5, True),
+    wid.LG_G29: (3.08, True),
+    wid.LG_G920: (3.08, True),
+    wid.LG_G923P: (3.08, True),
+    wid.LG_G923X: (3.08, True),
     wid.LG_G27: (2.5, True),
     wid.LG_G25: (2.5, True),
     wid.LG_DFGT: (2.0, True),
@@ -89,6 +89,7 @@ RIM_MM = {
 DEFAULT_RIM_MM = 279.0                   # an unknown wheel is taken to have a G29's rim
 CAR_WHEEL_MM = 350.0                     # a rally car's steering wheel (profile key countersteer_car_wheel_mm)
 CAR_WHEEL_RANGE = (280, 420)
+PEAK_RANGE = (1.0, 30.0)                 # Nm: the peak torque setting (the range covers direct-drive wheels)
 RIM_RANGE = (200, 400)                   # mm: the rim diameter setting
 
 # Direct drives by name, for later: their USB ids are not in wheel_ids and are NOT FOUND in the repo (not guessed)

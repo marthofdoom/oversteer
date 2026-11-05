@@ -171,7 +171,7 @@ def test_the_played_share_is_1_to_1_up_to_the_knee_and_clamps_hard_at_the_budget
 
 
 def test_an_unknown_wheel_counts_as_the_g29_class():
-    assert force_at(rack_for(None), 300.0) == pytest.approx(force_at(rack_for(3.5), 300.0))
+    assert force_at(rack_for(None), 300.0) == pytest.approx(force_at(rack_for(3.08), 300.0))
 
 
 def test_a_strong_wheel_plays_the_same_nm_and_never_passes_the_ceiling():
@@ -198,7 +198,7 @@ def test_the_steering_budget_leaves_the_texture_its_reserve():
 
 
 def test_wheel_table_knows_only_usable_wheels():
-    assert wheel_torque.peak_nm('046d:c24f') == 3.5
+    assert wheel_torque.peak_nm('046d:c24f') == 3.08
     assert wheel_torque.peak_nm('0eb7:0020') is None            # a direct drive: not usable yet
     assert wheel_torque.peak_nm(None) is None and wheel_torque.peak_nm('dead:beef') is None
 
@@ -240,7 +240,7 @@ def test_the_engine_takes_the_wheel_model_for_the_peak():
     engine = fe.FfbEngine(clock=lambda: 0.0, driver=FakeDriver)
     assert engine.model.wheel_peak is None
     engine.usb_id = '046d:c24f'
-    assert engine.model.wheel_peak == 3.5
+    assert engine.model.wheel_peak == 3.08
     engine.usb_id = None
     assert engine.model.wheel_peak is None
 
@@ -433,7 +433,7 @@ def test_the_classic_share_is_the_old_uniform_scale_and_does_not_depend_on_the_c
             got.append(rack.force(s))
         outs.append(got)
     assert outs[0] == outs[1]
-    assert fe.RackForce.CLASSIC_SCALE == pytest.approx(0.30 * 3.5 / 2.1)
+    assert fe.RackForce.CLASSIC_SCALE == pytest.approx(0.30 * 3.08 / 2.1)
 
 
 def test_the_classic_strength_scales_the_uniform_share_and_the_budget_clamps_it():
@@ -602,3 +602,38 @@ def test_the_model_defaults_the_rim_from_the_wheel_table_and_clamps_both_diamete
     assert model.get_countersteer_rim_mm() == 279
     model.set_countersteer_car_wheel_mm(900)
     assert model.get_countersteer_car_wheel_mm() == 420
+
+
+def test_set_wheel_peak_moves_all_three_racks_the_table_returns_and_a_new_wheel_drops_it():
+    engine = fe.FfbEngine()
+    racks = (engine.model, engine.rbr_rack, engine.forza_rack)
+    engine.usb_id = '046d:c24f'
+    assert [r.wheel_peak for r in racks] == [3.08] * 3
+    engine.set_wheel_peak(6.0)
+    assert [r.wheel_peak for r in racks] == [6.0] * 3
+    engine.usb_id = '046d:c24f'                                          # the same wheel again (replug): kept
+    assert [r.wheel_peak for r in racks] == [6.0] * 3
+    engine.set_wheel_peak(99)
+    assert [r.wheel_peak for r in racks] == [wheel_torque.PEAK_RANGE[1]] * 3
+    engine.set_wheel_peak(None)                                          # None: the table's
+    assert [r.wheel_peak for r in racks] == [3.08] * 3
+    engine.set_wheel_peak(6.0)
+    engine.usb_id = '046d:c262'                                          # another wheel: the override is gone
+    assert [r.wheel_peak for r in racks] == [wheel_torque.peak_nm('046d:c262')] * 3
+    engine.usb_id = None
+    engine.set_wheel_peak(8.0)                                           # (an unknown wheel takes one too)
+    assert [r.wheel_peak for r in racks] == [8.0] * 3
+
+
+def test_the_force_share_at_a_fixed_torque_scales_with_the_peak_below_the_knee():
+    engine = fe.FfbEngine()
+    engine.usb_id = '046d:c24f'
+    rack = engine.model
+    rack.LEARNS, rack.mapping, rack.assist, rack.ratio, rack.p99 = False, 'knee', 0.0, 1.0, 30.0
+    rack.reset('acr/x')
+    rack.assist, rack.ratio = 0.0, 1.0
+    rack.rim_torque = lambda sample, *a, **k: 1.0
+    s = sample_at(0.0)
+    low = rack.force(s) / fe.FULL
+    engine.set_wheel_peak(6.16)                                          # twice the G29's
+    assert rack.force(s) / fe.FULL == pytest.approx(low / 2)

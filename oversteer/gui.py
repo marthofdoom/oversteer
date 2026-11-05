@@ -24,6 +24,7 @@ from gi.repository import GLib
 from .gtk_ui import GtkUi
 from . import beamng_mod, diagnostics, hotkeys, rbr_fingerprint
 from . import wheel_calibration as wcal
+from . import wheel_torque
 from .model import Model, pick_plug_profile, read_apply_on_plug
 from .test import Test
 from .combined_chart import CombinedChart
@@ -521,6 +522,7 @@ class Gui:
         if current:
             if self.device.is_ready():
                 self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
+                self.apply_wheel_peak()
                 self.ffb_engine.set_device(self.device.dev_path)
                 self.ffb_engine.set_position_source(self._position_source(self.device))
             self.apply_wheel_correction()
@@ -584,6 +586,7 @@ class Gui:
         ready = self.device is not None and self.device.is_ready()
         # The old wheel's game force is restored by the engine before it takes the new one
         self.ffb_engine.usb_id = getattr(self.device, 'usb_id', None)
+        self.apply_wheel_peak()
         self.ffb_engine.set_device(self.device.dev_path if ready else None)
         self.ffb_engine.set_position_source(self._position_source(self.device) if ready else None)
         self.ffb_pending = {}
@@ -732,6 +735,29 @@ class Gui:
     def apply_countersteer_rim_mm(self):
         """The wheel's rim diameter (FFB tab; 0: the table's) to the engine."""
         self.ffb_engine.set_rim_mm(self.model.get_countersteer_rim_mm_setting())
+
+    def _wheel_peak_path(self):
+        return os.path.join(self.config_path, wcal.PEAK_STORE_NAME)
+
+    def apply_wheel_peak(self):
+        """The selected wheel's stored peak torque (per wheel, not per profile; none: the table's) to the engine and
+        into the FFB tab's box, without storing it."""
+        usb_id = getattr(self.device, 'usb_id', None)
+        stored = wcal.stored_peak(self._wheel_peak_path(), usb_id)
+        self.ffb_engine.set_wheel_peak(stored)
+        self.ui.safe_call(self.ui.set_wheel_peak, stored or wheel_torque.peak_nm(usb_id) or wheel_torque.DEFAULT_PEAK_NM)
+
+    def set_wheel_peak(self, nm):
+        """The FFB tab's peak torque box changed: store it for the selected wheel and apply it."""
+        usb_id = getattr(self.device, 'usb_id', None)
+        if not usb_id:
+            return
+        try:
+            nm = wcal.store_peak(self._wheel_peak_path(), usb_id, nm)
+        except OSError:
+            logging.exception("Could not store the wheel's peak torque")
+            return
+        self.ffb_engine.set_wheel_peak(None if nm == (wheel_torque.peak_nm(usb_id) or wheel_torque.DEFAULT_PEAK_NM) else nm)
 
     def apply_countersteer_power_class(self):
         """The assist class (profile INI only: rally / street / off) to the engine."""
