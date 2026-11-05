@@ -152,7 +152,7 @@ STRENGTH_MAX = 1.3                       # ... and the most: 130 %, applied insi
 OVERALL_KNEE = wheel_torque.KNEE         # "1:1 up to" default: the share of the wheel's peak played 1:1 in Nm
 OVERALL_RBR_CUT = 30                     # "RBR force cut" default (Hz): the low-pass corner on RBR's column torque
 RBR_CUT_OFF = 120                        # ... and the top of its range: no filter
-OVERALL_ENGINE_FEEL = 600                # "Engine feel" default (profile key countersteer_engine_feel, %): the engine hum as a share of ffb_texture's EngineHum.CAP, 0 = off
+OVERALL_ENGINE_FEEL = 100                # "Engine feel" default (profile key countersteer_engine_feel, %): the engine hum as a share of ffb_texture's EngineHum.CAP, 0 = off
 OVERALL_CASTER_FLOOR = 100               # "Caster in slides" default (profile key countersteer_caster_floor, %): 0 = off
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
