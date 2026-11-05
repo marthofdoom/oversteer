@@ -2,6 +2,7 @@
 calib-check.py and new-game-check.py. Nothing here touches a wheel, the proxy, a game or the telemetry database; user
 files (stored calibration, runs, profiles, captures) are only read."""
 import configparser
+import contextlib
 import glob
 import gzip
 import json
@@ -93,10 +94,8 @@ def sample_spacing(times):
     return float(np.median(np.diff(t))) if len(t) > 1 else 0.0
 
 
-def simulate(items, game, power_class, peak=None):
-    """Today's rack over recorded samples [(t, Sample)], two passes (the first lets the rack learn), whole force
-    (align_on off). Returns {'cells': {key: [share of full force]}, 'secs': {key: seconds}, 'info': {...}}.
-    Call inside ffb_score._sandbox() so no user file is read or written."""
+def _build_rack(game, power_class, peak=None):
+    """(rack, the rack's fresh trail/ratio/mass, feed(t, s)): today's rack of the game with the aligning spring off."""
     from oversteer import ffb_carprops as cp, ffb_engine as fe, wheel_torque as wt
     cls_name = rack_for(game)[0]
     cp.set_power_class(power_class)
@@ -114,6 +113,15 @@ def simulate(items, game, power_class, peak=None):
             rack.ready = True
         rack.feed(t, s, None if game != 'acr' or s.game_ffb is None else s.game_ffb * fe.FULL)
 
+    return rack, fresh, feed
+
+
+def simulate(items, game, power_class, peak=None):
+    """Today's rack over recorded samples [(t, Sample)], two passes (the first lets the rack learn), whole force
+    (align_on off). Returns {'cells': {key: [share of full force]}, 'secs': {key: seconds}, 'info': {...}}.
+    Call inside ffb_score._sandbox() so no user file is read or written."""
+    from oversteer import ffb_engine as fe
+    rack, fresh, feed = _build_rack(game, power_class, peak)
     for t, s in items:
         feed(t, s)
     cells, scored = {}, 0
@@ -181,6 +189,381 @@ def sim_match(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1.0
             sides.append(pool_sims(sims))
     rows = sit.compare(sides[0][0], sides[1][0], min_s, sides[0][1], sides[1][1])
     return lines, rows, sit.summary(rows)[0]
+
+
+# --- ffb-force-curve --------------------------------------------------------------------------------------------------
+
+def _pair(v):
+    """(a, b) floats of a per-wheel tuple's first two entries, or None."""
+    if v is None or len(v) < 2:
+        return None
+    a, b = v[0], v[1]
+    if a is None or b is None or not (np.isfinite(a) and np.isfinite(b)):
+        return None
+    return float(a), float(b)
+
+
+def _slip_acr(s, rack):
+    p = _pair(s.tyre_slip_angle)
+    return None if p is None else 0.5 * (abs(p[0]) + abs(p[1]))
+
+
+def _slip_forza(s, rack):
+    p = _pair(s.slip_angle)
+    return None if p is None else 0.5 * (abs(p[0]) + abs(p[1]))
+
+
+def _slip_rbr(s, rack):
+    a = rack._slip(s)
+    return None if a is None or not np.isfinite(a) else abs(a)
+
+
+def _norm_rbr():
+    from oversteer import ffb_engine as fe
+    return fe.RbrRack.DERIVED_SLIP_PEAK        # read at use, so --set reaches it
+
+
+# The normalised slip theta, per game, in one place: (raw slip of a sample, what it is divided by, a text for the header).
+# The divisor: a number, a function giving one (read when the drive is binned), or 'stretch' (ACR: the peak found per
+# 60 s stretch of the drive from the tyres' Fy / Fz, acr_peaks).
+THETA_TABLE = {
+    'acr': (_slip_acr, 'stretch', "mean |tyre_slip_angle| of the fronts over the per-stretch peak (p80 of Fy/Fz reaching 97 % of the top)"),
+    'forza-fh': (_slip_forza, 0.7, "mean |slip_angle| of the fronts over 0.7"),
+    'rbr': (_slip_rbr, _norm_rbr, "|RbrRack._slip| over RbrRack.DERIVED_SLIP_PEAK"),
+}
+FYF_TEXT = {'acr': "the tyres' |Fy_FL + Fy_FR|", 'forza-fh': "the front_lateral value ForzaRack._front used", 'rbr': "RbrRack.fy_f"}
+STRETCH_S = 60.0
+ACR_PEAK_BINS = np.array([.005, .01, .02, .03, .05, .07, .1, .13, .17, .22, .3, .4, .6, 1])
+ACR_PEAK_FZ = 800.0                     # N: wheels carrying less say nothing about the grip
+ACR_PEAK_MIN = 800                      # wheel samples a stretch needs
+
+
+def acr_peaks(t, sa, fy, fz):
+    """The peak slip (rad) per sample, from its 60 s stretch of the drive (calib-check's item3a): the slip bin where the p80 of
+    Fy/Fz first reaches 97 % of the stretch's top. `sa`, `fy`, `fz` are (n, 2) arrays of |slip angle|, |Fy| and Fz of the
+    front wheels. A stretch with too little data takes the median of the others'; NaN when none has any."""
+    t = np.asarray(t, float)
+    seg = ((t - t[0]) // STRETCH_S).astype(int) if len(t) else np.zeros(0, int)
+    peak = {}
+    bs = ACR_PEAK_BINS
+    for g in np.unique(seg):
+        m = seg == g
+        x, f, z = sa[m].ravel(), fy[m].ravel(), fz[m].ravel()
+        ok = z > ACR_PEAK_FZ
+        x, mu = x[ok], f[ok] / z[ok]
+        if len(x) < ACR_PEAK_MIN:
+            continue
+        vals = np.full(len(bs) - 1, np.nan)
+        for j in range(len(bs) - 1):
+            k = (x >= bs[j]) & (x < bs[j + 1])
+            if k.sum() >= 15:
+                vals[j] = np.percentile(mu[k], 80)
+        if np.isnan(vals).all():
+            continue
+        j = int(np.argmax(vals >= .97 * np.nanmax(vals)))
+        peak[g] = (bs[j] + bs[j + 1]) / 2
+    fallback = float(np.median(list(peak.values()))) if peak else float('nan')
+    return np.array([peak.get(g, fallback) for g in seg]) if len(seg) else np.zeros(0)
+
+
+def _theta(game, cols):
+    """theta per sample of a simulated drive (cols from simulate_rows)."""
+    _fn, norm, _text = THETA_TABLE[game]
+    slip = np.asarray(cols['slip'], float)
+    if norm == 'stretch':
+        peak = acr_peaks(cols['t'], np.column_stack([cols['sa0'], cols['sa1']]),
+                         np.column_stack([cols['fy0'], cols['fy1']]), np.column_stack([cols['fz0'], cols['fz1']]))
+        return slip / peak
+    return slip / (norm() if callable(norm) else norm)
+
+
+def simulate_rows(items, game, power_class, peak=None):
+    """Today's rack over the samples as simulate does (two passes, align_on off), one row per scored sample: the rim force in
+    Nm (share x peak), the front axle's lateral force Fyf (N) and the raw front slip, as the game's rack believes them:
+      ACR  |tyre_fy[0] + tyre_fy[1]|, the game's own (with the columns for Newton's check and the peak per stretch);
+      Forza  the value ffb_forza.front_lateral gave ForzaRack._front for the sample (recorded by wrapping the call);
+      RBR  rack.fy_f, what RbrRack._derive made of the same Newton route.
+    Returns {'cols': {name: array}, 'theta': array, 'info': {...}, 'mass': (kg or None, text)}. Call inside _sandbox()."""
+    from oversteer import car_data, ffb_engine as fe, ffb_forza
+    rack, fresh, feed = _build_rack(game, power_class, peak)
+    slip_fn = THETA_TABLE[game][0]
+    last = {}
+    orig = ffb_forza.front_lateral
+    if game == 'forza-fh':
+        def recorder(*a, **k):
+            last['v'] = orig(*a, **k)
+            return last['v']
+        ffb_forza.front_lateral = recorder
+    names = ('t', 'nm', 'fyf', 'slip', 'ay', 'yaw', 'bl', 'fysum', 'sa0', 'sa1', 'fy0', 'fy1', 'fz0', 'fz1')
+    cols = {k: [] for k in names}
+    car, scored = None, 0
+    try:
+        for t, s in items:
+            feed(t, s)
+        for t, s in items:
+            feed(t, s)
+            car = s.car or car
+            if not rack.ready or not sample_ok(s, sit.SPEED[0]):
+                continue
+            last['v'] = None
+            force = rack.force(s)
+            slip = slip_fn(s, rack)
+            if slip is None:
+                continue
+            extra = {}
+            if game == 'acr':
+                fy, fz, sa = _pair(s.tyre_fy), _pair(s.tyre_load), _pair(s.tyre_slip_angle)
+                if fy is None or fz is None or sa is None or s.yaw_rate is None or not np.isfinite(s.yaw_rate):
+                    continue
+                fyf = abs(fy[0] + fy[1])
+                extra = {'fysum': fy[0] + fy[1], 'sa0': abs(sa[0]), 'sa1': abs(sa[1]), 'fy0': abs(fy[0]), 'fy1': abs(fy[1]),
+                         'fz0': fz[0], 'fz1': fz[1]}
+            elif game == 'forza-fh':
+                if last['v'] is None:
+                    continue
+                fyf = abs(last['v'])
+            else:
+                fyf = getattr(rack, 'fy_f', None)
+                if fyf is None or not np.isfinite(fyf):
+                    continue
+                fyf = abs(fyf)
+            scored += 1
+            cols['t'].append(t)
+            cols['nm'].append(abs(force) / fe.FULL * rack.wheel_peak)
+            cols['fyf'].append(fyf)
+            cols['slip'].append(slip)
+            cols['ay'].append(s.accel[1])
+            cols['yaw'].append(s.yaw_rate if s.yaw_rate is not None else float('nan'))
+            cols['bl'].append(ffb_forza.front_share(getattr(s, 'drivetrain', None)))
+            for k, v in extra.items():
+                cols[k].append(v)
+        learnt = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}
+        entry = car_data.entry(rack.car) if game == 'rbr' and getattr(rack, 'car', None) else None
+    finally:
+        ffb_forza.front_lateral = orig
+    cols = {k: np.array(v, float) for k, v in cols.items() if v}
+    dt = sample_spacing([t for t, _ in items])
+    info = {'game': game, 'class': power_class, 'samples': len(items), 'scored': scored, 'dt': dt, 'learnt': learnt,
+            'default': fresh, 'car': car, 'peak': rack.wheel_peak}
+    if game == 'forza-fh':
+        m = learnt['mass']
+        default = fresh['mass'] is not None and abs(m - fresh['mass']) < 1e-9
+        mass = (m, 'ForzaRack mass %.0f kg, %s' % (m, 'the default (not learnt)' if default else 'learnt'))
+    elif game == 'rbr':
+        m = entry.get('mass_kg') if entry else None
+        mass = (m or rack.FLOOR_MASS, 'RbrRack mass %.0f kg, %s' % (m or rack.FLOOR_MASS, 'from the car table' if m else 'the default FLOOR_MASS (car not in the table)'))
+    else:
+        mass = (None, 'the mass is not sent; solved below')
+    theta = _theta(game, cols) if scored else np.zeros(0)
+    return {'cols': cols, 'theta': theta, 'info': info, 'mass': mass}
+
+
+def newton_check(cols, bins=sit.FYF, rdot_window=0.03):
+    """ACR: Newton's Fy_f (ffb_forza.front_lateral with unit mass, the car's b/L from the drivetrain, and the yaw acceleration
+    rdot, a central difference over +-rdot_window s of the yaw rate) against the tyres' Fy_f (signed sum of the fronts), with the
+    one best mass by least squares, with and without rdot. ACR's rack has no rdot of its own. Returns (lines, mass with rdot)."""
+    from oversteer import ffb_forza
+    t, ay, yaw, bl, fy = (cols[k] for k in ('t', 'ay', 'yaw', 'bl', 'fysum'))
+    if len(t) < 100:
+        return ['  too few samples'], None
+    dt = max(float(np.median(np.diff(t))), 1e-4)
+    k = max(int(round(rdot_window / dt)), 1)
+    n = len(t)
+    lo, hi = np.clip(np.arange(n) - k, 0, n - 1), np.clip(np.arange(n) + k, 0, n - 1)
+    span = t[hi] - t[lo]
+    good = (span > 0) & (span < 4 * rdot_window)
+    rd = np.zeros(n)
+    rd[good] = (yaw[hi] - yaw[lo])[good] / span[good]
+    out, result, final = [], None, None
+    for name, di in (('ay only', 0.0), ('ay and rdot', ffb_forza.DI)):
+        x = np.array([ffb_forza.front_lateral(1.0, b, a, r, di=di) for b, a, r in zip(bl, ay, rd)])
+        m = float(np.dot(fy, x) / np.dot(x, x))
+        sign = ''
+        if m < 0:
+            m, x, sign = -m, -x, ' (tyre Fy has the opposite sign to ay)'
+        newton = m * x
+        err = float(np.sqrt(np.mean((newton - fy) ** 2)))
+        rms = float(np.sqrt(np.mean(fy ** 2)))
+        out.append('  %-12s best mass %.0f kg%s; r %.3f; rms error %.0f N of rms Fy_f %.0f N (%.1f %%)' % (
+            name, m, sign, float(np.corrcoef(newton, fy)[0, 1]), err, rms, err / rms * 100))
+        if di:
+            result, final = m, (np.abs(newton), np.abs(fy))
+    out.append("  with rdot, by the tyres' |Fy_f| band (N): median Newton | median tyres | Newton / tyres | s")
+    i = sit.band(bins, final[1])
+    for j in range(len(bins) - 1):
+        sel = i == j
+        if sel.sum():
+            nn, tt = float(np.median(final[0][sel])), float(np.median(final[1][sel]))
+            out.append('  %-10s %8.0f %8.0f %8.2f %7.1f' % (sit.curve_label(bins, j), nn, tt, nn / tt if tt else float('nan'), sel.sum() * dt))
+    return out, result
+
+
+def pool_rows(sims):
+    """Per-sample arrays nm, fyf, theta, dt of simulated captures, joined."""
+    out = {k: [] for k in ('nm', 'fyf', 'theta', 'dt')}
+    for sim in sims:
+        n = len(sim['theta'])
+        if not n:
+            continue
+        out['nm'].append(sim['cols']['nm'])
+        out['fyf'].append(sim['cols']['fyf'])
+        out['theta'].append(sim['theta'])
+        out['dt'].append(np.full(n, sim['info']['dt']))
+    return {k: np.concatenate(v) if v else np.zeros(0) for k, v in out.items()}
+
+
+TRAIL_FYF_MIN = 300.0                   # N: under this Nm / Fyf means nothing
+
+
+def trail_lines(a, b):
+    """Median Nm per unit of Fyf (mm, the effective trail through the mapping) by theta band, A and B, samples with Fyf over
+    TRAIL_FYF_MIN."""
+    def per(side):
+        out = {}
+        ok = (side['fyf'] >= TRAIL_FYF_MIN) & np.isfinite(side['theta']) & np.isfinite(side['nm'])
+        j = sit.band(sit.THETA, side['theta'])
+        for k in range(len(sit.THETA) - 1):
+            m = ok & (j == k)
+            if m.any():
+                out[k] = (float(np.median(side['nm'][m] / side['fyf'][m] * 1000.0)), float(side['dt'][m].sum()))
+        return out
+    pa, pb = per(a), per(b)
+    lines = ['effective trail, median Nm per unit of Fyf (mm), samples with Fyf >= %.0f N' % TRAIL_FYF_MIN,
+             '%-8s | %8s %6s | %8s %6s | %8s %7s' % ('theta', 'A mm', 's A', 'B mm', 's B', 'A-B mm', '% of B')]
+    for k in range(len(sit.THETA) - 1):
+        if k not in pa and k not in pb:
+            continue
+        x, y = pa.get(k), pb.get(k)
+
+        def cell(v):
+            return '%8.3f %6.1f' % v if v else '%8s %6s' % ('.', '.')
+        diff = ('%+8.3f %7.1f' % (x[0] - y[0], (x[0] - y[0]) / y[0] * 100.0)) if x and y and y[0] > 0 else '%8s %7s' % ('.', '.')
+        lines.append('%-8s | %s | %s | %s' % (sit.curve_label(sit.THETA, k), cell(x), cell(y), diff))
+    return lines
+
+
+def _resolve(name):
+    """(owner, attribute, value) of a dotted constant: 'ffb_forza.TP_S_HALF' (a module of oversteer), 'RbrRack.DERIVED_SLIP_PEAK'
+    (a class of ffb_engine) or 'ffb_engine.RbrRack.X'. ValueError for a name that does not exist or is not a number."""
+    import importlib
+    import types
+    parts = name.split('.')
+    if len(parts) < 2 or not all(parts):
+        raise ValueError("--set %s: want MODULE.NAME or CLASS.NAME (like ffb_forza.TP_S_HALF)" % name)
+    try:
+        obj, rest = importlib.import_module('oversteer.' + parts[0]), parts[1:]
+    except ImportError:
+        from oversteer import ffb_engine
+        if not hasattr(ffb_engine, parts[0]):
+            raise ValueError("--set %s: no module oversteer.%s and no class %s in ffb_engine" % (name, parts[0], parts[0]))
+        obj, rest = ffb_engine, parts
+    for p in rest[:-1]:
+        if not hasattr(obj, p):
+            raise ValueError("--set %s: %s has no %s" % (name, getattr(obj, '__name__', obj), p))
+        obj = getattr(obj, p)
+        if not isinstance(obj, (types.ModuleType, type)):
+            raise ValueError("--set %s: %s is not a module or class" % (name, p))
+    attr = rest[-1]
+    if not hasattr(obj, attr):
+        raise ValueError("--set %s: %s has no %s" % (name, getattr(obj, '__name__', obj), attr))
+    value = getattr(obj, attr)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("--set %s: %s is not a number (it is %s)" % (name, attr, type(value).__name__))
+    return obj, attr, value
+
+
+def cache_warnings(owner, attr, old):
+    """Places that hold their own copy of a constant the override does not reach: another module or class with the same name and
+    value, and a function whose default for a parameter of that name was fixed when it was defined."""
+    import inspect
+    out = []
+    for modname, mod in sorted(sys.modules.items()):
+        if not modname.startswith('oversteer.') or mod is None:
+            continue
+        for k, v in list(vars(mod).items()):
+            if k == attr and v is not owner and not isinstance(v, bool) and v == old:
+                out.append('%s.%s holds its own copy (%r): not reached' % (modname, k, v))
+            if inspect.isclass(v) and v.__module__ == modname and v is not owner and attr in vars(v) and vars(v)[attr] == old:
+                out.append('class %s.%s holds its own copy (%r): not reached' % (modname, v.__name__, old))
+            if inspect.isfunction(v) and v.__module__ == modname:
+                for p in inspect.signature(v).parameters.values():
+                    if p.name.lower() == attr.lower() and p.default == old:
+                        out.append('%s.%s() has %s=%r fixed as a default: not reached' % (modname, k, p.name, old))
+    return out
+
+
+@contextlib.contextmanager
+def overrides(specs):
+    """Temporarily set module or class constants given as 'NAME=VALUE' (NAME dotted: ffb_forza.TP_S_HALF, RbrRack.DERIVED_SLIP_PEAK);
+    yields the header lines (what was set, and any copy the setting does not reach). Everything is validated before anything is
+    set, and restored on exit. ValueError for a bad spec, a name that does not exist or one that is not a number."""
+    todo = []
+    for spec in specs or ():
+        name, eq, text = spec.partition('=')
+        if not eq:
+            raise ValueError("--set %s: want NAME=VALUE" % spec)
+        owner, attr, old = _resolve(name.strip())
+        try:
+            value = float(text)
+        except ValueError:
+            raise ValueError("--set %s: %r is not a number" % (spec, text))
+        if not np.isfinite(value):
+            raise ValueError("--set %s: %r is not finite" % (spec, text))
+        if isinstance(old, int) and value == int(value):
+            value = int(value)
+        todo.append((name.strip(), owner, attr, old, value))
+    saved, lines = [], []
+    try:
+        for name, owner, attr, old, value in todo:
+            inherited = isinstance(owner, type) and attr not in vars(owner)
+            saved.append((owner, attr, old, inherited))
+            setattr(owner, attr, value)
+            lines.append('SET %s = %r (was %r)%s' % (name, value, old, (' [inherited: set on %s only]' % owner.__name__) if inherited else ''))
+            lines += ['    WARNING: ' + w for w in cache_warnings(owner, attr, old)]
+        yield lines
+    finally:
+        for owner, attr, old, inherited in reversed(saved):
+            if inherited:
+                delattr(owner, attr)
+            else:
+                setattr(owner, attr, old)
+
+
+def force_curve(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1.0, sets=(), loader=None, game_of=None):
+    """Run ffb-force-curve. Returns {'head', 'summary', 'trail', 'newton', 'rows', 'knee_nm'} (lists of lines; rows are
+    ffb_situations.curve_rows). Raises NoRack, ValueError (a bad --set)."""
+    import ffb_benchmark as fb
+    import ffb_parity as fp
+    import ffb_score as fs
+    from oversteer import wheel_torque as wt
+    loader = loader or (lambda path: list(fb._walk(path)[1]))
+    game_of = game_of or fp.game_of
+    head, newton, sides = [], [], []
+    with fs._sandbox(), overrides(sets) as set_lines:
+        head += set_lines
+        for tag, names, cls in (('A', a_names, class_a), ('B', b_names, class_b)):
+            sims = []
+            for name in names:
+                path = capture_path(name)
+                game = game_of(path)
+                rack_for(game, os.path.basename(path)[:15])
+                power = cls or profile_power_class(game)
+                sim = simulate_rows(loader(path), game, power, peak)
+                short = os.path.basename(path)[:15]
+                head += [tag + '  ' + ln for ln in info_lines(short, sim['info'])]
+                head.append('%s    theta: %s; Fyf: %s' % (tag, THETA_TABLE[game][2], FYF_TEXT[game]))
+                head.append('%s    %s' % (tag, sim['mass'][1]))
+                if game == 'acr' and len(sim['cols'].get('t', ())):
+                    text, _mass = newton_check(sim['cols'])
+                    newton += ['%s %s: Newton against the tyres (%d samples)' % (tag, short, len(sim['cols']['t']))] + text
+                sims.append(sim)
+            sides.append(pool_rows(sims))
+    a, b = sides
+    knee_nm = wt.KNEE * (peak or wt.DEFAULT_PEAK_NM)
+    rows = sit.curve_rows(sit.curve_cells(a['nm'], a['fyf'], a['theta'], a['dt']),
+                          sit.curve_cells(b['nm'], b['fyf'], b['theta'], b['dt']), min_s)
+    return {'head': head, 'summary': sit.curve_summary(rows, knee_nm), 'trail': trail_lines(a, b), 'newton': newton,
+            'rows': rows, 'knee_nm': knee_nm}
 
 
 # --- ffb-wheel-model ------------------------------------------------------------------------------------------------
