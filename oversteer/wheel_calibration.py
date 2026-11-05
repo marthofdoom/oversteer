@@ -97,6 +97,10 @@ class Calibration:
     V_STOP = 500.0              # deg/s: a pulse ends here
     V_KICK = 100.0              # deg/s: the push that starts each pulse runs until this
     V_RUN = 300.0               # deg/s: ...and then on to this before the pulse
+    PATHWAY = 'gear'            # the measurement pathway of this wheel type (see wheel_calib)
+    V_PULSE_RUN = 350.0         # deg/s: the run-up before a pulse (measured speed)
+    V_PULSE_END = 250.0         # deg/s: a pulse ends this fast the other way, or sooner for a strong wheel
+    OVERSHOOT_MARGIN = 1.25     # the speed the wheel gains after a pulse ends is allowed for with this much room
     V_MOVE = 180.0              # deg/s: moving between positions
     KICK = 0.35                 # the push, unless twice the breakaway is more
     KICK_START_S = 0.200        # a push that moves nothing in this long: held
@@ -165,6 +169,13 @@ class Calibration:
         self.a_kick = 300.0             # deg/s^2 the push gives (a floor for braking)
         self.kick_accels = {1.0: [], -1.0: []}
         self._latency = 0.03            # command to movement, raised to what the pushes show
+        self._overshoot = None          # deg/s a pulse's speed grows by after it ends, per unit of level (the median of
+                                        # the last few, so one stray report can't cut every later pulse short; until one is
+                                        # measured, the push's strength gives an estimate)
+        self._overshoots = deque(maxlen=5)
+        self._watch_dir = 0.0           # direction whose peak speed is being tracked (after a pulse), 0: none
+        self._watch_peak = 0.0
+        self._pulse_logged = set()      # levels whose first pulse duration is in the log
         self.done_units = 0
         self.total_units = 4 + self.BREAKAWAY_ANGLES + len(wc.KNOTS) * 2 * self.REPEATS + 1
         self._high_since = None
@@ -288,6 +299,7 @@ class Calibration:
             'summary': {
                 'a_kick': self.a_kick, 'a_fs': self.a_fs, 'breakaway_max': self.breakaway_max,
                 'latency_s': self._latency, 'sign': self.sign, 'kick': self.kick,
+                'pathway': self.PATHWAY, 'overshoot': self._overshoot,
                 'kick_accels': {str(int(k)): v for k, v in self.kick_accels.items()},
                 'move_timeouts': self.move_timeouts, 'move_skips': self.move_skips,
                 'near_lock_events': self.near_lock_events, 'phase_marks': self.phase_marks,
@@ -594,6 +606,8 @@ class Calibration:
             self.hist.popleft()
         self.omega = self._velocity(now)
         self._accel_update()
+        if self._watch_dir:
+            self._watch_peak = max(self._watch_peak, self._watch_dir * self.omega)
         # The reports can stop while the wheel turns (another program grabbed the input node): the axis's
         # current value, which a grab doesn't stop, must agree with them
         self.theta_now = self._deg(current)
@@ -972,6 +986,14 @@ class Calibration:
         """Where a pulse in direction d starts: on the other side, so it runs through the centre."""
         return -d * min(90.0, 0.25 * self._usable())
 
+    def _pulse_lead(self):
+        """How long a force written now takes to show in the speed we read: the latency the pushes measured
+        (the median, not the largest: _latency is raised by every slow push and never lowered) plus half of
+        the speed window."""
+        lags = [first - t_on for t_on, first in self.rec.onsets if first is not None]
+        lag = sorted(lags)[len(lags) // 2] if lags else self._latency
+        return lag + self.VEL_WINDOW_S / 2
+
     def _shot(self, level, d):
         """One pulse at `level`. The wheel is pushed from the far side (KICK, a sweep-level force) up to a run-up
         speed, then the pulse is played against the movement: it brakes the wheel and, past the breakaway,
@@ -991,9 +1013,17 @@ class Calibration:
                 return
         self._settle(0.15)
         self._kick(d)
-        v_run = min(self.V_RUN, math.sqrt(self.a_kick * abs(start)))
         end = min(abs(start) + 90.0, 0.6 * self._usable())
-        lead = self._latency + self.VEL_WINDOW_S
+        lead = self._pulse_lead()
+        # The run-up is measured, so the push still on its way (one lead) comes on top of the speed it ends at:
+        # a strong wheel behind a long latency gets a lower run-up speed, not one that starts the pulse past V_STOP
+        v_run = min(self.V_PULSE_RUN, math.sqrt(self.a_kick * abs(start)),
+                    self.V_STOP - self.OVERSHOOT_MARGIN * self.a_kick * lead)
+        v_run = max(v_run, 1.5 * self.V_KICK)
+        overshoot = self.a_fs * 0.02 if self._overshoot is None else self._overshoot
+        # The speed the other way a pulse ends at: the wheel keeps gaining speed for about a latency after the
+        # force stops, so a strong wheel (large overshoot at this level) ends sooner and stays under V_STOP
+        v_end = max(0.0, min(self.V_PULSE_END, self.V_STOP - self.OVERSHOOT_MARGIN * overshoot * level))
         history = deque([(self._now(), self.omega)])
 
         def peak():
@@ -1014,7 +1044,7 @@ class Calibration:
         while True:                                          # run up
             self._tick(d * self.kick)
             p = peak()
-            if d * p >= v_run or too_far(p):
+            if d * self.omega >= v_run or too_far(p):
                 break
             run = self._now() - t_run
             if d * self.omega < 0.7 * self.V_KICK:
@@ -1031,12 +1061,27 @@ class Calibration:
             elapsed = self._now() - t_pulse
             # (a pulse is played against the movement; for the first `lead` seconds the push before it is still
             # acting, so a predicted peak past V_STOP then is no reason to end it: it is what brakes)
-            if elapsed > window or -d * p >= v_run or (elapsed > lead and abs(p) > self.V_STOP) or too_far(p):
+            if elapsed > window or -d * self.omega >= v_end or (elapsed > lead and abs(self.omega) > self.V_STOP) \
+                    or too_far(p):
                 break
-            if elapsed > 0.03 and abs(self.omega) < 20.0:
-                break                                        # stopped, and the pulse can't turn it back
-        self._brake()
-        self._settle(0.1, check=False)
+            if elapsed > max(0.03, 2 * lead) and abs(self.omega) < 20.0:
+                break                                        # stopped, and the pulse can't turn it back (a strong
+                                                             # wheel reads 0 on its way through, a lead behind)
+        if level not in self._pulse_logged:
+            self._pulse_logged.add(level)
+            self.log.append((self._now(), 'pulse {:.0f}% lasted {:.0f} ms'.format(level * 100, elapsed * 1000)))
+        end_speed = -d * self.omega
+        self._watch_dir, self._watch_peak = -d, end_speed
+        try:
+            self._brake()
+            self._settle(0.1, check=False)
+        finally:
+            self._watch_dir = 0.0
+        # What the wheel gained after the pulse ended, per unit of level (only a pulse that turned the wheel back
+        # says how fast it goes after its force stops)
+        if level >= 0.3 and end_speed > 0:
+            self._overshoots.append((self._watch_peak - end_speed) / level)
+            self._overshoot = sorted(self._overshoots)[len(self._overshoots) // 2]
 
     def _step(self, fn, *args):
         """One step; near the lock it is dropped and the wheel centred (the third time, the run stops)."""
@@ -1709,8 +1754,11 @@ CONSISTENT_KNOTS = (0.4, 0.7)
 
 def inconsistency(result, previous):
     """Why a new fit does not agree with the stored one (a_fs more than 15 % apart, or the torque curve more than
-    0.1 of full scale apart at the knots 0.4 to 0.7), None when it does or there is nothing to compare."""
+    0.1 of full scale apart at the knots 0.4 to 0.7), None when it does or there is nothing to compare: a stored fit from
+    another measurement (no 'pathway', or a different one) is not this wheel's drift, and a new method must be able to replace it."""
     if not isinstance(result, dict) or not isinstance(previous, dict):
+        return None
+    if result.get('pathway') != previous.get('pathway'):
         return None
     reasons = []
     new, old = _num(result.get('a_fs')), _num(previous.get('a_fs'))
