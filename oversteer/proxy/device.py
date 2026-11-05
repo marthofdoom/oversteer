@@ -22,7 +22,7 @@ import threading
 import time
 
 from .spec import code_name, one_sided_fraction
-from . import calibration, uinput_ff
+from . import calibration, steer_gain, uinput_ff
 
 # Types never copied from a passthrough source: we generate SYN ourselves and
 # FF is handled by the passthrough machinery.
@@ -30,6 +30,8 @@ _NEVER_COPY = (ecodes.EV_SYN, ecodes.EV_FF, ecodes.EV_FF_STATUS)
 
 _RESCAN_MIN = 1.0
 _RESCAN_MAX = 10.0
+_STEER_STEP = 0.005          # a steering gain moving this much re-emits the steering axis
+_STEER_EVERY = 0.01         # ... at most this often (100 Hz); also the loop's wait while a gain file is there
 
 
 class ProxyState(Enum):
@@ -115,6 +117,13 @@ class ProxyDevice:
         self.calibration_uid_file = calibration.UID_FILE
         self.calibrating = {}             # '<source>:<code>' -> (monotonic deadline, saved (low, high, dead) or None)
         self.calibrated = {}              # '<source>:<code>' -> [low, high, dead] applied at run time
+        # The steering gain the app's engine hands over (steer_gain.py): only the wheel's own steering axis, the passthrough
+        # source that also takes the force feedback, is scaled; everything else goes through as it came.
+        self._steer_key = spec.passthrough if spec.passthrough is not None and spec.passthrough == spec.ff_source else None
+        self._steer_reader = steer_gain.GainReader(uids=lambda: calibration.allowed_uids(self.calibration_uid_file))
+        self._steer_raw = None            # the wheel's last steering value as it came
+        self._steer_gain = 1.0            # the gain the last steering value left with
+        self._steer_at = 0.0              # when the axis was last re-emitted for a moving gain
         self._thread = None
         self._lock = threading.Lock()
         self._wake_r, self._wake_w = os.pipe()
@@ -179,6 +188,7 @@ class ProxyDevice:
                 'ff_playing': list(self._ff_summary[1]) if self._ff_summary else [],
                 'inverted_axes': self._inverted_axes(),
                 'runtime_calibration': True,
+                'steer_gain': True,
                 'calibration': self._calibration_summary(),
                 'source_axes': {'{}:{}'.format(key, code): [info.min, info.max]
                                 for key, src in self.sources.items()
@@ -300,6 +310,9 @@ class ProxyDevice:
                 timeout = max(0.05, next_scan - time.monotonic()) if self.missing_sources() else None
                 timeout = 0.25 if timeout is None else min(timeout, 0.25)     # also the rhythm of the calibration check
                 self._check_calibration()
+                if self._steer_reader.active:
+                    timeout = min(timeout, _STEER_EVERY)
+                self._steer_tick()
                 self._pump(timeout)
         except Exception as e:
             logging.exception("proxy %s: fatal error", self.spec.id)
@@ -382,6 +395,8 @@ class ProxyDevice:
             return
         logging.info("proxy %s: lost %s (%s) %s", self.spec.id, key, source.path, reason)
         source.close()
+        if key == self._steer_key:
+            self._steer_raw = None
         self._release_keys_from(key)
         if key == self.spec.ff_source:
             # Effect ids on the real device are gone; keep the cache so they
@@ -453,7 +468,8 @@ class ProxyDevice:
                     if rule.to_type == ecodes.EV_ABS:
                         wrote |= self._apply(rule, source, _FakeEvent(ecodes.EV_ABS, code, info.value))
             elif self.spec.passthrough == key:
-                self._write(ecodes.EV_ABS, code, info.value)
+                self._write(ecodes.EV_ABS, code,
+                            self._steer_out(source, info.value) if self._is_steer(key, ecodes.EV_ABS, code) else info.value)
                 wrote = True
         try:
             pressed = set(source.device.active_keys())
@@ -498,6 +514,7 @@ class ProxyDevice:
             self.sources.clear()
         for _, source in sources:
             source.close()
+        self._steer_raw = None
         if self.ui is not None:
             try:
                 self.ui.close()
@@ -641,9 +658,44 @@ class ProxyDevice:
                 for rule in rules:
                     wrote |= self._apply(rule, source, event)
             elif passthrough and event.type not in _NEVER_COPY:
-                self._write(event.type, event.code, event.value, key)
+                value = self._steer_out(source, event.value) if self._is_steer(key, event.type, event.code) else event.value
+                self._write(event.type, event.code, value, key)
                 wrote = True
         if wrote:
+            self.ui.syn()
+
+    def _is_steer(self, key, etype, code):
+        return key == self._steer_key and etype == ecodes.EV_ABS and code == ecodes.ABS_X
+
+    def _steer_out(self, source, raw):
+        """The wheel's steering value `raw` as the virtual device gets it: scaled by the engine's gain about the centre of
+        the axis (steer_gain), exactly `raw` without a fresh one."""
+        self._steer_raw = raw
+        gain = self._steer_gain = self._steer_reader.read()
+        if gain == 1.0:
+            return raw
+        info = source.absinfo.get(ecodes.ABS_X)
+        return raw if info is None else steer_gain.scale_steer(raw, gain, info.min, info.max)
+
+    def _steer_tick(self):
+        """The car's speed changes while the wheel stands still: when the gain moved since the last steering value left,
+        the axis goes out again from the last raw value (at most every _STEER_EVERY)."""
+        if self._steer_key is None or self._steer_raw is None or self.ui is None:
+            return
+        now = time.monotonic()
+        if now - self._steer_at < _STEER_EVERY:
+            return
+        gain, last = self._steer_reader.read(), self._steer_gain
+        if abs(gain - last) <= _STEER_STEP and (gain == last or gain != 1.0):
+            return
+        with self._lock:
+            source = self.sources.get(self._steer_key)
+        if source is None:
+            return
+        self._steer_at = now
+        value = self._steer_out(source, self._steer_raw)
+        if value != self.last_values.get((ecodes.EV_ABS, ecodes.ABS_X)):
+            self._write(ecodes.EV_ABS, ecodes.ABS_X, value, self._steer_key)
             self.ui.syn()
 
     def _write(self, etype, code, value, source_key=None):

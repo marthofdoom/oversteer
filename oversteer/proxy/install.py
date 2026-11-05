@@ -23,7 +23,7 @@ UNIT_FILE = '/etc/systemd/system/oversteer-proxy.service'
 DAEMON_DIR = '/usr/local/lib/oversteer-proxy'
 DAEMON_FILES = ['__init__.py', 'wheel_ids.py', 'proxy/__init__.py', 'proxy/spec.py', 'proxy/device.py',
                 'proxy/uinput_ff.py', 'proxy/manager.py', 'proxy/equipment.py', 'proxy/daemon.py',
-                'proxy/install.py', 'proxy/calibration.py']
+                'proxy/install.py', 'proxy/calibration.py', 'proxy/steer_gain.py']
 HOST_PYTHON = '/usr/bin/python3'
 UNIT_TEMPLATE = """[Unit]
 Description=Oversteer proxy devices (virtual wheels, shifters, handbrakes)

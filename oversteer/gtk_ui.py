@@ -1494,6 +1494,16 @@ class GtkUi:
                       lambda w: self.controller.model.set_countersteer_lightness(int(w.get_value())))
         self.countersteer_lightness = light
 
+        self.linear_steer_note = self._status_label()
+        row, self.countersteer_linear_steer = self._switch_row(
+            _("Linear steering at speed"),
+            _("Forza turns the front wheels less as speed rises, so the same wheel angle does less at speed. On: the "
+              "wheel keeps one ratio at all speeds, like a real car. Set the game's own steering to its most direct "
+              "option. Applies at once."),
+            lambda state: self.controller.model.set_countersteer_forza_linear_steer(state), status=self.linear_steer_note)
+        self._dependent_rows.append(row)
+        game.add(row)
+
         self._build_wheel_calibration(self._page_list(page, _("Wheel correction")))
 
         self.main_notebook.insert_page(self._scrolled(page), Gtk.Label(label=_("Countersteer FFB")),
@@ -1641,6 +1651,13 @@ class GtkUi:
         """No control any more: RBR plays through the shared chain; the profile key stays for the model."""
         return
 
+    def set_countersteer_forza_linear_steer(self, value):
+        """Forza Horizon's "Linear steering at speed" (None where the driver has no replace mode)."""
+        if not hasattr(self, 'countersteer_linear_steer') or value is None:
+            return
+        if self.countersteer_linear_steer.get_active() != bool(value):
+            self.countersteer_linear_steer.set_active(bool(value))
+
     def set_countersteer_lightness(self, value):
         """Forza Horizon's understeer lightness, 0..100 (None where the driver has no replace mode)."""
         if not hasattr(self, 'countersteer_lightness') or value is None:
@@ -1700,6 +1717,10 @@ class GtkUi:
                 if self.countersteer_lines[key].get_text() != text:
                     self.countersteer_lines[key].set_text(text)
         self._show_countersteer_delay()
+        if self.countersteer_page_light.get_mapped():
+            note = self.controller.linear_steer_note()
+            if self.linear_steer_note.get_text() != note:
+                self.linear_steer_note.set_text(note)
         warning = self.controller.sensitivity_warning()
         if self.sensitivity_note.get_text() != warning:
             self.sensitivity_note.set_text(warning)

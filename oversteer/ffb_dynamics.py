@@ -293,6 +293,7 @@ def position_source(device, opener=None):
             ino = os.stat(node).st_ino if os.path.exists(node) else None
             if state['dev'] is None or state['node'] != node or state['ino'] != ino:
                 state['dev'], state['node'], state['ino'] = opener(node), node, ino
+            read.virtual = node != getattr(device, 'dev_name', None)      # a proxy's device: in the game's frame, not the wheel's
             info = state['dev'].absinfo(ecodes.ABS_X)
             if node != getattr(device, 'dev_name', None):
                 span = info.max - info.min
@@ -303,6 +304,7 @@ def position_source(device, opener=None):
         except (OSError, AttributeError):
             state['dev'] = None
             return None
+    read.virtual = False
     # What Countersteer FFB's engine process (ffb_process) builds the same reader from (a Device of these fields): a
     # callable does not cross the process boundary
     read.spec = {name: getattr(device, name, None) for name in POSITION_FIELDS} if default else None
