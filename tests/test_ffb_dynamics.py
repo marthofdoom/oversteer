@@ -60,8 +60,8 @@ def test_column_targets_scale_with_s_and_the_peak_and_never_go_under_the_wheels_
     assert d == round(0.17 * math.pi / 180 * 0.1 / 3.5 * 1e6) < 470 and f == 500
     d, f = fd.column_targets(0.1, 3.5, (470, 670, 500, 1250, 5000), removal=True)
     assert f == round(0.75 * 0.1 * fd.COLUMN_FRICTION_GAIN / 3.5 * 1e4) < 500
-    # an unknown wheel counts as the G29's 3.5 Nm; the figures stay in the driver's range
-    assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 3.5)
+    # an unknown wheel counts as the G29's 3.08 Nm; the figures stay in the driver's range
+    assert fd.column_targets(0.4, None) == fd.column_targets(0.4, 3.08)
     assert fd.column_targets(50.0, 3.5) == (fd.COLUMN_DAMPING_MAX, fd.COLUMN_FRICTION_MAX)
     # the damping's own scale (1:1 with the torque under the knee): the friction keeps the impedance scale
     d, f = fd.column_targets(0.3, 3.5, (470, 670, 500, 1250, 5000), damping_scale=1.0)   # 1:1 (100 %)
@@ -384,7 +384,7 @@ def test_the_default_column_damping_adds_15_percent_to_the_wheels_own(tmp_path):
     path = dyn_wheel(tmp_path)
     engine, t = playing_engine(path)
     assert engine.model.damping_pct == 15
-    add = 0.15 * engine.model.rho() ** 2 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.5) * 1e6
+    add = 0.15 * engine.model.rho() ** 2 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.08) * 1e6
     assert int(open(path + '/ffb_dyn_damping').readline()) == round(engine._dyn.own[0] + add)
     assert fd.column_targets(0.3, 3.5, damping_scale=0.64)[0] == round(0.64 * 848)      # the classic mapping's total
 
@@ -415,7 +415,7 @@ def test_the_slider_reaches_the_driver_on_top_of_the_calibrated_own(tmp_path):
     engine.set_column_damping(100)
     t = feed(engine, t, 0.5)
     own = engine._dyn.own[0]
-    assert int(open(path + '/ffb_dyn_damping').readline()) == round(own + engine.model.rho() ** 2 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.5) * 1e6)
+    assert int(open(path + '/ffb_dyn_damping').readline()) == round(own + engine.model.rho() ** 2 * 0.17 * math.pi / 180 / (engine.model.wheel_peak or 3.08) * 1e6)
     engine.stop()
 
 

@@ -30,7 +30,7 @@ except ImportError as _e:                          # the CLI prints this; the mo
     MISSING = "ffb-parity needs numpy and scipy (%s). Install them: pip install numpy scipy" % _e
 
 FULL = 32767.0                                   # ext_force full scale
-DEFAULT_PEAK = 3.5                               # Nm: wheel_torque.DEFAULT_PEAK_NM, the G29 class
+DEFAULT_PEAK = 3.08                              # Nm: wheel_torque.DEFAULT_PEAK_NM, the G29 class
 MIN_S = 4.0                                      # seconds of data a band needs
 TOL = 0.25                                       # a measure this far off the reference is flagged
 FLAT_TOL = 0.02                                  # the steering ratio must be this flat
