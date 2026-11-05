@@ -17,7 +17,7 @@ from . import telemetry_plot
 from .telemetry_capture import FFB_MAX_BYTES, FFB_MAX_SECONDS
 from .telemetry_view import DISCIPLINES, SURFACES, METHODS, clock, signed, coaching_items, live_status, sob_gain, splits_row, shift_summary, shift_table
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, GObject
 
 class GtkUi:
 
@@ -444,6 +444,10 @@ class GtkUi:
         scale.set_hexpand(True)
         scale.set_draw_value(False)
         scale.get_adjustment().set_page_increment(step)
+        # Only a drag moves a setting: not the mouse wheel (it scrolls the page) and not the keys (field: Steering strength found
+        # at 10 % on a drive, nobody having touched it, in a multiple of this page step, with no web write: cause not proven)
+        scale.set_can_focus(False)
+        scale.connect('scroll-event', lambda w, _e: (GObject.signal_stop_emission_by_name(w, 'scroll-event'), False)[1])
         return scale
 
     @staticmethod

@@ -565,6 +565,8 @@ class Model:
 
     def set_if_changed(self, key, value):
         if self.data[key] != value:
+            if key.startswith('countersteer_') and self.data[key] is not None:     # (what the force ran with must be in the log)
+                logging.info("setting %s: %s -> %s", key, self.data[key], value)
             self.data[key] = value
             if self.ui is not None:
                 self.update_save_profile_button()
