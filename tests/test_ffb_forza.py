@@ -415,7 +415,7 @@ def test_a_landing_is_a_pulse_after_all_four_were_in_the_air():
 
 def test_the_forza_texture_obeys_the_master_level_and_the_limiter():
     tx = ft.Texture()
-    tx.set(1.0, {name: name in ('road', 'impact', 'engine') for name in ft.PARTS})
+    tx.set(1.0, {name: name in ('road', 'impact') for name in ft.PARTS})      # (the engine is outside the limiter)
     out = run_texture(tx, lambda t, n: fsample(t, speed=30.0, rumble=(1, 0, 0, 0), surface_rumble=(0.6,) * 4,
                                                 susp=(0.01 * math.sin(n), 0.0, 0.0, 0.0)), seconds=3.0, steering=0.0)
     assert max(abs(v) for v in out) <= ft.FLOOR * FULL + 1e-6          # no steering force: only the floor of headroom

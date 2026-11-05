@@ -2882,7 +2882,10 @@ class Gui:
         if device is None:
             return None
         try:
-            entry = wcal.load_store(self._wheel_store()).get(wcal.wheel_key(device))
+            store = wcal.load_store(self._wheel_store())
+            base = wcal.base_key(device)
+            # The motor's response is the wheel's, whichever way it is read: direct mode uses the combined run's correction and back
+            entry = store.get(wcal.wheel_key(device)) or store.get(base + '+combined') or store.get(base)
         except Exception as e:
             logging.warning("wheel calibration store: %s", e)
             return None
