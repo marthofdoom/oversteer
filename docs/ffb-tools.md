@@ -4,6 +4,7 @@ All read only: no wheel, proxy, game or telemetry database is touched. Each writ
 
 - `scripts/new-game-check.py CAPTURE [--vs REFERENCE]`: the game a recording decoded as, the channels the force code reads that are present or missing, then `ffb-sim-match` against the newest ACR capture and `ffb-parity`; says so when the game has no rack yet.
 - `scripts/ffb-sim-match.py A [A2 ...] --vs B [B2 ...] [--class-a NAME] [--class-b NAME] [--peak NM]`: today's rack over recorded physics in `ffb-match`'s situations (ACR, RBR, Forza racks; the power class from the game's profile).
+- `scripts/ffb-force-curve.py A [A2 ...] --vs B [B2 ...] [--class-a NAME] [--class-b NAME] [--peak NM] [--set NAME=VALUE ...]`: today's rack's rim force in Nm by the front axle's lateral force and the normalised slip (the per-game definition is `THETA_TABLE` in `ffb_tools.py`), the cells where A and B differ, the effective trail by slip, and for ACR Newton's front force against the tyres'; `--set ffb_forza.TP_S_HALF=0.4` tries a constant for the replay only; log `~/.cache/ffb-force-curve/latest.log`.
 - `scripts/ffb-match.py A --vs B`: what two sets of recordings actually played in the same situations.
 - `scripts/ffb-parity.py [CAPTURE] [--ref CAPTURE]`: a recorded drive against a reference, flags over 25 %.
 - `scripts/ffb-wheel-model.py [--old RUN.json.gz] [--weight KG SHARE]`: what the wheel delivers for an asked torque, from the stored calibration, and the hanging-weight cross-check.
