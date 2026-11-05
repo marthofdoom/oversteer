@@ -2842,7 +2842,6 @@ function buildCs() {
   for (const [part, label] of [["road", "Road"], ["impact", "Landings"], ["lock", "Front lock"], ["engine", "Engine"]])
     tex.appendChild(reg(T("Texture: " + label, null, "countersteer_texture_" + part)));
   const game = mkPanel(b, "Game-specific");
-  game.appendChild(reg(S("Forza understeer lightness", percent, "Forza Horizon only: how much lighter the wheel gets as the front tyres run out of grip. 100 % by default.", "countersteer_lightness")));
   const corr = mkPanel(b, "Wheel correction");
   corr.appendChild(reg(mkCsCalibration()));
   corr.appendChild(el("div", "Correction, dither, soft clip, friction compensation and the Calibrate button are in the window on the Countersteer FFB tab.", "hint"));

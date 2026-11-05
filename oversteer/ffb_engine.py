@@ -156,6 +156,7 @@ OVERALL_ENGINE_FEEL = 100                # "Engine feel" default (profile key co
 OVERALL_CASTER_FLOOR = 100               # "Caster in slides" default (profile key countersteer_caster_floor, %): 0 = off
 OVERALL_MAPPING = 'knee'                 # steering mapping default (profile INI only): 'knee' (1:1 up to a knee) or 'classic' (the uniform impedance scale)
 OVERALL_FORZA_MODEL = True              # Forza Horizon through the ACR chain (profile INI only: countersteer_forza_model); False: ForzaLightness
+OVERALL_FORZA_SPRING = True             # Forza's driver-side aligning spring (profile INI only: countersteer_forza_spring)
 OVERALL_RBR_SPRING = True               # RBR's driver-side aligning spring, as ACR's (profile INI only: countersteer_rbr_spring); False: column damping and friction only
 OVERALL_RBR_SOURCE = 'derived'           # RBR's force from the car's physics (RbrRack; profile INI only: countersteer_rbr_source); 'ngp': the game's own force, recovered and played through the chain
 RBR_SOURCES = ('derived', 'ngp')
@@ -1932,6 +1933,9 @@ class ForzaRack(RackForce):
     TRIGGER_HOLD = 0.1                   # s: an event not taken by Kickback in this long is dropped
     MASS_SAVE_EVERY = 1.0                # s between hands of the learnt mass to the store
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
+    LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
+    spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
+    lead_on = False                      # the front slip's lead on Newton's Fy_f (ffb_forza.SlipLead): off, it moved steering to force by nothing on 20261104-220133
 
     @property
     def mass(self):
@@ -1941,6 +1945,8 @@ class ForzaRack(RackForce):
         stored = ffb_carprops.STORE.get_mass(car) if car is not None else None
         self.mass_l = ffb_forza.MassLearner(stored)
         self._yaw = collections.deque(maxlen=3)         # (game time, yaw rate)
+        self._lead = ffb_forza.SlipLead()
+        self._lead_fy = None
         self.rdot = 0.0
         self._sides = (0, 0)                            # the one-sided rumble / puddle now (+1 FL, -1 FR)
         self._trigger = None                            # (time, step of Fx_FL - Fx_FR)
@@ -1949,6 +1955,20 @@ class ForzaRack(RackForce):
         super().reset(car)
         self.ratio, self.assist = self.STEER_RATIO, self.ASSIST
         self.ratio_known = True
+        self.lock, self.lock_known = self.ALIGN_LOCK, True        # (the approximation plays at once; _learn_lock moves it)
+        self.lock_learnt_at = None
+
+    def _learn_lock(self, t, sample, dt):
+        """The aligning spring's frame: the lock and ratio from the car's own motion (RackForce._learn_ratio: Ackermann
+        steer-to-road-wheel angle at low lateral acceleration; Forza has no tyre slip angles in rad, no lock, no ratio
+        table), the lock slewing from the start value at LOCK_SLEW rad/s so the spring does not step."""
+        before = self.lock
+        self._learn_ratio(sample, dt)
+        learnt, self.lock = self.lock, before
+        if learnt != before:
+            if self.lock_learnt_at is None:
+                self.lock_learnt_at = t
+            self.lock += min(max(learnt - before, -self.LOCK_SLEW * dt), self.LOCK_SLEW * dt)
 
     def _restart(self):
         super()._restart()
@@ -1957,6 +1977,19 @@ class ForzaRack(RackForce):
 
     def power_steering(self):
         return 'model'
+
+    ALIGN_SPEED = RbrRack.ALIGN_SPEED
+    ALIGN_FRESH = RbrRack.ALIGN_FRESH
+    _slip = RbrRack._slip                # the kinematic front slip angle (Forza's own are normalised, not rad)
+
+    @staticmethod
+    def _rear_slip(sample):
+        return None
+
+    def align_ready(self):
+        """The spring may play: the INI has not turned it off and the car is ready (the ratio and lock start from
+        STEER_RATIO and ALIGN_LOCK; the prior stiffness serves until the fit has enough)."""
+        return bool(self.spring_on and self.ratio_known and self.lock_known and self.ready)
 
     def top_torque(self, ratio=None, assist=None):
         return ffb_carprops.hyd_top()
@@ -1972,6 +2005,9 @@ class ForzaRack(RackForce):
             return None
         bl = ffb_forza.front_share(sample.drivetrain)
         fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot)
+        lead = self._lead_fy
+        if lead is not None and lead[0] is sample:
+            fy = lead[1]
         cs = sample.combined_slip
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
@@ -1983,6 +2019,19 @@ class ForzaRack(RackForce):
                 torque += math.copysign(scrub * self.PULL_FRACTION * self.mass * bl * ffb_forza.G / 2.0,
                                         1.0 if pud[0] else -1.0)
         return torque
+
+    def _lead_update(self, t, sample):
+        """Newton's Fy_f with the front slip's fast part (ffb_forza.SlipLead), once for this sample; _front plays it."""
+        self._lead_fy = None
+        accel, sa = sample.accel, sample.slip_angle
+        if not self.lead_on or accel is None or len(accel) < 2 or not ffb_forza.finite(accel[1]):
+            return
+        slip = None
+        if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]):
+            slip = 0.5 * (sa[0] + sa[1])
+        bl = ffb_forza.front_share(sample.drivetrain)
+        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot)
+        self._lead_fy = (sample, self._lead.step(t, fy, slip))
 
     def _kicked(self, sample, share, ratio, assist):
         return share                     # (after the output filter: kick_force)
@@ -2043,10 +2092,16 @@ class ForzaRack(RackForce):
             self._mass_saved = t
             ffb_carprops.STORE.set_mass(self.car, self.mass)
         self._events(t, sample, ffb_forza.front_share(sample.drivetrain))
+        self._lead_update(t, sample)
+        if self.car is not None and self.moving:
+            self._learn_lock(t, sample, dt)
         torque = self._front(sample, self.trail, 0.0)
         if raw is not None and torque is not None and speed > MIN_SPEED and dt > 0.0:
             self.moving_time += dt
             self._corr.add(torque, raw, dt, abs(raw) < self.RAW_CLIPPED)
+        alpha = self._slip(sample)
+        if torque is not None and alpha is not None and dt > 0.0 and abs(alpha) < self.ALIGN_FIT_ALPHA and speed > MIN_SPEED:
+            self._align.add(self._sat(alpha), torque, dt)       # (the spring's stiffness, as RackForce.feed)
         corr = self._corr
         self.fit = corr.r()
         self.refused = 'mismatch' if (self.moving_time >= self.MIN_TIME and corr.spread() >= self.MIN_SPREAD
@@ -2476,6 +2531,7 @@ class FfbEngine:
         self.forza_filter = ffb_forza.OutputFilter(FULL)
         self._forza_model = OVERALL_FORZA_MODEL      # ForzaRack (True) or ForzaLightness (False) for Forza Horizon
         self._forza_model_req = None     # the profile INI's countersteer_forza_model from the GUI
+        self._forza_spring_req = None    # the profile INI's countersteer_forza_spring from the GUI
         self._rbr_spring_req = None      # the profile INI's countersteer_rbr_spring from the GUI
         self._rbr_source_req = None      # the profile INI's countersteer_rbr_source from the GUI
         self._fz_sample = None           # the last Forza sample (ForzaRack)
@@ -2716,6 +2772,12 @@ class FfbEngine:
         self._forza_model_req = bool(on)
         self._wake.set()
 
+    def set_forza_spring(self, on):
+        """Forza Horizon's aligning spring (profile INI only, countersteer_forza_spring): True plays it through the driver as ACR's,
+        False leaves it with the column's damping and friction."""
+        self._forza_spring_req = bool(on)
+        self._wake.set()
+
     def set_rbr_spring(self, on):
         """RBR's aligning spring (profile INI only, countersteer_rbr_spring): True plays it through the driver as ACR's,
         False leaves RBR with the column's damping and friction."""
@@ -2802,7 +2864,7 @@ class FfbEngine:
             'car_wheel_mm': model.car_wheel_mm, 'forza_car_wheel_mm': fz.car_wheel_mm,
             'power_class': ffb_carprops.power_class(), 'texture_level': round(self.texture.level, 4),
             'texture_parts': dict(self.texture.parts), 'column': bool(column), 'align': bool(align),
-            'friction_removal': bool(removal), 'forza_model': bool(self._forza_model), 'rbr_spring': bool(self.rbr_rack.spring_on), 'rbr_source': self.rbr_rack.source,
+            'friction_removal': bool(removal), 'forza_model': bool(self._forza_model), 'forza_spring': bool(self.forza_rack.spring_on), 'rbr_spring': bool(self.rbr_rack.spring_on), 'rbr_source': self.rbr_rack.source,
             'lightness': round(self.addon.strength * 100.0, 3)}
         learnt = {'car': model.car, 'ratio': model.ratio, 'lock': model.lock, 'trail_m': model.trail,
                   'scrub_m': model.scrub, 'forza_car': fz.car, 'forza_mass_kg': fz.mass,
@@ -3081,6 +3143,8 @@ class FfbEngine:
                 self.forza_rack.car_wheel_mm = FORZA_CAR_WHEEL_MM
         if self._forza_model_req is not None:
             self._forza_model = self._forza_model_req
+        if self._forza_spring_req is not None:
+            self.forza_rack.spring_on = self._forza_spring_req
         if self._rbr_spring_req is not None:
             self.rbr_rack.spring_on = self._rbr_spring_req
         if self._rbr_source_req is not None and self._rbr_source_req != self.rbr_rack.source:
@@ -3232,17 +3296,12 @@ class FfbEngine:
         ready, the driver reports a spring and the wheel's range is known."""
         stage = self._dyn
         rbr = self._played_mode == 'rbr'
-        model = self.rbr_rack if rbr else self.model
+        fz = self._played_mode == 'forza-rack'
+        model = self.rbr_rack if rbr else self.forza_rack if fz else self.model
         if stage is None or not stage.usable() or self._played_mode not in ('acr', 'rbr', 'forza-rack'):
             model.align_on = False
             return
         stage.poll(t)
-        if self._played_mode == 'forza-rack':
-            # Forza: the column's damping and friction only (no aligning split, no frame check: the lock sits at the
-            # wheel's range / 2)
-            rack = self.forza_rack
-            stage.column(t, rack.impedance(), rack.wheel_peak, rack.damping_scale(), not rack.classic())
-            return
         if stage.k_limit is not None:
             model.align_k_limit = stage.k_limit      # (the model's k already carries the strength)
         model.wheel_range = stage.range
@@ -3261,9 +3320,10 @@ class FfbEngine:
             self.align_note = _("engine off: unassisted steering")
         want = stage.can_align() and model.align_ready() and frame_ok \
             and self._w >= 1.0 and not self._handback      # (while gliding between the levels the spring would add its own)
-        if rbr:
-            # RBR's slip is worked out from the sample: it must be a live one (its level may outlast the telemetry)
-            want = want and model._fed_at is not None and 0.0 <= t - model._fed_at <= model.ALIGN_FRESH
+        if rbr or fz:
+            # RBR's and Forza's slip is worked out from the sample: it must be a live one (the level may outlast the telemetry)
+            fed = model._fed_at if rbr else model._last
+            want = want and fed is not None and 0.0 <= t - fed <= model.ALIGN_FRESH
         why = None if want else next((name for name, ok in (
             ('the driver or the profile', stage.can_align()),
             ('car or fit not ready: %s' % {k: getattr(model, k, None) for k in ('car', 'ratio_known', 'lock_known', 'ready', 'spring_on')}, model.align_ready()),

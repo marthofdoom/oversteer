@@ -1479,10 +1479,6 @@ class GtkUi:
         light.connect('value-changed',
                       lambda w: self.controller.model.set_countersteer_lightness(int(w.get_value())))
         self.countersteer_lightness = light
-        self._dependent_rows.append(self._setting_row(_("Forza understeer lightness"), None,
-                                                      _(self.COUNTERSTEER_LIGHTNESS_TOOLTIP),
-                                                      (self._response_row(light),)))
-        game.add(self._dependent_rows[-1])
 
         self._build_wheel_calibration(self._page_list(page, _("Wheel correction")))
 
