@@ -277,7 +277,7 @@ class Extract:
 def _levels(path):
     """[(t, level)] of the sidecar's game_ffb_raw, and (ext_force (t, value) array or None, header, playing writes)."""
     from oversteer import ffb_record
-    raw, ext, header = [], [], {}
+    raw, ext, header, align, wheel_range = [], [], {}, [], None
     side = path + ffb_record.SUFFIX
     if os.path.exists(side):
         try:
@@ -287,9 +287,36 @@ def _levels(path):
                     raw.append((t, v[0]))
                 elif name == 'ext_force':
                     ext.append((t, v[0]))
+                elif name == 'ffb_align':
+                    align.append((t, v[0], v[1], v[2]))
+                elif name == 'ffb_align_read':
+                    wheel_range = v[1]
         except (OSError, ValueError):
             header, raw, ext = {}, [], []
-    return raw, (np.array(ext, float) if len(ext) >= 50 else None), header
+    played = np.array(ext, float) if len(ext) >= 50 else None
+    if played is not None and align and wheel_range:
+        played = _with_spring(path, played, np.array(align, float), wheel_range)
+    return raw, played, header
+
+
+def _with_spring(path, played, align, wheel_range):
+    """ext_force is the residual: the played force is it plus the driver's aligning spring (target, k uFS/deg, wheel position)."""
+    from oversteer import telemetry_capture as tc
+    side = path + tc.WHEEL_SUFFIX
+    if not os.path.exists(side):
+        return played
+    _meta, records = tc.read_wheel(side)
+    pos = np.array([(t, v) for t, kind, code, v in records if kind == 3 and code == 0], float)
+    if len(pos) < 50:
+        return played
+    t, half = played[:, 0], wheel_range / 2.0
+    theta = -(np.interp(t, pos[:, 0], pos[:, 1]) - 32767.5) / 32767.5 * half
+    target = -np.interp(t, align[:, 0], align[:, 1]) / 32767.0 * half
+    k = np.interp(t, align[:, 0], align[:, 2]) * 1e-6
+    live = np.abs(t - np.interp(t, align[:, 0], align[:, 0])) < 0.2
+    out = played.copy()
+    out[:, 1] += FULL * np.clip(k * (target - theta), -0.8, 0.8) * live
+    return out
 
 
 def _walk(path):
