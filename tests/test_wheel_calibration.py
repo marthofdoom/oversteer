@@ -84,6 +84,17 @@ def test_a_push_that_cannot_reach_the_run_up_speed_is_no_hand_on_the_wheel():
     assert result['a_fs'] > 0
 
 
+def test_one_odd_push_is_noise_and_two_running_a_hand():
+    cal = Calibration(SimWheel())
+    cal.kick_accels[1.0] = [5000.0, 5000.0, 5000.0]
+    cal._check_push(2400.0, 1.0)                                  # (the field G29's slope, 141 pushes in)
+    assert cal.kick_accels[1.0] == [5000.0] * 3
+    cal._check_push(5000.0, 1.0)
+    cal._check_push(2400.0, 1.0)                                  # not running: still noise
+    with pytest.raises(Aborted):
+        cal._check_push(2400.0, 1.0)
+
+
 def test_a_stored_fit_from_before_the_pathways_never_blocks_a_new_measurement():
     new = {'pathway': 'gear', 'a_fs': 14000.0, 'knots': [0.5], 'curve': [0.8]}
     old = {'a_fs': 17587.0, 'knots': [0.5], 'curve': [0.59]}
