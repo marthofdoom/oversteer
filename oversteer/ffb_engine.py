@@ -1935,7 +1935,6 @@ class ForzaRack(RackForce):
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
     LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
     spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
-    TP_SCALE = 1.5                       # the pneumatic trail: 42 mm at no slip, ACR's on tarmac (42-44 mm); with the rally caster the closest physical pair to ACR tarmac, same situations
     SLIP_RAD = -0.148                    # rad of kinematic front slip per unit of Forza's normalised slip angle (corr -0.93 over 2 drives)
     AY_LEVEL_S = 0.5                     # s: what is slower than this comes from a_y, what is faster from v r
     VR_GAIN = 0.8                        # a_y over v r, measured 0.78 on 20261104-230426
@@ -2028,7 +2027,7 @@ class ForzaRack(RackForce):
         cs = sample.combined_slip
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
-        torque = ffb_forza.kingpin(fy, s, (self.PUDDLE_TP if self._both_puddles(sample) else 1.0) * self.TP_SCALE, ffb_carprops.RALLY_TRAIL)
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0)
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):

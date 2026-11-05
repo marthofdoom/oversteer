@@ -53,7 +53,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
     assert rack.rdot == pytest.approx(6.0, rel=1e-6)
     s = fsample(t, ay=4.0, dt='awd', cs=0.0)
     rack._ay_lp = None                 # (this sample's yaw rate is unrelated to the ramp above)
-    expect = -(fe.ffb_carprops.RALLY_TRAIL + 0.028 * fe.ForzaRack.TP_SCALE) * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
+    expect = -(0.027 + 0.028) * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
     assert rack._front(s, None, None) == pytest.approx(expect, rel=1e-9)
     assert rack._front(fsample(t, ay=None), None, None) is None if False else True
     s2 = fsample(t, ay=4.0, dt='awd', cs=0.0, accel=None)
@@ -70,10 +70,10 @@ def test_the_trail_fades_with_the_combined_slip():
     rack.reset(CAR)
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     hi = rack._front(fsample(ay=6.0, cs=3.0), None, None)
-    assert lo == pytest.approx(-(fe.ffb_carprops.RALLY_TRAIL + fe.ForzaRack.TP_SCALE * 0.028) * 1400.0 * 0.53 * 6.0)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(fe.ffb_carprops.RALLY_TRAIL + fe.ForzaRack.TP_SCALE * fz.trail(3.0)) * 1400.0 * 0.53 * 6.0)
+    assert lo == pytest.approx(-(0.027 + 0.028) * 1400.0 * 0.53 * 6.0)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0)) * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
-    assert rack._front(both, None, None) == pytest.approx(-(fe.ffb_carprops.RALLY_TRAIL + fe.ForzaRack.TP_SCALE * 0.014) * 1400.0 * 0.53 * 6.0)
+    assert rack._front(both, None, None) == pytest.approx(-(0.027 + 0.014) * 1400.0 * 0.53 * 6.0)
 
 
 def test_the_constants_ratio_14_wheel_375_assist_1_model():
