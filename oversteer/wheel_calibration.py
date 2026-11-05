@@ -138,6 +138,7 @@ class Calibration:
     REPEATS = 2
     GRAB_RATIO = 2.0            # a push accelerating the wheel this much less (hands on it) or more (pushed
                                 # along) than the others stops the run
+    GRAB_PUSHES = 2             # ...twice running in one direction
     BLIND_DEG = 4.0             # the reported position and the axis's current value may differ this much
     TICK_GAP_S = 0.020          # a pause between writes this long during a pulse above SWEEP_MAX stops the run
     EMERGENCY_BRAKE_S = 0.200   # stopping at the hard margin: brake this long at most, then force 0
@@ -172,6 +173,7 @@ class Calibration:
         self.a_fs = 20000.0             # deg/s^2 at full scale: high (soft loops) until the first pushes
         self.a_kick = 300.0             # deg/s^2 the push gives (a floor for braking)
         self.kick_accels = {1.0: [], -1.0: []}
+        self._odd_pushes = {1.0: 0, -1.0: 0}
         self._latency = 0.03            # command to movement, raised to what the pushes show
         self._overshoot = None          # deg/s a pulse's speed grows by after it ends, per unit of level (the median of
                                         # the last few, so one stray report can't cut every later pulse short; until one is
@@ -950,14 +952,25 @@ class Calibration:
         accel = self._rise(speeds, first)
         if accel <= 0:
             raise self._grabbed(_("it turned the wrong way when pushed"))
+        self._check_push(accel, d)
+        return accel
+
+    def _check_push(self, accel, d):
+        """A push far from the others, twice running that way: a hand on the rim stays there, while one slope read
+        over the 20 ms a strong wheel takes to reach V_KICK can land that far off by itself (the field G29: 2482
+        against a median of 5053). An odd push is not taken as a reference."""
         refs = self.kick_accels[d]
         if len(refs) >= 2:
             ref = sorted(refs)[len(refs) // 2]
             if not ref / self.GRAB_RATIO < accel < ref * self.GRAB_RATIO:
-                raise self._grabbed(_("a push accelerated it at {:.0f} instead of {:.0f} degrees/s²")
-                                    .format(accel, ref))
+                self._odd_pushes[d] += 1
+                self.log.append((self._now(), 'odd push {:.0f} against {:.0f}'.format(accel, ref)))
+                if self._odd_pushes[d] >= self.GRAB_PUSHES:
+                    raise self._grabbed(_("a push accelerated it at {:.0f} instead of {:.0f} degrees/s²")
+                                        .format(accel, ref))
+                return
+        self._odd_pushes[d] = 0
         refs.append(accel)
-        return accel
 
     def _rise(self, speeds, first):
         """The acceleration (deg/s^2) of a speed rising through `speeds` ((time, speed) per tick): a line
