@@ -671,7 +671,6 @@ class Gui:
         self.apply_countersteer_mapping()
         self.apply_countersteer_forza_model()
         self.apply_countersteer_forza_spring()
-        self.apply_countersteer_forza_linear_steer()
         self.apply_countersteer_rbr_spring()
         self.apply_countersteer_rbr_source()
         self.apply_countersteer_knee()
@@ -700,44 +699,6 @@ class Gui:
     def apply_countersteer_forza_model(self):
         """Forza Horizon's force: ours through the chain or the lightened game force (profile INI only) to the engine."""
         self.ffb_engine.set_forza_model(self.model.get_countersteer_forza_model())
-
-    STEER_GAIN_CHECK_S = 3.0
-
-    def proxy_steer_gain(self):
-        """Can the running proxy service scale the steering by the engine's gain (proxy/steer_gain)? True; False when
-        proxies run without it (a daemon from before it: it ignores the gain file); None when no proxy runs. Read from
-        the daemon's status, at most every STEER_GAIN_CHECK_S."""
-        now = time.monotonic()
-        seen = getattr(self, '_steer_gain_seen', None)
-        if seen is not None and now - seen[0] < self.STEER_GAIN_CHECK_S:
-            return seen[1]
-        from .proxy.manager import ProxyManager
-        running = [p for p in (ProxyManager.read_status() or {}).get('proxies', []) if p.get('state') in ('running', 'degraded')]
-        capable = None if not running else any(p.get('steer_gain') for p in running)
-        self._steer_gain_seen = (now, capable)
-        if seen is not None and seen[1] != capable:
-            self.apply_countersteer_forza_linear_steer()          # the daemon came or went, or was updated
-        return capable
-
-    def apply_countersteer_forza_linear_steer(self):
-        """Forza Horizon's "Linear steering at speed" to the engine: on only where the proxy service can apply it (the engine
-        takes the steering as the game's frame then, which it would not be otherwise)."""
-        on = self.model.get_countersteer_forza_linear_steer()
-        if on and getattr(self, '_steer_gain_seen', None) is not None:
-            self._steer_gain_seen = None
-        self.ffb_engine.set_forza_linear_steer(bool(on and self.proxy_steer_gain() is True))
-
-    def linear_steer_note(self):
-        """The row's line under "Linear steering at speed": what stops it from working, '' when nothing does."""
-        if not self.model.get_countersteer_forza_linear_steer():
-            return ''
-        capable = self.proxy_steer_gain()
-        if capable is None:
-            return _("Needs the proxy service (the combined device) running: it does nothing now.")
-        if not capable:
-            return _("The proxy service is from an older version and ignores this. Untick and tick \"Combine into one device\" "
-                    "again to reinstall it (no game running).")
-        return ''
 
     def apply_countersteer_forza_spring(self):
         """Forza Horizon's aligning spring on or off (profile INI only) to the engine."""

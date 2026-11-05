@@ -63,23 +63,6 @@ def kingpin(fy, s, tp_scale=1.0, caster=CASTER):
     return -(caster + tp_scale * trail(s)) * fy
 
 
-# Forza Horizon 6 turns the front wheels less as speed rises, and the packet's `steer` is the wheel 1:1 at every speed.
-# The road-wheel angle per unit of steer (L r / v / steer, steady low-g driving, three cars alike, ~/.cache/calib-check/fhk.py)
-# is about .72 up to 14 m/s and .25 at 50 m/s, and between them it follows .72 / (1 + (v - 14) / 19.1) within .03. Past 50 m/s
-# nothing is measured yet: the line is carried on, and held at STEER_GAIN_MAX.
-STEER_KNEE = 14.0                        # m/s: the speed up to which the game takes nothing away
-STEER_SLOPE = 19.1                       # m/s: the speed past the knee that takes it to half
-STEER_GAIN_MAX = 5.0
-
-
-def linear_steer_gain(v):
-    """The factor to put on the wheel's position so the front wheels turn as they do at low speed, whatever the speed:
-    1 + (|v| - STEER_KNEE) / STEER_SLOPE past the knee, 1.0 under it, at most STEER_GAIN_MAX; 1.0 for a speed that is not a number."""
-    if not finite(v):
-        return 1.0
-    return min(1.0 + max(abs(v) - STEER_KNEE, 0.0) / STEER_SLOPE, STEER_GAIN_MAX)
-
-
 class LowPass:
     """A causal low-pass at `hz`, first or second order (Butterworth), exact for an input held over each (irregular) step dt
     (the same closed form as RbrRack._low_pass). A gap over `gap` s (or time going back) starts it again at the input."""
