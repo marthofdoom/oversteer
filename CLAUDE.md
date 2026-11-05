@@ -2,6 +2,7 @@
 
 ## Build, run, test
 - Run from source: `scripts/run-dev.sh [--gui]` (meson build dir `build/`, then `python3 build/bin/oversteer`).
+- Same-situation force, two sets of recordings: `scripts/ffb-match.py A --vs B`.
 - Tests: `python3 -m pytest -q --ignore=tests/test_proxy.py` (about 2 minutes). CI adds `-k "not uinput"` and runs under xvfb.
 - FFB parity: `scripts/ffb-parity.py [CAPTURE] [--ref CAPTURE] [--json PATH]` compares a recorded FFB drive with a reference drive and flags gaps over 25 %; log in `~/.cache/ffb-parity/latest.log`; run `tests/test_ffb_parity.py` after editing it.
 - FFB benchmark (ACR as the reference, read-only): `nice -n 15 scripts/ffb-benchmark.py build`, then `... compare CAPTURE`; log `~/.cache/ffb-benchmark/latest.log`; STALE once `ffb_engine.py`, `ffb_carprops.py` or `wheel_torque.py` change.
