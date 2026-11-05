@@ -269,7 +269,11 @@ def test_readers_on_other_threads_see_whole_rows_in_order():
                 if len({v for v in s[:-1]}) != 1:
                     errors.append(('torn', s))
             if ks:
-                if ks != list(range(int(ks[0]), int(ks[0]) + len(ks))) or ks[-1] != body['seq']:
+                # (an unthrottled writer can lap a reader stalled mid-read: it then skips slots overwritten since its snapshot,
+                # as the module says, and rows stay in order. At the real 10 Hz the ring is minutes long)
+                lapped = buffer._seq - int(ks[0]) >= CAPACITY
+                if ks != sorted(set(ks)) or (not lapped and (ks != list(range(int(ks[0]), int(ks[0]) + len(ks)))
+                                                             or ks[-1] != body['seq'])):
                     errors.append(('order', since, ks[:3], ks[-1], body['seq']))
                 if ks[0] != since + 1 and body['seq'] - since <= CAPACITY:
                     errors.append(('gap', since, ks[0], body['seq']))

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.0-rc2 — 2026-11-05
+
+0.18.0-rc1 never got a download: tests failed in release CI. No change to the app; rc1's notes follow.
+
 ## 0.18.0-rc1 — 2026-11-05
 
 ### Wheel calibration and peak force

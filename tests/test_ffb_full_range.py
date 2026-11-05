@@ -17,7 +17,7 @@ def full_wheel(tmp_path, gain=G75, cap=80):
     return engine, path
 
 
-def setup(tmp_path, gain=G75, cap=80, name='wheel'):
+def rig(tmp_path, gain=G75, cap=80, name='wheel'):
     from tests.test_ffb_engine import wheel
     path = wheel(tmp_path, name)
     if gain is not None:
@@ -34,7 +34,7 @@ def setup(tmp_path, gain=G75, cap=80, name='wheel'):
 
 
 def play(tmp_path, **kw):
-    engine, path = setup(tmp_path, **kw)
+    engine, path = rig(tmp_path, **kw)
     t = run(engine, 0.0, fe.GLIDE_IN + 5.5)
     assert engine.status.active and engine._w == 1.0
     return engine, path, t
@@ -42,7 +42,7 @@ def play(tmp_path, **kw):
 
 def test_raised_only_once_our_force_fully_plays(tmp_path, caplog):
     caplog.set_level(logging.INFO)
-    engine, path = setup(tmp_path)
+    engine, path = rig(tmp_path)
     t, raised_at, seen = 0.0, None, []
     while t < 12.0:
         t = run(engine, t, 0.05)
@@ -56,7 +56,7 @@ def test_raised_only_once_our_force_fully_plays(tmp_path, caplog):
 
 
 def test_what_is_delivered_does_not_step_across_the_switch(tmp_path):
-    engine, path = setup(tmp_path)
+    engine, path = rig(tmp_path)
     t, last, worst, jumps = 0.0, None, None, []
     steps = int((fe.GLIDE_IN + 6.5) * HZ)
     for _ in range(steps):
@@ -95,7 +95,7 @@ def test_restored_on_a_handback_before_the_glide_out(tmp_path):
 
 def test_restored_on_stop_and_a_device_change(tmp_path):
     engine, path, t = play(tmp_path)
-    other_path = setup(tmp_path, name='other')[1]
+    other_path = rig(tmp_path, name='other')[1]
     engine.set_device(other_path)
     run(engine, t, 0.5)
     assert (read(path, 'ext_force_cap'), read(path, 'gain')) == (80, G75)
@@ -148,7 +148,7 @@ def test_a_users_gain_change_is_the_new_original(tmp_path, caplog):
 
 
 def test_a_killed_child_is_restored_by_the_gui(tmp_path):
-    engine, path = setup(tmp_path)
+    engine, path = rig(tmp_path)
     reports = []
     engine.range_hook = lambda wheel, state: reports.append((wheel, None if state is None else state.wire()))
     run(engine, 0.0, fe.GLIDE_IN + 5.5)

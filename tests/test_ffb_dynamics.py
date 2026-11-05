@@ -1014,8 +1014,9 @@ def test_the_wheels_own_node_goes_through_normalize_and_a_node_change_reopens(tm
     assert read() == 64535 and opened == [str(own)]
     read()
     assert len(opened) == 1                                              # kept open
-    own.unlink()
-    own.write_text('')                                                   # a new node under the same name
+    fresh = tmp_path / 'event-new'
+    fresh.write_text('')
+    os.replace(fresh, own)                                               # a new node under the same name (a new inode: unlink and create may reuse it)
     read()
     assert len(opened) == 2
 

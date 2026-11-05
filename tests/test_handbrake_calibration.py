@@ -259,6 +259,8 @@ def test_device_ignores_a_file_of_another_user(tmp_path):
     assert dev.spec.mappings[0].low is None
     (tmp_path / "nouid").write_text("%d\n" % os.getuid())
     calibration.write(dev.spec.id, {NAME: {"low": 1000, "high": 60000, "dead": 0.03}}, dev.calibration_dir)    # rewritten
+    bumped = calibration.path_for(dev.spec.id, dev.calibration_dir)
+    os.utime(bumped, (os.path.getmtime(bumped) + 5, os.path.getmtime(bumped) + 5))   # (a coarse clock can give the rewrite the same time)
     dev._calibration_next = 0
     dev._check_calibration(now=2.0)
     assert dev.spec.mappings[0].low == 1000.0

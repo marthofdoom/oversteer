@@ -11,7 +11,7 @@ import pytest
 from oversteer import ffb_engine as fe, ffb_gear as fg, ffb_process as fp, wheel_ids as wid, wheel_torque
 from oversteer.model import Model
 from tests.test_ffb_engine import FakeDriver, _clean_log, run as run_engine  # noqa: F401
-from tests.test_ffb_full_range import play, setup  # noqa: F401
+from tests.test_ffb_full_range import play, rig  # noqa: F401
 
 DT = 0.002
 

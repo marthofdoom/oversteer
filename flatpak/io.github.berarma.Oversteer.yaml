@@ -61,8 +61,8 @@ modules:
     config-opts:
       - -Dudev_rules_dir=/etc/udev/rules.d
       # flatpak-builder's git checkout may have no .git: the commit of the tag below, for the build id
-      - -Dbuild_id=b74c63549
+      - -Dbuild_id=2adc3f7c5
     sources:
       - type: git
         url: https://github.com/marthofdoom/oversteer.git
-        tag: v0.18.0-rc1
+        tag: v0.18.0-rc2
