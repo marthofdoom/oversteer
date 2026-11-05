@@ -1935,6 +1935,8 @@ class ForzaRack(RackForce):
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
     LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
     spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
+    TP_SCALE = 1.5                       # the pneumatic trail: 42 mm at no slip, ACR's on tarmac (42-44 mm); with the rally caster the closest physical pair to ACR tarmac, same situations
+    SLIP_RAD = -0.148                    # rad of kinematic front slip per unit of Forza's normalised slip angle (corr -0.93 over 2 drives)
     AY_LEVEL_S = 0.5                     # s: what is slower than this comes from a_y, what is faster from v r
     VR_GAIN = 0.8                        # a_y over v r, measured 0.78 on 20261104-230426
     YAW_WEIGHT = 1.0                     # the yaw acceleration's weight in Fy_f (ffb_forza.DI: with the front slip's changes, replayed on 20261104-230426, steering to force 50 ms, 0 ms behind the game's force, the force's rate 3.0 against 5.3 FS/s at 2.0)
@@ -1989,7 +1991,13 @@ class ForzaRack(RackForce):
 
     ALIGN_SPEED = RbrRack.ALIGN_SPEED
     ALIGN_FRESH = RbrRack.ALIGN_FRESH
-    _slip = RbrRack._slip                # the kinematic front slip angle (Forza's own are normalised, not rad)
+    def _slip(self, sample):
+        """The front slip angle (rad, ACR's sign) for the aligning spring: the game's own, on time (the car's velocity is 400 ms behind its force); the kinematic one without it."""
+        sa = getattr(sample, 'slip_angle', None)
+        if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]) and (sa[0] or sa[1]):
+            return self.SLIP_RAD * 0.5 * (sa[0] + sa[1])
+        return RbrRack._slip(self, sample)
+
 
     @staticmethod
     def _rear_slip(sample):
@@ -2020,7 +2028,7 @@ class ForzaRack(RackForce):
         cs = sample.combined_slip
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
-        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0)
+        torque = ffb_forza.kingpin(fy, s, (self.PUDDLE_TP if self._both_puddles(sample) else 1.0) * self.TP_SCALE, ffb_carprops.RALLY_TRAIL)
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):
