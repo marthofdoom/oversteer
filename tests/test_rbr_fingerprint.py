@@ -790,3 +790,16 @@ def test_the_range_ini_switch_off_leaves_the_range(table):
     assert model.get_rbr_auto_range() is True                               # default on
     model.data['rbr_auto_range'] = 0
     assert model.get_rbr_auto_range() is False
+
+
+def test_the_car_table_is_found_from_the_package_alone(tmp_path, monkeypatch):
+    """Field: the engine process has no DATADIR and the Flatpak's sys.prefix is /usr: no car table, and no aligning spring."""
+    import oversteer.car_data as cd
+    package = tmp_path / 'lib' / 'python3.13' / 'site-packages' / 'oversteer'
+    package.mkdir(parents=True)
+    cars = tmp_path / 'share' / 'oversteer' / 'telemetry' / 'cars'
+    cars.mkdir(parents=True)
+    monkeypatch.setattr(cd, 'DATADIR', None)
+    monkeypatch.setattr(cd, '__file__', str(package / 'car_data.py'))
+    monkeypatch.setattr(cd.sys, 'prefix', '/nowhere')
+    assert cd.find_dir() == str(cars)
