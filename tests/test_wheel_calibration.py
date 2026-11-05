@@ -67,6 +67,53 @@ def g29_like():
     return sim, cal, result
 
 
+@pytest.fixture(scope='module')
+def g29_driven():
+    """A G29 as the saved field runs show it: strong (17000 deg/s^2), a 12 ms latency and the driver's slew, no
+    damping when coasting but a speed term under drive (about 14 per second at 20 % of the motor command; more and the sim could not reach the run-up speed)."""
+    sim = SimWheel(inertia=1 / 17000.0, damping=0.0, drive_damping=0.004, latency=0.012, slew_s=0.012)
+    cal = Calibration(sim)
+    result = cal.run()
+    return sim, cal, result
+
+
+def test_a_stored_fit_from_before_the_pathways_never_blocks_a_new_measurement():
+    new = {'pathway': 'gear', 'a_fs': 14000.0, 'knots': [0.5], 'curve': [0.8]}
+    old = {'a_fs': 17587.0, 'knots': [0.5], 'curve': [0.59]}
+    assert wcal.inconsistency(new, old) is None
+    assert wcal.inconsistency(new, dict(old, pathway='gear')) is not None
+
+
+def test_a_speed_term_that_grows_with_the_drive_does_not_bend_the_curve(g29_driven):
+    sim, _cal, result = g29_driven
+    # In deg/s^2, since the known limit is at the top: the speed term and the torque at full force share the same short
+    # pulses, so this wheel's top reads 9 % low, and every share below it reads high by that much when normalised to it
+    # (0.07 at most here). Up to 0.8 of full force the torque itself is right.
+    a_fs = result['a_fs']
+    for k, v in zip(result['knots'], result['curve']):
+        if 0.2 <= k <= 0.8:
+            assert v * a_fs * sim.J == pytest.approx(sim.torque_of(k), rel=0.06), k
+    assert a_fs * sim.J == pytest.approx(1.0, rel=0.15)
+    assert result['friction'] * a_fs * sim.J == pytest.approx(sim.coulomb, rel=0.15)
+    assert result['pathway'] == 'gear' and result['speed_knots'] == list(wc.SPEED_KNOTS)
+    assert len(result['speed_term']) == len(wc.SPEED_KNOTS) and result['damping'] > 0
+    assert result['speed_term'][-1] > result['speed_term'][0]          # (more at full drive than coasting)
+
+
+def test_pulses_of_a_strong_wheel_last_long_enough_and_stay_under_the_stop_speed(g29_driven):
+    sim, cal, _result = g29_driven
+    first = {}
+    for _t, event in cal.log:
+        if event.startswith('pulse ') and ' lasted ' in event:
+            level, ms = event[len('pulse '):].split('% lasted ')
+            first[int(level)] = float(ms.split(' ')[0])
+    assert first                                                  # (each level's first pulse is in the log)
+    high = [ms for level, ms in first.items() if level >= 50]
+    assert sorted(high)[len(high) // 2] > 50, first
+    assert sim.max_abs_omega < Calibration.V_STOP * 1.1
+    assert cal._overshoot > 0
+
+
 def test_the_correction_linearises_a_simulated_wheel(g29_like):
     sim, cal, result = g29_like
     assert uncorrected_error(sim) > 0.25

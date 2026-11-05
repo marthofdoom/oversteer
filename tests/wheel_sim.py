@@ -22,7 +22,7 @@ class SimWheel:
                  dead_zone=0.06, curve=3.0, latency=0.012, encoder_deg=360 / 4096, ext_sign=-1,
                  max_range=900, range=540, gain=110, autocenter=30, start_deg=0.0, game_spring=0.002,
                  stop_deg=450.0, dt=0.0005, tick=0.002, report=0.001, read_delay=0.0, read_batch=0.0,
-                 rim_zone=None, slew_s=0.0):
+                 rim_zone=None, slew_s=0.0, drive_damping=0.0):
         self.slew_s = slew_s                # the driver's slew on ext_force: seconds for a full-scale change (0: none)
         self._ext_now = 0.0
         self.J = inertia                    # full scale per deg/s^2
@@ -30,6 +30,7 @@ class SimWheel:
         self.static = static
         self.static_wobble = static_wobble
         self.b = damping                    # full scale per deg/s
+        self.drive_damping = drive_damping  # full scale per deg/s per unit of |motor command|, only while driven
         self.dead_zone = dead_zone
         self.curve = curve                  # 0: linear past the dead zone; larger: stronger at the bottom
         self.latency = latency
@@ -164,6 +165,8 @@ class SimWheel:
         tau -= 0.004 * self.theta * self.autocenter / 100.0
         J = self.J
         b = self.b
+        if abs(self.motor) > self.dead_zone:
+            b += self.drive_damping * abs(self.motor)
         if abs(self.theta) > self.stop_deg:
             tau -= 0.05 * (self.theta - math.copysign(self.stop_deg, self.theta))
             b += 0.002

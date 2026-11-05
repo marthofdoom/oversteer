@@ -7,22 +7,29 @@ wheel (tests/wheel_sim.py) or a saved recording.
 
 The model. While the wheel turns, its angular acceleration (deg/s^2) is
 
-    a(t) = tau(w(t - L)) / J  -  f * sgn(omega)  -  beta * omega  +  bias
+    a(t) = tau(w(t - L)) / J  -  f * sgn(omega)  -  beta(|w(t - L)|) * omega  +  bias
 
 w is the commanded force in full-scale units (-1..1, positive turns the wheel towards positive angles), L the
 latency from the write to the torque, tau the motor's torque curve (symmetric, zero below the motor's dead
-zone), f the Coulomb (sliding) friction and beta the viscous damping, both per unit inertia. tau/J is a
-piecewise-linear function of |w| over the KNOTS, so every unknown enters linearly and one least-squares fit
-over all the moving samples finds them all; L is found by trying each value. The acceleration is never
+zone), f the Coulomb (sliding) friction and beta the speed term, both per unit inertia. A gear-driven wheel
+coasts with no force at a rate that doesn't depend on speed, but under drive its speed term grows with the
+force level (the motor's back-EMF and the gears' load), so beta is a piecewise-linear function of the
+commanded level over the SPEED_KNOTS, not one constant: a constant one would bend the torque curve's low end.
+tau/J is a piecewise-linear function of |w| over the KNOTS, so every unknown enters linearly and one
+least-squares fit over all the usable samples finds them all; L is found by trying each value. The acceleration is never
 differentiated out of the position samples on its own: the same Savitzky-Golay filter that turns positions
 into accelerations is applied to the double integral of every regressor, so both sides of the fit see exactly
 the same smoothing (the filter is linear and blind to constants and slopes, which hold the unknown starting
 position and speed). Several window lengths are used together, each weighted by its noise gain: the long ones
 read the slow movements, the short ones the brief hard pulses a strong wheel is stopped and turned in.
 
+This is the gear-driven pathway ('gear' in a result's 'pathway'). Each wheel type (a direct drive later) gets
+its own measurement pathway, sharing only the result format (the curve, the peak and the speed term per wheel
+key), so nothing here has to suit another type.
+
 Units. tau/J at full scale (a_fs, deg/s^2 per full-scale command) is what one command does to this wheel; the
 torque curve is reported relative to it (1.0 at full scale). Friction is reported in full-scale command units
-(the force that just balances it), damping in full-scale per deg/s, inertia as full-scale per deg/s^2: the
+(the force that just balances it), the speed term (damping) in full-scale per deg/s, inertia as full-scale per deg/s^2: the
 units an FFB loop needs for feed-forward. The wheel's torque in Nm is not measured.
 
 The correction. The driver shapes the force x (0..32767, sign kept) with the LUT and then lifts it past the
@@ -44,7 +51,11 @@ SG_HALVES = (3, 5, 8, 12, 20)        # Savitzky-Golay half windows in samples (7
 SG_HALVES_SLOW = (8, 12, 20, 30)     # ...and these when that leaves the curve uncertain: a heavy wheel's small
                                      # accelerations drown in the encoder's step, and change slowly enough for
                                      # the longer windows
-MOVING_DEG_S = 8.0           # a sample is used when the wheel turned faster than this throughout its window
+# Command levels the speed term is solved at (all free, the one at 0 too: a wheel with constant damping must fit)
+SPEED_KNOTS = (0.0, 0.06, 0.10, 0.13, 0.16, 0.20, 0.30, 0.40, 0.60, 0.80, 1.0)
+DAMPING_LEVELS = (0.13, 0.40)  # the single damping figure is the median of the speed term over these levels
+MOVING_DEG_S = 8.0           # slower than this the wheel counts as stuck (static friction, not the sliding model)
+STUCK_MS = 8                 # ...when it stays so this long; a window holding such a stretch is not used
 MIN_ROWS = 200               # rows a window length needs to take part
 BLOCKS = 12                  # groups of stretches the uncertainty is judged over
 CHUNK = 250                  # samples (ms) in a stretch
@@ -182,25 +193,23 @@ def slew_limited(w, rate, h=GRID_S):
     return out
 
 
-def hats(u, knots):
-    """Piecewise-linear basis over the knots, one column per knot after the first (tau(0) = 0)."""
+def hats(u, knots, free_first=False):
+    """Piecewise-linear basis over the knots, one column per knot after the first (tau(0) = 0); with
+    `free_first` the first knot gets its column too (a quantity that isn't zero there)."""
     k = np.asarray(knots)
-    cols = np.zeros((len(u), len(k) - 1))
+    first = 0 if free_first else 1
+    cols = np.zeros((len(u), len(k) - first))
     u = np.clip(u, 0.0, k[-1])
+    if free_first:
+        cols[:, 0] = np.clip((k[1] - u) / (k[1] - k[0]), 0.0, 1.0)
     for n in range(1, len(k)):
         left = (u - k[n - 1]) / (k[n] - k[n - 1])
         if n + 1 < len(k):
             right = (k[n + 1] - u) / (k[n + 1] - k[n])
-            cols[:, n - 1] = np.clip(np.minimum(left, right), 0.0, 1.0)
+            cols[:, n - first] = np.clip(np.minimum(left, right), 0.0, 1.0)
         else:
-            cols[:, n - 1] = np.clip(left, 0.0, 1.0)
+            cols[:, n - first] = np.clip(left, 0.0, 1.0)
     return cols
-
-
-def rolling_min(x, half):
-    """min over each centred window of 2*half+1 (shorter at the ends)."""
-    padded = np.pad(x, half, mode='edge')
-    return np.lib.stride_tricks.sliding_window_view(padded, 2 * half + 1).min(axis=1)
 
 
 def isotonic(y, weights=None):
@@ -220,15 +229,16 @@ def isotonic(y, weights=None):
 
 # --- the fit ---
 
-def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
+def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES, speed_knots=SPEED_KNOTS):
     """Least-squares fit of the model above to a recording. Returns a dict: 'curve' (tau/J at each knot,
-    deg/s^2), 'curve_se' (its uncertainty), 'friction' (f), 'damping' (beta), 'bias', 'latency' (s), 'r2',
-    'rows' (samples used).
+    deg/s^2), 'curve_se' (its uncertainty), 'friction' (f), 'speed_term' (beta at the `speed_knots`, deg/s^2
+    per deg/s), 'damping' (its median over DAMPING_LEVELS, one figure), 'bias', 'latency' (s), 'r2', 'rows'
+    (samples used).
 
     Every window length in `halves` contributes its own rows, each weighted by the inverse of that filter's
     noise gain: a long window reads the slow movements (small forces) with little noise, a short one the
     brief hard pulses (a strong wheel is stopped and turned in 10-30 ms, no long window sees them moving
-    throughout). Their rows are the same data seen at different scales, so the uncertainty is not taken from
+    throughout, which is where a quick reversal under force happens). Their rows are the same data seen at different scales, so the uncertainty is not taken from
     the rows' scatter but from refitting without each of a dozen groups of stretches of the run in turn."""
     if len(rec.cmd_t) < 2:
         raise FitError("no forces were recorded")
@@ -241,29 +251,36 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     cmd_t = np.asarray(rec.cmd_t, dtype=float)
     cmd = np.asarray(rec.cmd, dtype=float)
 
-    # Per window length: the rows (moving the same way throughout the window: the friction there is sliding
-    # friction of one sign), the acceleration there, the regressors that don't depend on the latency
+    # Stuck stretches: no speed for STUCK_MS in a row (dilated by 1 ms each side). A window holding one is not
+    # used, since static friction isn't in the model; a quick reversal under force is sliding friction either
+    # side of it and stays in.
+    _c0, c1_stuck, _c2 = savgol(4, h)
+    speed = np.convolve(theta, c1_stuck[::-1], mode='same')
+    slow = (np.abs(speed) <= MOVING_DEG_S).astype(float)
+    stuck = np.convolve(slow, np.ones(STUCK_MS), mode='same') >= STUCK_MS - 0.5
+    stuck = np.convolve(stuck.astype(float), np.ones(3), mode='same') > 0
+
+    # Per window length: the rows (no stuck stretch in the window), the acceleration there, the regressors
+    # that don't depend on the latency
     scales = []
     for half in halves:
         c0, c1, c2 = savgol(half, h)
         idx_all = np.arange(half, n - half)
         omega = np.zeros(n)
         omega[idx_all] = apply_at(theta, c1, idx_all)
-        fwd = rolling_min(omega, half) > MOVING_DEG_S
-        back = rolling_min(-omega, half) > MOVING_DEG_S
+        clear = np.convolve(stuck.astype(float), np.ones(2 * half + 1), mode='same') == 0
         ok = np.zeros(n, dtype=bool)
         ok[2 * half:n - 2 * half] = True
-        rows = np.flatnonzero(ok & (fwd | back))
+        rows = np.flatnonzero(ok & clear)
         if len(rows) < MIN_ROWS:
             continue
         sgn = np.sign(omega)
         fixed = np.column_stack([
             apply_at(double_integral(-sgn, h), c2, rows),
-            apply_at(double_integral(-omega, h), c2, rows),
             apply_at(double_integral(np.ones(n), h), c2, rows),
         ])
         scales.append({'half': half, 'c2': c2, 'rows': rows, 'accel': apply_at(theta, c2, rows),
-                       'fixed': fixed, 'weight': 1.0 / float(np.linalg.norm(c2))})
+                       'omega': omega, 'fixed': fixed, 'weight': 1.0 / float(np.linalg.norm(c2))})
     if not scales:
         raise FitError("the wheel hardly moved during the run")
 
@@ -279,11 +296,14 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     def design(lat):
         w = delayed(slewed_cmd if slew[0] else raw_cmd, lat)
         basis = hats(np.abs(w), knots) * np.sign(w)[:, None]
+        levels = hats(np.abs(w), speed_knots, free_first=True)
         xs = []
         for sc in scales:
             cols = np.column_stack([apply_at(double_integral(basis[:, k], h), sc['c2'], sc['rows'])
                                     for k in range(basis.shape[1])])
-            xs.append(np.column_stack([cols, sc['fixed']]) * sc['weight'])
+            speed_cols = np.column_stack([apply_at(double_integral(-levels[:, k] * sc['omega'], h), sc['c2'],
+                                                   sc['rows']) for k in range(levels.shape[1])])
+            xs.append(np.column_stack([cols, speed_cols, sc['fixed']]) * sc['weight'])
         return np.vstack(xs)
 
     accel = np.concatenate([sc['accel'] * sc['weight'] for sc in scales])
@@ -326,6 +346,7 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
     xtx = xk.T @ xk
     xty = xk.T @ ak
     nk = len(knots) - 1
+    nh = len(speed_knots)
     loo = []
     for b in range(BLOCKS):
         m = bk == b
@@ -337,8 +358,11 @@ def fit_dynamics(rec, knots=KNOTS, latencies=LATENCIES_S, halves=SG_HALVES):
         raise FitError("the recording is too short")
     loo = np.array(loo)
     se = np.sqrt((len(loo) - 1) / len(loo) * ((loo - loo.mean(axis=0)) ** 2).sum(axis=0))
+    speed_term = p[nk:nk + nh]
+    mid = [v for k, v in zip(speed_knots, speed_term) if DAMPING_LEVELS[0] - 1e-9 <= k <= DAMPING_LEVELS[1] + 1e-9]
     return {'curve': np.concatenate([[0.0], p[:nk]]), 'curve_se': np.concatenate([[0.0], se]),
-            'friction': float(p[nk]), 'damping': float(p[nk + 1]), 'bias': float(p[nk + 2]),
+            'friction': float(p[nk + nh]), 'speed_term': [float(v) for v in speed_term],
+            'damping': float(np.median(mid)), 'bias': float(p[nk + nh + 1]),
             'latency': float(lat), 'r2': r2, 'rows': int(keep.sum()),
             'window_ms': (2 * max(sc['half'] for sc in scales) + 1) * h * 1000}
 
@@ -531,6 +555,14 @@ def analyse(rec, knots=KNOTS):
     if fit['r2'] < MIN_R2 or uncertainty > MAX_UNCERTAINTY:
         raise FitError("the wheel's response did not follow a consistent pattern (fit {:.2f}, uncertainty {:.0f} %);"
                        " was it touched?".format(fit['r2'], uncertainty * 100))
+    damping = fit['damping']
+    if not damping > 0:
+        # ffb_dynamics.wheel_values needs damping > 0: the largest positive value of the speed term there
+        mid = [v for k, v in zip(SPEED_KNOTS, fit['speed_term']) if DAMPING_LEVELS[0] - 1e-9 <= k <= DAMPING_LEVELS[1] + 1e-9]
+        positive = [v for v in mid if v > 0]
+        if not positive:
+            raise FitError("the wheel's speed term did not come out positive")
+        damping = max(positive)
     d = dead_zone(knots, r)
     if d > MAX_DEAD_ZONE:
         raise FitError("the motor seemed to give nothing below {:.0f} % (more than {:.0f} % is not plausible)"
@@ -550,7 +582,10 @@ def analyse(rec, knots=KNOTS):
         'a_fs': round(a_fs, 1),                                   # deg/s^2 at full scale
         'inertia': round(1.0 / a_fs, 8),                          # full scale per deg/s^2
         'friction': round(fit['friction'] / a_fs, 4),             # full scale
-        'damping': round(fit['damping'] / a_fs, 7),               # full scale per deg/s
+        'damping': round(damping / a_fs, 7),                      # full scale per deg/s
+        'speed_knots': list(SPEED_KNOTS),
+        'speed_term': [round(float(v) / a_fs, 7) for v in fit['speed_term']],     # full scale per deg/s, at the speed knots
+        'pathway': 'gear',
         'bias': round(fit['bias'] / a_fs, 4),
         'breakaway': round(float(np.median(breakaway)), 4) if breakaway else None,
         'breakaway_by_angle': [[round(a, 1), int(dd), round(w, 4)] for a, dd, w in rec.breakaway],
