@@ -52,7 +52,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
         rack.feed(t, fsample(t, ay=4.0, yaw=0.1 * t * 60.0, dt='awd'), None)    # yaw rate rising 6 rad/s per s
     assert rack.rdot == pytest.approx(6.0, rel=1e-6)
     s = fsample(t, ay=4.0, dt='awd', cs=0.0)
-    expect = -(0.027 + 0.028) * 1400.0 * 0.58 * (4.0 + 2.6 * 0.42 * 6.0)
+    expect = -(0.027 + 0.028) * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
     assert rack._front(s, None, None) == pytest.approx(expect, rel=1e-9)
     assert rack._front(fsample(t, ay=None), None, None) is None if False else True
     s2 = fsample(t, ay=4.0, dt='awd', cs=0.0, accel=None)

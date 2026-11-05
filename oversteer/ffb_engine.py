@@ -1935,6 +1935,7 @@ class ForzaRack(RackForce):
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
     LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
     spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
+    YAW_WEIGHT = 2.0                     # the yaw acceleration's weight in Fy_f: replayed on 20261104-223911 steering to force falls from 166 to 66 ms, the force by 2-8 % (1.0 is the k^2 = a b rule of thumb, this car's yaw inertia is not known)
     lead_on = False                      # the front slip's lead on Newton's Fy_f (ffb_forza.SlipLead): off, it moved steering to force by nothing on 20261104-220133
 
     @property
@@ -2004,7 +2005,7 @@ class ForzaRack(RackForce):
         if accel is None or len(accel) < 2 or not ffb_forza.finite(accel[1]):
             return None
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot)
+        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT)
         lead = self._lead_fy
         if lead is not None and lead[0] is sample:
             fy = lead[1]
@@ -2030,7 +2031,7 @@ class ForzaRack(RackForce):
         if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]):
             slip = 0.5 * (sa[0] + sa[1])
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot)
+        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT)
         self._lead_fy = (sample, self._lead.step(t, fy, slip))
 
     def _kicked(self, sample, share, ratio, assist):
