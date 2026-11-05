@@ -337,7 +337,11 @@ def _assist(mag, speed, assist):
 # or isolation filters); 'street' is the commuter's 3.7 Nm top; 'off' is unassisted (the column torque). INI only.
 POWER_CLASSES = ('rally', 'street', 'off')
 DEFAULT_POWER_CLASS = 'rally'
-_CLASS_HYD = {'rally': (3.0, 4.0), 'street': (1.5, 2.2), 'off': (1.5, 2.2)}
+_CLASS_HYD = {'rally': (3.0, 4.0), 'street': (1.5, 0.5), 'off': (1.5, 2.2)}
+# Street: full assist is reached early and the force stops building: risen within 15-25 degrees of wheel at speed (the owner's
+# experience of road cars), a top of 2.0 Nm. The on-centre gain before the top end, so it gets there that soon.
+_CLASS_GAIN = {'rally': 1.0, 'street': 2.0, 'off': 1.0}
+HYD_GAIN = _CLASS_GAIN[DEFAULT_POWER_CLASS]
 _power_class = DEFAULT_POWER_CLASS
 HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top end: the driver's torque follows the boost curve 1:1
                                          # up to HYD_K, then bends toward HYD_K + HYD_R (the rack runs out of assist flow)
@@ -345,9 +349,10 @@ HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top en
 
 def set_power_class(name):
     """Make `name` (rally / street / off; anything else: rally) the active assist class; returns the class in effect."""
-    global _power_class, HYD_K, HYD_R
+    global _power_class, HYD_K, HYD_R, HYD_GAIN
     _power_class = name if name in POWER_CLASSES else DEFAULT_POWER_CLASS
     HYD_K, HYD_R = _CLASS_HYD[_power_class]
+    HYD_GAIN = _CLASS_GAIN[_power_class]
     return _power_class
 
 
@@ -372,9 +377,9 @@ def hyd_top():
 def _hyd(x):
     """The driver's torque after the hydraulic top end (signed): x up to HYD_K, then HYD_K + R o / (R + o) for the
     excess o over HYD_K, tending to HYD_K + HYD_R."""
-    mag = abs(x)
+    mag = abs(x) * HYD_GAIN
     if mag <= HYD_K:
-        return x
+        return x * HYD_GAIN
     over = mag - HYD_K
     return math.copysign(HYD_K + HYD_R * over / (HYD_R + over), x)
 
@@ -383,15 +388,15 @@ def _hyd_inverse(y):
     """The torque that _hyd maps to y (signed); y' = |y| - HYD_K is held just under HYD_R (the curve's asymptote)."""
     mag = abs(y)
     if mag <= HYD_K:
-        return y
+        return y / HYD_GAIN
     over = min(mag - HYD_K, HYD_R * (1.0 - 1e-6))
-    return math.copysign(HYD_K + HYD_R * over / (HYD_R - over), y)
+    return math.copysign((HYD_K + HYD_R * over / (HYD_R - over)) / HYD_GAIN, y)
 
 
 def _hyd_slope(x):
     """d _hyd / dx at x: 1 up to HYD_K, (R / (R + x - HYD_K))^2 above."""
-    over = abs(x) - HYD_K
-    return 1.0 if over <= 0.0 else (HYD_R / (HYD_R + over)) ** 2
+    over = abs(x) * HYD_GAIN - HYD_K
+    return HYD_GAIN if over <= 0.0 else HYD_GAIN * (HYD_R / (HYD_R + over)) ** 2
 
 
 def column_from_driver(driver, speed, assist=1.0):

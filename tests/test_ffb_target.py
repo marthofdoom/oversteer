@@ -325,10 +325,11 @@ def test_with_the_split_on_ext_force_plays_the_residual_and_the_writer_gets_the_
         resid = rack.force(s)
     split = rack.align(s)
     k_fs = split['k'] * rack.rho() * wheel_torque.rim_share_slope(rack.rim_torque(s) * rack.rho(), 20.0, 1.0, rack.top_torque() * rack.rho(), rack.knee) / 20.0
-    assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, wheel_torque.TOP))
+    tau = max(rack.ALIGN_SHARE_MAX * abs(plain) / fe.FULL, rack.ALIGN_TAU_MIN)        # the spring is held to a share of the force now
+    assert seen[-1] == pytest.approx((split['theta_a_deg'], k_fs, tau))
     spring = ffb_spring.DriverSpring()
     for _ in range(200):
-        want = spring.force(split['theta_a_deg'], split['theta_deg'], k_fs, wheel_torque.TOP, rack.align_k_limit, 0.005)
+        want = spring.force(split['theta_a_deg'], split['theta_deg'], k_fs, tau, rack.align_k_limit, 0.005)
     assert resid == pytest.approx(plain - fe.FULL * want, rel=1e-6)
     assert abs(resid) < abs(plain)
     rack.align_k_limit = 0.0                                           # a driver that allows no spring: all through ext_force
