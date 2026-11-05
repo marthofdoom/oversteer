@@ -1937,7 +1937,11 @@ class ForzaRack(RackForce):
     spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
     AY_LEVEL_S = 0.5                     # s: what is slower than this comes from a_y, what is faster from v r
     VR_GAIN = 0.8                        # a_y over v r, measured 0.78 on 20261104-230426
-    YAW_WEIGHT = 2.0                     # the yaw acceleration's weight in Fy_f: replayed on 20261104-223911 steering to force falls from 166 to 66 ms, the force by 2-8 % (1.0 is the k^2 = a b rule of thumb, this car's yaw inertia is not known)
+    YAW_WEIGHT = 1.0                     # the yaw acceleration's weight in Fy_f (ffb_forza.DI: with the front slip's changes, replayed on 20261104-230426, steering to force 50 ms, 0 ms behind the game's force, the force's rate 3.0 against 5.3 FS/s at 2.0)
+    SLIP_SCALE = 0.5                     # Forza's normalised slip angle at which the tyre curve bends
+    SLIP_GAIN0 = -13.5                   # m/s^2 of a_y per unit of it, before the car's own is learnt (measured 20261104-230426)
+    SLIP_GAIN_S = 20.0                   # s: the regression's memory
+    SLIP_ALIVE = 0.002                   # the slip's mean square under which it says nothing
     lead_on = False                      # the front slip's lead on Newton's Fy_f (ffb_forza.SlipLead): off, it moved steering to force by nothing on 20261104-220133
 
     @property
@@ -1949,7 +1953,8 @@ class ForzaRack(RackForce):
         self.mass_l = ffb_forza.MassLearner(stored)
         self._yaw = collections.deque(maxlen=3)         # (game time, yaw rate)
         self._lead = ffb_forza.SlipLead()
-        self._ay_lp = self._vr_lp = self._ay_sample = self._ay_at = None
+        self._ay_lp = self._fast_lp = self._ay_sample = self._ay_at = None
+        self._ay_slip, self._gain_xy, self._gain_xx = False, 0.0, 0.0
         self._lead_fy = None
         self.rdot = 0.0
         self._sides = (0, 0)                            # the one-sided rumble / puddle now (+1 FL, -1 FR)
@@ -2067,22 +2072,37 @@ class ForzaRack(RackForce):
             self.rdot = 0.0
 
     def _fast_ay(self, sample, ay):
-        """The lateral acceleration on time. FH6's a_y is about 180 ms behind its own force, its yaw rate about 95 ms (ACR's: 5 and
-        65): a_y keeps the level, speed x yaw rate gives the changes (a_y over a half second + VR_GAIN (v r - v r over a half second))."""
-        r, v, g = sample.yaw_rate, sample.speed, sample.game_time
-        if not (ffb_forza.finite(r) and ffb_forza.finite(v)):
+        """The lateral acceleration on time. A scan of every value in FH6's packet against its own force: a_y is 170 ms behind, the
+        yaw rate 110, the front slip angle 17, the earliest with a real correlation. So a_y keeps the level and the front slip gives
+        the changes: a_y over a half second + gain (f - f over a half second), f = tanh(front slip / 0.5), the gain the regression
+        of a_y on f, learnt per car from a prior. Without slip angles: the changes from speed x yaw rate. No surface is told."""
+        sa, r, v, g = sample.slip_angle, sample.yaw_rate, sample.speed, sample.game_time
+        slip = sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1])
+        if slip:
+            fast, gain = math.tanh(0.5 * (sa[0] + sa[1]) / self.SLIP_SCALE), None
+        elif ffb_forza.finite(r) and ffb_forza.finite(v):
+            fast, gain = v * r, self.VR_GAIN
+        else:
             self._ay_lp = None
             return ay
-        vr = v * r
-        if self._ay_lp is None:
-            self._ay_lp, self._vr_lp, self._ay_sample, self._ay_at = ay, vr, sample, g
+        if self._ay_lp is None or slip != self._ay_slip:
+            self._ay_lp, self._fast_lp, self._ay_sample, self._ay_at, self._ay_slip = ay, fast, sample, g, slip
         elif sample is not self._ay_sample:
             dt = g - self._ay_at if ffb_forza.finite(g) and ffb_forza.finite(self._ay_at) else 1.0 / 60.0
-            k = 1.0 - math.exp(-min(max(dt, 0.0), 0.1) / self.AY_LEVEL_S)
+            dt = min(max(dt, 0.0), 0.1)
+            k = 1.0 - math.exp(-dt / self.AY_LEVEL_S)
             self._ay_lp += k * (ay - self._ay_lp)
-            self._vr_lp += k * (vr - self._vr_lp)
+            self._fast_lp += k * (fast - self._fast_lp)
             self._ay_sample, self._ay_at = sample, g
-        return self._ay_lp + self.VR_GAIN * (vr - self._vr_lp)
+            if slip:
+                k = 1.0 - math.exp(-dt / self.SLIP_GAIN_S)
+                self._gain_xy += k * (ay * fast - self._gain_xy)
+                self._gain_xx += k * (fast * fast - self._gain_xx)
+        if gain is None:
+            if self._gain_xx <= self.SLIP_ALIVE:
+                return ay                        # the slip has not moved yet: nothing to take the changes from, a_y as it comes
+            gain = min(max(self._gain_xy / self._gain_xx, -2.0 * abs(self.SLIP_GAIN0)), 0.0)
+        return self._ay_lp + gain * (fast - self._fast_lp)
 
     def _events(self, t, sample, bl):
         """The onset of a rumble strip under one front wheel, or of a puddle under one: an event for Kickback."""

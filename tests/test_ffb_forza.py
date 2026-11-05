@@ -861,18 +861,30 @@ def test_the_forza_spring_switch_is_wired_like_rbrs():
     assert not rack.align_ready()
 
 
-def test_the_lateral_acceleration_keeps_its_level_and_takes_its_changes_from_the_yaw_rate():
+def test_the_lateral_acceleration_keeps_its_level_and_takes_its_changes_from_the_front_slip():
     rack = fe.ForzaRack()
     rack.reset(CAR)
-    def at(t, ay, yaw):
-        s = fsample(t, ay=ay, yaw=yaw, speed=20.0, dt='awd')
+    def at(t, ay, slip):
+        s = fsample(t, ay=ay, yaw=0.2, speed=20.0, dt='awd')
+        s.slip_angle = (slip, slip, 0.0, 0.0)
         return rack._fast_ay(s, ay)
-    assert at(0.0, 4.0, 0.2) == pytest.approx(4.0)
+    assert at(0.0, 4.0, -0.15) == pytest.approx(4.0)
     for i in range(1, 300):
-        steady = at(i / 60.0, 4.0, 0.2)
+        steady = at(i / 60.0, 4.0, -0.15)
     assert steady == pytest.approx(4.0, abs=0.01)                 # steady: a_y's level
-    moved = at(300 / 60.0, 4.0, 0.3)                              # the yaw rate moves first
-    assert moved == pytest.approx(4.0 + rack.VR_GAIN * 20.0 * 0.1, rel=0.1)
-    s = fsample(5.1, ay=3.0, dt='awd')
-    s.yaw_rate = None
-    assert rack._fast_ay(s, 3.0) == 3.0                           # no yaw rate: a_y itself
+    moved = at(5.0, 4.0, -0.30)                                   # the slip moves first: more a_y coming, the same sign
+    assert moved > 4.5
+
+
+def test_without_slip_angles_the_changes_come_from_the_yaw_rate_and_without_either_it_is_plain_a_y():
+    rack = fe.ForzaRack()
+    rack.reset(CAR)
+    def at(t, yaw):
+        s = fsample(t, ay=4.0, yaw=yaw, speed=20.0, dt='awd')
+        s.slip_angle = None
+        return rack._fast_ay(s, 4.0)
+    at(0.0, 0.2)
+    assert at(1 / 60.0, 0.3) == pytest.approx(4.0 + rack.VR_GAIN * 20.0 * 0.1, rel=0.1)
+    s = fsample(1.0, ay=3.0, dt='awd')
+    s.slip_angle, s.yaw_rate = None, None
+    assert rack._fast_ay(s, 3.0) == 3.0
