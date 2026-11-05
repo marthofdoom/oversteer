@@ -38,6 +38,7 @@ from collections import deque
 from locale import gettext as _
 
 from . import wheel_calib as wc
+from . import wheel_torque
 from . import wheel_owner
 
 # The driver attributes the calibration and the correction need (new-lg4ff with replace mode and shaping)
@@ -1650,6 +1651,35 @@ def save_store(path, data):
     with open(tmp, 'w') as f:
         json.dump(data, f, indent=1, sort_keys=True)
     os.replace(tmp, path)
+
+
+PEAK_STORE_NAME = 'wheel_peak.json'    # usb id -> the peak torque (Nm) the user set for that wheel; per wheel, not per profile
+
+
+def stored_peak(path, usb_id):
+    """The peak torque (Nm) stored for the wheel, clamped to wheel_torque.PEAK_RANGE; None if there is none or it is damaged."""
+    if not usb_id:
+        return None
+    value = load_store(path).get(str(usb_id).lower())
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return min(max(float(value), wheel_torque.PEAK_RANGE[0]), wheel_torque.PEAK_RANGE[1])
+
+
+def store_peak(path, usb_id, nm):
+    """Store the wheel's peak (clamped); a figure equal to the table's (wheel_torque.peak_nm, or the default for an unknown
+    wheel) removes the key, so a later change of the table still reaches the user. Returns the figure in effect."""
+    nm = round(min(max(float(nm), wheel_torque.PEAK_RANGE[0]), wheel_torque.PEAK_RANGE[1]), 2)
+    key = str(usb_id).lower()
+    store = load_store(path)
+    if nm == (wheel_torque.peak_nm(key) or wheel_torque.DEFAULT_PEAK_NM):
+        if key not in store:
+            return nm
+        del store[key]
+    else:
+        store[key] = nm
+    save_store(path, store)
+    return nm
 
 
 def new_entry(result, old=None):

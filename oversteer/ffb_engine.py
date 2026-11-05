@@ -2565,6 +2565,7 @@ class FfbEngine:
         self._enabled_req = False        # GUI requests, applied on the engine thread
         self._path_req = None
         self._usb_id = None
+        self._peak_override = None       # Nm the user set for the current wheel (set_wheel_peak), None: the table's
         self._inhibit_req = False        # wheel_owner: an exclusive owner wants the wheel
         self._texture_req = None         # (seq, level 0..1, {part: on}) from the GUI, applied on the engine thread
         self._texture_seq = 0            # the GUI's last request number
@@ -2930,11 +2931,21 @@ class FfbEngine:
     @usb_id.setter
     def usb_id(self, usb_id):
         """The wheel's model (USB vendor:product), for the peak torque the steering force is mapped to
-        (wheel_torque; unknown: the relative target). Set before set_device."""
+        (wheel_torque; unknown: the relative target). Set before set_device. A peak set for another wheel
+        (set_wheel_peak) is dropped: the GUI then sets the new wheel's own."""
+        if usb_id != self._usb_id:
+            self._peak_override = None
         self._usb_id = usb_id
         for rack in (self.model, self.rbr_rack, self.forza_rack):
-            rack.wheel_peak = wheel_torque.peak_nm(usb_id)        # one attribute swap, read by the engine thread
+            rack.wheel_peak = self._peak_override or wheel_torque.peak_nm(usb_id)        # one attribute swap, read by the engine thread
             rack.wheel_rim = wheel_torque.rim_mm(usb_id)
+
+    def set_wheel_peak(self, nm):
+        """The current wheel's peak torque in Nm, PEAK_RANGE (the user's figure; None: the table's for the wheel). Applies
+        at once to every game's rack: one attribute swap each, read by the engine thread."""
+        self._peak_override = None if nm is None else min(max(float(nm), wheel_torque.PEAK_RANGE[0]), wheel_torque.PEAK_RANGE[1])
+        for rack in (self.model, self.rbr_rack, self.forza_rack):
+            rack.wheel_peak = self._peak_override or wheel_torque.peak_nm(self._usb_id)
 
     def set_device(self, path):
         """The wheel's sysfs directory, None for none. The old one's game

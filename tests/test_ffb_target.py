@@ -602,3 +602,38 @@ def test_the_model_defaults_the_rim_from_the_wheel_table_and_clamps_both_diamete
     assert model.get_countersteer_rim_mm() == 279
     model.set_countersteer_car_wheel_mm(900)
     assert model.get_countersteer_car_wheel_mm() == 420
+
+
+def test_set_wheel_peak_moves_all_three_racks_the_table_returns_and_a_new_wheel_drops_it():
+    engine = fe.FfbEngine()
+    racks = (engine.model, engine.rbr_rack, engine.forza_rack)
+    engine.usb_id = '046d:c24f'
+    assert [r.wheel_peak for r in racks] == [3.08] * 3
+    engine.set_wheel_peak(6.0)
+    assert [r.wheel_peak for r in racks] == [6.0] * 3
+    engine.usb_id = '046d:c24f'                                          # the same wheel again (replug): kept
+    assert [r.wheel_peak for r in racks] == [6.0] * 3
+    engine.set_wheel_peak(99)
+    assert [r.wheel_peak for r in racks] == [wheel_torque.PEAK_RANGE[1]] * 3
+    engine.set_wheel_peak(None)                                          # None: the table's
+    assert [r.wheel_peak for r in racks] == [3.08] * 3
+    engine.set_wheel_peak(6.0)
+    engine.usb_id = '046d:c262'                                          # another wheel: the override is gone
+    assert [r.wheel_peak for r in racks] == [wheel_torque.peak_nm('046d:c262')] * 3
+    engine.usb_id = None
+    engine.set_wheel_peak(8.0)                                           # (an unknown wheel takes one too)
+    assert [r.wheel_peak for r in racks] == [8.0] * 3
+
+
+def test_the_force_share_at_a_fixed_torque_scales_with_the_peak_below_the_knee():
+    engine = fe.FfbEngine()
+    engine.usb_id = '046d:c24f'
+    rack = engine.model
+    rack.LEARNS, rack.mapping, rack.assist, rack.ratio, rack.p99 = False, 'knee', 0.0, 1.0, 30.0
+    rack.reset('acr/x')
+    rack.assist, rack.ratio = 0.0, 1.0
+    rack.rim_torque = lambda sample, *a, **k: 1.0
+    s = sample_at(0.0)
+    low = rack.force(s) / fe.FULL
+    engine.set_wheel_peak(6.16)                                          # twice the G29's
+    assert rack.force(s) / fe.FULL == pytest.approx(low / 2)

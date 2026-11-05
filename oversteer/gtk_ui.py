@@ -1241,6 +1241,8 @@ class GtkUi:
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
                                     "after a slide. 0 % is the wheel as it is; 100 % adds a real column's damping on top.")
     COUNTERSTEER_RIM_TOOLTIP = ("Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.")
+    WHEEL_PEAK_TOOLTIP = ("The most torque your wheel really makes at the rim, in Nm. All forces are mapped against it. A measured "
+                          "figure beats the default: hang a known weight from the outside of the rim; Nm = kg x 9.81 x rim radius in metres.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
                                  "acts on the steering through the scrub radius; the game's own force has it. On: "
                                  "Countersteer plays that pull, unfiltered, at the level below. Off: the steering "
@@ -1384,6 +1386,14 @@ class GtkUi:
         self.countersteer_rim_mm = rim
         self._dependent_rows.append(self._setting_row(
             _("Your wheel's rim diameter (mm)"), None, _(self.COUNTERSTEER_RIM_TOOLTIP), (rim,)))
+        steering.add(self._dependent_rows[-1])
+        peak = Gtk.SpinButton.new_with_range(*wheel_torque.PEAK_RANGE, 0.05)
+        peak.set_digits(2)
+        peak.set_value(wheel_torque.DEFAULT_PEAK_NM)
+        peak.connect('value-changed', lambda w: None if self.updating_wheel_peak else self.controller.set_wheel_peak(w.get_value()))
+        self.wheel_peak = peak
+        self._dependent_rows.append(self._setting_row(
+            _("Peak force (Nm)"), None, _(self.WHEEL_PEAK_TOOLTIP), (peak,)))
         steering.add(self._dependent_rows[-1])
         car = Gtk.SpinButton.new_with_range(*wheel_torque.CAR_WHEEL_RANGE, 1)
         car.set_value(wheel_torque.CAR_WHEEL_MM)
@@ -1554,6 +1564,19 @@ class GtkUi:
                 self.countersteer_rim_mm.set_value(int(value))
             finally:
                 self.updating_countersteer_rim = False
+
+    updating_wheel_peak = False
+
+    def set_wheel_peak(self, value):
+        """The wheel's peak torque shown, Nm (the stored one, else the table's). Shown without storing it."""
+        if not hasattr(self, 'wheel_peak') or value is None:
+            return
+        if abs(self.wheel_peak.get_value() - float(value)) > 1e-6:
+            self.updating_wheel_peak = True
+            try:
+                self.wheel_peak.set_value(float(value))
+            finally:
+                self.updating_wheel_peak = False
 
     def set_countersteer_car_wheel_mm(self, value):
         """The car's steering wheel diameter, mm (None where the driver has no replace mode)."""

@@ -1924,3 +1924,31 @@ def test_an_inconsistent_calibration_is_kept_beside_the_previous_one_not_applied
     gui._calibration_finished(cal, wheel, dict(result, date='2026-11-04T10:00:00'), None)
     entry = wcal.load_store(str(tmp_path / wcal.STORE_NAME))['046d:c24f']
     assert 'candidate' not in entry and entry['result']['date'] == '2026-11-04T10:00:00'
+
+
+def test_the_wheels_peak_is_stored_per_wheel_clamped_and_the_tables_figure_removes_the_key(tmp_path):
+    from oversteer import wheel_torque
+    path = str(tmp_path / wcal.PEAK_STORE_NAME)
+    assert wcal.stored_peak(path, '046d:c24f') is None and wcal.stored_peak(path, None) is None
+    assert wcal.store_peak(path, '046d:C24F', 4.5) == 4.5                  # (upper case ids are the same wheel)
+    assert wcal.stored_peak(path, '046d:c24f') == 4.5 and not os.path.exists(path + '.tmp')
+    assert wcal.stored_peak(path, '046d:c262') is None                     # another wheel keeps its own
+    wcal.store_peak(path, '346e:0006', 12.0)
+    assert wcal.stored_peak(path, '346e:0006') == 12.0 and wcal.stored_peak(path, '046d:c24f') == 4.5
+    assert wcal.store_peak(path, '046d:c24f', 99) == wheel_torque.PEAK_RANGE[1]          # clamped on the way in...
+    assert wcal.store_peak(path, '046d:c24f', 0.1) == wheel_torque.PEAK_RANGE[0]
+    with open(path, 'w') as f:
+        json.dump({'046d:c24f': 500, '346e:0006': 'x', 'dead:beef': True, 'a:b': 0.2}, f)
+    assert wcal.stored_peak(path, '046d:c24f') == wheel_torque.PEAK_RANGE[1]             # ...and on the way out
+    assert wcal.stored_peak(path, '346e:0006') is None and wcal.stored_peak(path, 'dead:beef') is None
+    assert wcal.stored_peak(path, 'a:b') == wheel_torque.PEAK_RANGE[0]
+    wcal.store_peak(path, '046d:c24f', 4.0)
+    assert wcal.store_peak(path, '046d:c24f', wheel_torque.peak_nm('046d:c24f')) == 3.08     # the table's figure: no key
+    assert '046d:c24f' not in wcal.load_store(path) and 'a:b' in wcal.load_store(path)
+    wcal.store_peak(path, 'dead:beef', wheel_torque.DEFAULT_PEAK_NM)                         # (an unknown wheel: the default)
+    assert 'dead:beef' not in wcal.load_store(path)
+    with open(path, 'w') as f:
+        f.write('{not json')
+    assert wcal.stored_peak(path, '046d:c24f') is None
+    wcal.store_peak(path, '046d:c24f', 5.0)                                                  # a damaged file is an empty store
+    assert wcal.load_store(path) == {'046d:c24f': 5.0}

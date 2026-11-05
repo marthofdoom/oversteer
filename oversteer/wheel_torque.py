@@ -89,6 +89,7 @@ RIM_MM = {
 DEFAULT_RIM_MM = 279.0                   # an unknown wheel is taken to have a G29's rim
 CAR_WHEEL_MM = 350.0                     # a rally car's steering wheel (profile key countersteer_car_wheel_mm)
 CAR_WHEEL_RANGE = (280, 420)
+PEAK_RANGE = (1.0, 30.0)                 # Nm: the peak torque setting (the range covers direct-drive wheels)
 RIM_RANGE = (200, 400)                   # mm: the rim diameter setting
 
 # Direct drives by name, for later: their USB ids are not in wheel_ids and are NOT FOUND in the repo (not guessed)
