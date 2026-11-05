@@ -335,7 +335,7 @@ class OutputFilter:
     (its arrival time), `step(t, x)` every engine pass: x the steering force (ext_force units), returns the filtered,
     slew-limited value."""
 
-    FC_RATIO = 3.0                       # the corner is the packet rate over this ...
+    FC_RATIO = 2.5                       # the corner is the packet rate over this ...
     FC_MIN, FC_MAX = 15.0, 60.0          # ... within these (Hz)
     RATE_WINDOW = 2.0                    # s: the median interval is taken over this
     RATE_TAU = 0.5                       # s: the rate the corner follows is smoothed over this

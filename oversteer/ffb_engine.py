@@ -1494,7 +1494,7 @@ class RbrRack(RackForce):
     DERIVED_MU_RISE = 0.5                # s
     DERIVED_MU_FALL = 60.0               # s
     DERIVED_R_TAU = 0.15                 # s: Fy_f / Fz's smoothing
-    DERIVED_AY_HZ = 16.1                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
+    DERIVED_AY_HZ = 30.0                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
     # Slip and spring shape, from RBR 20261104-143327 (speed over 10 m/s, _slip bins: median |a_y| 4.0 m/s^2 at .08-.1 rad, 6.1 at
     # .15-.2, 6.8 at .3-.5): the normalised slip is 1 where the lateral acceleration has all but stopped growing; the kingpin torque
@@ -1506,6 +1506,7 @@ class RbrRack(RackForce):
     DERIVED_UNLOADED = 0.10              # share of the fronts' static load (m b/L g) under which they are in the air ...
     DERIVED_UNLOADED_S = 0.05            # ... and the torque fades out within this long (and back in)
     DERIVED_ALIGN_K0 = 4800.0            # Nm/rad: the derived kingpin torque per _sat shape until learnt
+    DERIVED_SPRING_PAST = 0.2            # rad of front slip past which the spring's slope floor falls away
     DERIVED_SLOPE_MIN = 0.01              # the spring's k keeps this share of the small-signal slope past the derived shape's peak
 
     @property
@@ -1849,7 +1850,9 @@ class RbrRack(RackForce):
             return super()._sat_div(alpha)
         h = 1e-4
         slope = (self._sat(alpha + h) - self._sat(alpha - h)) / (2.0 * h)
-        return 1.0 / max(slope, self.DERIVED_SLOPE_MIN)
+        # Past the tyre's peak the spring only fades: the floor falls with the slip, so its force never starts to load up again
+        floor = self.DERIVED_SLOPE_MIN * min(1.0, (self.DERIVED_SPRING_PAST / max(abs(alpha), 1e-6)) ** 2)
+        return 1.0 / max(slope, floor)
 
     def align_stiffness(self):
         """Kingpin torque per unit of _sat(slip): the derived path's prior until learnt (its torque is not NGP's)."""

@@ -205,7 +205,7 @@ def test_the_filter_step_has_no_overshoot_and_about_20_ms_of_lag_at_60():
     flt, ts, ys = run_filter(60.0, step, seconds=0.5)
     assert max(ys) <= step + 1e-6                                  # no overshoot
     assert all(b >= a - 1e-9 for a, b in zip(ys, ys[1:]))          # monotone
-    assert flt.corner() == pytest.approx(20.0, abs=0.5)
+    assert flt.corner() == pytest.approx(24.0, abs=0.5)
     # critically damped at a 20 Hz corner: 90 % after about 20 ms (plus the packet's own wait)
     assert 0.015 < t_cross(ts, ys, 0.9 * step) - 0.0 < 0.030
     # a ramp is followed 2 tau behind (10 ms) plus the packets' half interval (8 ms): about 18 ms in all
@@ -256,7 +256,7 @@ def test_the_corner_and_slew_follow_the_packet_rate_60_and_120():
             for k in range(4):
                 flt.step(t + k * 0.00025, 0.0)
         assert flt.rate == pytest.approx(hz, rel=0.03)
-    assert f60.corner() == pytest.approx(20.0, rel=0.04) and f120.corner() == pytest.approx(40.0, rel=0.04)
+    assert f60.corner() == pytest.approx(24.0, rel=0.04) and f120.corner() == pytest.approx(48.0, rel=0.04)
     assert f120.slew() == pytest.approx(2.0 * f60.slew(), rel=0.05)
     assert f60.slew() == pytest.approx(0.15 * FULL / 0.010, rel=0.04)
     # the same step answers about twice as fast at 120/s
@@ -296,7 +296,7 @@ def test_the_filter_takes_out_the_buzz_between_the_60_hz_steps():
         freqs = np.fft.rfftfreq(len(x), 0.001)
         sel = (freqs >= 30.0) & (freqs <= 120.0)
         return float(np.sqrt(np.sum(spectrum[sel] ** 2)))
-    assert band(out) < 0.3 * band(raw)
+    assert band(out) < 0.33 * band(raw)
 
 
 # -- the texture --
