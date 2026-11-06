@@ -955,14 +955,18 @@ class Model:
 
     def set_countersteer_power_class(self, value):
         """The assist class, rally / street / off (profile INI only, no control): see ffb_carprops.POWER_CLASSES."""
-        value = str(value).strip().lower()
-        value = value if value in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
+        value = self._power_class_text(value)
         if self.set_if_changed('countersteer_power_class', value) and self.ui is not None:
             self.ui.controller.apply_countersteer_power_class()
 
     def get_countersteer_power_class(self):
-        value = str(self.data.get('countersteer_power_class') or '').strip().lower()
-        return value if value in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
+        return self._power_class_text(self.data.get('countersteer_power_class'))
+
+    @staticmethod
+    def _power_class_text(value):
+        """A class name and any rack overrides (ffb_carprops.parse_power_class, 'rally speed=15 k=3'); a bad name is the default."""
+        words = str(value or '').strip().lower().split()
+        return ' '.join(words) if words and words[0] in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
 
     def get_rbr_auto_range(self):
         """Richard Burns Rally's car sets the wheel's range to its real steering lock (profile INI only, default on)."""

@@ -637,3 +637,20 @@ def test_the_force_share_at_a_fixed_torque_scales_with_the_peak_below_the_knee()
     low = rack.force(s) / fe.FULL
     engine.set_wheel_peak(6.16)                                          # twice the G29's
     assert rack.force(s) / fe.FULL == pytest.approx(low / 2)
+
+
+def test_the_ini_tunes_the_rack():
+    from oversteer import ffb_carprops as cp
+    try:
+        assert cp.set_power_class('rally speed=15 k=2 r=1 gain=1.5 nonsense=3 k2') == 'rally'
+        assert (cp.HYD_K, cp.HYD_R, cp.HYD_GAIN) == (2.0, 1.0, 1.5)
+        assert cp.driver_from_column(20.0, 5.0) == cp.driver_from_column(20.0, 50.0)
+        assert cp.power_spec().startswith('rally speed=15')
+        cp.set_power_class('street')
+        assert cp.driver_from_column(20.0, 5.0) != cp.driver_from_column(20.0, 50.0)
+        cp.set_power_class('rally speed=0')
+        assert cp.driver_from_column(20.0, 5.0) != cp.driver_from_column(20.0, 50.0)
+        cp.set_power_class('rally speed=999')
+        assert cp.driver_from_column(20.0, 5.0) == cp.driver_from_column(20.0, 50.0)
+    finally:
+        cp.set_power_class(None)

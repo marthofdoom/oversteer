@@ -319,8 +319,8 @@ def boost_t0(speed):
 
 def _assist_raw(mag, speed, assist):
     """(A_raw, dA_raw/dT_d) before the saturation, at driver torque `mag` >= 0."""
-    if _power_class == 'rally':
-        speed = RALLY_ASSIST_SPEED           # hydraulic: the pump doesn't know the road speed, only a road car's electronics do
+    if _assist_speed is not None:
+        speed = _assist_speed                # hydraulic: the pump doesn't know the road speed, only a road car's electronics do
     kc, k, t0 = BOOST_K_CENTRE * assist, boost_k(speed, assist), boost_t0(speed)
     raw = kc * mag + (k - kc) * mag * mag / (t0 + mag)
     slope = kc + (k - kc) * mag * (mag + 2.0 * t0) / (t0 + mag) ** 2
@@ -350,13 +350,44 @@ HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top en
                                          # up to HYD_K, then bends toward HYD_K + HYD_R (the rack runs out of assist flow)
 
 
+RACK_KEYS = {'k': (0.2, 10.0), 'r': (0.0, 10.0), 'gain': (0.1, 5.0), 'speed': (0.0, 90.0)}     # the INI's rack overrides, and their ranges
+_power_spec = DEFAULT_POWER_CLASS
+_assist_speed = RALLY_ASSIST_SPEED       # m/s: the boost curve held at every speed, None: it follows the road speed
+
+
+def parse_power_class(text):
+    """(class, overrides) of countersteer_power_class: a class name, then any of k=, r=, gain=, speed= (Nm, Nm, a factor,
+    m/s; 'k=3 r=1 gain=1.5 speed=15'; speed 0: follow the road speed). A bad or out-of-range part is ignored, a bad name is rally."""
+    parts = str(text or '').strip().lower().split()
+    name = parts[0] if parts and parts[0] in POWER_CLASSES else DEFAULT_POWER_CLASS
+    tune = {}
+    for part in parts[1:]:
+        key, _, value = part.partition('=')
+        try:
+            number = float(value)
+        except ValueError:
+            continue
+        if key in RACK_KEYS and RACK_KEYS[key][0] <= number <= RACK_KEYS[key][1]:
+            tune[key] = number
+    return name, tune
+
+
 def set_power_class(name):
-    """Make `name` (rally / street / off; anything else: rally) the active assist class; returns the class in effect."""
-    global _power_class, HYD_K, HYD_R, HYD_GAIN
-    _power_class = name if name in POWER_CLASSES else DEFAULT_POWER_CLASS
+    """Make `name` (see parse_power_class; anything else: rally) the active assist class; returns the class."""
+    global _power_class, _power_spec, _assist_speed, HYD_K, HYD_R, HYD_GAIN
+    _power_class, tune = parse_power_class(name)
+    _power_spec = str(name or DEFAULT_POWER_CLASS).strip().lower()
     HYD_K, HYD_R = _CLASS_HYD[_power_class]
     HYD_GAIN = _CLASS_GAIN[_power_class]
+    HYD_K, HYD_R, HYD_GAIN = tune.get('k', HYD_K), tune.get('r', HYD_R), tune.get('gain', HYD_GAIN)
+    speed = tune.get('speed', RALLY_ASSIST_SPEED if _power_class == 'rally' else 0.0)
+    _assist_speed = speed if speed > 0.0 else None
     return _power_class
+
+
+def power_spec():
+    """The class as the INI gave it, overrides included."""
+    return _power_spec
 
 
 def power_class():

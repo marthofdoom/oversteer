@@ -891,7 +891,7 @@ class Gui:
                 except Exception:
                     pass
                 from . import ffb_carprops
-                if ffb_carprops.power_settings()[0] == 'off' or self.model.get_countersteer_power_class() == 'off':
+                if ffb_carprops.power_settings()[0] == 'off' or self.model.get_countersteer_power_class().split()[0] == 'off':
                     parts.append(_("power steering: off in the INI"))
                 else:
                     parts.append(_("power steering: detected") if model.assist > 0.5 else _("power steering: absent"))

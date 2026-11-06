@@ -2883,7 +2883,7 @@ class FfbEngine:
     def set_power_class(self, name):
         """The assist class (profile INI only, countersteer_power_class): 'rally' (default, hydraulic top end 7.0 Nm),
         'street' (3.7 Nm) or 'off' (unassisted); anything else is rally."""
-        self._power_class_req = name if name in ffb_carprops.POWER_CLASSES else ffb_carprops.DEFAULT_POWER_CLASS
+        self._power_class_req = name or ffb_carprops.DEFAULT_POWER_CLASS
         self._wake.set()
 
     def car_properties(self):
@@ -3214,7 +3214,7 @@ class FfbEngine:
             self.rbr_rack.source = self._rbr_source_req      # (the other source's state starts again)
             self.rbr_rack._restart_derived()
             self.rbr_rack._restart_floor()
-        if self._power_class_req is not None and self._power_class_req != ffb_carprops.power_class():
+        if self._power_class_req is not None and self._power_class_req != ffb_carprops.power_spec():
             ffb_carprops.set_power_class(self._power_class_req)
         lightness = self._lightness_req
         if lightness is not None and lightness / 100.0 != self.addon.strength:
