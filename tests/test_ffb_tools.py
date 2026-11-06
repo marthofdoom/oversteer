@@ -290,3 +290,88 @@ def test_effective_trail_is_nm_per_fyf_in_mm_by_theta():
     row = [l for l in lines if l.startswith('0-0.2')][0]
     assert '1.000' in row or '0.750' in row               # median of 1.0 mm and 0.5 mm (the 100 N sample is left out)
     assert '0.750' in row
+
+
+# --- ffb-stages -------------------------------------------------------------------------------------------------------
+
+def _stage_cols(ay, speed, scale=1.0, n=200):
+    """n samples (0.01 s each) of every stage at ay / speed; stage values are scale times a constant per stage."""
+    cols = {k: np.full(n, float(i + 1) * scale) for i, (k, _n) in enumerate(sit.STAGES)}
+    cols['ay'], cols['speed'] = np.full(n, float(ay)), np.full(n, float(speed))
+    return cols
+
+
+def test_stage_cells_bin_by_ay_and_speed_with_real_seconds():
+    cols = {k: np.concatenate([_stage_cols(0.5, 10)[k], _stage_cols(5.5, 25)[k], _stage_cols(13.0, 40)[k]]) for k, _n in sit.STAGES}
+    meds, secs = sit.stage_cells(cols, 0.5)
+    assert sorted(meds) == [(0, 0), (5, 1), (11, 2)]
+    assert secs[(0, 0)] == pytest.approx(100.0) and meds[(5, 1)]['fyf'] == 4.0
+    assert sit.label(sit.STAGE_AY, 11) == '12-15' and sit.label(sit.STAGE_AY, 12) == '15+'
+    assert sit.label(sit.STAGE_SPEED, 2) == '30+'
+
+
+def test_stage_summary_gives_the_ratio_per_stage_for_all_low_and_high_ay():
+    def side(scale_low, scale_high):
+        c = {k: np.concatenate([_stage_cols(2.5, 25, scale_low)[k], _stage_cols(7.5, 25, scale_high)[k]]) for k, _n in sit.STAGES}
+        c['ay'] = np.concatenate([np.full(200, 2.5), np.full(200, 7.5)])
+        c['speed'] = np.full(400, 25.0)
+        return sit.stage_cells(c, 0.01)
+    a, b = side(2.0, 1.0), side(1.0, 1.0)
+    low = sit.stage_ratios(a, b, 1.0, lambda k: k[0] < sit.STAGE_SPLIT)
+    high = sit.stage_ratios(a, b, 1.0, lambda k: k[0] >= sit.STAGE_SPLIT)
+    allr = sit.stage_ratios(a, b, 1.0)
+    assert low['kingpin'][3] == pytest.approx(2.0) and high['kingpin'][3] == pytest.approx(1.0)
+    assert allr['kingpin'][3] == pytest.approx(1.5)         # (2 + 1) / 2, the two cells having the same seconds
+    text = sit.stage_summary(a, b, 1.0)
+    assert [l.split('|')[0].strip() for l in text[3:]] == [n.strip() for _k, n in sit.STAGES]
+    assert '|ay| < 5' in text[1] and '|ay| >= 5' in text[1]
+
+
+def test_stage_ratios_drop_cells_short_of_time_and_stages_without_values():
+    a = sit.stage_cells(_stage_cols(2.5, 25, 1.0, n=50), 0.01)        # 0.5 s only
+    b = sit.stage_cells(_stage_cols(2.5, 25, 1.0, n=50), 0.01)
+    assert all(v is None for v in sit.stage_ratios(a, b, 1.0).values())
+    cols = _stage_cols(2.5, 25)
+    cols['mass'] = np.full(200, np.nan)
+    a = sit.stage_cells(cols, 0.01)
+    assert sit.stage_ratios(a, a, 1.0)['mass'] is None and sit.stage_ratios(a, a, 1.0)['fyf'][3] == 1.0
+
+
+def test_mass_is_refused_for_acr_and_ratio_is_not():
+    tools.check_overrides('acr', None, 13.0)
+    tools.check_overrides('rbr', 1250.0, 13.0)
+    with pytest.raises(ValueError, match='ACR'):
+        tools.check_overrides('acr', 1250.0, None)
+    with pytest.raises(ValueError):
+        tools.check_overrides('rbr', -5.0, None)
+
+
+def test_a_pinned_ratio_and_mass_survive_set_car_and_the_learners():
+    from oversteer import car_data
+    rack, _fresh, _feed = tools._build_rack('rbr', 'rally')
+    tools.pin_values('rbr', rack, 1250.0, 13.0)
+    rack.set_car('rbr/106')                                    # restores the table's ratio (10.58)
+    assert rack.ratio != 13.0 and rack.DERIVED_RATIO == 13.0
+    tools.pin_values('rbr', rack, 1250.0, 13.0)
+    assert rack.ratio == 13.0 and rack.DERIVED_RATIO == 13.0
+    with tools.rbr_mass(1250.0):
+        assert car_data.entry('rbr/106')['mass_kg'] == 1250.0
+    assert car_data.entry('rbr/106')['mass_kg'] != 1250.0
+    forza, _f, _g = tools._build_rack('forza-fh', 'street')
+    forza.reset(None)
+    tools.pin_values('forza-fh', forza, 1250.0, 11.0)
+    assert forza.mass == 1250.0 and forza.ratio == 11.0
+    forza.reset(None)                                          # back to the prior mass and STEER_RATIO
+    assert forza.mass != 1250.0
+    tools.pin_values('forza-fh', forza, 1250.0, 11.0)
+    assert forza.mass == 1250.0
+
+
+def test_acr_true_mass_is_the_slope_of_the_four_tyres_fy_on_ay():
+    t = np.arange(2000) * 0.01
+    ay = 6.0 * np.sin(t * 0.7) + np.where(np.sin(t * 0.7) >= 0, 3.0, -3.0)      # mostly |ay| > 3
+    cols = {'t': t, 'ay_s': ay, 'yaw': np.zeros_like(t), 'fy_all': 1200.0 * ay, 'fy_front': 700.0 * ay}
+    m, mf, share, n = tools.acr_true_mass(cols)
+    assert m == pytest.approx(1200.0) and mf == pytest.approx(700.0) and share == pytest.approx(700 / 1200)
+    cols['yaw'] = 5.0 * t * 0 + np.sin(t * 40.0) * 3.0                          # a violent yaw acceleration: nothing qualifies
+    assert tools.acr_true_mass(cols) is None

@@ -566,6 +566,252 @@ def force_curve(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1
             'rows': rows, 'knee_nm': knee_nm}
 
 
+# --- ffb-stages ---------------------------------------------------------------------------------------------------------
+
+def yaw_accel(t, yaw, window=0.03):
+    """The yaw acceleration (rad/s2): a central difference of the yaw rate over +-window s (0 where the span is not about that)."""
+    t, yaw = np.asarray(t, float), np.asarray(yaw, float)
+    n = len(t)
+    dt = max(float(np.median(np.diff(t))), 1e-4) if n > 1 else 1e-4
+    k = max(int(round(window / dt)), 1)
+    lo, hi = np.clip(np.arange(n) - k, 0, n - 1), np.clip(np.arange(n) + k, 0, n - 1)
+    span = t[hi] - t[lo]
+    good = (span > 0) & (span < 4 * window)
+    rd = np.zeros(n)
+    rd[good] = (yaw[hi] - yaw[lo])[good] / span[good]
+    return rd
+
+
+def check_overrides(game, mass=None, ratio=None):
+    """ValueError for a mass given for ACR (its force takes none) or a value that is not a positive number."""
+    for name, v in (('mass', mass), ('ratio', ratio)):
+        if v is not None and not (np.isfinite(v) and v > 0):
+            raise ValueError('%s must be a positive number (got %r)' % (name, v))
+    if mass is not None and game == 'acr':
+        raise ValueError("a mass cannot be set for ACR: its force does not take one (it is not sent; ffb-stages prints an estimate)")
+
+
+def pin_values(game, rack, mass=None, ratio=None):
+    """Put the what-if mass and ratio back into the rack. Called before the first sample and after every feed: set_car, reset and
+    the learners restore the table's or learnt values (RbrRack.set_car -> _table_frame, RackForce._learn_ratio, MassLearner).
+    RBR: the derived path divides by DERIVED_RATIO (not rack.ratio, which is only the aligning spring's frame), set on the instance;
+    its mass is the car table's, replaced by `rbr_mass` below. Forza: mass_l.mass. ACR: ratio only."""
+    if ratio is not None:
+        rack.ratio = ratio
+        if game == 'rbr':
+            rack.DERIVED_RATIO = ratio
+    if mass is not None and game == 'forza-fh':
+        rack.mass_l.mass = mass
+
+
+@contextlib.contextmanager
+def rbr_mass(mass):
+    """Inside, car_data.entry gives a copy of the entry with mass_kg replaced (RbrRack._derive reads the mass there); None: as it is."""
+    from oversteer import car_data
+    if mass is None:
+        yield
+        return
+    orig = car_data.entry
+
+    def entry(key):
+        found = orig(key)
+        return dict(found or {}, mass_kg=mass)
+    car_data.entry = entry
+    try:
+        yield
+    finally:
+        car_data.entry = orig
+
+
+STAGE_FYF_MIN = TRAIL_FYF_MIN
+
+
+def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None):
+    """Today's rack over the samples (two passes, align_on off) as simulate_rows does it, one row per scored sample with the value
+    each stage of the chain had in the rack's own code (read from the rack or the same call recorded, see ffb_situations.STAGES).
+    Signs: kingpin, column, driver, rim are |.|; caster and pneu/Mz carry the sign of the kingpin (so they add up to it).
+    `mass`, `ratio`: what-ifs, pinned (pin_values, rbr_mass). Returns {'cols', 'info', 'in_force', 'raw'}. Call inside _sandbox()."""
+    from oversteer import car_data, ffb_carprops, ffb_engine as fe, ffb_forza
+    check_overrides(game, mass, ratio)
+    with rbr_mass(mass if game == 'rbr' else None):
+        rack, fresh, base_feed = _build_rack(game, power_class, peak)
+
+        def feed(t, s):
+            pin_values(game, rack, mass, ratio)
+            base_feed(t, s)
+            pin_values(game, rack, mass, ratio)
+        names = [k for k, _n in sit.STAGES] + ['t', 'ay_s', 'yaw', 'fy_all', 'fy_front']
+        cols = {k: [] for k in names}
+        rec = {}
+        orig_fl, orig_kp = ffb_forza.front_lateral, ffb_forza.kingpin
+        if game == 'forza-fh':
+            def fl(*a, **k):
+                rec['fy'] = orig_fl(*a, **k)
+                return rec['fy']
+
+            def kp(*a, **k):
+                rec['kp'] = orig_kp(*a, **k)
+                return rec['kp']
+            ffb_forza.front_lateral, ffb_forza.kingpin = fl, kp
+        car, scored = None, 0
+        try:
+            for t, s in items:
+                feed(t, s)
+            for t, s in items:
+                feed(t, s)
+                car = s.car or car
+                if not rack.ready or not sample_ok(s, sit.STAGE_SPEED[0]):
+                    continue
+                rec.clear()
+                force = rack.force(s)
+                bl = ffb_forza.front_share(getattr(s, 'drivetrain', None))
+                nan = float('nan')
+                if game == 'acr':
+                    fy, fz, sa = _pair(s.tyre_fy), _pair(s.tyre_load), _pair(s.tyre_slip_angle)
+                    if fy is None or fz is None or sa is None or s.yaw_rate is None or not np.isfinite(s.yaw_rate):
+                        continue
+                    side = fy[0] + fy[1]
+                    fyf, slip, m = abs(side), _slip_acr(s, rack), nan
+                    kingpin = rack._front(s, rack.trail, rack.pull_scrub())
+                    if kingpin is None:
+                        continue
+                    ratio_now = rack.ratio
+                    column = kingpin / ratio_now
+                    caster = -rack.trail * side
+                elif game == 'forza-fh':
+                    if 'fy' not in rec or 'kp' not in rec:
+                        continue
+                    v = rack._slip(s)
+                    fyf, slip, m = abs(rec['fy']), (None if v is None or not np.isfinite(v) else abs(v)), rack.mass
+                    kingpin = rec['kp']
+                    ratio_now = rack.ratio
+                    column = kingpin / ratio_now
+                    caster = -ffb_forza.CASTER * rec['fy']
+                else:
+                    fy_f = getattr(rack, 'fy_f', None)
+                    if fy_f is None or not np.isfinite(fy_f) or rack.derived is None or rack.derived_raw is None:
+                        continue
+                    entry = car_data.entry(rack.car)
+                    m = (entry.get('mass_kg') if entry else None) or rack.FLOOR_MASS
+                    fyf, slip = abs(fy_f), _slip_rbr(s, rack)
+                    ratio_now = rack.DERIVED_RATIO
+                    column = rack.derived * rack._fresh()
+                    kingpin = column * ratio_now
+                    raw = rack.derived_raw * ratio_now
+                    caster = -ffb_carprops.RALLY_TRAIL * fy_f * (kingpin / raw if raw else 0.0)
+                sign = 1.0 if kingpin >= 0 else -1.0
+                driver = abs(rack.last_torque)
+                rho = rack.rho()
+                share = abs(force) / fe.FULL
+                if slip is None:
+                    slip = nan
+                scored += 1
+                row = {'ay': abs(s.accel[1]), 'speed': s.speed, 'slip': slip, 'fyf': fyf, 'mass': m, 'bl': bl,
+                       'kingpin': abs(kingpin), 'caster': caster * sign, 'pneu': (kingpin - caster) * sign,
+                       'trail_mm': abs(kingpin) / fyf * 1000.0 if fyf >= STAGE_FYF_MIN else nan,
+                       'ratio': ratio_now, 'column': abs(column), 'driver': driver,
+                       'gain': driver / abs(column) if column else nan, 'rho': rho, 'rim': driver * rho, 'share': share,
+                       'played': share * rack.wheel_peak, 't': t, 'ay_s': s.accel[1],
+                       'yaw': s.yaw_rate if s.yaw_rate is not None else nan, 'fy_all': nan, 'fy_front': nan}
+                if game == 'acr' and s.tyre_fy is not None and len(s.tyre_fy) >= 4:
+                    allfy = sum(s.tyre_fy[:4])
+                    row['fy_all'] = allfy if np.isfinite(allfy) else nan
+                    row['fy_front'] = side
+                for k in names:
+                    cols[k].append(row[k])
+            learnt = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}
+            source = rack.power_steering()
+            table = ffb_carprops.table_ratio(car_data.entry(rack.car)) if getattr(rack, 'car', None) else None
+            ratio_text = _ratio_text(game, rack, ratio, table)
+        finally:
+            ffb_forza.front_lateral, ffb_forza.kingpin = orig_fl, orig_kp
+    cols = {k: np.array(v, float) for k, v in cols.items()}
+    dt = sample_spacing([t for t, _ in items])
+    info = {'game': game, 'class': power_class, 'samples': len(items), 'scored': scored, 'dt': dt, 'learnt': learnt,
+            'default': fresh, 'car': car, 'peak': rack.wheel_peak}
+    pick = (lambda k: cols[k][np.isfinite(cols[k])]) if scored else (lambda k: np.zeros(0))
+
+    def span(k):
+        v = pick(k)
+        return 'median %.4g (%.4g-%.4g)' % (np.median(v), v.min(), v.max()) if len(v) else 'none'
+    in_force = ['in force: mass %s; ratio %s (%s); power steering %s; rho %s' % (
+        span('mass') if game != 'acr' else 'not used by the force', span('ratio'), ratio_text, source, span('rho'))]
+    return {'cols': cols, 'info': info, 'in_force': in_force}
+
+
+def _ratio_text(game, rack, pinned, table):
+    if pinned is not None:
+        return 'what-if, pinned'
+    if game == 'rbr':
+        return 'RbrRack.DERIVED_RATIO, a class constant; the car table %s only frames the spring' % ('%.2f' % table if table else 'has none')
+    if game == 'forza-fh':
+        return 'ForzaRack.STEER_RATIO, a constant'
+    if table and abs(rack.ratio - table) < 1e-9:
+        return 'from the car table'
+    if not rack.ratio_known:
+        return 'the default STEER_RATIO, not learnt and not in a table'
+    return 'learnt in this replay (starts at %s)' % ('the table %.2f' % table if table else 'the default')
+
+
+MASS_AY_MIN = 3.0                       # m/s2: the true-mass fit uses |ay| over this ...
+MASS_RDOT_MAX = 0.3                     # rad/s2: ... and |yaw acceleration| under this
+
+
+def acr_true_mass(cols):
+    """(mass kg, front mass kg, front share, samples) of one ACR drive: least squares through the origin of the sum of all four
+    tyres' Fy on ay (and of the front pair's), |ay| over MASS_AY_MIN and |yaw acceleration| under MASS_RDOT_MAX. None when too few."""
+    ay, tot, fr = cols['ay_s'], cols['fy_all'], cols['fy_front']
+    if not len(ay):
+        return None
+    rd = yaw_accel(cols['t'], cols['yaw'])
+    ok = (np.abs(ay) > MASS_AY_MIN) & (np.abs(rd) < MASS_RDOT_MAX) & np.isfinite(tot) & np.isfinite(fr)
+    if ok.sum() < 100:
+        return None
+    a = ay[ok]
+    m, mf = abs(float(np.dot(tot[ok], a) / np.dot(a, a))), abs(float(np.dot(fr[ok], a) / np.dot(a, a)))
+    return m, mf, mf / m if m else float('nan'), int(ok.sum())
+
+
+def mass_lines(tag, name, cols):
+    r = acr_true_mass(cols)
+    if r is None:
+        return ['%s %s: true mass: too few samples with |ay| > %g and |yaw acceleration| < %g' % (tag, name, MASS_AY_MIN, MASS_RDOT_MAX)]
+    return ['%s %s: true mass %.0f kg (sum of all four tyre Fy over ay), front %.0f kg = %.1f %% of it; %d samples, |ay| > %g, |yaw accel| < %g'
+            % (tag, name, r[0], r[1], r[2] * 100, r[3], MASS_AY_MIN, MASS_RDOT_MAX)]
+
+
+def stages(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1.0, sets=(), mass=(None, None), ratio=(None, None),
+           loader=None, game_of=None):
+    """Run ffb-stages. Returns {'head', 'summary', 'cells', 'mass'} (lists of lines). Raises NoRack, ValueError (a bad --set, a
+    mass for ACR)."""
+    import ffb_benchmark as fb
+    import ffb_parity as fp
+    import ffb_score as fs
+    loader = loader or (lambda path: list(fb._walk(path)[1]))
+    game_of = game_of or fp.game_of
+    head, mass_out, sides = [], [], []
+    with fs._sandbox(), overrides(sets) as set_lines:
+        head += set_lines
+        for n, tag in enumerate('AB'):
+            pool = []
+            for name in (a_names, b_names)[n]:
+                path = capture_path(name)
+                game = game_of(path)
+                rack_for(game, os.path.basename(path)[:15])
+                check_overrides(game, mass[n], ratio[n])
+                power = (class_a, class_b)[n] or profile_power_class(game)
+                sim = simulate_stages(loader(path), game, power, peak, mass[n], ratio[n])
+                short = os.path.basename(path)[:15]
+                head += [tag + '  ' + ln for ln in info_lines(short, sim['info'])]
+                head += [tag + '    ' + ln for ln in sim['in_force']]
+                if game == 'acr':
+                    mass_out += mass_lines(tag, short, sim['cols'])
+                pool.append((sim['cols'], sim['info']['dt']))
+            sides.append(sit.stage_pool(pool))
+    a, b = (sit.stage_cells(c, d) for c, d in sides)
+    return {'head': head, 'summary': sit.stage_summary(a, b, min_s), 'cells': sit.stage_cell_lines(a, b, min_s), 'mass': mass_out}
+
+
 # --- ffb-wheel-model ------------------------------------------------------------------------------------------------
 
 def stored_result(store_path=None, key=None):

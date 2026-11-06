@@ -134,3 +134,93 @@ def curve_line(r):
     return '%-10s %-8s | %7.3f %7.3f | %6.1f %6.1f | %+8.3f %7s' % (
         curve_label(FYF, r[0][0]), curve_label(THETA, r[0][1]), r[1], r[2], r[3], r[4], r[5],
         ('%+.1f' % r[6]) if np.isfinite(r[6]) else '.')
+
+
+# --- ffb-stages: each stage of the force chain by |ay| and speed ---------------------------------------------------------
+STAGE_AY = (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.0, 15.0, 99.0)     # m/s2: |lateral acceleration|
+STAGE_SPEED = (8.0, 20.0, 30.0, 199.0)                                                       # m/s
+STAGE_SPLIT = 5                                  # STAGE_AY bands under this index are |ay| < 5 m/s2
+# (key, name in the output) in pipeline order; ay and speed first, they are what the cells are made of
+STAGES = (('ay', 'ay m/s2'), ('speed', 'speed m/s'), ('slip', 'slip rad'), ('fyf', 'Fyf N'), ('mass', 'mass kg'), ('bl', 'b/L'),
+          ('kingpin', 'kingpin Nm'), ('caster', ' caster Nm'), ('pneu', ' pneu/Mz Nm'), ('trail_mm', 'trail mm'),
+          ('ratio', 'ratio'), ('column', 'column Nm'), ('driver', 'driver Nm'), ('gain', 'boost gain'), ('rho', 'rho'),
+          ('rim', 'rim Nm'), ('share', 'share'), ('played', 'Nm played'))
+
+
+def stage_cells(cols, dt):
+    """({(ay band, speed band): {stage: median}}, {cell: seconds}) of per-sample arrays in `cols` (keys of STAGES; NaN where a
+    game has no such stage) and `dt`, the seconds each sample stands for (a number or an array). Real time, not sample counts."""
+    ay, speed = np.asarray(cols['ay'], float), np.asarray(cols['speed'], float)
+    dt = np.broadcast_to(np.asarray(dt, float), ay.shape)
+    ok = np.isfinite(ay) & np.isfinite(speed)
+    i, j = band(STAGE_AY, ay), band(STAGE_SPEED, speed)
+    meds, secs = {}, {}
+    for k in set(zip(i[ok].tolist(), j[ok].tolist())):
+        m = ok & (i == k[0]) & (j == k[1])
+        row = {}
+        for key, _name in STAGES:
+            v = np.asarray(cols[key], float)[m]
+            v = v[np.isfinite(v)]
+            row[key] = float(np.median(v)) if len(v) else float('nan')
+        meds[k] = row
+        secs[k] = float(dt[m].sum())
+    return meds, secs
+
+
+def stage_pool(sides):
+    """Join per-capture (cols, dt) into one cols dict and one dt array."""
+    cols = {key: [] for key, _name in STAGES}
+    dts = []
+    for c, dt in sides:
+        n = len(c['ay'])
+        for key in cols:
+            cols[key].append(np.asarray(c[key], float) if key in c else np.full(n, np.nan))
+        dts.append(np.full(n, dt))
+    return {k: np.concatenate(v) if v else np.zeros(0) for k, v in cols.items()}, (np.concatenate(dts) if dts else np.zeros(0))
+
+
+def stage_ratios(a, b, min_s, pick=None):
+    """{stage: (n cells, mean A, mean B, A/B, seconds)}: over the cells both sides have >= min_s in (and `pick(cell)`), the
+    cells' medians averaged with the shared seconds as weights, A/B the ratio of those two means (cells where either side has no
+    value at a stage are left out of that stage). `a`, `b` are (medians, seconds) of stage_cells. None for a stage with no cell."""
+    out = {}
+    cells = [k for k in set(a[0]) & set(b[0]) if a[1][k] >= min_s - 1e-9 and b[1][k] >= min_s - 1e-9 and (pick is None or pick(k))]
+    for key, _name in STAGES:
+        sel = [k for k in cells if np.isfinite(a[0][k][key]) and np.isfinite(b[0][k][key])]
+        if not sel:
+            out[key] = None
+            continue
+        w = np.array([min(a[1][k], b[1][k]) for k in sel])
+        ma = float(np.average([a[0][k][key] for k in sel], weights=w))
+        mb = float(np.average([b[0][k][key] for k in sel], weights=w))
+        out[key] = (len(sel), ma, mb, ma / mb if mb else float('nan'), float(w.sum()))
+    return out
+
+
+def stage_summary(a, b, min_s):
+    """Lines: per stage in pipeline order, mean A, mean B and A/B over all cells, the cells with |ay| under 5 and those with 5 or more."""
+    sets = (('all', None), ('|ay| < 5', lambda k: k[0] < STAGE_SPLIT), ('|ay| >= 5', lambda k: k[0] >= STAGE_SPLIT))
+    res = [stage_ratios(a, b, min_s, p) for _n, p in sets]
+    secs = ['%s: %d cells, %.0f s' % (n, max([r[k][0] for k in r if r[k]] or [0]), max([r[k][4] for k in r if r[k]] or [0.0])) for (n, _p), r in zip(sets, res)]
+    lines = ['stage ratios A/B, cell medians averaged with the shared seconds (cells with >= %g s on both sides): ' % min_s + '; '.join(secs),
+             '%-12s | %s' % ('stage', ' | '.join('%-26s' % n for n, _p in sets)),
+             '%-12s | %s' % ('', ' | '.join('%8s %8s %7s' % ('A', 'B', 'A/B') for _ in sets))]
+    for key, name in STAGES:
+        parts = []
+        for r in res:
+            v = r[key]
+            parts.append('%8.4g %8.4g %7.3f' % v[1:4] if v else '%8s %8s %7s' % ('.', '.', '.'))
+        lines.append('%-12s | %s' % (name, ' | '.join(parts)))
+    return lines
+
+
+def stage_cell_lines(a, b, min_s):
+    """The per-cell table for the log: for each cell both sides have, A median, B median and A/B at every stage."""
+    keys = sorted(k for k in set(a[0]) & set(b[0]) if a[1][k] >= min_s - 1e-9 and b[1][k] >= min_s - 1e-9)
+    lines = []
+    for k in keys:
+        lines.append('|ay| %s m/s2, speed %s m/s: A %.1f s, B %.1f s' % (label(STAGE_AY, k[0]), label(STAGE_SPEED, k[1]), a[1][k], b[1][k]))
+        for key, name in STAGES[2:]:
+            x, y = a[0][k][key], b[0][k][key]
+            lines.append('    %-12s A %10.4g  B %10.4g  A/B %s' % (name, x, y, ('%.3f' % (x / y)) if np.isfinite(x) and np.isfinite(y) and y else '.'))
+    return lines
