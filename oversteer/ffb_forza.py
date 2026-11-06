@@ -31,8 +31,9 @@ DI = 1.0                                 # the yaw-acceleration term's weight
 AY_MAX = 30.0                            # m/s^2
 RDOT_MAX = 15.0                          # rad/s^2
 CASTER = 0.027                           # m: the mechanical trail
-TP0 = 0.028                              # m: the pneumatic trail at no slip
-TP_S_HALF = 1.4                          # normalised combined slip at which it has halved
+LATERAL_FACTOR = 0.875                    # ACR, Fabia: tyre side forces over m a_y are .86-.92 of the weight from its tyre loads; RBR vs ACR, same car, .92-1.06 with it
+TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
+TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
 
 
@@ -54,7 +55,7 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI):
     """Fy_f (N, left positive): m (b/L) (a_y + di a rdot), a = wheelbase (1 - b/L); a_y and rdot clipped."""
     ay = min(max(ay, -AY_MAX), AY_MAX)
     rdot = min(max(rdot, -RDOT_MAX), RDOT_MAX)
-    return mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
+    return LATERAL_FACTOR * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
 def kingpin(fy, s, tp_scale=1.0, caster=CASTER):
