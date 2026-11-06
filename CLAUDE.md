@@ -8,6 +8,7 @@
 - Where two routes to the same force differ (each stage of the chain by |ay| and speed, A/B; `--mass-a/b`, `--ratio-a/b` what-ifs; ACR's true mass): `scripts/ffb-stages.py A --vs B`; log `~/.cache/ffb-stages/latest.log`.
 - First look at a new game's recording: `scripts/new-game-check.py CAPTURE [--vs REF]` (channels, sim-match, parity); order for a new game in `docs/ffb-tools.md`.
 - Wheel calibration: `scripts/ffb-wheel-model.py [--old RUN] [--weight KG SHARE]` (what the stored calibration delivers) and `scripts/calib-check.py [RUN ...]` (a saved run: pulses, run-ups, refit).
+- What the played force is made of (joint fit per band on ay, yaw acceleration, pedals, steer rate, front Fx/load/Mz; yaw-settle sign flips): `scripts/ffb-components.py CAPTURE [CAPTURE ...]`; log `~/.cache/ffb-components/latest.log`.
 - Tests: `python3 -m pytest -q --ignore=tests/test_proxy.py` (about 2 minutes). CI adds `-k "not uinput"` and runs under xvfb.
 - FFB parity: `scripts/ffb-parity.py [CAPTURE] [--ref CAPTURE] [--json PATH]` compares a recorded FFB drive with a reference drive and flags gaps over 25 %; log in `~/.cache/ffb-parity/latest.log`; run `tests/test_ffb_parity.py` after editing it.
 - FFB benchmark (ACR as the reference, read-only): `nice -n 15 scripts/ffb-benchmark.py build`, then `... compare CAPTURE`; log `~/.cache/ffb-benchmark/latest.log`; STALE once `ffb_engine.py`, `ffb_carprops.py` or `wheel_torque.py` change.
