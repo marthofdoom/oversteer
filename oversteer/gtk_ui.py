@@ -1242,8 +1242,8 @@ class GtkUi:
                                     "after a slide. 0 % is the wheel as it is; 100 % adds a real column's damping on top.")
     COUNTERSTEER_RIM_TOOLTIP = ("Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.")
     RACK_TOOLTIP = "The car's power steering. Hydraulic doesn't change with speed; a road car's electric assist does."
-    PRELOAD_TOOLTIP = ("A hydraulic rack's rotating torque at the car's steering column, the friction you feel in Nm. Makers' figures: "
-                       "1.2-1.5 at the valve, 0.8-3.5 for a whole rack. 0 keeps the default. The wheel can play up to about 0.6 Nm of friction.")
+    PRELOAD_TOOLTIP = ("A hydraulic rack's rotating torque as measured on the bench at the pinion, in Nm (makers' figures: 0.8-3.5). "
+                       "The running assist carries most of it: 3 Nm is about 0.3 Nm at your hands. 0 keeps the default.")
     WHEEL_PEAK_TOOLTIP = ("The most torque your wheel really makes at the rim, in Nm. All forces are mapped against it. A measured "
                           "figure beats the default: hang a known weight from the outside of the rim; Nm = kg x 9.81 x rim radius in metres.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "

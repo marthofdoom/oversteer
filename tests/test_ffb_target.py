@@ -660,7 +660,8 @@ def test_a_hydraulic_racks_preload_is_the_column_friction():
     from oversteer import ffb_carprops as cp, ffb_dynamics as fd
     try:
         cp.set_power_class('rally preload=0.5')
-        assert cp.rack_preload() == 0.5
+        assert cp.rack_preload() == pytest.approx(0.5 * cp.driver_slope(1.0, cp.RALLY_ASSIST_SPEED))
+        assert cp.rack_preload() < 0.1
         assert fd.column_targets(0.3, 3.08, preload_nm=0.5)[1] == round(0.5 / 3.08 * 1e4)
         cp.set_power_class('street preload=0.5')
         assert cp.rack_preload() == 0.0

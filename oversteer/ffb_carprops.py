@@ -351,6 +351,7 @@ HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top en
 
 
 RACK_KEYS = {'k': (0.2, 10.0), 'r': (0.0, 10.0), 'gain': (0.1, 5.0), 'speed': (0.0, 90.0), 'preload': (0.0, 5.0)}     # the INI's rack overrides, and their ranges
+_preload_hands = 0.0
 _rack_preload = 0.0                      # Nm at the car's pinion: a hydraulic rack's rotating torque (0: the frozen column friction)
 _power_spec = DEFAULT_POWER_CLASS
 _assist_speed = RALLY_ASSIST_SPEED       # m/s: the boost curve held at every speed, None: it follows the road speed
@@ -384,12 +385,16 @@ def set_power_class(name):
     speed = tune.get('speed', RALLY_ASSIST_SPEED if _power_class == 'rally' else 0.0)
     _assist_speed = speed if speed > 0.0 else None
     _rack_preload = tune.get('preload', 0.0) if _power_class == 'rally' else 0.0
+    global _preload_hands
+    _preload_hands = _rack_preload * driver_slope(1.0, RALLY_ASSIST_SPEED)
     return _power_class
 
 
 def rack_preload():
-    """Nm of rotating torque at the car's pinion (makers' figures for hydraulic racks: valve 1.2-1.5, whole rack 0.8-3.5); 0: not set."""
-    return _rack_preload
+    """The rack's rotating torque as the driver feels it at the car's wheel, Nm: a bench figure at the pinion (makers': valve
+    1.2-1.5, whole rack 0.8-3.5; assist off) through the assist's slope near the centre, since the running assist carries it;
+    0: not set. A check: 300 N of rack friction is 3 Nm at the pinion and about the same at the hands as the frozen column friction."""
+    return _preload_hands
 
 
 def format_power_class(name, tune):
