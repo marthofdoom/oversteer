@@ -654,3 +654,16 @@ def test_the_ini_tunes_the_rack():
         assert cp.driver_from_column(20.0, 5.0) == cp.driver_from_column(20.0, 50.0)
     finally:
         cp.set_power_class(None)
+
+
+def test_a_hydraulic_racks_preload_is_the_column_friction():
+    from oversteer import ffb_carprops as cp, ffb_dynamics as fd
+    try:
+        cp.set_power_class('rally preload=0.5')
+        assert cp.rack_preload() == 0.5
+        assert fd.column_targets(0.3, 3.08, preload_nm=0.5)[1] == round(0.5 / 3.08 * 1e4)
+        cp.set_power_class('street preload=0.5')
+        assert cp.rack_preload() == 0.0
+        assert cp.format_power_class('rally', {'speed': 15.0, 'preload': 1.3}) == 'rally speed=15 preload=1.3'
+    finally:
+        cp.set_power_class(None)

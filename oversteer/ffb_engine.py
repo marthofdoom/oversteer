@@ -3400,7 +3400,8 @@ class FfbEngine:
         if want and not model.align_on:
             model.align_writer = self._align_write
         model.align_on = want
-        stage.column(t, model.impedance(), model.wheel_peak, model.damping_scale(), not model.classic())
+        stage.column(t, model.impedance(), model.wheel_peak, model.damping_scale(), not model.classic(),
+                     ffb_carprops.rack_preload() * model.rho())
 
     def _align_write(self, theta_a_deg, k_fs, tau_fs):
         """RackForce's spring to the driver (its k already carries the overall steering strength, like the rest of the

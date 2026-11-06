@@ -762,6 +762,7 @@ class Gui:
     def apply_countersteer_power_class(self):
         """The assist class (profile INI only: rally / street / off) to the engine."""
         self.ffb_engine.set_power_class(self.model.get_countersteer_power_class())
+        self.ui.safe_call(self.ui.set_countersteer_power_class, self.model.get_countersteer_power_class())
 
     def apply_countersteer_car_wheel_mm(self):
         """The car's steering wheel diameter (FFB tab) to the engine."""

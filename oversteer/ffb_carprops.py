@@ -350,7 +350,8 @@ HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top en
                                          # up to HYD_K, then bends toward HYD_K + HYD_R (the rack runs out of assist flow)
 
 
-RACK_KEYS = {'k': (0.2, 10.0), 'r': (0.0, 10.0), 'gain': (0.1, 5.0), 'speed': (0.0, 90.0)}     # the INI's rack overrides, and their ranges
+RACK_KEYS = {'k': (0.2, 10.0), 'r': (0.0, 10.0), 'gain': (0.1, 5.0), 'speed': (0.0, 90.0), 'preload': (0.0, 5.0)}     # the INI's rack overrides, and their ranges
+_rack_preload = 0.0                      # Nm at the car's pinion: a hydraulic rack's rotating torque (0: the frozen column friction)
 _power_spec = DEFAULT_POWER_CLASS
 _assist_speed = RALLY_ASSIST_SPEED       # m/s: the boost curve held at every speed, None: it follows the road speed
 
@@ -374,7 +375,7 @@ def parse_power_class(text):
 
 def set_power_class(name):
     """Make `name` (see parse_power_class; anything else: rally) the active assist class; returns the class."""
-    global _power_class, _power_spec, _assist_speed, HYD_K, HYD_R, HYD_GAIN
+    global _power_class, _power_spec, _assist_speed, _rack_preload, HYD_K, HYD_R, HYD_GAIN
     _power_class, tune = parse_power_class(name)
     _power_spec = str(name or DEFAULT_POWER_CLASS).strip().lower()
     HYD_K, HYD_R = _CLASS_HYD[_power_class]
@@ -382,7 +383,17 @@ def set_power_class(name):
     HYD_K, HYD_R, HYD_GAIN = tune.get('k', HYD_K), tune.get('r', HYD_R), tune.get('gain', HYD_GAIN)
     speed = tune.get('speed', RALLY_ASSIST_SPEED if _power_class == 'rally' else 0.0)
     _assist_speed = speed if speed > 0.0 else None
+    _rack_preload = tune.get('preload', 0.0) if _power_class == 'rally' else 0.0
     return _power_class
+
+
+def rack_preload():
+    """Nm of rotating torque at the car's pinion (makers' figures for hydraulic racks: valve 1.2-1.5, whole rack 0.8-3.5); 0: not set."""
+    return _rack_preload
+
+
+def format_power_class(name, tune):
+    return ' '.join([name] + ['%s=%g' % (k, tune[k]) for k in RACK_KEYS if k in tune])
 
 
 def power_spec():

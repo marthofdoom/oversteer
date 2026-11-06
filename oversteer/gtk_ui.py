@@ -9,7 +9,7 @@ from .gtk_handlers import GtkHandlers
 from . import hotkeys
 from .ffb_meter import FfbMeter, FfbPoller
 from . import qr
-from . import wheel_torque
+from . import ffb_carprops, wheel_torque
 from . import steam_options
 from .telemetry import AUTO, DEFAULT_PORT, PORT_PRESETS, PORT_MIN, PORT_MAX, parse_port
 from .telemetry_formats import eawrc_structure, eawrc_config_lines
@@ -1241,6 +1241,9 @@ class GtkUi:
                                     "feels freer on fast corrections; higher settles the wheel better when you let go "
                                     "after a slide. 0 % is the wheel as it is; 100 % adds a real column's damping on top.")
     COUNTERSTEER_RIM_TOOLTIP = ("Hands feel force, not torque: the force is played 1:1 at your rim for the car's wheel size. Set your rim if you fitted a different one.")
+    RACK_TOOLTIP = "The car's power steering. Hydraulic doesn't change with speed; a road car's electric assist does."
+    PRELOAD_TOOLTIP = ("A hydraulic rack's rotating torque at the car's steering column, the friction you feel in Nm. Makers' figures: "
+                       "1.2-1.5 at the valve, 0.8-3.5 for a whole rack. 0 keeps the default. The wheel can play up to about 0.6 Nm of friction.")
     WHEEL_PEAK_TOOLTIP = ("The most torque your wheel really makes at the rim, in Nm. All forces are mapped against it. A measured "
                           "figure beats the default: hang a known weight from the outside of the rim; Nm = kg x 9.81 x rim radius in metres.")
     COUNTERSTEER_PULL_TOOLTIP = ("The drive's left/right split (the front wheels pulling unevenly under power or braking) "
@@ -1401,6 +1404,19 @@ class GtkUi:
         self.countersteer_car_wheel_mm = car
         self._dependent_rows.append(self._setting_row(
             _("Car's steering wheel diameter (mm)"), None, _(self.COUNTERSTEER_RIM_TOOLTIP), (car,)))
+        steering.add(self._dependent_rows[-1])
+        rack = Gtk.ComboBoxText()
+        for cid, label in (('rally', _("Hydraulic")), ('street', _("Electric, road car")), ('off', _("None"))):
+            rack.append(cid, label)
+        rack.set_active_id('rally')
+        preload = Gtk.SpinButton.new_with_range(0.0, 5.0, 0.1)
+        preload.set_digits(2)
+        rack.connect('changed', lambda w: self._on_rack_changed())
+        preload.connect('value-changed', lambda w: self._on_rack_changed())
+        self.countersteer_rack, self.countersteer_preload = rack, preload
+        self._dependent_rows.append(self._setting_row(_("Power steering"), None, _(self.RACK_TOOLTIP), (rack,)))
+        steering.add(self._dependent_rows[-1])
+        self._dependent_rows.append(self._setting_row(_("Pinion preload (Nm)"), None, _(self.PRELOAD_TOOLTIP), (preload,)))
         steering.add(self._dependent_rows[-1])
         damping = self._response_scale(0, 100, 5)
         damping.set_size_request(160, -1)
@@ -1564,6 +1580,32 @@ class GtkUi:
                 self.countersteer_rim_mm.set_value(int(value))
             finally:
                 self.updating_countersteer_rim = False
+
+    updating_rack = False
+
+    def _on_rack_changed(self):
+        if self.updating_rack:
+            return
+        name = self.countersteer_rack.get_active_id() or 'rally'
+        self.countersteer_preload.set_sensitive(name == 'rally')
+        _old, tune = ffb_carprops.parse_power_class(self.controller.model.get_countersteer_power_class())
+        tune.pop('preload', None)
+        if name == 'rally' and self.countersteer_preload.get_value() > 0.0:
+            tune['preload'] = round(self.countersteer_preload.get_value(), 2)
+        self.controller.model.set_countersteer_power_class(ffb_carprops.format_power_class(name, tune))
+
+    def set_countersteer_power_class(self, value):
+        """The power steering shown, from the profile (ffb_carprops.parse_power_class)."""
+        if not hasattr(self, 'countersteer_rack'):
+            return
+        name, tune = ffb_carprops.parse_power_class(value)
+        self.updating_rack = True
+        try:
+            self.countersteer_rack.set_active_id(name)
+            self.countersteer_preload.set_value(tune.get('preload', 0.0))
+            self.countersteer_preload.set_sensitive(name == 'rally')
+        finally:
+            self.updating_rack = False
 
     updating_wheel_peak = False
 
