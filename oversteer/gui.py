@@ -115,7 +115,7 @@ class Gui:
         self.web_token = ''                     # pairs a browser to change settings (config.ini web_token)
         self.telemetry_recorder = None          # telemetry_capture.Recorder, while recording
         self._capture_shown_at = 0.0
-        self.ffb_tuning_on = False              # "Record for FFB tuning": an app preference, taken up by each new recorder
+        self.ffb_tuning_on = True               # "Record for FFB tuning": an app preference, taken up by each new recorder
         self.ffb_stop_reason = None             # 'time' or 'size' once it ended by itself, until it is switched on again
         # App preferences (config.ini): learn with the rev lights off (D4),
         # the web page and recording, all off by default
