@@ -375,3 +375,13 @@ def test_acr_true_mass_is_the_slope_of_the_four_tyres_fy_on_ay():
     assert m == pytest.approx(1200.0) and mf == pytest.approx(700.0) and share == pytest.approx(700 / 1200)
     cols['yaw'] = 5.0 * t * 0 + np.sin(t * 40.0) * 3.0                          # a violent yaw acceleration: nothing qualifies
     assert tools.acr_true_mass(cols) is None
+
+
+def test_components_fit_recovers_a_known_coefficient_per_band():
+    rng = np.random.default_rng(3)
+    n = 4000
+    ay, yaw_acc = rng.normal(size=n), rng.normal(size=n)
+    force = 0.8 * tools.band_of(ay, 2, 10) - 0.5 * tools.band_of(yaw_acc, 2, 10) + 0.001 * rng.normal(size=n)
+    fit, full = tools.joint_fit(force, {'ay': tools.band_of(ay, 2, 10), 'yawacc': tools.band_of(yaw_acc, 2, 10)})
+    assert fit['ay'][0] == pytest.approx(0.8, abs=0.02) and fit['yawacc'][0] == pytest.approx(-0.5, abs=0.02)
+    assert full > 0.99 and fit['yawacc'][2] > 0.1

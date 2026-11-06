@@ -6,6 +6,7 @@ import contextlib
 import glob
 import gzip
 import json
+import math
 import os
 import sys
 
@@ -1085,3 +1086,71 @@ def channel_report(samples, channels=CHANNELS):
         share[ch] = have / n if n else 0.0
     present = [c for c in channels if share[c] > 0]
     return share, present, [c for c in channels if share[c] == 0]
+
+
+# --- ffb-components -----------------------------------------------------------------------------------------------------
+
+GRID_HZ = 60.0
+BANDS = (('0-1 Hz', None, 60), ('1-6 Hz', 10, 60), ('6-30 Hz', 2, 10))      # (name, short mean, long mean) in grid samples
+
+
+def moving_mean(x, n):
+    x = np.asarray(x, float)
+    return x if n <= 1 else np.convolve(x, np.ones(n) / n, 'same')
+
+
+def band_of(x, short, long):
+    """A band by differences of moving means: (mean over `long`) alone, else (mean over `short`) - (mean over `long`)."""
+    return moving_mean(x, long) if short is None else moving_mean(x, short) - moving_mean(x, long)
+
+
+def joint_fit(y, causes):
+    """Least squares of y on the causes (dict name -> array, same length, intercept removed): {name: (coef, rms Nm, r2 rise
+    when added last, input rms)} and the full r2."""
+    names = list(causes)
+    X = np.column_stack([np.asarray(causes[n], float) - np.mean(causes[n]) for n in names])
+    y = np.asarray(y, float) - np.mean(y)
+    yy = float(y @ y) or 1e-12
+
+    def r2(cols):
+        if not cols:
+            return 0.0
+        b, *_ = np.linalg.lstsq(X[:, cols], y, rcond=None)
+        r = y - X[:, cols] @ b
+        return 1.0 - float(r @ r) / yy
+    b, *_ = np.linalg.lstsq(X, y, rcond=None)
+    full = r2(list(range(len(names))))
+    out = {n: (float(b[i]), float(np.std(X[:, i] * b[i])), full - r2([j for j in range(len(names)) if j != i]),
+               float(np.std(X[:, i]))) for i, n in enumerate(names)}
+    return out, full
+
+
+def yaw_events(F, yaw, ay, hz=GRID_HZ, horizons=(0.1, 0.2, 0.3, 0.5), min_yaw=0.3, window=0.6, min_force=0.2):
+    """The settle after a turn: yaw rate falling from over min_yaw to under half of it within `window` s with |ay| falling.
+    Returns (count, {horizon: median force change signed relative to the turn's force}, {horizon: fraction of events where
+    the force then has the opposite sign to the turn's})."""
+    F, yaw, ay = (np.asarray(a, float) for a in (F, yaw, ay))
+    ys, w, n, i = moving_mean(yaw, 3), int(window * hz), len(F), 0
+    Fs = moving_mean(F, 7)
+    ch = {h: [] for h in horizons}
+    flips = {h: [] for h in horizons}
+    count = 0
+    while i < n - 1:
+        s = 1.0 if ys[i] > 0 else -1.0
+        if s * ys[i] > min_yaw and abs(Fs[i]) >= min_force:
+            seg = s * ys[i + 1:i + 1 + w]
+            hit = np.nonzero(seg < 0.5 * s * ys[i])[0]
+            if len(hit) and abs(ay[i + 1 + hit[0]]) < abs(ay[i]):
+                j = i + 1 + int(hit[0])
+                sf = 1.0 if Fs[i] > 0 else -1.0
+                if j + int(max(horizons) * hz) < n:
+                    count += 1
+                    for h in horizons:
+                        k = j + int(round(h * hz))
+                        ch[h].append(sf * (Fs[k] - Fs[j]))
+                        flips[h].append(sf * Fs[k] < 0)
+                i = j + w
+                continue
+        i += 1
+    return (count, {h: float(np.median(v)) if v else math.nan for h, v in ch.items()},
+            {h: float(np.mean(v)) if v else math.nan for h, v in flips.items()})

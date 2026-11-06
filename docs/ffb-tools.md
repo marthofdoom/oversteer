@@ -19,3 +19,4 @@ All read only: no wheel, proxy, game or telemetry database is touched. Each writ
 4. `ffb-sim-match.py CAPTURE --vs <ACR capture>`: the situations where the new force differs from ACR's; fix the biggest gaps first.
 5. `ffb-parity.py CAPTURE`: the measures against the reference, once the game's own recording has a force sidecar.
 6. After a wheel calibration, `calib-check.py` for the run and `ffb-wheel-model.py` for what the wheel then delivers.
+7. `ffb-components.py CAPTURE [CAPTURE ...]`: what the played force is made of (per band 0-1, 1-6, 6-30 Hz: Nm per cause from a joint fit, errors-in-variables check on yaw acceleration, settle-after-a-turn sign flips); log `~/.cache/ffb-components/latest.log`.
