@@ -319,6 +319,8 @@ def boost_t0(speed):
 
 def _assist_raw(mag, speed, assist):
     """(A_raw, dA_raw/dT_d) before the saturation, at driver torque `mag` >= 0."""
+    if _power_class == 'rally':
+        speed = RALLY_ASSIST_SPEED           # hydraulic: the pump doesn't know the road speed, only a road car's electronics do
     kc, k, t0 = BOOST_K_CENTRE * assist, boost_k(speed, assist), boost_t0(speed)
     raw = kc * mag + (k - kc) * mag * mag / (t0 + mag)
     slope = kc + (k - kc) * mag * (mag + 2.0 * t0) / (t0 + mag) ** 2
@@ -336,6 +338,7 @@ def _assist(mag, speed, assist):
 # range and runs to 7.0 Nm (marth's WRC research: cruise about 0.5 Nm, corners 2-3 Nm, a held maximum 6-8 Nm, no damping
 # or isolation filters); 'street' is the commuter's 3.7 Nm top; 'off' is unassisted (the column torque). INI only.
 POWER_CLASSES = ('rally', 'street', 'off')
+RALLY_ASSIST_SPEED = 25.0                # m/s: the boost curve a rally car's hydraulic assist keeps at every speed
 DEFAULT_POWER_CLASS = 'rally'
 _CLASS_HYD = {'rally': (3.0, 4.0), 'street': (1.5, 0.5), 'off': (1.5, 2.2)}
 # Street: full assist is reached early and the force stops building: risen within 15-25 degrees of wheel at speed (the owner's
