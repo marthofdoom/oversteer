@@ -1154,3 +1154,41 @@ def yaw_events(F, yaw, ay, hz=GRID_HZ, horizons=(0.1, 0.2, 0.3, 0.5), min_yaw=0.
         i += 1
     return (count, {h: float(np.median(v)) if v else math.nan for h, v in ch.items()},
             {h: float(np.mean(v)) if v else math.nan for h, v in flips.items()})
+
+
+# --- ffb-tyre-fit -----------------------------------------------------------------------------------------------------
+
+TYRE_BINS = {'rad': np.array([0, .005, .01, .02, .03, .05, .07, .1, .13, .17, .22, .3, .4, .6, 1.0]),
+             'norm': np.array([0, .05, .1, .2, .3, .45, .6, .8, 1, 1.25, 1.6, 2, 3, 5, 20.0])}
+MU_BANDS = (0.7, 1.0, 1.3)
+MU_BAND_NAMES = ('<.7', '.7-1', '1-1.3', '>1.3')
+
+
+def mu_band(mu):
+    return int(sum(mu >= b for b in MU_BANDS))
+
+
+def envelope_fit(x, y, dt, bins, min_bin=15, share=0.97):
+    """The upper envelope (p80 of y in slip bins of at least `min_bin` samples) of one stretch: dict with C (initial
+    slope: median env/centre over the two lowest populated bins), mu (top), peak (centre of the first bin reaching
+    `share` of the top) and reached (False when the top bin holds under 1 s or the envelope still rises by over 3 % into
+    the last populated bin); None when fewer than three bins are populated."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    x, y = x[ok], y[ok]
+    idx = np.digitize(x, bins) - 1
+    cen, env, secs = [], [], []
+    for j in range(len(bins) - 1):
+        m = idx == j
+        if m.sum() >= min_bin:
+            cen.append(0.5 * (bins[j] + bins[j + 1]))
+            env.append(float(np.percentile(y[m], 80)))
+            secs.append(m.sum() * dt)
+    if len(env) < 3:
+        return None
+    cen, env, secs = np.array(cen), np.array(env), np.array(secs)
+    top = float(env.max())
+    k = int(np.argmax(env >= share * top))
+    rising = env[-1] > 1.03 * env[-2]
+    return {'C': float(np.median(env[:2] / cen[:2])), 'mu': top, 'peak': float(cen[k]),
+            'top_s': float(secs[int(np.argmax(env))]), 'reached': bool(secs[int(np.argmax(env))] >= 1.0 and not rising)}

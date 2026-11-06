@@ -385,3 +385,15 @@ def test_components_fit_recovers_a_known_coefficient_per_band():
     fit, full = tools.joint_fit(force, {'ay': tools.band_of(ay, 2, 10), 'yawacc': tools.band_of(yaw_acc, 2, 10)})
     assert fit['ay'][0] == pytest.approx(0.8, abs=0.02) and fit['yawacc'][0] == pytest.approx(-0.5, abs=0.02)
     assert full > 0.99 and fit['yawacc'][2] > 0.1
+
+
+def test_tyre_envelope_recovers_known_mu_and_peak_and_flags_unsaturated():
+    rng = np.random.default_rng(5)
+    x = rng.uniform(0.0, 0.3, 6000)
+    y = np.minimum(x / 0.1, 1.2) * 0.9 + 0.1 * rng.uniform(0, 1, x.size)    # C ~9, p80 top ~1.16, knee at 0.12
+    f = tools.envelope_fit(x, y, 0.01, tools.TYRE_BINS['rad'])
+    assert f['reached'] and f['mu'] == pytest.approx(1.16, abs=0.06) and f['peak'] == pytest.approx(0.12, abs=0.04)
+    assert tools.mu_band(f['mu']) == 2
+    xs = rng.uniform(0.0, 0.1, 6000)                                    # never leaves the rising part
+    g = tools.envelope_fit(xs, xs * 10 + 0.05 * rng.uniform(0, 1, xs.size), 0.01, tools.TYRE_BINS['rad'])
+    assert g['reached'] is False

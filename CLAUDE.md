@@ -7,6 +7,7 @@
 - Force against what causes it (front lateral force and normalised slip, effective trail, `--set NAME=VALUE` to try a constant): `scripts/ffb-force-curve.py A --vs B`; log `~/.cache/ffb-force-curve/latest.log`.
 - Where two routes to the same force differ (each stage of the chain by |ay| and speed, A/B; `--mass-a/b`, `--ratio-a/b` what-ifs; ACR's true mass): `scripts/ffb-stages.py A --vs B`; log `~/.cache/ffb-stages/latest.log`.
 - First look at a new game's recording: `scripts/new-game-check.py CAPTURE [--vs REF]` (channels, sim-match, parity); order for a new game in `docs/ffb-tools.md`.
+- Each game's grip and collapse from its recordings (mu, initial slope, peak slip per mu band; ACR validation and Mz shape): `scripts/ffb-tyre-fit.py CAPTURE [CAPTURE ...]`; log `~/.cache/ffb-tyre-fit/latest.log`.
 - Wheel calibration: `scripts/ffb-wheel-model.py [--old RUN] [--weight KG SHARE]` (what the stored calibration delivers) and `scripts/calib-check.py [RUN ...]` (a saved run: pulses, run-ups, refit).
 - What the played force is made of (joint fit per band on ay, yaw acceleration, pedals, steer rate, front Fx/load/Mz; yaw-settle sign flips): `scripts/ffb-components.py CAPTURE [CAPTURE ...]`; log `~/.cache/ffb-components/latest.log`.
 - Tests: `python3 -m pytest -q --ignore=tests/test_proxy.py` (about 2 minutes). CI adds `-k "not uinput"` and runs under xvfb.
