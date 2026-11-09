@@ -338,12 +338,14 @@ def _assist(mag, speed, assist):
 # range and runs to 7.0 Nm (marth's WRC research: cruise about 0.5 Nm, corners 2-3 Nm, a held maximum 6-8 Nm, no damping
 # or isolation filters); 'street' is the commuter's 3.7 Nm top; 'off' is unassisted (the column torque). INI only.
 POWER_CLASSES = ('rally', 'street', 'off')
-RALLY_ASSIST_SPEED = 25.0                # m/s: the boost curve a rally car's hydraulic assist keeps at every speed
+# Rally: k 3, r 2, gain 0.9, the curve held at 15 m/s, fitted to a real rally car's hand torque on this rim (0.4 Nm cruising,
+# 0.9 light, 1.5 medium, 2.0 heavy, 2.4 at the limit) over ACR and RBR, same car, learnt ratios: within 10 % in every band
+RALLY_ASSIST_SPEED = 15.0                # m/s: the boost curve a rally car's hydraulic assist keeps at every speed
 DEFAULT_POWER_CLASS = 'rally'
-_CLASS_HYD = {'rally': (3.0, 4.0), 'street': (1.5, 0.5), 'off': (1.5, 2.2)}
+_CLASS_HYD = {'rally': (3.0, 2.0), 'street': (1.5, 0.5), 'off': (1.5, 2.2)}
 # Street: full assist is reached early and the force stops building: risen within 15-25 degrees of wheel at speed (the owner's
 # experience of road cars), a top of 2.0 Nm. The on-centre gain before the top end, so it gets there that soon.
-_CLASS_GAIN = {'rally': 1.0, 'street': 2.0, 'off': 1.0}
+_CLASS_GAIN = {'rally': 0.9, 'street': 2.0, 'off': 1.0}
 HYD_GAIN = _CLASS_GAIN[DEFAULT_POWER_CLASS]
 _power_class = DEFAULT_POWER_CLASS
 HYD_K, HYD_R = _CLASS_HYD[DEFAULT_POWER_CLASS]   # Nm: the active class's top end: the driver's torque follows the boost curve 1:1
