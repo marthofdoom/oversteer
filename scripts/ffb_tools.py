@@ -295,7 +295,7 @@ THETA_TABLE = {
     'forza-fh': (_slip_forza, 0.7, "mean |slip_angle| of the fronts over 0.7"),
     'rbr': (_slip_rbr, _norm_rbr, "|RbrRack._slip| over RbrRack.DERIVED_SLIP_PEAK"),
 }
-FYF_TEXT = {'acr': "the tyres' |Fy_FL + Fy_FR|", 'forza-fh': "the front_lateral value ForzaRack._front used", 'rbr': "RbrRack.fy_f"}
+FYF_TEXT = {'acr': "the tyres' |Fy_FL + Fy_FR|", 'forza-fh': "the Fy_f ForzaRack._front gave ffb_forza.kingpin", 'rbr': "RbrRack.fy_f"}
 STRETCH_S = 60.0
 ACR_PEAK_BINS = np.array([.005, .01, .02, .03, .05, .07, .1, .13, .17, .22, .3, .4, .6, 1])
 ACR_PEAK_FZ = 800.0                     # N: wheels carrying less say nothing about the grip

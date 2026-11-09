@@ -42,6 +42,8 @@ for name in names:
         continue
     print('%s mass %.0f n %6d mu p10-p90 %.2f-%.2f ratio median %.3f' % (name, M, len(p), *np.percentile(p[:, 0], [10, 90]), np.median(p[:, 1])))
     allp.append(p)
+if not allp:
+    sys.exit("no ACR capture with tyre forces and a learnt mass")
 p = np.vstack(allp)
 edges = np.arange(0.7, 1.8, 0.1); mids, meds, ws = [], [], []
 for lo in edges:
