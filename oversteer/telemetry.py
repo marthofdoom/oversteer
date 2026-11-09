@@ -238,6 +238,7 @@ PROBE_LISTEN = 1.0                                   # seconds the other port is
 DEFAULT_SHIFT = 0.97                                 # shift point as a fraction of max RPM
 LED_SPACING = (0.72, 0.80, 0.89, 0.95, 1.0)          # per LED, as a fraction of the shift point
 FLASH_MARGIN = 0.03                                  # above the shift point: flash (shift now)
+FORZA_CEILING = 0.85                                 # Forza sends a max rpm above the cut: cars peak at 0.84-0.94 of it (0.875 where it holds)
 LEARNT_FLASH = 0.995                                 # a learnt shift point at the limiter flashes by this share of it
 LEARNED_DECAY = 0.01                                 # OutGauge: learnt ceiling sags this much per second
 IDLE_TIMEOUT = 2.0                                   # seconds without telemetry -> LEDs off
@@ -457,6 +458,8 @@ class Telemetry:
         self.learned_max = 0.0
         self.seen_max = 0.0               # the highest rpm seen in this car (what 'seen' tells the learner)
         self._seen_car = None
+        self._peak_car = None             # Forza: the car whose peak rpm is held, and that peak
+        self._peak = 0.0
         self._thread = None
         self._unknown_sizes = set()
         self.heard = False                # anything decoded on our port since start()
@@ -1164,10 +1167,19 @@ class Telemetry:
             learn_limiter, learn_source = self.seen_max, 'seen'
         else:
             self.last_max_rpm = max_rpm
+        lights_max = max_rpm
+        if str(sample.game).startswith('forza') and sample.car is not None and max_rpm:
+            # Forza's max rpm is a rounded-up figure the engine never reaches (it cuts at 0.875 of it in some
+            # cars, 0.94 in others, and nothing sent says where): the bar completes at the highest rpm this
+            # car has shown, never below FORZA_CEILING of the max, so the top lights come on at a real shift
+            if sample.car != self._peak_car:
+                self._peak_car, self._peak = sample.car, 0.0
+            self._peak = max(self._peak, min(rpm, max_rpm))
+            lights_max = min(max_rpm, max(FORZA_CEILING * max_rpm, self._peak / shift_fraction))
         # Everything is relative to the shift point: the bar completes
         # there and flashes above it.
         if self.launch and self.launch_max:
-            max_rpm = self.launch_max
+            max_rpm = lights_max = self.launch_max
         learnt = self._feed_learner(now, sample, learn_limiter, learn_source, pedals, throttle, clutch)
         if learnt:
             # A gear that pulls to the limiter learns the limiter itself as
@@ -1175,7 +1187,7 @@ class Telemetry:
             # and bouncing off it must still flash
             reference = min(learnt, max_rpm * LEARNT_FLASH / (1.0 + FLASH_MARGIN)) if max_rpm else learnt
         else:
-            reference = shift_rpm if shift_rpm else shift_fraction * max_rpm
+            reference = shift_rpm if shift_rpm else shift_fraction * lights_max
         fraction = rpm / reference if reference > 0 else 0.0
         if shift or fraction >= 1.0 + FLASH_MARGIN:
             if now - self._flash_at >= FLASH_PERIOD:
