@@ -1244,3 +1244,39 @@ def test_the_rim_torque_at_the_end_of_the_ramp_is_the_unassisted_column_torque()
     off = r.rim_torque(s)
     r.assist = 0.0
     assert off == pytest.approx(r.rim_torque(s))
+
+
+def test_the_ffb_record_keeps_the_driver_s_game_level_and_const_scale_on_change_and_each_second(tmp_path):
+    from oversteer import ffb_engine as fe
+    state = {'level': 0, 'scale': 100}
+    driver = SimpleNamespace(game_level=lambda: state['level'], const_scale=lambda: state['scale'])
+    engine = fe.FfbEngine()
+    engine._driver, engine._fh_scale = driver, True
+    path = str(tmp_path / 'x.ffb.gz')
+    sampler = ffb_record.FfbSampler(path, origin=100.0)
+    sampler.start()
+    for t in (100.0, 100.1, 100.5):
+        engine._dyn_record(t)                                           # one record each, then nothing: no change
+    state['level'] = 100
+    engine._dyn_record(100.6)                                           # changed: logged at once
+    engine._dyn_record(101.1)                                           # a second since the scale's last: it again, the level not
+    sampler.stop()
+    seen = [(round(t, 1), ch, v[0]) for t, ch, v in ffb_record.load(path)[1]]
+    assert seen == [(0.0, 'game_ffb_level', 0), (0.0, 'game_const_scale', 100), (0.6, 'game_ffb_level', 100),
+                    (1.1, 'game_const_scale', 100)]
+    engine._dyn_record(200.0)                                           # nothing recording: nothing happens
+
+
+def test_old_readers_skip_the_new_channels(tmp_path):
+    import importlib.util
+    path = str(tmp_path / 'x')
+    sampler = ffb_record.FfbSampler(path + ffb_record.SUFFIX, origin=0.0)
+    sampler.add(1.0, 'game_ffb_level', (100,))
+    sampler.add(1.0, 'game_ffb_raw', (-300, 1, 2))
+    sampler.pump()
+    sampler.stop()
+    spec = importlib.util.spec_from_file_location('ffb_benchmark', os.path.join(os.path.dirname(__file__), '..', 'scripts', 'ffb_benchmark.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    raw, played, _header = mod._levels(path)
+    assert raw == [(1.0, -300.0)] and played is None

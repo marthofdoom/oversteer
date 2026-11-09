@@ -1405,6 +1405,10 @@ class GtkUi:
         self._dependent_rows.append(self._setting_row(
             _("Car's steering wheel diameter (mm)"), None, _(self.COUNTERSTEER_RIM_TOOLTIP), (car,)))
         steering.add(self._dependent_rows[-1])
+        self.countersteer_hand_force = self._status_label()
+        self._dependent_rows.append(self._setting_row(
+            _("Hand force"), None, _(self.COUNTERSTEER_RIM_TOOLTIP), (), self.countersteer_hand_force))
+        steering.add(self._dependent_rows[-1])
         rack = Gtk.ComboBoxText()
         for cid, label in (('rally', _("Hydraulic")), ('street', _("Electric, road car")), ('off', _("None"))):
             rack.append(cid, label)
@@ -1741,6 +1745,9 @@ class GtkUi:
             for key, text in self.controller.countersteer_details().items():
                 if self.countersteer_lines[key].get_text() != text:
                     self.countersteer_lines[key].set_text(text)
+            text = self.controller.countersteer_hand_force()
+            if self.countersteer_hand_force.get_text() != text:
+                self.countersteer_hand_force.set_text(text)
         self._show_countersteer_delay()
         warning = self.controller.sensitivity_warning()
         if self.sensitivity_note.get_text() != warning:

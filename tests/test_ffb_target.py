@@ -676,3 +676,33 @@ def test_a_hydraulic_racks_preload_is_the_column_friction():
         assert cp.format_power_class('rally', {'speed': 15.0, 'preload': 1.3}) == 'rally speed=15 preload=1.3'
     finally:
         cp.set_power_class(None)
+
+
+def test_the_hand_force_figures_say_where_each_value_came_from():
+    engine = fe.FfbEngine()
+    engine.usb_id = '046d:c24f'
+    f = engine.hand_force()
+    assert (f['rim_mm'], f['rim_src'], f['car_wheel_mm'], f['car_src']) == (279.0, 'table', 350.0, 'default')
+    assert f['rho'] == pytest.approx(279 / 350)
+    engine.set_rim_mm(300)
+    engine.set_car_wheel_mm(400)
+    engine._requests(0.0)
+    f = engine.hand_force()
+    assert (f['rim_mm'], f['rim_src'], f['car_wheel_mm'], f['car_src']) == (300.0, 'profile', 400.0, 'profile')
+    assert engine.details()['hand_force'] == f
+    engine.set_car_wheel_mm(wheel_torque.CAR_WHEEL_MM)                   # the profile's default is not a choice
+    engine._requests(0.0)
+    assert engine.hand_force()['car_src'] == 'default'
+
+
+def test_the_hand_force_line_names_forza_s_default_and_never_claims_detection():
+    from tests.fake_wheel import FakeController
+    gui = FakeController.__new__(FakeController)
+    gui.ffb_engine = fe.FfbEngine()
+    gui.ffb_engine.usb_id = '046d:c24f'
+    text = gui.countersteer_hand_force()
+    assert text == "Hand force: rim 279 mm (wheel table), car wheel 350 mm (default), x 0.80"
+    gui.ffb_engine._verdict = gui.ffb_engine._verdict._replace(game='forza-fh')
+    assert gui.ffb_engine.forza_rack.car_wheel_mm == fe.FORZA_CAR_WHEEL_MM
+    assert gui.countersteer_hand_force() == "Hand force: rim 279 mm (wheel table), car wheel 375 mm (Forza default), x 0.74"
+    assert 'detected' not in text

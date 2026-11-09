@@ -412,6 +412,9 @@ class EngineProcess:
     def car_properties(self):
         return self._details.get('car_properties')
 
+    def hand_force(self):
+        return self._details.get('hand_force')
+
     @property
     def align_note(self):
         return self._details.get('align_note')

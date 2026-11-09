@@ -159,6 +159,7 @@ class FakeController:
     countersteer_info = Gui.countersteer_info
     countersteer_details = Gui.countersteer_details
     countersteer_delay = Gui.countersteer_delay
+    countersteer_hand_force = Gui.countersteer_hand_force
     sensitivity_warning = Gui.sensitivity_warning
     _countersteer_wanted = Gui._countersteer_wanted
 

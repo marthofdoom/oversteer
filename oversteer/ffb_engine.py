@@ -2652,6 +2652,7 @@ class FfbEngine:
         self._slope_logged = False       # the measured wheel mapping has been logged (once per fit of the check)
         self.align_note = None           # why the aligning spring is not played (the info line shows it)
         self._align_why = ''             # the reason last logged (None: playing)
+        self._rec_levels = {}            # channel -> (value, time) of the last game_ffb_level / game_const_scale record
         self._rec_at = None              # when the FFB tuning record last read the driver's hands/live/thermal
         self._fh_level = None            # the game's last fresh raw level (Forza; held through a fade out)
         self._fh_fresh = None            # ... as of the last pass, None when it was not fresh
@@ -2915,6 +2916,18 @@ class FfbEngine:
         model = self.model
         return None if model.car is None else (model.car, model.trail, model.scrub)
 
+    def hand_force(self):
+        """What the hand-force mapping uses now, for the FFB tab's line: the rack of the game playing (the last one seen),
+        its rim diameter and the car's wheel with where each came from ('profile': the user set it, 'table': the wheel
+        table, 'default'), and rho. The game doesn't send the car's wheel size, so it is the profile's or a default."""
+        game = self._verdict.game
+        rack = self.forza_rack if game == 'forza-fh' else self.rbr_rack if game == 'rbr' else self.model
+        req = self._car_wheel_req
+        car_set = req is not None and req != wheel_torque.CAR_WHEEL_MM
+        return {'rim_mm': rack.rim_mm(), 'rim_src': 'profile' if rack.rim_user else 'table' if rack.wheel_rim else 'default',
+                'car_wheel_mm': rack.car_wheel_mm, 'car_src': 'profile' if car_set else 'default', 'rho': rack.rho(),
+                'game': game}
+
     def details(self):
         """What the FFB tab's read-only lines show besides the status (gui.countersteer_details), as plain values: the
         engine process sends this to the GUI's EngineProcess (ffb_process)."""
@@ -2924,7 +2937,7 @@ class FfbEngine:
         except Exception:
             impedance = None
         return {'car_properties': self.car_properties(), 'align_note': self.align_note, 'ratio': model.ratio,
-                'assist': model.assist, 'impedance': impedance}
+                'assist': model.assist, 'impedance': impedance, 'hand_force': self.hand_force()}
 
     def settings_snapshot(self):
         """The profile values in effect ("profile": what a change of is logged) and the learnt ones now ("learnt"), as
@@ -3443,11 +3456,22 @@ class FfbEngine:
 
     def _dyn_record(self, now):
         """While an FFB tuning capture runs: the driver's hands observer, re-identified friction and thermal state,
-        about 20 times a second, for the offline replay."""
-        stage = self._dyn
-        if not ffb_record.active() or stage is None or (self._rec_at is not None and 0.0 <= now - self._rec_at < 0.05):
+        about 20 times a second, for the offline replay; game_ffb_level and game_const_scale as the driver holds them,
+        on change and at least once a second."""
+        if not ffb_record.active():
+            self._rec_levels.clear()
+            return
+        if self._rec_at is not None and 0.0 <= now - self._rec_at < 0.05:
             return
         self._rec_at = now
+        driver = self._driver
+        if driver is not None:
+            self._rec_level(now, 'game_ffb_level', driver.game_level)
+            if self._fh_scale:
+                self._rec_level(now, 'game_const_scale', driver.const_scale)
+        stage = self._dyn
+        if stage is None:
+            return
         dyn = stage.dyn
         hands, live = dyn.hands(), dyn.live()
         thermal = dyn.numbers('ffb_thermal', 3)
@@ -3457,6 +3481,16 @@ class FfbEngine:
             ffb_record.log(now, 'ffb_dyn_live', *live)
         if thermal is not None:
             ffb_record.log(now, 'ffb_thermal', *thermal)
+
+    def _rec_level(self, now, channel, read):
+        """One driver percentage into the FFB tuning record: when it differs from the last one logged, else once a second."""
+        value = read()
+        if value is None:
+            return
+        last = self._rec_levels.get(channel)
+        if last is None or last[0] != value or not 0.0 <= now - last[1] < 1.0:
+            self._rec_levels[channel] = (value, now)
+            ffb_record.log(now, channel, value)
 
     def _raw(self, t, fresh=RAW_FRESH, stops=False):
         """(level, new): the game's constant force level now, or None (none
