@@ -2048,7 +2048,7 @@ class ForzaRack(RackForce):
             return None
         bl = ffb_forza.front_share(sample.drivetrain)
         fy = ffb_forza.front_lateral(self.mass, bl, self._fast_ay(sample, accel[1]), self.rdot, di=self.YAW_WEIGHT,
-                                     factor=ffb_forza.lateral_factor(self._grip.mu()))
+                                     factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
         lead = self._lead_fy
         if lead is not None and lead[0] is sample:
             fy = lead[1]
@@ -2075,7 +2075,7 @@ class ForzaRack(RackForce):
             slip = 0.5 * (sa[0] + sa[1])
         bl = ffb_forza.front_share(sample.drivetrain)
         fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT,
-                                     factor=ffb_forza.lateral_factor(self._grip.mu()))
+                                     factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
         self._lead_fy = (sample, self._lead.step(t, fy, slip))
 
     def _kicked(self, sample, share, ratio, assist):
