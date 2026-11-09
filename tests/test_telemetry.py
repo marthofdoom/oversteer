@@ -99,8 +99,16 @@ def test_bar_relative_to_shift_point():
     leds = FakeLeds()
     writes = _feed(Telemetry(leds, shift=0.90), [forza(r, max_rpm=8000) for r in (4000, 5300, 6500, 7200, 7400)])
     counts = [w[1] for w in writes if w[0] == 'count']
-    assert counts == [0, 1, 3, 5][:len(counts)] or counts == [0, 1, 3, 5]      # 90 % of 8000 = 7200: all on there
-    assert not any(w[0] == 'pattern' for w in writes)                          # 7400 < 7200 * 1.03: no flash
+    assert counts == [0, 2, 5]                       # Forza: the bar completes at the 6800 floor (0.85 of 8000) x 0.90
+    assert not any(w[0] == 'pattern' for w in writes)                          # the peak raises the ceiling: no flash
+
+
+def test_forza_top_lights_come_on_below_the_max_rpm_the_game_sends():
+    """Forza sends a max rpm the engine never reaches (FH6 cars cut at 0.875-0.94 of it): the full scale
+    must still light all 5 LEDs at the shift point, from the owner's 20261105-202640 drive (cut 7000 of 8000)."""
+    leds = FakeLeds()
+    writes = _feed(Telemetry(leds), [forza(r, max_rpm=8000) for r in (3000, 5000, 6000, 6500, 6900, 7000)])
+    assert max(w[1] for w in writes if w[0] == 'count') == 5
 
 
 def test_shift_rpm_mode_and_flash():
@@ -271,7 +279,7 @@ def test_handle_is_the_live_path():
     telemetry = Telemetry(leds, shift=0.90)
     for i, rpm in enumerate((4000, 5300, 6500, 7200, 7400)):
         telemetry.handle(100.0 + i * 0.01, forza(rpm, max_rpm=8000), ('127.0.0.1', 40000))
-    assert [w[1] for w in leds.writes if w[0] == 'count'] == [0, 1, 3, 5]
+    assert [w[1] for w in leds.writes if w[0] == 'count'] == [0, 2, 5]
     assert telemetry.live.rpm == 7400.0 and telemetry.last_source == '127.0.0.1'
     telemetry.check_idle(100.1)                               # not quiet long enough
     assert telemetry.live is not None
