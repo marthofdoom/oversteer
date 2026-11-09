@@ -217,7 +217,7 @@ class MassLearner:
     SLIP_ANGLE = 0.5
     SLIP_RATIO = 0.3
     SUSP = (0.01, 0.99)
-    AY_MAX_G = 6.0                       # m/s^2: (3 left 10 s of 20 qualifying in 215 s of 20261105-202640's car 2470 and 8 s of ACR's Fabia, 20261105-162134; the estimate is flat from 6 to 10: 2470 1417-1423 kg, ACR 925-940 kg on its tyre-force input; 6 is the first to qualify both)
+    AY_MAX_G = 6.0                       # m/s^2: (3 left 10 s of 20 qualifying in 215 s of 20261105-202640's car 2470 and 8 s of ACR's Fabia, 20261105-162134; the estimate is flat from 6 to 10: 2470 1417-1423 kg, ACR 925-940 kg on its tyre-force input with J 0.3, wrongly: tyre Fx is past the engine, and with J 0 three ACR drives read 1268-1314 kg against 1307 from the tyres' Fy over ay; 6 is the first to qualify both)
     GAP = 0.05                           # s
     GEAR_WINDOW = 0.15                   # s
     GRADE_MAX = 0.3
