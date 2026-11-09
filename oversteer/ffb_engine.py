@@ -1492,7 +1492,7 @@ class RbrRack(RackForce):
     # 15-30 Hz .342 / .694 (.49). Only a_y's 3-15 Hz is over (the 0.5-3 Hz band is 1.60 over too: that drive was harder, relative
     # to it the band is .95); 1.0 is not reachable inside 15 ms (a second-order corner of 5.3 Hz would need 42 ms), so a_y takes
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
-    DERIVED_RATIO = 13.0                 # the derived torque's ratio for now: the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
+    DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
     DERIVED_TP_B = 0.035                 # m: the pneumatic trail at no slip at a grip of 1
     DERIVED_TP_N = 4.0                   # ... and its power of the grip
@@ -1814,7 +1814,8 @@ class RbrRack(RackForce):
                 and ffb_forza.finite(load[1]) else bl * mass * ffb_forza.G
             # (light fronts over a crest say nothing about the grip: Fy_f / Fz would read the ceiling)
             tp = self._grip_trail(abs(self.fy_f), max(fz, 0.5 * bl * mass * ffb_forza.G), dt, speed) / (1.0 + (abs(s) / ffb_forza.TP_S_HALF) ** ffb_forza.TP_N)
-            self.derived_raw = -(ffb_carprops.RALLY_TRAIL + tp) * self.fy_f / self.DERIVED_RATIO
+            ratio = self.ratio if self.ratio_known else self.DERIVED_RATIO      # the car's own (table), else the prior
+            self.derived_raw = -(ffb_carprops.RALLY_TRAIL + tp) * self.fy_f / ratio
             lo, hi = (self.DERIVED_SPEED[0] * self.ALIGN_SPEED, self.DERIVED_SPEED[1] * self.ALIGN_SPEED)
             self._derived_fade = self._ramp(speed, (lo, hi))
         elif self.derived_raw is None:
