@@ -73,7 +73,7 @@ def test_the_trail_fades_with_the_combined_slip():
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     hi = rack._front(fsample(ay=6.0, cs=3.0), None, None)
     assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0)) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0, fz.FORZA_TP_S_HALF)) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
     assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
 

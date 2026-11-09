@@ -40,15 +40,17 @@ LATERAL_DEFAULT = 0.92                   # until the grip is known
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
+FORZA_TP_S_HALF = 1.1                   # Forza's own slip scale (its grip peaks at 0.7-0.9 there): halved at 1.1 its rim torque per Fy_f
+                                         # follows ACR's tyres (Fabia) within a few % from 0 to 3 times the peak slip; at 0.7 it faded 15 % early
 
 
 def finite(x):
     return x is not None and math.isfinite(x)
 
 
-def trail(s):
-    """The pneumatic trail (m) at the normalised combined slip s of the fronts: 0.028 / (1 + (s / 1.4)^4)."""
-    return TP0 / (1.0 + (abs(s) / TP_S_HALF) ** TP_N)
+def trail(s, half=TP_S_HALF):
+    """The pneumatic trail (m) at the normalised slip s: TP0 / (1 + (s / half)^TP_N)."""
+    return TP0 / (1.0 + (abs(s) / half) ** TP_N)
 
 
 def front_share(drivetrain):
@@ -113,10 +115,10 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
     return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER):
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=FORZA_TP_S_HALF):
     """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
     (0.5 with a puddle under both fronts)."""
-    return -(caster + tp_scale * trail(s)) * fy
+    return -(caster + tp_scale * trail(s, half)) * fy
 
 
 class LowPass:
