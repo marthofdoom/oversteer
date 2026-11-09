@@ -55,9 +55,10 @@ def finite(x):
     return x is not None and math.isfinite(x)
 
 
-def trail(s, half=TP_S_HALF):
-    """The pneumatic trail (m) at the normalised slip s: TP0 / (1 + (s / half)^TP_N)."""
-    return TP0 / (1.0 + (abs(s) / half) ** TP_N)
+def trail(s, half=None):
+    """The pneumatic trail (m) at the normalised slip s: TP0 / (1 + (s / half)^TP_N), half TP_S_HALF unless given
+    (read at the call, so a changed constant reaches it)."""
+    return TP0 / (1.0 + (abs(s) / (TP_S_HALF if half is None else half)) ** TP_N)
 
 
 def front_share(drivetrain):
@@ -122,10 +123,10 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
     return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=FORZA_TP_S_HALF):
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None):
     """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
     (0.5 with a puddle under both fronts)."""
-    return -(caster + tp_scale * trail(s, half)) * fy
+    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half)) * fy
 
 
 class LowPass:
