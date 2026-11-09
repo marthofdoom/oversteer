@@ -10,6 +10,7 @@
 - Each game's grip and collapse from its recordings (mu, initial slope, peak slip per mu band; ACR validation and Mz shape): `scripts/ffb-tyre-fit.py CAPTURE [CAPTURE ...]`; log `~/.cache/ffb-tyre-fit/latest.log`.
 - Wheel calibration: `scripts/ffb-wheel-model.py [--old RUN] [--weight KG SHARE]` (what the stored calibration delivers) and `scripts/calib-check.py [RUN ...]` (a saved run: pulses, run-ups, refit).
 - What the played force is made of (joint fit per band on ay, yaw acceleration, pedals, steer rate, front Fx/load/Mz; yaw-settle sign flips): `scripts/ffb-components.py CAPTURE [CAPTURE ...]`; log `~/.cache/ffb-components/latest.log`.
+- Held-wheel settle (`scripts/ffb-components.py --settle CAPTURE ...`) and the force inventory (origin, presence in each game's data and force, strength; `docs/ffb-force-inventory.md`): `scripts/ffb-inventory.py CAPTURE [...]`; log `~/.cache/ffb-inventory/latest.log`.
 - Tests: `python3 -m pytest -q --ignore=tests/test_proxy.py` (about 2 minutes). CI adds `-k "not uinput"` and runs under xvfb.
 - FFB parity: `scripts/ffb-parity.py [CAPTURE] [--ref CAPTURE] [--json PATH]` compares a recorded FFB drive with a reference drive and flags gaps over 25 %; log in `~/.cache/ffb-parity/latest.log`; run `tests/test_ffb_parity.py` after editing it.
 - FFB benchmark (ACR as the reference, read-only): `nice -n 15 scripts/ffb-benchmark.py build`, then `... compare CAPTURE`; log `~/.cache/ffb-benchmark/latest.log`; STALE once `ffb_engine.py`, `ffb_carprops.py` or `wheel_torque.py` change.
