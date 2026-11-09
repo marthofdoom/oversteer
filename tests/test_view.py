@@ -167,7 +167,7 @@ def test_capture_status():
 def test_preferences_round_trip():
     defaults = view.read_preferences({})
     assert defaults == {'telemetry_learn': False, 'telemetry_web_on': False, 'telemetry_web_port': 5301,
-                        'telemetry_web_bind': 'lan', 'telemetry_web_control': False, 'telemetry_capture_on': False,
+                        'telemetry_web_bind': 'lan', 'telemetry_web_control': False, 'telemetry_capture_on': False, 'ffb_tuning_max_minutes': 60, 'ffb_tuning_max_mb': 600,
                         'telemetry_capture_cap': 1, 'ffb_tuning_on': False, 'telemetry_forward': '',
                         'diagnostics_debug': False}
     chosen = dict(defaults, telemetry_learn=True, telemetry_web_on=True, telemetry_web_port=8080,
