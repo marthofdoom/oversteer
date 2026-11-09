@@ -35,7 +35,7 @@ def fsample(t=0.0, speed=25.0, ay=0.0, yaw=0.0, cs=0.2, car=CAR, dt='rwd', **kw)
 def test_newton_front_force_for_a_known_ay_and_rdot():
     m, bl, ay, rd = 1300.0, 0.58, 5.0, 0.4
     a = 2.6 * (1 - 0.58)
-    k = fz.LATERAL_FACTOR * m * bl
+    k = fz.LATERAL_DEFAULT * m * bl
     assert fz.front_lateral(m, bl, ay, rd) == pytest.approx(k * (ay + fz.DI * a * rd))
     assert fz.front_lateral(m, bl, ay, 0.0) == pytest.approx(k * ay)
     # clipped: a_y at 30, rdot at 15
@@ -54,7 +54,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
     assert rack.rdot == pytest.approx(6.0, rel=1e-6)
     s = fsample(t, ay=4.0, dt='awd', cs=0.0)
     rack._ay_lp = None                 # (this sample's yaw rate is unrelated to the ramp above)
-    expect = -(0.027 + fz.TP0) * fz.LATERAL_FACTOR * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
+    expect = -(0.027 + fz.TP0) * fz.LATERAL_DEFAULT * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
     assert rack._front(s, None, None) == pytest.approx(expect, rel=1e-9)
     assert rack._front(fsample(t, ay=None), None, None) is None if False else True
     s2 = fsample(t, ay=4.0, dt='awd', cs=0.0, accel=None)
@@ -72,10 +72,10 @@ def test_the_trail_fades_with_the_combined_slip():
     rack.reset(CAR)
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     hi = rack._front(fsample(ay=6.0, cs=3.0), None, None)
-    assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_FACTOR * 1400.0 * 0.53 * 6.0)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0)) * fz.LATERAL_FACTOR * 1400.0 * 0.53 * 6.0)
+    assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0)) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
-    assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_FACTOR * 1400.0 * 0.53 * 6.0)
+    assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_DEFAULT * 1400.0 * 0.53 * 6.0)
 
 
 def test_the_constants_ratio_14_wheel_375_assist_1_model():
@@ -898,3 +898,40 @@ def test_the_springs_slip_is_the_games_own_front_slip():
     s = fsample(1.0, ay=2.0, yaw=0.1, speed=20.0)
     s.slip_angle = (0.4, 0.2, 0.0, 0.0)
     assert rack._slip(s) == pytest.approx(rack.SLIP_RAD * 0.3)
+
+
+def test_lateral_factor_clips_and_defaults():
+    assert fz.lateral_factor(None) == fz.LATERAL_DEFAULT
+    assert fz.lateral_factor(0.1) == fz.LATERAL_RANGE[0]
+    assert fz.lateral_factor(9.0) == fz.LATERAL_RANGE[1]
+    assert fz.lateral_factor(1.0) == pytest.approx(0.654 + 0.240)
+
+
+def test_front_lateral_scales_by_factor():
+    base = fz.front_lateral(1400.0, 0.58, 4.0, 0.0)
+    assert fz.front_lateral(1400.0, 0.58, 4.0, 0.0, factor=0.46) == pytest.approx(base * 0.5)
+
+
+def _feed(g, t0, secs, ay, speed=20.0, rate=10):
+    for i in range(int(secs * rate)):
+        g.feed(t0 + i / rate, ay, speed)
+
+
+def test_grip_scale_p95_warmup_gap_and_speed():
+    g = fz.GripScale()
+    assert g.mu() is None
+    _feed(g, 0.0, 15.0, 9.81)
+    assert g.mu() is None                      # under 20 s held
+    _feed(g, 15.0, 10.0, 9.81)
+    assert g.mu() == pytest.approx(1.0)
+    _feed(g, 25.0, 40.0, -11.772)              # |a_y| is used
+    assert g.mu() == pytest.approx(1.2)
+    g.feed(70.0, 3.0, 20.0)                    # 5 s gap clears
+    assert g.mu() is None
+    h = fz.GripScale()
+    _feed(h, 0.0, 30.0, 9.81, speed=5.0)       # under 8 m/s: not fed
+    assert h.mu() is None
+    _feed(h, 0.0, 30.0, 9.81)
+    assert h.mu() == pytest.approx(1.0)
+    h.reset()
+    assert h.mu() is None

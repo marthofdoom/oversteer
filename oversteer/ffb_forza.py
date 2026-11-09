@@ -31,7 +31,12 @@ DI = 1.0                                 # the yaw-acceleration term's weight
 AY_MAX = 30.0                            # m/s^2
 RDOT_MAX = 15.0                          # rad/s^2
 CASTER = 0.027                           # m: the mechanical trail
-LATERAL_FACTOR = 0.92                     # ACR, Fabia, tarmac: all four tyres' side force over m a_y, m from its tyre loads
+# ACR, Skoda Fabia, 15 stretches of 60 s: the four tyres' summed side force over m a_y (m from the tyre loads) follows the grip,
+# ratio = 0.654 + 0.240 mu (r 0.79), mu the stretch's p95 of |a_y| / g: about 0.85 on loose (mu .8-.95), 0.96 on tarmac (mu 1.1-1.35).
+# Not the speed (aero under 5 %), not the steering angle. The rack feels only the tyres' force, so Fy_f carries that ratio.
+LATERAL_FIT = (0.654, 0.240)
+LATERAL_RANGE = (0.85, 0.98)
+LATERAL_DEFAULT = 0.92                   # until the grip is known
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
@@ -51,11 +56,61 @@ def front_share(drivetrain):
     return BL.get(drivetrain, BL_DEFAULT)
 
 
-def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI):
-    """Fy_f (N, left positive): m (b/L) (a_y + di a rdot), a = wheelbase (1 - b/L); a_y and rdot clipped."""
+def lateral_factor(mu):
+    """The tyres' side force over m a_y at the grip mu (LATERAL_FIT, clipped to LATERAL_RANGE); LATERAL_DEFAULT without mu."""
+    if not finite(mu):
+        return LATERAL_DEFAULT
+    return min(max(LATERAL_FIT[0] + LATERAL_FIT[1] * mu, LATERAL_RANGE[0]), LATERAL_RANGE[1])
+
+
+class GripScale:
+    """The grip mu the car is being driven at: the p95 of 1 s maxima of |a_y| over the last WINDOW s, over g. None until HOLD s of
+    maxima are held. Not fed under V_MIN; a gap over GAP s clears it."""
+
+    WINDOW = 60.0                        # s
+    HOLD = 20.0                          # s of maxima before mu() answers
+    GAP = 2.0                            # s
+    V_MIN = 8.0                          # m/s
+    PCT = 95.0
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._max = collections.deque()  # [second, max |a_y|], oldest first
+        self._at = None
+
+    def feed(self, t, ay, speed=None):
+        if not (finite(t) and finite(ay)) or (speed is not None and (not finite(speed) or speed < self.V_MIN)):
+            return
+        if self._at is not None and (t - self._at > self.GAP or t < self._at):
+            self._max.clear()
+        self._at = t
+        sec = math.floor(t)
+        a = abs(ay)
+        if self._max and self._max[-1][0] == sec:
+            if a > self._max[-1][1]:
+                self._max[-1][1] = a
+        else:
+            self._max.append([sec, a])
+        while self._max and self._max[0][0] < sec - self.WINDOW:
+            self._max.popleft()
+
+    def mu(self):
+        if len(self._max) < self.HOLD:
+            return None
+        v = sorted(m for _s, m in self._max)
+        k = (len(v) - 1) * self.PCT / 100.0
+        i = int(k)
+        x = v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
+        return x / G
+
+
+def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):
+    """Fy_f (N, left positive): factor m (b/L) (a_y + di a rdot), a = wheelbase (1 - b/L); a_y and rdot clipped."""
     ay = min(max(ay, -AY_MAX), AY_MAX)
     rdot = min(max(rdot, -RDOT_MAX), RDOT_MAX)
-    return LATERAL_FACTOR * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
+    return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
 def kingpin(fy, s, tp_scale=1.0, caster=CASTER):
