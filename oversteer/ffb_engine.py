@@ -1938,7 +1938,7 @@ class ForzaRack(RackForce):
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
     LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
     spring_on = OVERALL_FORZA_SPRING     # the aligning spring (profile INI only: countersteer_forza_spring)
-    SLIP_RAD = -0.148                    # rad of kinematic front slip per unit of Forza's normalised slip angle (corr -0.93 over 2 drives)
+    SLIP_RAD = -0.2                    # rad of kinematic front slip per unit of Forza's normalised slip angle (corr -0.93 over 2 drives)
     AY_LEVEL_S = 0.5                     # s: what is slower than this comes from a_y, what is faster from v r
     VR_GAIN = 0.8                        # a_y over v r, measured 0.78 on 20261104-230426
     YAW_WEIGHT = 0.6                     # the yaw acceleration's weight in Fy_f (ffb_forza.DI: with the front slip's changes, replayed on 20261104-230426, steering to force 50 ms, 0 ms behind the game's force, the force's rate 3.0 against 5.3 FS/s at 2.0)
