@@ -266,12 +266,13 @@ def test_set_overrides_a_module_constant_and_a_class_attribute_and_restores_them
 
 def test_set_refuses_unknown_names_non_numbers_and_bad_values_before_setting_anything():
     from oversteer import ffb_forza
+    shipped = ffb_forza.TP_S_HALF
     for spec in ('ffb_forza.NOPE=1', 'nomodule.X=1', 'ffb_forza.trail=1', 'ffb_forza.TP_S_HALF', 'ffb_forza.TP_S_HALF=abc',
                  'ffb_forza.TP_S_HALF=nan', 'TP_S_HALF=1', 'RbrRack.NOPE=1', 'ffb_forza.CASTER.x=1'):
         with pytest.raises(ValueError):
             with tools.overrides(['ffb_forza.TP_S_HALF=0.4', spec]):
                 pass
-        assert ffb_forza.TP_S_HALF == 1.4
+        assert ffb_forza.TP_S_HALF == shipped
 
 
 def test_set_warns_where_a_constant_is_copied_so_the_override_does_not_reach():

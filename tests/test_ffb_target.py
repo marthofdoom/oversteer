@@ -102,9 +102,13 @@ def test_the_boost_curve_is_monotone_and_invertible():
 
 
 def test_assist_is_heavy_parked_and_light_at_speed():
-    parked = ffb_carprops.driver_from_column(20.0, 0.0)
-    fast = ffb_carprops.driver_from_column(20.0, 30.0)
-    assert parked < fast < 20.0
+    ffb_carprops.set_power_class('street')           # (the rally class holds the curve at one speed)
+    try:
+        parked = ffb_carprops.driver_from_column(20.0, 0.0)
+        fast = ffb_carprops.driver_from_column(20.0, 30.0)
+        assert parked < fast < 20.0
+    finally:
+        ffb_carprops.set_power_class(None)
 
 
 def test_on_centre_and_at_the_limit_torques_are_a_real_cars():
@@ -121,12 +125,16 @@ def test_the_boost_curve_follows_the_measured_steering():
     # on centre ~0.2 Nm per degree at the rim: the dump's tyre torque gives K0 / ratio^2 = 0.589 Nm per degree
     column_per_deg = 5700.0 / 13.0 ** 2 * math.pi / 180.0
     assert column_per_deg * ffb_carprops.driver_slope(0.0, 25.0, 1.0) == pytest.approx(0.2, rel=0.05)
-    # the highway gain 3-6 in the mid range, the centre zone wider at speed, the assist saturating at high load
-    mid = ffb_carprops.driver_from_column(10.0, 30.0)
-    assert 10.0 / mid - 1.0 == pytest.approx(5.0, abs=2.0)
-    assert ffb_carprops.driver_slope(0.5, 30.0) > ffb_carprops.driver_slope(0.5, 3.0)       # (zone 1.0 vs 0.3 Nm)
-    slopes = [ffb_carprops.driver_slope(tc, 30.0) for tc in (5.0, 20.0, 50.0, 150.0)]
-    assert slopes[0] > slopes[1] > slopes[2] > slopes[3] > 0.0                             # the hydraulic top end flattens it for good
+    ffb_carprops.set_power_class('street')           # (the rally class holds the curve at one speed)
+    try:
+        # the highway gain 3-6 in the mid range, the centre zone wider at speed, the assist saturating at high load
+        mid = ffb_carprops.driver_from_column(10.0, 30.0)
+        assert 10.0 / mid - 1.0 == pytest.approx(5.0, abs=2.0)
+        assert ffb_carprops.driver_slope(0.5, 30.0) > ffb_carprops.driver_slope(0.5, 3.0)       # (zone 1.0 vs 0.3 Nm)
+        slopes = [ffb_carprops.driver_slope(tc, 30.0) for tc in (5.0, 20.0, 50.0, 150.0)]
+        assert slopes[0] > slopes[1] > slopes[2] > slopes[3] > 0.0                             # the hydraulic top end flattens it for good
+    finally:
+        ffb_carprops.set_power_class(None)
 
 
 def test_the_column_scale_is_frozen_on_the_g29_class_and_the_car_tops_out_at_the_budget():
