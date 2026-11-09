@@ -9,7 +9,7 @@ tyres' |Fy_FL + Fy_FR|; Forza and RBR: the value the rack derives itself) and by
 per-game definition). Cells with at least --min-s seconds on both sides are compared; the biggest |difference| x sqrt(seconds)
 come first. Also: Newton's Fyf against the tyres' for ACR (with the one best mass), and the effective trail (Nm per unit of
 Fyf) by theta. --set ffb_forza.TP_S_HALF=0.4 (or RbrRack.DERIVED_SLIP_PEAK=0.2) sets a module or class constant for the
-replay only. Runs inside ffb_score._sandbox(): no user file is touched. Full log: ~/.cache/ffb-force-curve/latest.log
+replay only. Runs inside ffb_score._sandbox(): the car properties start from a COPY of the live store (--empty-store: none; --store PATH: that file); no user file is written. Full log: ~/.cache/ffb-force-curve/latest.log
 """
 import argparse
 import os
@@ -32,8 +32,10 @@ def main(argv=None):
     parser.add_argument('--set', action='append', default=[], metavar='NAME=VALUE', help='override a module or class constant for the replay, e.g. ffb_forza.TP_S_HALF=0.4')
     parser.add_argument('--min-s', type=float, default=1.0)
     parser.add_argument('--top', type=int, default=15, help='cells printed to the screen; the log has all')
+    tools.add_store_args(parser)
     args = parser.parse_args(argv)
     try:
+        tools.apply_store_args(args)
         r = tools.force_curve(args.a, args.vs, args.class_a, args.class_b, args.peak, args.min_s, args.set)
     except tools.NoRack as e:
         print('ffb-force-curve: %s' % e, file=sys.stderr)

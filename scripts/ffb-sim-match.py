@@ -7,7 +7,7 @@ Names are relative to the captures folder. Each capture is fed to the rack of it
 ForzaRack; another game exits with a message saying which rack is missing) twice, the first pass letting the rack learn, with
 the aligning spring off so the force is the whole share. The power class is the one in the game's profile (else rally, Forza
 street); --class-a / --class-b override it for that side. Time in a situation is the number of samples times the capture's real
-sample spacing. Runs inside ffb_score._sandbox(): no user file is touched. Full log: ~/.cache/ffb-sim-match/latest.log
+sample spacing. Runs inside ffb_score._sandbox(): the car properties start from a COPY of the live store (--empty-store: none; --store PATH: that file); no user file is written. Full log: ~/.cache/ffb-sim-match/latest.log
 """
 import argparse
 import os
@@ -29,8 +29,10 @@ def main(argv=None):
     parser.add_argument('--peak', type=float, metavar='NM', help="the wheel's peak torque (default 3.08)")
     parser.add_argument('--min-s', type=float, default=1.0)
     parser.add_argument('--top', type=int, default=12, help='rows printed to the screen; the log has all')
+    tools.add_store_args(parser)
     args = parser.parse_args(argv)
     try:
+        tools.apply_store_args(args)
         lines, rows, summary = tools.sim_match(args.a, args.vs, args.class_a, args.class_b, args.peak, args.min_s)
     except tools.NoRack as e:
         print('ffb-sim-match: %s' % e, file=sys.stderr)

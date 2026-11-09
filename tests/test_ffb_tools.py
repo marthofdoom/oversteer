@@ -398,3 +398,49 @@ def test_tyre_envelope_recovers_known_mu_and_peak_and_flags_unsaturated():
     xs = rng.uniform(0.0, 0.1, 6000)                                    # never leaves the rising part
     g = tools.envelope_fit(xs, xs * 10 + 0.05 * rng.uniform(0, 1, xs.size), 0.01, tools.TYRE_BINS['rad'])
     assert g['reached'] is False
+
+
+def _store_file(tmp_path, ratio=9.87):
+    path = tmp_path / 'live.json'
+    path.write_text(json.dumps({'acr/Test Car': {'trail': 0.0264, 'scrub': 0.0, 'ratio': ratio, 'assist': 1.0, 'lock': 0.477}}))
+    return path
+
+
+def test_a_seeded_store_reaches_the_replayed_rack_and_the_header(tmp_path):
+    import ffb_score as fs
+    path = _store_file(tmp_path)
+    try:
+        fs.use_store(path=str(path))
+        with fs._sandbox():
+            rack, _fresh, _feed = tools._build_rack('acr', 'rally')
+            rack.reset('acr/Test Car')
+            assert rack.ratio == pytest.approx(9.87) and rack.trail == pytest.approx(0.0264) and rack.lock == pytest.approx(0.477)
+            line = tools.props_line('acr/Test Car')
+        assert 'ratio 9.87 (stored)' in line and 'trail 0.0264 (stored)' in line and 'lock 0.477 (stored)' in line
+        fs.use_store(empty=True)
+        with fs._sandbox():
+            rack, _fresh, _feed = tools._build_rack('acr', 'rally')
+            rack.reset('acr/Test Car')
+            assert rack.ratio == rack.STEER_RATIO and rack.ratio != 9.87
+            assert '(default)' in tools.props_line('acr/Test Car')
+    finally:
+        fs.use_store(empty=True)
+
+
+def test_the_live_store_is_copied_never_written(tmp_path):
+    import ffb_score as fs
+    path = _store_file(tmp_path)
+    os.utime(path, (1_000_000, 1_000_000))
+    before = (path.read_bytes(), os.stat(path).st_mtime_ns)
+    try:
+        fs.use_store(path=str(path))
+        with fs._sandbox() as tmp:
+            rack, _fresh, _feed = tools._build_rack('acr', 'rally')
+            rack.reset('acr/Test Car')
+            from oversteer import ffb_carprops as cp
+            cp.STORE.set_rack('acr/Test Car', 11.0, 1.0)
+            cp.STORE.put('acr/Test Car', 0.03, 0.0, force=True)
+            assert json.load(open(os.path.join(tmp, 'props.json')))['acr/Test Car']['ratio'] == 11.0
+    finally:
+        fs.use_store(empty=True)
+    assert (path.read_bytes(), os.stat(path).st_mtime_ns) == before
