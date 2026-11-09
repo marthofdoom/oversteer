@@ -539,10 +539,13 @@ PREFERENCES = (
     ('telemetry_capture_on', 'telemetry_capture', False),
     ('telemetry_capture_cap', 'telemetry_capture_cap', 1),       # GB
     ('ffb_tuning_on', 'telemetry_ffb_tuning', False),             # "Record for FFB tuning", taken up by each new recorder
+    ('ffb_tuning_max_minutes', 'telemetry_ffb_max_minutes', 60),  # its limits, config.ini only (a test rig sets them high)
+    ('ffb_tuning_max_mb', 'telemetry_ffb_max_mb', 600),
     ('telemetry_forward', 'telemetry_forward', ''),               # "Forward to": comma-separated host:port
     ('diagnostics_debug', 'diagnostics_debug', False),           # debug lines in the log file
 )
-LIMITS = {'telemetry_web_port': (1024, 65535), 'telemetry_capture_cap': (1, 100)}
+LIMITS = {'telemetry_web_port': (1024, 65535), 'telemetry_capture_cap': (1, 100),
+          'ffb_tuning_max_minutes': (1, 200000), 'ffb_tuning_max_mb': (10, 400000)}
 CHOICES = {'telemetry_web_bind': ('lan', 'local')}
 
 

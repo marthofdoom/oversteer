@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.18.0-rc3 — 2026-11-08
+
+Prerelease. After installing, run **Calibrate wheel** again if you haven't since rc1.
+
+### Steering force, end to end from physics
+- Every Nm is now worked out at the hands on your rim, and the rally power steering is fitted to a real rally car's hand torque (about 0.4 Nm cruising, 0.9 light, 1.5 medium, 2.0 heavy and 2.4 at the limit on a 279 mm rim). Hydraulic assist no longer changes with speed: the wheel no longer stiffens as you go faster.
+- RBR's force uses the car's own steering ratio, and Assetto Corsa Rally and RBR now agree within about 4 % in the same car.
+- The front tyres' side force follows the grip you're driving at (about 0.85 of m a_y on loose, 0.96 on tarmac, measured from ACR's tyres) instead of one figure.
+- ACR's brake pull: the scrub radius is learnt on straight braking (11-22 mm on the Fabia), where it read 0 before.
+- Forza Horizon: road-wheel lock measured (0.75 rad), the ratio from your wheel's range, the trail fading on Forza's own slip scale, the yaw term at its physical weight, slip scale 0.2 rad per unit, and car mass learnt per car and tune, re-estimated slowly. Forza's car wheel defaults to 375 mm (road car).
+- Calibration: the first runs' table over-delivered small forces by 34-42 %; the G29's peak is 3.08 Nm (2 litres of water lifted 3 inches at 0.92).
+
+### New in the FFB tab
+- Power steering: Hydraulic, Electric road car or None; a pinion preload for hydraulic racks, and `countersteer_power_class` in the profile INI takes `k=`, `r=`, `gain=`, `speed=`, `preload=` after the class.
+- Fast-spin relief for gear-driven wheels (off by default): the real column's damping becomes the total, so the driver takes the wheel's own extra drag off a fast-spinning wheel.
+- A hand-force line: rim, car wheel and scale in use, and where each comes from.
+- Peak force box (per wheel); clutch and throttle response presets (since rc1).
+
+### Fixes
+- Forza's shift lights now reach the top two LEDs (Forza reports a max rpm the engine doesn't reach).
+- FFB tuning recordings carry the driver's game force level and scale; their limits are `telemetry_ffb_max_minutes` and `telemetry_ffb_max_mb` in config.ini (60 and 600 by default).
+
+### Known
+- Forza Horizon plays about 12-17 % under ACR in the same situations (part of it the 375 mm road car wheel); street (electric) assist is still a shaped curve.
+
 ## 0.18.0-rc2 — 2026-11-05
 
 0.18.0-rc1 never got a download: tests failed in release CI. No change to the app; rc1's notes follow.

@@ -58,6 +58,14 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.18.0-rc3" date="2026-11-08" type="development">
+      <description>
+        <ul>
+          <li>Prerelease: steering force from physics end to end, fitted to a real rally car's hand torque; RBR and ACR agree in the same car.</li>
+          <li>Fast-spin relief, a hand-force line, shift lights fixed for Forza, power steering choice in the FFB tab.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.18.0-rc2" date="2026-11-05" type="development">
       <description>
         <ul>

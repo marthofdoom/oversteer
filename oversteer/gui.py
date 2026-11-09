@@ -115,7 +115,7 @@ class Gui:
         self.web_token = ''                     # pairs a browser to change settings (config.ini web_token)
         self.telemetry_recorder = None          # telemetry_capture.Recorder, while recording
         self._capture_shown_at = 0.0
-        self.ffb_tuning_on = True               # "Record for FFB tuning": an app preference, taken up by each new recorder
+        self.ffb_tuning_on = False              # "Record for FFB tuning": an app preference, taken up by each new recorder
         self.ffb_stop_reason = None             # 'time' or 'size' once it ended by itself, until it is switched on again
         # App preferences (config.ini): learn with the rev lights off (D4),
         # the web page and recording, all off by default
@@ -1896,7 +1896,11 @@ class Gui:
             recorder = self.telemetry_recorder = None
         if self.telemetry_capture_on and recorder is None:
             self.ffb_stop_reason = None
+            from . import telemetry_capture as _tc
+            _tc.FFB_MAX_SECONDS = 60.0 * getattr(self, 'ffb_tuning_max_minutes', 60)
+            _tc.FFB_MAX_BYTES = 1e6 * getattr(self, 'ffb_tuning_max_mb', 600)
             recorder = self.telemetry_recorder = Recorder(
+                ffb_limits=(_tc.FFB_MAX_SECONDS, _tc.FFB_MAX_BYTES),
                 self.capture_folder(), port=self.telemetry.port if self.telemetry is not None else None,
                 version=self.app.version, wheel=lambda: wheel_from_device(self.device))
             if self.ffb_tuning_on:                  # the saved wish: a new recorder resumes the full rate
