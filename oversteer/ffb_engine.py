@@ -877,7 +877,9 @@ class RackForce:
         if not (math.isfinite(side) and math.isfinite(couple)):
             return
         learner = self.learner
-        learner.add(mz, side, couple, raw, dt, self.scale)
+        accel = getattr(sample, 'accel', None)
+        braking = (getattr(sample, 'brake', 0.0) or 0.0) > 0.3 and accel is not None and abs(accel[1]) < 3.0
+        learner.add(mz, side, couple, raw, dt, self.scale, braking)
         self.trail, self.scrub = learner.trail, learner.scrub
         ffb_carprops.STORE.put(self.car, self.trail, self.scrub)
 

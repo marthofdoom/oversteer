@@ -656,8 +656,10 @@ class TorqueLearner:
         self._v = [0.0] * 3
         self._since = 0.0
         self._a = None                            # the Mz weight of the last fit (ext_force per Nm)
+        self._sb = [[0.0] * 3 for _ in range(3)]  # the same sums over braking only: the scrub is fitted there, where the
+        self._vb = [0.0] * 3                      # left-right Fx is not collinear with the side force (ACR: 10-24 mm)
 
-    def add(self, mz, fy, dfx, raw, dt, a_hint):
+    def add(self, mz, fy, dfx, raw, dt, a_hint, braking=False):
         """One unclipped moving sample (the front torque's three parts and the game's raw level); a_hint: the
         strength fitted on the torque (ext_force per Nm), which the prior's b and c scale with."""
         if abs(fy) < FY_MIN and abs(dfx) < DFX_MIN:
@@ -669,6 +671,11 @@ class TorqueLearner:
             for j in range(3):
                 s[i][j] = s[i][j] * decay + z[i] * z[j]
             v[i] = v[i] * decay + z[i] * raw
+        sb, vb = self._sb, self._vb
+        for i in range(3):
+            for j in range(3):
+                sb[i][j] = sb[i][j] * decay + (z[i] * z[j] if braking else 0.0)
+            vb[i] = vb[i] * decay + (z[i] * raw if braking else 0.0)
         self.weight = self.weight * decay + 1.0
         self._since += dt                        # (informative time only)
         if self._since >= SOLVE_EVERY:
@@ -695,6 +702,15 @@ class TorqueLearner:
         self._a = a
         self.fit_trail = -theta[1] / SIGMA[1] / a
         self.fit_scrub = -theta[2] / SIGMA[2] / a
+        if self._sb[2][2] >= PRIOR_W * 0.3:      # braking: the scrub from its own fit, a the whole window's
+            mb = [row[:] for row in self._sb]
+            rb = self._vb[:]
+            for i, target in ((0, a * SIGMA[0]), (1, -a * self.fit_trail * SIGMA[1]), (2, -a * s0 * SIGMA[2])):
+                mb[i][i] += lam
+                rb[i] += lam * target
+            tb = _solve3(mb, rb)
+            if tb is not None and tb[0] / SIGMA[0] > MIN_A * a_hint:
+                self.fit_scrub = -tb[2] / SIGMA[2] / (tb[0] / SIGMA[0])
 
     def _slew(self, dt):
         if self.fit_trail is None:
@@ -704,7 +720,7 @@ class TorqueLearner:
             want = min(max(self.fit_trail, TRAIL_RANGE[0]), TRAIL_RANGE[1])
             step = TRAIL_SLEW * dt
             self.trail = min(max(want, self.trail - step), self.trail + step)
-        if self._s[2][2] >= held:
+        if self._s[2][2] >= held or self._sb[2][2] >= held:
             want = min(max(self.fit_scrub, SCRUB_RANGE[0]), SCRUB_RANGE[1])
             step = SCRUB_SLEW * dt
             self.scrub = min(max(want, self.scrub - step), self.scrub + step)
