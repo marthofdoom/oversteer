@@ -1947,6 +1947,7 @@ class ForzaRack(RackForce):
     KICK_FRACTION = 0.3                  # of m_f g / 2: the synthetic step of Fx_FL - Fx_FR at a one-sided onset
     PULL_FRACTION = 0.15                 # of m_f g / 2: a one-sided puddle's sustained drag difference
     TRIGGER_HOLD = 0.1                   # s: an event not taken by Kickback in this long is dropped
+    _pi = None                           # the tune's PI (the mass is kept per car and PI)
     MASS_SAVE_EVERY = 1.0                # s between hands of the learnt mass to the store
     PUDDLE_TP = 0.5                      # the pneumatic trail's share with a puddle under both fronts
     LOCK_SLEW = 0.02                     # rad/s: the road wheels' lock moves to the learnt one at this rate
@@ -1966,7 +1967,7 @@ class ForzaRack(RackForce):
         return self.mass_l.mass
 
     def reset(self, car=None):
-        stored = ffb_carprops.STORE.get_mass(car) if car is not None else None
+        stored = ffb_carprops.STORE.get_mass(car, self._pi) if car is not None else None
         self.mass_l = ffb_forza.MassLearner(stored)
         self._yaw = collections.deque(maxlen=3)         # (game time, yaw rate)
         self._lead = ffb_forza.SlipLead()
@@ -2154,8 +2155,15 @@ class ForzaRack(RackForce):
     def feed(self, t, sample, raw, new=True):
         """A telemetry sample with the game's raw level now (None if none fresh): the mass, the yaw acceleration, the
         events, the safety check and readiness."""
+        pi = ffb_forza.power_index(sample)
         if sample.car != self.car:
+            self._pi = pi
             self.reset(sample.car)
+        elif pi is not None and pi != self._pi:         # a tune edit: the mass is the new tune's (the car's until it has one)
+            self._pi = pi
+            stored = ffb_carprops.STORE.get_mass(self.car, pi)
+            self.mass_l = ffb_forza.MassLearner(stored or (self.mass_l.mass if self.mass_l.known else None))
+            self._mass_saved = None
         dt = 0.0 if self._last is None else min(max(t - self._last, 0.0), 1.0)
         self._last = self._now = t
         self._engine(t, sample)
@@ -2164,9 +2172,15 @@ class ForzaRack(RackForce):
         self._feed_grip(t, sample)
         self._track_yaw(t, sample)
         self.mass_l.add(t, sample)
-        if self.car is not None and self.mass_l.accepted and (self._mass_saved is None or t - self._mass_saved >= self.MASS_SAVE_EVERY):
+        moved, self.mass_l.moved = self.mass_l.moved, None
+        if moved is not None and self.car is not None:
+            logging.info("Countersteer FFB: %s (PI %s) mass %.0f -> %.0f kg (estimate %.0f)", self.car, self._pi, *moved)
             self._mass_saved = t
-            ffb_carprops.STORE.set_mass(self.car, self.mass)
+            ffb_carprops.STORE.set_mass(self.car, self.mass, self._pi)
+        elif self.car is not None and self.mass_l.accepted and not self.mass_l.holding \
+                and (self._mass_saved is None or t - self._mass_saved >= self.MASS_SAVE_EVERY):
+            self._mass_saved = t
+            ffb_carprops.STORE.set_mass(self.car, self.mass, self._pi)
         self._events(t, sample, ffb_forza.front_share(sample.drivetrain))
         self._lead_update(t, sample)
         if self.car is not None and self.moving:

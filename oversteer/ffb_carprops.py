@@ -97,6 +97,7 @@ class Store:
         self._steer_lock = {}
         self._frame = {}
         self._mass = {}
+        self._pi_mass = {}               # {car: {pi: kg}}: a mass per tune (Forza's PI changes with it)
         self._dirty = False
         self._lock = threading.Lock()
         self._saved = {}                 # what the file holds, to tell what changed
@@ -109,7 +110,7 @@ class Store:
     def _load(self):
         if self._cars is None:
             self._cars = {}
-            self._p99, self._rack, self._steer_lock, self._frame, self._mass = {}, {}, {}, {}, {}
+            self._p99, self._rack, self._steer_lock, self._frame, self._mass, self._pi_mass = {}, {}, {}, {}, {}, {}
             try:
                 with open(self._file()) as f:
                     for car, v in json.load(f).items():
@@ -128,6 +129,14 @@ class Store:
                         mass = v.get('mass')
                         if isinstance(mass, (int, float)) and math.isfinite(mass) and MASS_RANGE[0] <= mass <= MASS_RANGE[1]:
                             self._mass[car] = float(mass)
+                        masses = v.get('masses')
+                        if isinstance(masses, dict):
+                            for pi, kg in masses.items():
+                                if isinstance(kg, (int, float)) and math.isfinite(kg) and MASS_RANGE[0] <= kg <= MASS_RANGE[1]:
+                                    try:
+                                        self._pi_mass.setdefault(car, {})[int(pi)] = float(kg)
+                                    except (TypeError, ValueError):
+                                        pass
                         lock = v.get('lock')
                         if isinstance(lock, (int, float)) and math.isfinite(lock) and LOCK_RANGE[0] <= lock <= LOCK_RANGE[1]:
                             self._steer_lock[car] = float(lock)
@@ -173,23 +182,29 @@ class Store:
                 self._dirty = True
             self._rack[car] = (float(ratio), float(assist))
 
-    def get_mass(self, car):
-        """The car's learnt mass (kg, ForzaRack's MassLearner), None if not learnt."""
+    def get_mass(self, car, pi=None):
+        """The car's learnt mass (kg, ForzaRack's MassLearner) for its tune (Forza's PI), else the car's own (an entry
+        from before masses were kept per tune, or a tune not yet seen); None if not learnt."""
         with self._lock:
             self._load()
+            if pi is not None and pi in self._pi_mass.get(car, ()):
+                return self._pi_mass[car][pi]
             return self._mass.get(car)
 
-    def set_mass(self, car, mass):
-        """Keeps a learnt mass; written (with the car's other values) when it moved MASS_SAVE_STEP kg from the stored."""
+    def set_mass(self, car, mass, pi=None):
+        """Keeps a learnt mass (per tune when `pi` is given, else the car's); written (with the car's other values) when it moved
+        MASS_SAVE_STEP kg from the stored."""
         if car is None or not (math.isfinite(mass) and MASS_RANGE[0] <= mass <= MASS_RANGE[1]):
             return
         with self._lock:
             self._load()
-            old = self._mass.get(car)
+            table = self._mass if pi is None else self._pi_mass.setdefault(car, {})
+            key = car if pi is None else pi
+            old = table.get(key)
             moved = old is None or abs(old - mass) >= MASS_SAVE_STEP
             if moved:
                 self._dirty = True
-                self._mass[car] = float(mass)
+                table[key] = float(mass)
             trail, scrub = self._cars.get(car) or (TRAIL_DEFAULT, SCRUB_DEFAULT)
             pending = self._dirty
         if pending:                      # (put() throttles to SAVE_EVERY: the next call after it flushes)
@@ -269,6 +284,8 @@ class Store:
                     data[c]['ratio'], data[c]['assist'] = self._rack[c]
                 if c in self._mass:
                     data[c]['mass'] = round(self._mass[c], 1)
+                if self._pi_mass.get(c):
+                    data[c]['masses'] = {str(k): round(x, 1) for k, x in sorted(self._pi_mass[c].items())}
                 if c in self._steer_lock:
                     data[c]['lock'] = round(self._steer_lock[c], 4)
                 if self._frame.get(c):

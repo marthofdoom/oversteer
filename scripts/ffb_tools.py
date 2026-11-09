@@ -348,7 +348,7 @@ def simulate_rows(items, game, power_class, peak=None):
         ffb_forza.front_lateral = recorder
     names = ('t', 'nm', 'fyf', 'slip', 'ay', 'yaw', 'bl', 'fysum', 'sa0', 'sa1', 'fy0', 'fy1', 'fz0', 'fz1')
     cols = {k: [] for k in names}
-    car, scored = None, 0
+    car, scored, scored_mass = None, 0, None
     try:
         for t, s in items:
             feed(t, s)
@@ -389,7 +389,10 @@ def simulate_rows(items, game, power_class, peak=None):
             cols['bl'].append(ffb_forza.front_share(getattr(s, 'drivetrain', None)))
             for k, v in extra.items():
                 cols[k].append(v)
+            scored_mass = getattr(rack, 'mass', None)
         learnt = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}
+        if scored_mass is not None:      # (the drive may end in a menu, where the rack has no car and the prior)
+            learnt['mass'] = scored_mass
         entry = car_data.entry(rack.car) if game == 'rbr' and getattr(rack, 'car', None) else None
     finally:
         ffb_forza.front_lateral = orig
