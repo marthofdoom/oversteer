@@ -1936,7 +1936,9 @@ class ForzaRack(RackForce):
       is added after the output filter (kick_force), so its edge stays sharp."""
 
     LEARNS = False
-    STEER_RATIO = 14.0
+    STEER_RATIO = 14.0                   # without the wheel's range; with it, the ratio is the half range over FORZA_LOCK
+    ALIGN_LOCK = 0.75                    # rad: Forza maps full steer to about 0.75 rad of road wheel (L r / v + slip, steady driving,
+                                         # three cars, 0.73-0.76 at every speed and load measured); its learner never closes on Forza
     ASSIST = 1.0
     car_wheel_mm = FORZA_CAR_WHEEL_MM
     MOVING_ON = MIN_SPEED                # m/s to start ...
@@ -1977,10 +1979,17 @@ class ForzaRack(RackForce):
         self._mass_saved = None
         self.moving = False
         super().reset(car)
-        self.ratio, self.assist = self.STEER_RATIO, self.ASSIST
+        self.ratio, self.assist = self._mapped_ratio(), self.ASSIST
         self.ratio_known = True
         self.lock, self.lock_known = self.ALIGN_LOCK, True        # (the approximation plays at once; _learn_lock moves it)
         self.lock_learnt_at = None
+
+    def _mapped_ratio(self):
+        """The overall ratio as the hands feel it: the wheel's half range over the road wheels' lock (as ACR's is learnt from its
+        wheel mapping); STEER_RATIO without the range."""
+        if not self.wheel_range:
+            return self.STEER_RATIO
+        return min(max(math.radians(self.wheel_range / 2.0) / self.ALIGN_LOCK, ffb_carprops.RATIO_RANGE[0]), ffb_carprops.RATIO_RANGE[1])
 
     def _learn_lock(self, t, sample, dt):
         """The aligning spring's frame: the lock and ratio from the car's own motion (RackForce._learn_ratio: Ackermann
@@ -1993,6 +2002,7 @@ class ForzaRack(RackForce):
             if self.lock_learnt_at is None:
                 self.lock_learnt_at = t
             self.lock += min(max(learnt - before, -self.LOCK_SLEW * dt), self.LOCK_SLEW * dt)
+        self.ratio = self._mapped_ratio()          # the wheel's range can arrive or change after the reset
 
     def _restart(self):
         super()._restart()
