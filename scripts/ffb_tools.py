@@ -78,6 +78,17 @@ def profile_power_class(game, config=None):
     return value if value in ('rally', 'street', 'off') else default
 
 
+def profile_range(game, config=None):
+    """The wheel's range in degrees from the game's profile (the live engine gets it from the wheel stage), else 900."""
+    path = os.path.join(config or config_dir(), 'profiles', rack_for(game)[1])
+    cp = configparser.ConfigParser(interpolation=None, strict=False)
+    try:
+        cp.read(path)
+        return float(cp['DEFAULT'].get('range', '') or 900)
+    except (configparser.Error, OSError, ValueError):
+        return 900.0
+
+
 def sample_ok(s, min_speed):
     return bool(s.vel and s.accel and s.vel[0] and (s.speed or 0.0) >= min_speed)
 
@@ -104,6 +115,7 @@ def _build_rack(game, power_class, peak=None):
     fresh = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}
     rack.wheel_peak = peak or wt.DEFAULT_PEAK_NM
     rack.align_on = False
+    rack.wheel_range = profile_range(game)       # live: the wheel stage sets it (ForzaRack's ratio is half range / lock)
     rbr = game == 'rbr'
     if rbr:
         rack.reset(None)
