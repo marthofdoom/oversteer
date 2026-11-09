@@ -660,10 +660,17 @@ class RackForce:
         self._floor_uploads = 0
         self.reset()
 
+    def _feed_grip(self, t, sample):
+        """The grip scale (ffb_forza.GripScale) from the sample's lateral acceleration and speed."""
+        accel = getattr(sample, 'accel', None)
+        if accel is not None and len(accel) > 1:
+            self._grip.feed(t, accel[1], getattr(sample, 'speed', None))
+
     def reset(self, car=None):
         if self.learner is not None and self.car is not None:
             ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True, p99=self.p99)
         self.car = car
+        self._grip = ffb_forza.GripScale()
         self.trail, self.scrub = ffb_carprops.default_trail(CASTER_TRAIL), SCRUB    # (rally class: 37 mm until learnt)
         self.learner = None
         if self.LEARNS:
@@ -1673,6 +1680,7 @@ class RbrRack(RackForce):
     def _floor_size(self, t, sample):
         """What mechanical caster alone gives at the column (Nm) in a slide, 0 in grip or without the fields; sets the floor's sign.
         floor = level w RALLY_TRAIL |Fy_f| / ratio, w the body slip's and the speed's ramps; the column torque has the sign opposite Fy_f."""
+        self._feed_grip(t, sample)
         rdot = self._track_yaw(t, sample)
         accel, vel = getattr(sample, 'accel', None), getattr(sample, 'vel', None)
         speed, drivetrain = getattr(sample, 'speed', None), getattr(sample, 'drivetrain', None)
@@ -1681,7 +1689,8 @@ class RbrRack(RackForce):
             return 0.0
         entry = car_data.entry(self.car)
         mass = (entry.get('mass_kg') if entry else None) or self.FLOOR_MASS
-        fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot)
+        fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot,
+                                     factor=ffb_forza.lateral_factor(self._grip.mu()))
         limit = ffb_forza.front_share(drivetrain) * mass * self.FLOOR_AY
         fy = min(max(fy, -limit), limit)
         if abs(fy) >= self.FLOOR_FY_MIN:
@@ -1778,6 +1787,7 @@ class RbrRack(RackForce):
         the kingpin torque with the rally caster and the pneumatic trail at the kinematic slip (normalised by DERIVED_SLIP_PEAK),
         over the steering ratio. Faded to 0 by speed (under ALIGN_SPEED the slip is not defined), and out within DERIVED_UNLOADED_S
         when the fronts carry under DERIVED_UNLOADED of their static load (the air). Without the fields: the last value fades out."""
+        self._feed_grip(t, sample)
         rdot = self._track_yaw(t, sample)
         accel, speed = getattr(sample, 'accel', None), getattr(sample, 'speed', None)
         last, self._gate_at = self._gate_at, t
@@ -1795,7 +1805,7 @@ class RbrRack(RackForce):
         if ok:
             ay = self._filtered('ay', t, min(max(accel[1], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
             rd = self._filtered('rdot', t, min(max(rdot, -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX))
-            fy = ffb_forza.front_lateral(mass, bl, ay, rd)
+            fy = ffb_forza.front_lateral(mass, bl, ay, rd, factor=ffb_forza.lateral_factor(self._grip.mu()))
             limit = bl * mass * self.FLOOR_AY
             self.fy_f = min(max(fy, -limit), limit)
             alpha = self._slip(sample)
@@ -2023,7 +2033,8 @@ class ForzaRack(RackForce):
         if accel is None or len(accel) < 2 or not ffb_forza.finite(accel[1]):
             return None
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, self._fast_ay(sample, accel[1]), self.rdot, di=self.YAW_WEIGHT)
+        fy = ffb_forza.front_lateral(self.mass, bl, self._fast_ay(sample, accel[1]), self.rdot, di=self.YAW_WEIGHT,
+                                     factor=ffb_forza.lateral_factor(self._grip.mu()))
         lead = self._lead_fy
         if lead is not None and lead[0] is sample:
             fy = lead[1]
@@ -2049,7 +2060,8 @@ class ForzaRack(RackForce):
         if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]):
             slip = 0.5 * (sa[0] + sa[1])
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT)
+        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT,
+                                     factor=ffb_forza.lateral_factor(self._grip.mu()))
         self._lead_fy = (sample, self._lead.step(t, fy, slip))
 
     def _kicked(self, sample, share, ratio, assist):
@@ -2138,6 +2150,7 @@ class ForzaRack(RackForce):
         self._engine(t, sample)
         speed = sample.speed if ffb_forza.finite(sample.speed) else 0.0
         self.moving = speed > (self.MOVING_OFF if self.moving else self.MOVING_ON)
+        self._feed_grip(t, sample)
         self._track_yaw(t, sample)
         self.mass_l.add(t, sample)
         if self.car is not None and self.mass_l.accepted and (self._mass_saved is None or t - self._mass_saved >= self.MASS_SAVE_EVERY):
