@@ -1304,6 +1304,10 @@ class GtkUi:
                                              "a real car's column has that friction; turn it on if the wheel feels "
                                              "sticky.")
 
+    COUNTERSTEER_FAST_SPIN_RELIEF_TOOLTIP = ("A G29's motor and gears drag on a fast-spinning wheel more than a real steering "
+                                             "column does. On: the column's real damping is the total, so the driver takes "
+                                             "the wheel's extra drag off (at most half of it). Gear-driven wheels.")
+
     def _page_list(self, page, title, subtitle=None):
         listbox = self._list()
         self._section(page, title, listbox, subtitle)
@@ -1486,6 +1490,11 @@ class GtkUi:
             self.countersteer_toggles[key] = switch
             self._dependent_rows.append(row)
             steering.add(row)
+        row, self.countersteer_fast_spin_relief = self._switch_row(
+            _("Fast-spin relief"), _(self.COUNTERSTEER_FAST_SPIN_RELIEF_TOOLTIP),
+            lambda state: self.controller.model.set_countersteer_fast_spin_relief(state))
+        self._dependent_rows.append(row)
+        steering.add(row)
 
         texture = self._page_list(page, _("Texture"))
         scale = self._response_scale(0, 100, 10)
@@ -1535,6 +1544,12 @@ class GtkUi:
             switch = self.countersteer_toggles[key]
             if value is not None and switch.get_active() != bool(value):
                 switch.set_active(bool(value))
+
+    def set_countersteer_fast_spin_relief(self, value):
+        """Fast-spin relief (None where the driver has no replace mode)."""
+        switch = getattr(self, 'countersteer_fast_spin_relief', None)
+        if switch is not None and value is not None and switch.get_active() != bool(value):
+            switch.set_active(bool(value))
 
     def set_countersteer_strength(self, value):
         """The overall steering strength, 0..130 (None where the driver has no replace mode)."""

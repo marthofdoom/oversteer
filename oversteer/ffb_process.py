@@ -81,7 +81,7 @@ STOP_WAIT = 1.5                          # s the child has to stop (FfbEngine.st
 RESTART_DELAYS = (1.0, 3.0, 10.0)        # s before each restart of a child that died; then it stays off
 HEALTHY = 60.0                           # s of life after which a death counts as the first again
 CTRL_TIMEOUT = 0.1                       # s a control message may wait for room (a child that hung)
-SETTERS = ('set_enabled', 'set_dynamics', 'set_position_source', 'set_wheel_result', 'set_texture', 'set_linearity',
+SETTERS = ('set_enabled', 'set_dynamics', 'set_fast_spin_relief', 'set_position_source', 'set_wheel_result', 'set_texture', 'set_linearity',
            'set_lightness', 'set_strength', 'set_knee', 'set_rbr_cut', 'set_caster_floor', 'set_engine_feel', 'set_mapping', 'set_forza_model', 'set_forza_spring', 'set_rbr_spring', 'set_rbr_source', 'set_drive_pull', 'set_kick', 'set_gear_guard', 'set_column_damping', 'set_rim_mm', 'set_wheel_peak', 'set_car_wheel_mm', 'set_power_class', 'set_device')
 PR_SET_PDEATHSIG = 1
 PR_SET_NAME = 15
@@ -305,6 +305,9 @@ class EngineProcess:
 
     def set_dynamics(self, column, align, removal):
         self._call('set_dynamics', column, align, removal)
+
+    def set_fast_spin_relief(self, on):
+        self._call('set_fast_spin_relief', bool(on))
 
     def set_position_source(self, source):
         spec = getattr(source, 'spec', None) if source is not None else None

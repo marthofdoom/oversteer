@@ -2837,6 +2837,7 @@ function buildCs() {
   steer.appendChild(reg(T("Real column feel", "The car's own column damping and friction, sent to the driver so the wheel carries its weight and settles like the car's. On by default.", "countersteer_column")));
   steer.appendChild(reg(T("Local aligning spring", "The tyres' self-aligning pull played as a spring inside the driver: the wheel self-steers with about 4 ms response. Off: telemetry only. On by default.", "countersteer_align")));
   steer.appendChild(reg(T("Friction removal", "Takes the wheel's own friction out of the feel: lighter than a real column. Off by default.", "countersteer_friction_removal")));
+  steer.appendChild(reg(T("Fast-spin relief", "A G29's motor and gears drag on a fast-spinning wheel more than a real steering column does. On: the column's real damping is the total, so the driver takes the wheel's extra drag off (at most half of it). Gear-driven wheels.", "countersteer_fast_spin_relief")));
   const tex = mkPanel(b, "Texture");
   tex.appendChild(reg(S("Texture", percent, "Small vibrations on top of the steering force, under 8 % of the wheel's full force at 100 %. 30 % by default.", "countersteer_texture")));
   for (const [part, label] of [["road", "Road"], ["impact", "Landings"], ["lock", "Front lock"], ["engine", "Engine"]])
