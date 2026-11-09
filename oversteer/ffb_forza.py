@@ -38,6 +38,13 @@ CASTER = 0.027                           # m: the mechanical trail
 LATERAL_FIT = (0.654, 0.240)
 LATERAL_RANGE = (0.85, 0.98)
 LATERAL_DEFAULT = 0.92                   # until the grip is known
+# The same ratio against the moving mass (ACR's tyre loads read about 8 % over the mass its Fx and Fy accelerate: 1410 kg
+# against 1260-1345 from MassLearner on the tyres' Fx, J 0), per sample against GripScale's mu as played, 6 ACR drives,
+# 200k samples: 0.691 + 0.226 mu (0.95 at mu 1.0-1.1, 1.02 at 1.3-1.5, 1.05 at 1.5-1.8). For a mass learnt from the car's
+# acceleration (Forza's MassLearner); a car table's static mass (RBR) keeps LATERAL_FIT.
+LATERAL_FIT_INERTIAL = (0.691, 0.226)
+LATERAL_RANGE_INERTIAL = (0.85, 1.05)
+LATERAL_DEFAULT_INERTIAL = 0.95
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
@@ -66,11 +73,14 @@ def front_share(drivetrain):
     return BL.get(drivetrain, BL_DEFAULT)
 
 
-def lateral_factor(mu):
-    """The tyres' side force over m a_y at the grip mu (LATERAL_FIT, clipped to LATERAL_RANGE); LATERAL_DEFAULT without mu."""
+def lateral_factor(mu, inertial=False):
+    """The tyres' side force over m a_y at the grip mu (LATERAL_FIT, clipped to LATERAL_RANGE); LATERAL_DEFAULT without mu.
+    `inertial`: m is the moving mass (MassLearner), not a static one: the _INERTIAL fit, range and default."""
+    fit, rng, default = (LATERAL_FIT_INERTIAL, LATERAL_RANGE_INERTIAL, LATERAL_DEFAULT_INERTIAL) if inertial \
+        else (LATERAL_FIT, LATERAL_RANGE, LATERAL_DEFAULT)
     if not finite(mu):
-        return LATERAL_DEFAULT
-    return min(max(LATERAL_FIT[0] + LATERAL_FIT[1] * mu, LATERAL_RANGE[0]), LATERAL_RANGE[1])
+        return default
+    return min(max(fit[0] + fit[1] * mu, rng[0]), rng[1])
 
 
 class GripScale:
