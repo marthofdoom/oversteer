@@ -35,11 +35,12 @@ def fsample(t=0.0, speed=25.0, ay=0.0, yaw=0.0, cs=0.2, car=CAR, dt='rwd', **kw)
 def test_newton_front_force_for_a_known_ay_and_rdot():
     m, bl, ay, rd = 1300.0, 0.58, 5.0, 0.4
     a = 2.6 * (1 - 0.58)
-    assert fz.front_lateral(m, bl, ay, rd) == pytest.approx(m * bl * (ay + a * rd))
-    assert fz.front_lateral(m, bl, ay, 0.0) == pytest.approx(m * bl * ay)
+    k = fz.LATERAL_FACTOR * m * bl
+    assert fz.front_lateral(m, bl, ay, rd) == pytest.approx(k * (ay + fz.DI * a * rd))
+    assert fz.front_lateral(m, bl, ay, 0.0) == pytest.approx(k * ay)
     # clipped: a_y at 30, rdot at 15
-    assert fz.front_lateral(m, bl, 99.0, 99.0) == pytest.approx(m * bl * (30.0 + a * 15.0))
-    assert fz.front_lateral(m, bl, -99.0, -99.0) == pytest.approx(-m * bl * (30.0 + a * 15.0))
+    assert fz.front_lateral(m, bl, 99.0, 99.0) == pytest.approx(k * (30.0 + fz.DI * a * 15.0))
+    assert fz.front_lateral(m, bl, -99.0, -99.0) == pytest.approx(-k * (30.0 + fz.DI * a * 15.0))
     assert [fz.front_share(d) for d in ('fwd', 'rwd', 'awd', None)] == [0.62, 0.53, 0.58, 0.58]
 
 
@@ -53,7 +54,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
     assert rack.rdot == pytest.approx(6.0, rel=1e-6)
     s = fsample(t, ay=4.0, dt='awd', cs=0.0)
     rack._ay_lp = None                 # (this sample's yaw rate is unrelated to the ramp above)
-    expect = -(0.027 + 0.028) * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
+    expect = -(0.027 + fz.TP0) * fz.LATERAL_FACTOR * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
     assert rack._front(s, None, None) == pytest.approx(expect, rel=1e-9)
     assert rack._front(fsample(t, ay=None), None, None) is None if False else True
     s2 = fsample(t, ay=4.0, dt='awd', cs=0.0, accel=None)
@@ -61,19 +62,20 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
 
 
 def test_the_trail_fades_with_the_combined_slip():
-    assert fz.trail(0.0) == pytest.approx(0.028)
-    assert fz.trail(1.4) == pytest.approx(0.014)
-    assert fz.trail(3.0) == pytest.approx(0.028 / (1.0 + (3.0 / 1.4) ** 4))
+    h = fz.TP_S_HALF
+    assert fz.trail(0.0) == pytest.approx(fz.TP0)
+    assert fz.trail(h) == pytest.approx(fz.TP0 / 2)
+    assert fz.trail(3.0) == pytest.approx(fz.TP0 / (1.0 + (3.0 / h) ** 4))
     assert fz.trail(3.0) < 0.002
-    assert fz.trail(-1.4) == fz.trail(1.4)
+    assert fz.trail(-h) == fz.trail(h)
     rack = fe.ForzaRack()
     rack.reset(CAR)
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     hi = rack._front(fsample(ay=6.0, cs=3.0), None, None)
-    assert lo == pytest.approx(-(0.027 + 0.028) * 1400.0 * 0.53 * 6.0)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0)) * 1400.0 * 0.53 * 6.0)
+    assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_FACTOR * 1400.0 * 0.53 * 6.0)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0)) * fz.LATERAL_FACTOR * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
-    assert rack._front(both, None, None) == pytest.approx(-(0.027 + 0.014) * 1400.0 * 0.53 * 6.0)
+    assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_FACTOR * 1400.0 * 0.53 * 6.0)
 
 
 def test_the_constants_ratio_14_wheel_375_assist_1_model():
@@ -653,9 +655,9 @@ def test_forza_plays_our_force_through_the_chain(tmp_path):
     assert st.state == 'replace' and st.active and st.ready and st.game == 'forza-fh'
     assert levels() == [0]                                              # the game is muted, as for ACR
     n = len(forces())
-    drive.run(1.0)
+    drive.run(4.0)                                                      # past one full 0.3 Hz swing in a_y
     assert len(forces()) - n > 700                                      # written every pass, not at the packet rate
-    values = forces()[-700:]
+    values = forces()[-3000:]
     assert max(values) > 0.03 * FULL and min(values) < -0.03 * FULL
     step = max(abs(b - a) for a, b in zip(values, values[1:]))
     assert step < 0.04 * FULL                                           # smooth between the 60/s packets
