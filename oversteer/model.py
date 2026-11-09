@@ -115,6 +115,7 @@ class Model:
         'countersteer_column': None,
         'countersteer_align': None,
         'countersteer_friction_removal': None,
+        'countersteer_fast_spin_relief': None,
     }
 
     types = {
@@ -186,6 +187,7 @@ class Model:
         'countersteer_column': 'boolean',
         'countersteer_align': 'boolean',
         'countersteer_friction_removal': 'boolean',
+        'countersteer_fast_spin_relief': 'boolean',
     }
 
     # pedal response: (start %, end %, sensitivity), in pedal-travel terms
@@ -351,6 +353,8 @@ class Model:
         # on, friction removal (a column lighter than the wheel's own) off
         for key, on in cls.DYNAMICS_KEYS.items():
             data[key] = on if supported else None
+        # Fast-spin relief (gear-driven wheels): the column's damping is the total, off by default
+        data['countersteer_fast_spin_relief'] = False if supported else None
         return data
 
     def pedal_bit(self, name):
@@ -1103,6 +1107,14 @@ class Model:
         if self.set_if_changed(key, bool(value)) and self.ui is not None:
             self.ui.controller.apply_countersteer_dynamics()
 
+    def set_countersteer_fast_spin_relief(self, value):
+        """Fast-spin relief on or off: on a gear-driven wheel the real column's damping is the total, not added to the wheel's own."""
+        if self.set_if_changed('countersteer_fast_spin_relief', bool(value)) and self.ui is not None:
+            self.ui.controller.apply_countersteer_fast_spin_relief()
+
+    def get_countersteer_fast_spin_relief(self):
+        return bool(self.data.get('countersteer_fast_spin_relief'))
+
     def get_countersteer_dynamics(self):
         """(column feel, local aligning spring, friction removal) for the engine."""
         return tuple(bool(self.data.get(key)) if self.data.get(key) is not None else default
@@ -1375,6 +1387,7 @@ class Model:
         self.ui.set_countersteer_lightness(data['countersteer_lightness'])
         self.ui.set_countersteer_toggles(data['countersteer_column'], data['countersteer_align'],
                                          data['countersteer_friction_removal'])
+        self.ui.set_countersteer_fast_spin_relief(data['countersteer_fast_spin_relief'])
         # Last: it greys out the strength controls when force feedback is off
         self.ui.set_ffb_enabled(data['ffb_enabled'])
         self.update_save_profile_button()

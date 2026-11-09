@@ -41,7 +41,7 @@ COUNTERSTEER_NUMBERS = {'countersteer_strength': (STRENGTH_MIN, STRENGTH_MAX), '
                         'countersteer_texture': (0, 100),
                         'countersteer_linearity': (0, 100), 'countersteer_lightness': (0, 100)}
 COUNTERSTEER_TOGGLES = ('countersteer_column', 'countersteer_align', 'countersteer_friction_removal')
-COUNTERSTEER_FLAGS = ('countersteer_ffb', 'countersteer_drive_pull', 'countersteer_kick', 'countersteer_gear_guard') + COUNTERSTEER_TOGGLES + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
+COUNTERSTEER_FLAGS = ('countersteer_ffb', 'countersteer_drive_pull', 'countersteer_kick', 'countersteer_gear_guard') + COUNTERSTEER_TOGGLES + ('countersteer_fast_spin_relief',) + tuple('countersteer_texture_' + p for p in Model.TEXTURE_PARTS)
 # Greyed in the GTK window while force feedback is off (GtkUi.set_ffb_enabled)
 NEEDS_FFB = ('ff_gain', 'app_gain', 'inertia_mode') + LEVELS
 
@@ -517,6 +517,7 @@ class Bridge:
             settings['countersteer_rim_mm']['value'] = model.get_countersteer_rim_mm()      # 0 (the table's) shown as its figure
         for key in COUNTERSTEER_TOGGLES:
             flag(key, on)
+        flag('countersteer_fast_spin_relief', on)
         flag('countersteer_drive_pull', on)
         flag('countersteer_kick', on)
         flag('countersteer_gear_guard', on)

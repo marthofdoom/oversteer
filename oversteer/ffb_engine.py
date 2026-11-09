@@ -2651,6 +2651,7 @@ class FfbEngine:
         self._car_wheel_req = None       # the car's steering wheel diameter (mm, profile INI only) from the GUI
         self._power_class_req = None     # the assist class (rally / street / off, profile INI only) from the GUI
         self._dyn = None                 # ffb_dynamics.DynStage of the wheel (the driver's virtual steering dynamics)
+        self._fast_spin_relief = False   # "Fast-spin relief" (the profile's): on a gear-driven wheel the column's damping is the total
         self._dyn_req = (True, True, False)     # column feel, local aligning spring, friction removal (the profile's)
         self._wheel_req = None           # the stored wheel calibration result, for ffb_dyn_wheel and the wheel's own figures
         self._pos_req = None             # () -> (ABS_X 0..65535, ...) of the physical wheel, or None (ffb_dynamics.FrameCheck)
@@ -2796,6 +2797,12 @@ class FfbEngine:
         """The profile's switches for the driver's virtual steering dynamics: the car's column feel (damping and
         friction), the local aligning spring, and friction removal (a column lighter than the wheel's own)."""
         self._dyn_req = (bool(column), bool(align), bool(removal))
+        self._wake.set()
+
+    def set_fast_spin_relief(self, on):
+        """The profile's "Fast-spin relief": on a gear-driven wheel the knee mapping's column damping becomes a total (the real
+        column at this rim), so the driver takes the wheel's extra drag off instead of the column's damping adding to it."""
+        self._fast_spin_relief = bool(on)
         self._wake.set()
 
     def set_position_source(self, source):
@@ -3451,8 +3458,9 @@ class FfbEngine:
         if want and not model.align_on:
             model.align_writer = self._align_write
         model.align_on = want
-        stage.column(t, model.impedance(), model.wheel_peak, model.damping_scale(), not model.classic(),
-                     ffb_carprops.rack_preload() * model.rho())
+        relief = self._fast_spin_relief and self._gear_drive == 'gear' and not model.classic()
+        stage.column(t, model.impedance(), model.wheel_peak, model.rho() ** 2 if relief else model.damping_scale(),
+                     not model.classic() and not relief, ffb_carprops.rack_preload() * model.rho())
 
     def _align_write(self, theta_a_deg, k_fs, tau_fs):
         """RackForce's spring to the driver (its k already carries the overall steering strength, like the rest of the

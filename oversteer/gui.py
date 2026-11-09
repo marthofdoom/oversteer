@@ -812,6 +812,10 @@ class Gui:
         """The driver's virtual steering dynamics switches (column feel, local aligning spring, friction removal) to the engine."""
         self.ffb_engine.set_dynamics(*self.model.get_countersteer_dynamics())
 
+    def apply_countersteer_fast_spin_relief(self):
+        """Fast-spin relief (FFB tab) to the engine."""
+        self.ffb_engine.set_fast_spin_relief(self.model.get_countersteer_fast_spin_relief())
+
     def apply_countersteer_lightness(self):
         """Forza Horizon's understeer lightness (FFB tab, under the Countersteer switch) to the engine."""
         self.ffb_engine.set_lightness(self.model.get_countersteer_lightness())

@@ -1280,3 +1280,59 @@ def test_old_readers_skip_the_new_channels(tmp_path):
     spec.loader.exec_module(mod)
     raw, played, _header = mod._levels(path)
     assert raw == [(1.0, -300.0)] and played is None
+
+
+# -- fast-spin relief --
+
+def test_fast_spin_relief_targets_are_the_real_column_and_not_additive():
+    own = (920, 670, 500, 1250, 5000)
+    rho2 = (279.0 / 350.0) ** 2
+    real = 0.17 * math.pi / 180 / 3.5 * 1e6 * rho2
+    relief = fd.column_targets(0.3, 3.5, own, damping_scale=rho2, additive=False)[0]
+    assert relief == round(real) and relief < own[0]                # the driver renders target - own < 0: it takes drag off
+    added = fd.column_targets(0.3, 3.5, own, damping_scale=0.15 * rho2, additive=True)[0]
+    assert added > own[0]                                           # (today: the column's share on top of the wheel's own)
+
+
+def test_fast_spin_relief_reaches_the_driver_for_a_gear_wheel_only(tmp_path):
+    path = dyn_wheel(tmp_path, ffb_dyn_wheel='920 670 500 1250 5000\n')
+    engine, t = playing_engine(path)
+    engine.set_wheel_result(dict(G29, damping=0.00092))
+    engine.set_column_damping(15)
+    t = feed(engine, t, 0.5)
+    assert engine._dyn.own[0] == 920
+    off = int(open(path + '/ffb_dyn_damping').readline())
+    assert off == fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, engine._dyn.own,
+                                    damping_scale=engine.model.damping_scale(), additive=True)[0] and off > 920
+    engine.set_fast_spin_relief(True)
+    t = feed(engine, t, 0.5)
+    on = int(open(path + '/ffb_dyn_damping').readline())
+    assert on == fd.column_targets(engine.model.impedance(), engine.model.wheel_peak, engine._dyn.own,
+                                   damping_scale=engine.model.rho() ** 2, additive=False)[0] and on < 920
+    engine.set_gear_guard(False, 61, 'belt')
+    engine.set_fast_spin_relief(True)
+    t = feed(engine, t, 0.5)
+    assert int(open(path + '/ffb_dyn_damping').readline()) == off      # a belt wheel: unchanged
+    engine.set_fast_spin_relief(False)
+    engine.set_gear_guard(False, 61, 'gear')
+    t = feed(engine, t, 0.5)
+    assert int(open(path + '/ffb_dyn_damping').readline()) == off      # off: bit-identical
+    engine.stop()
+
+
+def test_fast_spin_relief_setting_round_trips(tmp_path):
+    from oversteer.model import Model
+    from tests.fake_wheel import FakeDevice
+    assert Model._texture_defaults(True)['countersteer_fast_spin_relief'] is False
+    assert Model._texture_defaults(False)['countersteer_fast_spin_relief'] is None
+    assert Model.types['countersteer_fast_spin_relief'] == 'boolean'
+    device = FakeDevice(ext_force_support=True)
+    model = Model(device, None)
+    assert model.get_countersteer_fast_spin_relief() is False
+    model.set_countersteer_fast_spin_relief(True)
+    profile = str(tmp_path / 'p.ini')
+    model.save(profile)
+    fresh = Model(device, None)
+    fresh.load(profile)
+    assert fresh.get_countersteer_fast_spin_relief() is True
+    assert fresh.get_countersteer_dynamics() == (True, True, False)
