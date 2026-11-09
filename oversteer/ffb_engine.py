@@ -1954,7 +1954,7 @@ class ForzaRack(RackForce):
     SLIP_RAD = -0.2                    # rad of kinematic front slip per unit of Forza's normalised slip angle (corr -0.93 over 2 drives)
     AY_LEVEL_S = 0.5                     # s: what is slower than this comes from a_y, what is faster from v r
     VR_GAIN = 0.8                        # a_y over v r, measured 0.78 on 20261104-230426
-    YAW_WEIGHT = 0.6                     # the yaw acceleration's weight in Fy_f (ffb_forza.DI: with the front slip's changes, replayed on 20261104-230426, steering to force 50 ms, 0 ms behind the game's force, the force's rate 3.0 against 5.3 FS/s at 2.0)
+    YAW_WEIGHT = 1.0                     # Iz / (m a b): 0.95-1.05 from ACR's front and rear tyre forces separately (Fabia, Iz about 2100 kg m2)
     SLIP_SCALE = 0.5                     # Forza's normalised slip angle at which the tyre curve bends
     SLIP_GAIN0 = -13.5                   # m/s^2 of a_y per unit of it, before the car's own is learnt (measured 20261104-230426)
     SLIP_GAIN_S = 20.0                   # s: the regression's memory
