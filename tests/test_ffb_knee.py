@@ -79,11 +79,13 @@ def test_the_assisted_driver_torque_never_passes_the_top_and_round_trips():
         assert cp.driver_slope(tc, speed, 1.0) == pytest.approx(d, rel=1e-3)
 
 
-def test_the_rally_top_end_is_7_and_street_2_and_off_is_unassisted():
-    assert cp.power_class() == 'rally' and cp.hyd_top() == 7.0 and wt.HYD_TOP_NM == 7.0
-    assert (cp.HYD_K, cp.HYD_R) == (3.0, 4.0)
-    assert cp.driver_from_column(1e6, 25.0, 1.0) < 7.0 and cp.driver_from_column(1e6, 25.0, 1.0) > 6.99
-    assert cp._hyd(2.9) == 2.9                                                     # the low and mid range are the road curve's
+def test_the_rally_top_end_is_5_and_street_2_and_off_is_unassisted():
+    # (rally fitted to a real rally car's hand torque, 2026-11-08: k 3, r 2, gain 0.9)
+    assert cp.power_class() == 'rally' and cp.hyd_top() == 5.0 and wt.HYD_TOP_NM == 5.0
+    assert (cp.HYD_K, cp.HYD_R) == (3.0, 2.0)
+    top = cp.driver_from_column(1e6, 25.0, 1.0)
+    assert top < 5.0 and top > 4.99
+    assert cp._hyd(2.9) == pytest.approx(2.9 * cp.HYD_GAIN)                                               # the low and mid range are the road curve's
     rally_low = cp.driver_from_column(3.0, 25.0, 1.0)
     assert cp.set_power_class('street') == 'street' and cp.hyd_top() == 2.0 and wt.HYD_TOP_NM == 2.0
     assert cp.driver_from_column(1e6, 25.0, 1.0) < 2.0
@@ -97,7 +99,7 @@ def test_the_top_torque_follows_the_class():
     rack = fe.RackForce()
     rack.assist = 1.0
     rack._boost = 1.0
-    assert rack.top_torque() == 7.0
+    assert rack.top_torque() == cp.hyd_top() == 5.0
     cp.set_power_class('street')
     assert rack.top_torque() == 2.0
     cp.set_power_class('off')
