@@ -901,6 +901,20 @@ class Gui:
         return {'calibration': self.wheel_calibration_text(), 'car': car, 'wheel': wheel,
                 'sensitivity': self.sensitivity_warning()}
 
+    def countersteer_hand_force(self):
+        """The FFB tab's hand-force line: the rim and car wheel the mapping uses now, each with its source, and the
+        scale between them ('' before the engine reports). The game doesn't send the car's wheel size: never "detected"."""
+        values = getattr(self.ffb_engine, 'hand_force', lambda: None)()
+        if not values:
+            return ''
+        rim_src = {'profile': _("profile"), 'table': _("wheel table")}.get(values['rim_src'], _("default"))
+        if values['car_src'] == 'profile':
+            car_src = _("profile")
+        else:
+            car_src = _("Forza default") if values.get('game') == 'forza-fh' else _("default")
+        return _("Hand force: rim {rim:.0f} mm ({rim_src}), car wheel {car:.0f} mm ({car_src}), x {rho:.2f}").format(
+            rim=values['rim_mm'], rim_src=rim_src, car=values['car_wheel_mm'], car_src=car_src, rho=values['rho'])
+
     def _position_source(self, device):
         """For the engine: a callable giving the wheel's ABS_X (0..65535) now, None when it can't be read (see
         ffb_dynamics.position_source)."""

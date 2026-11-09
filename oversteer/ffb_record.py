@@ -12,7 +12,8 @@ Channels (values): game_ffb_raw (level, count, effect id), ext_force (value writ
 as written, uFS and 1e-4 FS units of the driver), ffb_dyn_damping / ffb_dyn_friction (value written), ffb_dyn_wheel
 (damping, inertia, friction, breakaway, latency as written), ffb_align_read (k_limit, range), ffb_hands (torque
 per mille, hands on), ffb_dyn_live (friction, damping, seconds), ffb_thermal (mean square, derating, gain), off
-(the stage set back to 0). `load()` reads one back.
+(the stage set back to 0), game_ffb_level / game_const_scale (the driver's value read back, percent; on change and at
+least once a second; files from before have neither, readers skip names they do not know). `load()` reads one back.
 
 Settings: the header's "settings" is the engine's snapshot (`settings_source`) when the file starts. A value that
 changes later cannot be a record (the format is numbers only), so `FfbSampler.check_settings` logs an INFO line with the
@@ -35,7 +36,7 @@ RECORD = struct.Struct('<dB5d')
 SUFFIX = '.ffb.gz'
 CHANNELS = {name: i for i, name in enumerate((
     'game_ffb_raw', 'ext_force', 'ffb_align', 'ffb_dyn_damping', 'ffb_dyn_friction', 'ffb_dyn_wheel', 'ffb_align_read',
-    'ffb_hands', 'ffb_dyn_live', 'ffb_thermal', 'off'), 1)}
+    'ffb_hands', 'ffb_dyn_live', 'ffb_thermal', 'off', 'game_ffb_level', 'game_const_scale'), 1)}
 NAMES = {i: name for name, i in CHANNELS.items()}
 
 current = None                           # the running FfbSampler, None when nothing is recorded
