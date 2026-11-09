@@ -345,19 +345,20 @@ def simulate_rows(items, game, power_class, peak=None):
     """Today's rack over the samples as simulate does (two passes, align_on off), one row per scored sample: the rim force in
     Nm (share x peak), the front axle's lateral force Fyf (N) and the raw front slip, as the game's rack believes them:
       ACR  |tyre_fy[0] + tyre_fy[1]|, the game's own (with the columns for Newton's check and the peak per stretch);
-      Forza  the value ffb_forza.front_lateral gave ForzaRack._front for the sample (recorded by wrapping the call);
+      Forza  the Fy_f ForzaRack._front gave ffb_forza.kingpin for the sample (recorded by wrapping the call: the slip
+             lead calls front_lateral too, and _front may play the lead's value);
       RBR  rack.fy_f, what RbrRack._derive made of the same Newton route.
     Returns {'cols': {name: array}, 'theta': array, 'info': {...}, 'mass': (kg or None, text)}. Call inside _sandbox()."""
     from oversteer import car_data, ffb_engine as fe, ffb_forza
     rack, fresh, feed = _build_rack(game, power_class, peak)
     slip_fn = THETA_TABLE[game][0]
     last = {}
-    orig = ffb_forza.front_lateral
+    orig = ffb_forza.kingpin
     if game == 'forza-fh':
         def recorder(*a, **k):
-            last['v'] = orig(*a, **k)
-            return last['v']
-        ffb_forza.front_lateral = recorder
+            last['v'] = a[0] if a else k['fy']
+            return orig(*a, **k)
+        ffb_forza.kingpin = recorder
     names = ('t', 'nm', 'fyf', 'slip', 'ay', 'yaw', 'bl', 'fysum', 'sa0', 'sa1', 'fy0', 'fy1', 'fz0', 'fz1')
     cols = {k: [] for k in names}
     car, scored, scored_mass = None, 0, None
@@ -407,7 +408,7 @@ def simulate_rows(items, game, power_class, peak=None):
             learnt['mass'] = scored_mass
         entry = car_data.entry(rack.car) if game == 'rbr' and getattr(rack, 'car', None) else None
     finally:
-        ffb_forza.front_lateral = orig
+        ffb_forza.kingpin = orig
     cols = {k: np.array(v, float) for k, v in cols.items() if v}
     dt = sample_spacing([t for t, _ in items])
     info = {'game': game, 'class': power_class, 'samples': len(items), 'scored': scored, 'dt': dt, 'learnt': learnt,
@@ -717,6 +718,8 @@ def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None):
                 return rec['fy']
 
             def kp(*a, **k):
+                # the Fy_f the torque got: _front may play the slip lead's Fy_f, and the lead calls front_lateral too
+                rec['fy'] = a[0] if a else k['fy']
                 rec['kp'] = orig_kp(*a, **k)
                 return rec['kp']
             ffb_forza.front_lateral, ffb_forza.kingpin = fl, kp
