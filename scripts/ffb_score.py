@@ -160,11 +160,47 @@ def load_drive(path, limit=None):
 
 # ------------------------------------------------------------------------------------------------ the engine run
 
+STORE_SEED = {'mode': 'empty', 'path': None}    # what _sandbox() seeds the temp car-property store with: 'live' | 'empty' | 'file'
+# (the replay tools choose 'live' with ffb_tools.apply_store_args; the library default stays deterministic)
+
+
+def use_store(empty=False, path=None):
+    """Choose the store the sandbox starts from: the live one (no arguments), none (`empty`) or a file (`path`)."""
+    STORE_SEED['mode'] = 'empty' if empty else ('file' if path else 'live')
+    STORE_SEED['path'] = path
+
+
+def live_store_path():
+    """The newest car-property file of the user's: the data folder's (Flatpak or not) or the Flatpak config folder's."""
+    home = os.path.expanduser('~')
+    app = os.path.join(home, '.var', 'app', 'io.github.berarma.Oversteer')
+    names = (cp.STORE.path or os.path.join(os.environ.get('XDG_DATA_HOME') or os.path.join(home, '.local', 'share'),
+                                           'oversteer', cp.FILE),
+             os.path.join(app, 'data', 'oversteer', cp.FILE), os.path.join(app, 'config', 'oversteer', cp.FILE))
+    found = [n for n in names if os.path.isfile(n)]
+    return max(found, key=os.path.getmtime) if found else None
+
+
+def seed_path():
+    """(path of the file the sandbox store starts from or None, label for the header)."""
+    mode = STORE_SEED['mode']
+    if mode == 'empty':
+        return None, 'empty store'
+    path = STORE_SEED['path'] if mode == 'file' else live_store_path()
+    if path is None or not os.path.isfile(path):
+        return None, 'no store found (%s)' % (path or 'live')
+    return path, 'copy of %s' % path
+
+
 @contextlib.contextmanager
 def _sandbox():
-    """The car-property store and the INI settings away from the user's files (deterministic, nothing written)."""
+    """The car-property store and the INI settings away from the user's files (deterministic, nothing written). The store
+    starts as a COPY of the live one (see use_store; the original is only read); the replay learns into the copy."""
     tmp = tempfile.mkdtemp(prefix='ffb-score-')
     kept = (cp.STORE.path, cp.ASYNC, cp.CONFIG_PATH)
+    src, _label = seed_path()
+    if src:
+        shutil.copyfile(src, os.path.join(tmp, 'props.json'))
     cp.STORE.use(os.path.join(tmp, 'props.json'))
     cp.ASYNC = False
     cp.CONFIG_PATH = os.path.join(tmp, 'no-config.ini')

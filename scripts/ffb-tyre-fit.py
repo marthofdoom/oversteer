@@ -4,12 +4,12 @@
 the top). Stretches whose top bin holds under 1 s or whose envelope still rises over 3 % into the last bin are 'limit not
 reached' and left out of the peak statistics. Per mu band (<.7, .7-1, 1-1.3, >1.3): stretches, median C, mu, peak slip.
 
-    scripts/ffb-tyre-fit.py CAPTURE [CAPTURE ...]
+    scripts/ffb-tyre-fit.py CAPTURE [CAPTURE ...] [--empty-store] [--store PATH]
 
 Slip: ACR mean |tyre_slip_angle| of the fronts (rad); RBR |RbrRack._slip| (kinematic, rad); Forza mean |slip_angle| and,
 separately, mean |combined_slip| of the fronts (normalised). ACR is validated against the tyres' own sum|Fy| / sum Fz and
 its Mz / (mu Fz) and |Mz| / |Fy| are shown against slip / peak. RbrRack.DERIVED_SLIP_PEAK and Forza's theta scale are only
-printed for comparison. Reads only. Full log: ~/.cache/ffb-tyre-fit/latest.log
+printed for comparison. Reads only (the RBR slip runs on a COPY of the live car-property store; --empty-store: none; --store PATH: that file). Full log: ~/.cache/ffb-tyre-fit/latest.log
 """
 import os
 import sys
@@ -21,6 +21,7 @@ import ffb_tools as tools  # noqa: E402
 
 LOG = os.path.expanduser('~/.cache/ffb-tyre-fit/latest.log')
 MIN_SPEED = 8.0
+LAST_CAR = [None]                      # the car of the capture rows() last read
 STRETCH_S = 60.0
 MIN_STRETCH_S = 15.0
 TBINS = [0, .2, .4, .6, .8, 1, 1.5, 1e9]
@@ -51,6 +52,7 @@ def rows(path, game):
     keys = ('t', 'ay', 'slip', 'slip2', 'mu_true', 'mz', 'fy', 'fz')
     out = {k: [] for k in keys}
     for t, s in gen:
+        LAST_CAR[0] = s.car or LAST_CAR[0]
         if (s.speed or 0) < MIN_SPEED or not s.accel or len(s.accel) < 2 or s.accel[1] is None:
             continue
         slip2 = np.nan
@@ -181,7 +183,20 @@ def main(argv=None):
         return 0 if args else 2
     import ffb_parity as fp
     import ffb_score
-    out = []
+    flags = [a for a in args if a.startswith('--')]
+    store = None
+    if '--store' in args:
+        i = args.index('--store')
+        store = args[i + 1] if i + 1 < len(args) else None
+        flags = [a for a in flags if a != '--store']
+        args = args[:i] + args[i + 2:]
+    args = [a for a in args if a != '--empty-store']
+    try:
+        tools.apply_store_args(type('A', (), {'empty_store': '--empty-store' in flags, 'store': store})())
+    except ValueError as e:
+        print('ffb-tyre-fit: %s' % e, file=sys.stderr)
+        return 2
+    out = [ffb_score.seed_path()[1]]
     with ffb_score._sandbox():
         for name in args:
             path = tools.capture_path(name)
@@ -193,7 +208,9 @@ def main(argv=None):
             if game not in ('acr', 'rbr', 'forza-fh'):
                 out.append('%s: game %s not handled' % (base, game))
                 continue
-            out += report(base, game, rows(path, game))
+            r = rows(path, game)
+            out += ['%s: car %s; %s' % (base, LAST_CAR[0], tools.props_line(LAST_CAR[0]))]
+            out += report(base, game, r)
     text = '\n'.join(out)
     print(text)
     os.makedirs(os.path.dirname(LOG), exist_ok=True)

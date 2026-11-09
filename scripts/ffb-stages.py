@@ -16,7 +16,7 @@ seconds as weights) the ratio A/B at each stage in pipeline order, also for |ay|
 --mass-a/b and --ratio-a/b replace the mass and the steering ratio the rack uses (RBR: the car table's mass_kg and DERIVED_RATIO;
 Forza: its mass and ratio; ACR: ratio only, its force takes no mass); the value in force is printed in the header. For ACR the true
 mass is estimated per drive: least squares of the four tyres' summed Fy on ay, |ay| over 3, low yaw acceleration, and its front
-share. Runs inside ffb_score._sandbox(): no user file is touched. Full log: ~/.cache/ffb-stages/latest.log
+share. Runs inside ffb_score._sandbox(): the car properties start from a COPY of the live store (--empty-store: none; --store PATH: that file); no user file is written. Full log: ~/.cache/ffb-stages/latest.log
 """
 import argparse
 import os
@@ -41,8 +41,10 @@ def main(argv=None):
     parser.add_argument('--ratio-a', type=float, metavar='R', help='the steering ratio the A rack uses')
     parser.add_argument('--ratio-b', type=float, metavar='R', help='the steering ratio the B rack uses')
     parser.add_argument('--min-s', type=float, default=1.0)
+    tools.add_store_args(parser)
     args = parser.parse_args(argv)
     try:
+        tools.apply_store_args(args)
         r = tools.stages(args.a, args.vs, args.class_a, args.class_b, args.peak, args.min_s, args.set,
                          (args.mass_a, args.mass_b), (args.ratio_a, args.ratio_b))
     except tools.NoRack as e:

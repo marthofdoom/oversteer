@@ -141,16 +141,67 @@ def simulate(items, game, power_class, peak=None):
                      'learnt': learnt, 'default': fresh, 'car': car, 'peak': rack.wheel_peak}}
 
 
+def add_store_args(parser):
+    """--empty-store and --store PATH for a replay tool (the default: a copy of the live car-property store)."""
+    parser.add_argument('--empty-store', action='store_true', help='replay with an empty car-property store (the defaults), not a copy of the live one')
+    parser.add_argument('--store', metavar='PATH', help='replay with a copy of this car-property file instead of the live one')
+
+
+def apply_store_args(args):
+    """Choose the sandbox's store from the parsed flags; raises ValueError for a missing --store file."""
+    import ffb_score as fs
+    path = getattr(args, 'store', None)
+    if path and not os.path.isfile(path):
+        raise ValueError('no such store file: %s' % path)
+    fs.use_store(empty=bool(getattr(args, 'empty_store', False)), path=path)
+    if not getattr(args, 'empty_store', False) and not path:
+        fs.use_store()
+
+
+def _seed_props():
+    """The cars of the store the sandbox was seeded from, as the file holds them ({} when empty)."""
+    import ffb_score as fs
+    path, _ = fs.seed_path()
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def props_line(car):
+    """'ratio R (source), trail T (source), lock L (source)' for the car: stored in the seed store, else the car table
+    (ratio), else the default."""
+    from oversteer import car_data, ffb_carprops as cp, ffb_engine as fe
+    kept = _seed_props().get(car) if car else None
+    kept = kept if isinstance(kept, dict) else {}
+
+    def val(key, default, fmt, table=None):
+        v = kept.get(key)
+        if isinstance(v, (int, float)):
+            return fmt % v + ' (stored)'
+        if table:
+            return fmt % table + ' (table)'
+        return fmt % default + ' (default)'
+    table = cp.table_ratio(car_data.entry(car)) if car else None
+    return 'start values: ratio %s, trail %s, lock %s' % (
+        val('ratio', fe.RackForce.STEER_RATIO, '%.2f', table), val('trail', cp.default_trail(fe.CASTER_TRAIL), '%.4f'),
+        val('lock', fe.RackForce.ALIGN_LOCK, '%.3f'))
+
+
 def info_lines(name, info):
     """The header lines of one simulated capture, with plain warnings for an unknown car or a value left at its default."""
     learnt = ', '.join('%s %s' % (k, ('%.4g' % v) if v is not None else '-') for k, v in info['learnt'].items())
     lines = ['%s: game %s, power class %s, %d samples, %d scored, spacing %.1f ms, wheel peak %.2f Nm' % (
         name, info['game'], info['class'], info['samples'], info['scored'], info['dt'] * 1e3, info['peak']),
-        '    learnt: %s; car %s' % (learnt, str(info['car'])[:40] if info['car'] else 'unknown')]
+        '    learnt: %s; car %s' % (learnt, str(info['car'])[:40] if info['car'] else 'unknown'),
+        '    ' + props_line(info['car'])]
     if not info['car'] or str(info['car']).endswith('/unknown'):
         lines.append('    WARNING: the car is unknown: the car-specific values are the defaults')
     for k, v in info['learnt'].items():
-        if k != 'trail' and v is not None and info['default'].get(k) is not None and abs(v - info['default'][k]) < 1e-12:
+        if k != 'trail' and not (k == 'ratio' and isinstance(_seed_props().get(info['car']), dict)
+                                 and 'ratio' in _seed_props()[info['car']]) \
+                and v is not None and info['default'].get(k) is not None and abs(v - info['default'][k]) < 1e-12:
             lines.append('    WARNING: %s equals the default %.4g (not learnt from this drive)' % (k, v))
     if not info['scored']:
         lines.append('    WARNING: no sample was scored (rack never ready, or no moving data)')
@@ -175,7 +226,7 @@ def sim_match(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1.0
     import ffb_score as fs
     loader = loader or (lambda path: list(fb._walk(path)[1]))
     game_of = game_of or fp.game_of
-    lines, sides = [], []
+    lines, sides = [fs.seed_path()[1]], []
     with fs._sandbox():
         for tag, names, cls in (('A', a_names, class_a), ('B', b_names, class_b)):
             sims = []
@@ -539,7 +590,7 @@ def force_curve(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1
     from oversteer import wheel_torque as wt
     loader = loader or (lambda path: list(fb._walk(path)[1]))
     game_of = game_of or fp.game_of
-    head, newton, sides = [], [], []
+    head, newton, sides = [fs.seed_path()[1]], [], []
     with fs._sandbox(), overrides(sets) as set_lines:
         head += set_lines
         for tag, names, cls in (('A', a_names, class_a), ('B', b_names, class_b)):
@@ -790,7 +841,7 @@ def stages(a_names, b_names, class_a=None, class_b=None, peak=None, min_s=1.0, s
     import ffb_score as fs
     loader = loader or (lambda path: list(fb._walk(path)[1]))
     game_of = game_of or fp.game_of
-    head, mass_out, sides = [], [], []
+    head, mass_out, sides = [fs.seed_path()[1]], [], []
     with fs._sandbox(), overrides(sets) as set_lines:
         head += set_lines
         for n, tag in enumerate('AB'):
