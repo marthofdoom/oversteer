@@ -20,6 +20,7 @@ Forza sends no tyre forces, so the front kingpin torque comes from Newton (analy
   10 ms at 60/s). No extrapolation: it lags the packets by about a packet's interval and is smooth."""
 import collections
 import math
+import re
 
 from . import ffb_carprops
 
@@ -40,6 +41,12 @@ LATERAL_DEFAULT = 0.92                   # until the grip is known
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
+
+
+def power_index(sample):
+    """The tune's PI from the packet's `car_class` ('class:5 pi:884 group:26'), None without one. A tune edit changes it."""
+    m = re.search(r'\bpi:(\d+)', sample.car_class or '')
+    return int(m.group(1)) if m else None
 
 
 def finite(x):
@@ -192,7 +199,10 @@ class MassLearner:
     are exponentially weighted over TAU s; [1, v^2] is partialled out, the engine's inertia J (w_e / v)^2 a taken
     off, and m = sqrt(m_ols m_reverse). Accepted when r >= R_MIN, sd(a) >= SD_MIN and QUALIFY_S s have qualified (counted
     without the decay);
-    clamped to LIMITS, slewed SLEW kg/s toward it, from `prior` (the stored mass, else PRIOR)."""
+    clamped to LIMITS. Without a mass the car has not been learnt (from `prior`: PRIOR): the mass is slewed SLEW kg/s toward the
+    accepted estimate until it gets there. From then on, and from the start with a stored mass, the mass is held, and every
+    UPDATE_S s of driving (speed over V_MIN) the next accepted estimate moves it by at most UPDATE_STEP of itself toward the
+    estimate (`moved` then holds (old, new, estimate) for the caller to log and save): one bad stretch cannot swing it."""
 
     PRIOR = 1400.0
     LIMITS = (700.0, 2600.0)
@@ -204,7 +214,7 @@ class MassLearner:
     SLIP_ANGLE = 0.5
     SLIP_RATIO = 0.3
     SUSP = (0.01, 0.99)
-    AY_MAX_G = 3.0                       # m/s^2
+    AY_MAX_G = 6.0                       # m/s^2: (3 left 10 s of 20 qualifying in 215 s of 20261105-202640's car 2470 and 8 s of ACR's Fabia, 20261105-162134; the estimate is flat from 6 to 10: 2470 1417-1423 kg, ACR 925-940 kg on its tyre-force input; 6 is the first to qualify both)
     GAP = 0.05                           # s
     GEAR_WINDOW = 0.15                   # s
     GRADE_MAX = 0.3
@@ -212,10 +222,16 @@ class MassLearner:
     SD_MIN = 0.8                         # m/s^2: the spread of a (partialled): without it the slope is nothing
     QUALIFY_S = 20.0                     # s of qualifying samples (weighted)
     SOLVE_EVERY = 0.25                   # s
+    UPDATE_S = 300.0                     # s of driving between two updates of a held mass
+    UPDATE_STEP = 0.05                   # of the mass: the most one update moves it
 
     def __init__(self, mass=None):
         self.mass = float(mass) if mass else self.PRIOR
         self.known = bool(mass)
+        self._prior = float(mass) if mass else self.PRIOR
+        self.holding = bool(mass)        # the mass is held and moves only at the updates (a learnt car), else it slews to the first estimate
+        self.moved = None                # (old, new, estimate) of the last update, until the caller takes it
+        self.driven = 0.0                # s of driving since the last update (or the start)
         self.r = self.sd = self.m_ols = self.m_rev = None
         self.estimate = None             # sqrt(m_ols m_rev) of the last solve, accepted or not (diagnostic)
         self.qualified = 0.0             # s of qualifying samples seen (not decayed)
@@ -269,6 +285,8 @@ class MassLearner:
             self._gear = sample.gear
             return False
         dt = gt - prev[0]
+        if v > self.V_MIN:
+            self.driven += dt
         if sample.gear != self._gear:
             self._gear, self._gear_at = sample.gear, gt
             self._pending.clear()        # the samples within GEAR_WINDOW before it do not count either
@@ -329,10 +347,21 @@ class MassLearner:
         if not (self.r >= self.R_MIN and self.sd >= self.SD_MIN and self.m_ols > 0.0 and self.m_rev and self.m_rev > 0.0):
             return
         target = min(max(math.sqrt(self.m_ols * self.m_rev), self.LIMITS[0]), self.LIMITS[1])
+        self.accepted = True
+        if self.holding:
+            if self.driven >= self.UPDATE_S:
+                step = self.UPDATE_STEP * self.mass
+                old = self.mass
+                self.mass += min(max(target - old, -step), step)
+                self.driven = 0.0
+                self.moved = (old, self.mass, target)
+            return
         step = self.SLEW * elapsed
         self.mass += min(max(target - self.mass, -step), step)
         self.known = True
-        self.accepted = True
+        if abs(target - self.mass) < 1e-6:
+            self.holding, self.driven = True, 0.0
+            self.moved = (self._prior, self.mass, target)
 
 
 class SlipLead:

@@ -88,10 +88,10 @@ def test_the_constants_ratio_14_wheel_375_assist_1_model():
 
 # -- the mass --
 
-def pulls(learner, mass=1300.0, seconds=60.0, hz=60.0, c0=250.0, c2=0.4, j=0.3, **gate):
+def pulls(learner, mass=1300.0, seconds=60.0, hz=60.0, c0=250.0, c2=0.4, j=0.3, t0=0.0, **gate):
     """A drive under power with the car's acceleration swinging +-2 m/s^2: the power it takes is m a + c0 + c2 v^2 at the wheels
     plus the engine's inertia."""
-    t, v, n = 0.0, 22.0, int(seconds * hz)
+    t, v, n = t0, 22.0, int(seconds * hz)
     for i in range(n):
         a = 1.8 * math.sin(2 * math.pi * t / 7.0) + 0.7 * math.sin(2 * math.pi * t / 2.3)
         v += a / hz
@@ -110,12 +110,14 @@ def test_the_mass_learner_converges_on_synthetic_pulls():
     learner = pulls(fz.MassLearner())
     assert learner.accepted and learner.r >= 0.85 and learner.sd >= 0.8
     assert learner.mass == pytest.approx(1300.0, rel=0.05)
-    # from a stored mass it holds, and the slew is 50 kg/s
+    assert learner.holding and learner.moved is not None       # (reached the estimate: held from now on)
+    # the first estimate of a car without a mass slews at 50 kg/s
+    slew = fz.MassLearner()
+    pulls(slew, seconds=25.0)
+    assert slew.mass <= fz.MassLearner.PRIOR + 50.0 * 25.0 + 1e-6
+    # from a stored mass it holds, and moves only at the updates (below)
     other = pulls(fz.MassLearner(1290.0), seconds=40.0)
-    assert other.mass == pytest.approx(1300.0, rel=0.05)
-    slow = fz.MassLearner(700.0)
-    pulls(slow, seconds=25.0)
-    assert slow.mass <= 700.0 + 50.0 * 25.0 + 1e-6
+    assert other.accepted and other.mass == 1290.0 and other.moved is None
 
 
 def test_the_mass_learner_waits_for_enough_clean_time_and_swing():
@@ -132,7 +134,7 @@ def test_the_mass_learner_waits_for_enough_clean_time_and_swing():
 @pytest.mark.parametrize('gate', [
     {'brake': 0.3}, {'clutch': 0.5}, {'handbrake': 1.0}, {'slip_angle': (0.6, 0.0, 0.0, 0.0)},
     {'slip_ratio': (0.0, 0.0, 0.4, 0.0)}, {'susp_norm': (0.5, 0.5, 0.5, 0.995)}, {'susp_norm': (0.005, 0.5, 0.5, 0.5)},
-    {'accel': (0.0, 3.5, 0.0)}, {'speed': 7.0}])
+    {'accel': (0.0, 6.5, 0.0)}, {'speed': 7.0}])
 def test_the_mass_learner_rejects_gated_samples(gate):
     learner = pulls(fz.MassLearner(), seconds=45.0, **gate) if 'speed' not in gate else fz.MassLearner()
     if 'speed' in gate:
@@ -140,6 +142,22 @@ def test_the_mass_learner_rejects_gated_samples(gate):
             t = i / 60.0
             learner.add(t, fsample(t, speed=7.0, power=50000.0, rpm=2000.0))
     assert learner._w == 0.0 and not learner.accepted and learner.mass == fz.MassLearner.PRIOR
+
+
+def test_a_held_mass_moves_5_percent_at_most_every_5_minutes_of_driving():
+    learner = pulls(fz.MassLearner(1000.0), seconds=290.0)            # 290 s of driving: no update yet
+    assert learner.accepted and learner.mass == 1000.0 and learner.moved is None
+    pulls_more = pulls(learner, seconds=30.0, t0=290.5)                          # past 300 s: one update, 5 % toward ~1300 kg
+    assert pulls_more.moved is not None
+    old, new, estimate = pulls_more.moved
+    assert old == 1000.0 and new == pytest.approx(1050.0) and estimate == pytest.approx(1300.0, rel=0.05)
+    assert pulls_more.driven < 30.0                                     # the clock started again
+    pulls_more.moved = None
+    pulls(pulls_more, seconds=60.0, t0=321.0)
+    assert pulls_more.moved is None and pulls_more.mass == pytest.approx(1050.0)
+    # an estimate within the step is taken whole
+    near = pulls(fz.MassLearner(1290.0), seconds=330.0)
+    assert near.moved is not None and near.mass == pytest.approx(near.moved[2]) and abs(near.mass - 1290.0) < 0.05 * 1290.0
 
 
 def test_a_gear_change_and_a_gap_drop_their_samples():
@@ -177,6 +195,38 @@ def test_the_mass_is_clamped_and_stored_per_car(tmp_path):
         ffb_carprops.STORE.use(str(tmp_path / 'props.json'))
         rack.reset(CAR)
         assert rack.mass == 1273.4 and rack.mass_l.known
+    finally:
+        ffb_carprops.ASYNC = old
+
+
+def pi_sample(car, pi, t=0.0):
+    s = fsample(t, power=50000.0)
+    s.car, s.car_class = car, 'class:5 pi:%d group:26' % pi
+    return s
+
+
+def test_the_mass_is_kept_per_tune_with_the_car_as_the_fallback(tmp_path):
+    assert fz.power_index(pi_sample(CAR, 884)) == 884
+    assert fz.power_index(fsample(0.0)) is None
+    ffb_carprops.STORE.use(str(tmp_path / 'props.json'))
+    old = ffb_carprops.ASYNC
+    ffb_carprops.ASYNC = False
+    try:
+        store = ffb_carprops.STORE
+        store.set_mass(CAR, 1200.0)                                   # an entry from before masses were per tune
+        assert store.get_mass(CAR, 884) == 1200.0 and store.get_mass(CAR) == 1200.0
+        store.set_mass(CAR, 1500.0, 884)
+        store.put(CAR, 0.027, 0.0155, force=True)                       # (the write is throttled)
+        assert store.get_mass(CAR, 884) == 1500.0 and store.get_mass(CAR, 700) == 1200.0 and store.get_mass(CAR) == 1200.0
+        store.use(str(tmp_path / 'props.json'))                       # read back from the file
+        assert store.get_mass(CAR, 884) == 1500.0 and store.get_mass(CAR, 700) == 1200.0
+        rack = fe.ForzaRack()
+        rack.feed(0.0, pi_sample(CAR, 884), None)
+        assert rack.mass == 1500.0 and rack.mass_l.holding
+        rack.feed(0.02, pi_sample(CAR, 700, 0.02), None)               # a tune edit: the other tune's mass, the car's until it has one
+        assert rack.mass == 1200.0
+        rack.feed(0.04, pi_sample(CAR, 884, 0.04), None)
+        assert rack.mass == 1500.0
     finally:
         ffb_carprops.ASYNC = old
 
