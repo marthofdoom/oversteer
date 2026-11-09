@@ -444,3 +444,43 @@ def test_the_live_store_is_copied_never_written(tmp_path):
     finally:
         fs.use_store(empty=True)
     assert (path.read_bytes(), os.stat(path).st_mtime_ns) == before
+
+
+def _held_grid(opposite):
+    """60 Hz grid: a held wheel, yaw rate peaking at 5 s then falling, |ay| falling; the force relaxes or (opposite) reverses."""
+    n = 60 * 10
+    t = np.arange(n) / 60.0
+    yaw = np.exp(-((t - 5.0) / 1.0) ** 2) * 0.8 * np.ones(n)
+    ay = 8.0 * np.exp(-((t - 4.5) / 1.0) ** 2) * np.ones(n)
+    force = 2.0 * np.where(t < 5.0, 1.0, np.exp(-(t - 5.0) / 2.0))
+    if opposite:
+        force = force - 3.0 * np.clip((t - 5.0) / 0.3, 0, 1) * (t >= 5.0)
+    return {'t': t, 'yaw': yaw, 'ay': ay, 'F': force, 'ok': np.ones(n, bool), 'steer': np.full(n, 0.2),
+            'yawacc': np.gradient(yaw) * 60.0, 'steerrate': np.zeros(n), 'speed': np.full(n, 30.0),
+            'brake': np.zeros(n), 'throttle': np.zeros(n)}
+
+
+def test_settle_finds_a_held_wheel_and_the_opposite_pull():
+    comp = _load('ffb_components_launcher', 'ffb-components.py')
+    plain = comp.settle_events(_held_grid(False))
+    assert plain['n'] == 1 and plain['force'][0.3][0] > 0 and plain['force'][0.0][0] == pytest.approx(2.0, abs=0.1)
+    opp = comp.settle_events(_held_grid(True))
+    assert opp['n'] == 1 and opp['force'][0.5][0] < 0
+    g = _held_grid(False)
+    g['steer'] = 0.2 + 0.3 * np.sin(np.arange(len(g['t'])) / 60.0 * 6)             # the driver keeps steering: no held settle
+    assert comp.settle_events(g)['n'] == 0
+
+
+def test_inventory_marks_missing_present_and_absent_forces():
+    inv = _load('ffb_inventory_launcher', 'ffb-inventory.py')
+    rng = np.random.default_rng(7)
+    n = 6000
+    g = {k: rng.normal(size=n) for k in ('ay', 'yawacc', 'steerrate', 'brake', 'throttle', 'load_sum')}
+    g.update(t=np.arange(n) / 60.0, ok=np.ones(n, bool), speed=np.full(n, 30.0), steer=np.zeros(n), yaw=np.zeros(n))
+    g['F'] = 1.0 * tools.band_of(g['ay'], 10, 60) + 0.001 * rng.normal(size=n)          # follows ay only
+    res = inv.analyse('test', g, ['fx_diff', 'mz_front'])
+    assert inv.status(res['rows']['ay']) == 'in force'
+    assert inv.status(res['rows']['fx_diff']) == 'MISSING IN DATA' and inv.status(res['rows']['mz_front']) == 'MISSING IN DATA'
+    assert inv.status(res['rows']['throttle']) == 'IN DATA, NOT IN FORCE'
+    text = '\n'.join(inv.table([('x', res)]))
+    assert 'MISSING IN DATA' in text and 'held-wheel settle' in text

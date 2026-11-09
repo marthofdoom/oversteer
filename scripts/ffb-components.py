@@ -3,7 +3,9 @@
 acceleration, brake, throttle, |steer rate| and, where the capture has them, front Fx difference, front load sum, front Mz),
 an errors-in-variables check on yaw acceleration, and the settle-after-a-turn events (does the force flip sign?).
 
-    scripts/ffb-components.py CAPTURE [CAPTURE ...]
+    scripts/ffb-components.py [--settle] CAPTURE [CAPTURE ...]
+
+--settle: only the held-wheel settle (stacked on the yaw rate's peak: is there an opposite pull as the car settles?).
 
 CAPTURE: a name in the captures folder or a full path. Speed over 12 m/s, a 60 Hz grid, force in Nm at the hands (recorded
 share x 3.08). Reads only. Full log: ~/.cache/ffb-components/latest.log
@@ -19,6 +21,9 @@ import ffb_tools as tools  # noqa: E402
 
 LOG = os.path.expanduser('~/.cache/ffb-components/latest.log')
 MIN_SPEED = 12.0
+SETTLE_TIMES = (-0.2, 0.0, 0.1, 0.2, 0.3, 0.5, 0.8)      # s from the yaw rate's peak
+HELD_RATE = 0.02                                         # |steer rate| limit, full lock (steer = +-1) per second
+HELD_LOOSER = (0.05, 0.10, 0.20, 0.30)                              # shown too: how the answer moves when the wheel is held less strictly
 
 
 def _pair(v, f):
@@ -103,15 +108,79 @@ def report(name, game, g, missing):
     return lines
 
 
+def settle_events(g, min_yaw=0.3, min_force=0.2, held=HELD_RATE, times=SETTLE_TIMES, hz=tools.GRID_HZ):
+    """Held-wheel settles: at each yaw-rate peak (over min_yaw, the largest within 0.5 s) where |steer rate| stays under
+    `held` from 0.3 s before to 0.8 s after, |ay| is lower 0.8 s after than at the peak and never rises above it, and the
+    force before the peak (-0.3..-0.1 s) is over min_force. Returns {'n', 'force', 'yawacc', 'ay'}: per time offset the list
+    of values, force signed relative to the turn's force, yaw acceleration relative to the yaw sign, |ay|."""
+    yaw, F, ay, ok = (np.asarray(g[k], float) for k in ('yaw', 'F', 'ay', 'ok'))
+    ys, Fs, ays = tools.moving_mean(yaw, 3), tools.moving_mean(F, 7), np.abs(tools.moving_mean(ay, 3))
+    acc = tools.moving_mean(g['yawacc'], 3)
+    # steer is quantised (FH6: 1/127 steps at ~30 Hz), so its per-sample rate never rests: rate = change of the 0.2 s mean over 0.27 s
+    sm = tools.moving_mean(g['steer'], 12)
+    rate = np.abs(np.roll(sm, -8) - np.roll(sm, 8)) * hz / 16.0
+    pre, post, w, n = int(round(0.3 * hz)), int(round(0.8 * hz)), int(round(0.5 * hz)), len(F)
+    out = {'n': 0, 'force': {h: [] for h in times}, 'yawacc': {h: [] for h in times}, 'ay': {h: [] for h in times}}
+    i = max(pre, w)
+    while i < n - post - 1:
+        s = 1.0 if ys[i] > 0 else -1.0
+        if s * ys[i] > min_yaw and s * ys[i] >= np.max(s * ys[i - w:i + w + 1]) and ok[i - pre:i + post + 1].all():
+            f0 = float(np.median(Fs[i - pre:i - int(round(0.1 * hz)) + 1]))
+            if (abs(f0) >= min_force and rate[i - pre:i + post + 1].max() < held and
+                    ays[i + post] < ays[i] and ays[i:i + post + 1].max() <= 1.05 * ays[i]):
+                sf = 1.0 if f0 > 0 else -1.0
+                out['n'] += 1
+                for h in times:
+                    k = i + int(round(h * hz))
+                    out['force'][h].append(sf * Fs[k])
+                    out['yawacc'][h].append(s * acc[k])
+                    out['ay'][h].append(ays[k])
+                i += post
+                continue
+        i += 1
+    return out
+
+
+def settle_lines(name, game, g):
+    lines = []
+    for held in (HELD_RATE,) + HELD_LOOSER:
+        lines += _settle_block(name, game, settle_events(g, held=held), held)
+    return lines
+
+
+def _settle_block(name, game, ev, held):
+    lines = ['%s  game %s  held-wheel settles %d (|steer rate| < %.0f%% of full lock/s from -0.3 to +0.8 s, |ay| falling, over %.0f m/s)' % (
+        name, game, ev['n'], 100 * held, MIN_SPEED)]
+    if not ev['n']:
+        return lines + ['  none']
+    hs = SETTLE_TIMES
+    lines.append('  time s            ' + ''.join('%9.1f' % h for h in hs))
+    q = lambda v: '%+5.2f(%+.2f..%+.2f)' % (np.median(v), *np.percentile(v, (25, 75)))      # noqa: E731
+    lines.append('  force Nm (median, 25-75 %), + = the turn\'s sense')
+    lines.append('    ' + '  '.join(q(ev['force'][h]) for h in hs))
+    lines.append('  yaw acceleration rad/s2, + = the turn\'s sense: ' + '  '.join('%+.2f' % np.median(ev['yawacc'][h]) for h in hs))
+    lines.append('  |ay| m/s2: ' + '  '.join('%.2f' % np.median(ev['ay'][h]) for h in hs))
+    late = np.array(ev['force'][0.3]) < 0
+    lines.append('  opposite pull at +0.3 s (force sign against the turn): %.0f%% of settles; median change 0 -> +0.3 s %+.2f Nm, 0 -> +0.5 s %+.2f Nm' % (
+        100 * late.mean(), np.median(np.array(ev['force'][0.3]) - np.array(ev['force'][0.0])),
+        np.median(np.array(ev['force'][0.5]) - np.array(ev['force'][0.0]))))
+    return lines
+
+
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ('-h', '--help'):
         print(__doc__)
         return 0 if args else 2
+    settle = '--settle' in args
+    args = [a for a in args if a != '--settle']
     out = []
     for name in args:
         path = tools.capture_path(name)
         got = extract(path) if os.path.exists(path) else None
+        if settle and got:
+            out += settle_lines(os.path.basename(path).replace('.ovcap.gz', ''), got[0], got[1])
+            continue
         out += report(os.path.basename(path).replace('.ovcap.gz', ''), *got) if got else ['%s: no capture, or no recorded force' % name]
     text = '\n'.join(out)
     print(text)
