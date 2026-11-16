@@ -177,8 +177,13 @@ class LimitGrip:
     def feed(self, t, slip, speed, r):
         if not (finite(t) and finite(slip) and finite(speed) and finite(r)):
             return
-        if self._buf and t < self._buf[-1][0]:
-            self._buf.clear()
+        if self._buf and t <= self._buf[-1][0]:
+            # (the force pass feeds it again on a clock read before the packet landed: a reading at or before the last
+            # is dropped; only a clock that went back by more than a window starts it again)
+            if t < self._buf[-1][0] - self.WINDOW:
+                self._buf.clear()
+            else:
+                return
         u = grip_use(slip)
         if speed > self.V_MIN and self.SLIP[0] <= abs(slip) <= self.SLIP[1] and u >= self.U_MIN:
             self._buf.append((t, abs(r) / u))
@@ -208,7 +213,7 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
 
 def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None, mu=None):
     """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
-    (0.5 with a puddle under both fronts); `mu`: GripScale's grip, whose no-slip trail (trail_tp0) it fades from."""
+    (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip), whose no-slip trail (trail_tp0) it fades from."""
     return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half, trail_tp0(mu))) * fy
 
 

@@ -1047,3 +1047,12 @@ def test_limit_grip_reads_the_grip_below_the_limit_and_tracks_a_step():
     assert g.mu() == pytest.approx(0.7)
     g.feed(t, 0.5, 20.0, 99.0)
     assert g.mu() <= fz.LimitGrip.RANGE[1]
+
+
+def test_limit_grip_drops_a_reading_back_in_time_and_keeps_its_window():
+    g = fz.LimitGrip()
+    for i in range(200):
+        g.feed(i * 0.0167, 0.5, 20.0, 1.0)
+    before = len(g._buf)
+    g.feed(199 * 0.0167 - 0.005, 0.5, 20.0, 1.0)      # the force pass's clock read before the packet landed
+    assert len(g._buf) == before and g.mu() is not None
