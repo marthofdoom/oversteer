@@ -1508,13 +1508,13 @@ class RbrRack(RackForce):
     DERIVED_PEAK_BIN = 0.02              # rad: the slip bins of the upper envelope of the grip in use (the peak slip is where it first reaches DERIVED_PEAK_SHARE of its top, as ffb_laws finds the drive's own)
     DERIVED_PEAK_Q = 0.7                 # the quantile tracked per bin (the drive's envelope is the 80th percentile of its samples; the tracker, weighted to the recent, matched the drives' own peaks best at 0.7)
     DERIVED_PEAK_TAU = 30.0              # s of time in a bin: the tracker's time constant (the crossing of 0.95 in time read 10-30 % high on turn-in: the force lags the slip)
-    DERIVED_PEAK_FRESH = 5.0             # s: a bin's time fades over this (grip_mu falls over a minute; an old visit says nothing of today's grip)
+    DERIVED_PEAK_FRESH = 8.0             # s: a bin's time fades over this (grip_mu falls over a minute; an old visit says nothing of today's grip)
     DERIVED_PEAK_HOLD = 0.2              # s of recent time (faded over DERIVED_PEAK_FRESH) in a bin before it counts
     DERIVED_PEAK_SHARE = 0.97
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
-    DERIVED_MU_SUSTAIN = 0.3             # s: grip rises only toward the lowest r of this long (a spike of an impact or an unload is not grip)
+    DERIVED_MU_SUSTAIN = 0.5             # s: grip rises only toward the median r of this long (a spike of an impact or an unload is not grip)
     DERIVED_MU_RISE = 0.1                # s
     DERIVED_MU_FALL = 60.0               # s
     DERIVED_R_TAU = 0.05                 # s: Fy_f / Fz's smoothing
@@ -1859,7 +1859,8 @@ class RbrRack(RackForce):
         while hist and hist[0][0] < self._grip_clock - self.DERIVED_MU_SUSTAIN:
             hist.popleft()
         if loaded and ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED:
-            low = min(r for _t, r in hist)                    # (the rise follows the lowest r of the last DERIVED_MU_SUSTAIN s)
+            rs = sorted(r for _t, r in hist)
+            low = rs[len(rs) // 2]                            # (the rise follows the median r of the last DERIVED_MU_SUSTAIN s)
             if low > self.grip_mu:
                 self.grip_mu += min(dt / self.DERIVED_MU_RISE, 1.0) * (low - self.grip_mu)
             elif self._grip_r < self.grip_mu:
@@ -1902,6 +1903,8 @@ class RbrRack(RackForce):
         want = self.DERIVED_PEAK_SHARE * max(v for _k, v in held)
         for n, (k, v) in enumerate(held):
             if v >= want:
+                if n == 0 or n + 2 >= len(held):
+                    return                                  # (no rise below it, or nothing recent beyond it: a corner that stopped at the top says nothing of where it is)
                 lo = (k + 0.5) * self.DERIVED_PEAK_BIN
                 if n:
                     k0, v0 = held[n - 1]
