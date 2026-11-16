@@ -1505,7 +1505,7 @@ class RbrRack(RackForce):
     DERIVED_TP_N = 2.0                   # ... and its power of the grip
     DERIVED_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.85), (0.95, 0.715), (1.05, 0.55))      # (u, trail factor before the peak), held at the ends
     DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.3), (2.1, 0.15), (3.0, 0.12))          # (alpha / slip_peak, factor over the at-peak one), held at the end
-    DERIVED_PEAK_TAU = 5.0               # s: the learnt peak slip moves toward |alpha| at a grip use of 0.95-1.05 with this time constant
+    DERIVED_PEAK_STEP = 0.15             # the learnt peak slip moves this share toward |alpha| at each upward crossing of a grip use of 0.95
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
@@ -1661,6 +1661,7 @@ class RbrRack(RackForce):
         """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
         self.grip_mu, self._grip_r = self.DERIVED_MU0, 0.0      # (the derived path's grip: a new stream starts from the prior)
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
+        self._use_prev = None            # (the previous pass's grip use, for the crossing)
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1848,9 +1849,11 @@ class RbrRack(RackForce):
             self.grip_mu += min(dt / tau, 1.0) * (self._grip_r - self.grip_mu)
             self.grip_mu = min(max(self.grip_mu, self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
             use = self._grip_r / self.grip_mu
-            if alpha is not None and ffb_forza.finite(alpha) and 0.95 <= use <= 1.05:
-                self.slip_peak += min(dt / self.DERIVED_PEAK_TAU, 1.0) * (abs(alpha) - self.slip_peak)
+            # (only the onset: the grip in use crossing 0.95 upward; on the plateau past the peak the use stays at its recent max)
+            if alpha is not None and ffb_forza.finite(alpha) and self._use_prev is not None and self._use_prev < 0.95 <= use:
+                self.slip_peak += self.DERIVED_PEAK_STEP * (abs(alpha) - self.slip_peak)
                 self.slip_peak = min(max(self.slip_peak, self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
+            self._use_prev = use
         use = self._grip_r / self.grip_mu
         past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
         return self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N * self._interp(self.DERIVED_TP_USE, use) * past
@@ -1874,13 +1877,16 @@ class RbrRack(RackForce):
 
     def _sat(self, alpha):
         """The kingpin torque's shape in the slip angle. Derived: the saturating lateral force's shape times the kingpin torque's
-        trail share at that slip, (RALLY_TRAIL + tp(|alpha| / slip_peak)) / (RALLY_TRAIL + tp(0)), so the aligning spring
-        follows the torque the derived path plays (the pneumatic trail fades past the peak)."""
+        trail share at that slip, (RALLY_TRAIL + tp(0) f(x)) / (RALLY_TRAIL + tp(0)) with x = |alpha| / slip_peak and f the played use and
+        past-peak factors, so the aligning spring follows the torque the derived path plays (the pneumatic trail fades toward the peak)."""
         if self.source != 'derived':
             return super()._sat(alpha)
         base = alpha / (1.0 + abs(alpha) / self.DERIVED_PK)
         trail = ffb_carprops.RALLY_TRAIL
-        return base * (trail + ffb_forza.trail(alpha / self.slip_peak)) / (trail + ffb_forza.TP0)
+        x = abs(alpha) / self.slip_peak
+        tp0 = self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N
+        share = self._interp(self.DERIVED_TP_USE, min(x, 1.05)) * self._interp(self.DERIVED_TP_PAST, x)      # (x stands in for the use below the peak)
+        return base * (trail + tp0 * share) / (trail + tp0)
 
     def _sat_div(self, alpha):
         """The spring's k divisor: the inverse slope of _sat (a central difference where derived), the slope held at

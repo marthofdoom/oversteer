@@ -1753,21 +1753,34 @@ def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
         assert tp == pytest.approx(rack.DERIVED_TP_B * want)
 
 
-def test_slip_peak_learns_only_inside_the_use_window_and_stays_in_range():
+def test_slip_peak_learns_at_the_onset_not_on_the_plateau():
     rack = fe.RbrRack
-    r = trail_rack(1.0, 1.0)
-    for _ in range(400):
-        r._grip_trail(1.0, 1.0, 0.1, 20.0, 0.25)
-    assert r.slip_peak == pytest.approx(0.25, abs=0.01)
+    r = trail_rack(1.0, 0.0)
+    alpha = 0.02
+    for _ in range(600):                 # Fy / Fz rises to its max at alpha .15, then stays flat out to .4
+        alpha = min(alpha + 0.001, 0.4)
+        now = min(alpha / 0.15, 1.0) * 1.0
+        r._grip_trail(now, 1.0, 0.01, 20.0, alpha)
+    assert r.slip_peak == pytest.approx(0.15, abs=0.05) and r.slip_peak < 0.25
     r = trail_rack(1.0, 0.5)
-    r._grip_trail(0.5, 1.0, 0.1, 20.0, 0.25)
+    r._grip_trail(0.5, 1.0, 0.01, 20.0, 0.25)
     assert r.slip_peak == rack.DERIVED_SLIP_PEAK
-    r = trail_rack(1.0, 1.0)
-    for _ in range(300):
-        r._grip_trail(1.0, 1.0, 0.1, 20.0, 0.9)
+    r = trail_rack(1.0, 0.0)
+    for k in range(200):                 # crossings at a huge slip stay in range
+        r._grip_trail(0.0, 1.0, 0.5, 20.0, 0.9)
+        r._grip_trail(1.0, 1.0, 0.5, 20.0, 0.9)
     assert r.slip_peak == rack.DERIVED_PEAK_RANGE[1]
     r._restart_floor()
-    assert r.slip_peak == rack.DERIVED_SLIP_PEAK
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and r._use_prev is None
+
+
+def test_sat_div_is_finite_and_positive():
+    for peak in (0.08, 0.15, 0.4):
+        r = trail_rack(1.0, 1.0)
+        r.slip_peak = peak
+        for k in range(61):
+            d = r._sat_div(0.01 * k)
+            assert math.isfinite(d) and d > 0.0
 
 
 def test_trail_past_the_peak_factor():
