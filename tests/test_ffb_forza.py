@@ -998,14 +998,41 @@ def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     lo, hi = fz.TP0_RANGE
     assert fz.trail_tp0(None) == fz.TP0 and fz.trail_tp0(float('nan')) == fz.TP0
     assert fz.trail_tp0(1.3) == pytest.approx(fz.TP0_FIT[0] + fz.TP0_FIT[1] * 1.3)
-    assert fz.trail_tp0(0.5) == lo and fz.trail_tp0(3.0) == hi
-    assert fz.trail_tp0(1.1) < fz.trail_tp0(1.3) < fz.trail_tp0(1.5)
+    assert fz.trail_tp0(0.4) == lo and fz.trail_tp0(3.0) == hi
+    assert fz.trail_tp0(0.9) < fz.trail_tp0(1.1) < fz.trail_tp0(1.3)
     assert fz.trail(0.0, tp0=0.03) == pytest.approx(0.03) and fz.trail(fz.FORZA_TP_S_HALF, fz.FORZA_TP_S_HALF, 0.03) == pytest.approx(0.015)
-    assert fz.kingpin(1000.0, 0.0, mu=1.1) == pytest.approx(-(fz.CASTER + fz.trail_tp0(1.1)) * 1000.0)
+    assert fz.kingpin(1000.0, 0.0, mu=0.9) == pytest.approx(-(fz.CASTER + fz.trail_tp0(0.9)) * 1000.0)
     rack = fe.ForzaRack()
     rack.reset(CAR)
-    rack._grip.mu = lambda: 1.1
+    unknown = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    assert unknown == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+    rack._limit_grip._mu, rack._limit_grip.known = 0.9, True
     low = rack._front(fsample(ay=6.0, cs=0.0), None, None)
-    rack._grip.mu = lambda: 1.5
+    rack._limit_grip._mu = 1.5
     high = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     assert abs(high) > abs(low)
+
+
+def test_limit_grip_moves_only_at_the_slip_limit_and_tracks_a_step():
+    g = fz.LimitGrip()
+    assert g.mu() is None
+    t = 0.0
+    for slip, speed in ((0.3, 20.0), (1.5, 20.0), (1.0, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
+        g.feed(t, slip, speed, 1.4)
+        t += 0.1
+    assert g.mu() is None
+    for _ in range(300):                                  # 30 s at the limit, r 1.4
+        g.feed(t, 1.0, 20.0, 1.4)
+        t += 0.1
+    assert g.mu() == pytest.approx(1.4, abs=0.01)
+    held = g.mu()
+    for _ in range(100):                                  # out of the window: held
+        g.feed(t, 0.4, 20.0, 0.5)
+        t += 0.1
+    assert g.mu() == held
+    for _ in range(100):                                  # surface step to 0.7: within 10 s
+        g.feed(t, 0.9, 20.0, 0.7)
+        t += 0.1
+    assert g.mu() == pytest.approx(0.7, abs=0.05)
+    g.feed(t, 1.0, 20.0, 9.0)
+    assert g.mu() <= fz.LimitGrip.RANGE[1]

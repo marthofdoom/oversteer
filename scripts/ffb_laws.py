@@ -31,7 +31,7 @@ LOCK_FLAG = 0.15
 GS_MU_MAX = 2.5                 # a GripScale mu over this is a crash, not grip (ffb-lateral-fit's guard)
 GRIP_SPREAD = 0.3               # the grip must spread this far over a drive's stretches for a slope of trail against grip
 PEAK_FLAG = 0.25
-PROBE_KEYS = ('fzf', 'steer', 'vx', 'vy', 'rack_mu', 'gs_mu', 'rack_peak', 'lock')
+PROBE_KEYS = ('fzf', 'steer', 'vx', 'vy', 'rack_mu', 'gs_mu', 'lg_mu', 'rack_peak', 'lock')
 EXTRA_CHANNELS = ('tyre_mz',)
 
 
@@ -45,9 +45,11 @@ def probe(rack, s):
     load = tools._pair(getattr(s, 'tyre_load', None))
     vel = s.vel if s.vel is not None and len(s.vel) > 1 else (None, None)
     grip = getattr(rack, '_grip', None)
+    lim = getattr(rack, '_limit_grip', None)
     return {'fzf': load[0] + load[1] if load else float('nan'), 'steer': _num(getattr(s, 'steer', None)),
             'vx': _num(vel[0]), 'vy': _num(vel[1]), 'rack_mu': _num(getattr(rack, 'grip_mu', None)),
-            'gs_mu': _num(grip.mu() if grip is not None else None), 'rack_peak': _num(getattr(rack, 'slip_peak', None)),
+            'gs_mu': _num(grip.mu() if grip is not None else None),
+            'lg_mu': _num(lim.mu() if lim is not None else None), 'rack_peak': _num(getattr(rack, 'slip_peak', None)),
             'lock': _num(getattr(rack, 'lock', None))}
 
 

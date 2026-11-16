@@ -123,7 +123,8 @@ def _check_lines(laws, cols, c, dt, lock, const):
     if not rp:
         out.append('   the rack learns no peak slip of its own (see the x cells above for where its trail fades)')
     out.append('-- grip the rack believes, against the drive\'s own (Fy_f / Fz top)')
-    for key, text, same in (('rack_mu', 'grip_mu (Fy_f / Fz)', True), ('gs_mu', 'GripScale (p95 of |a_y| / g: the whole car, reads higher)', False)):
+    for key, text, same in (('rack_mu', 'grip_mu (Fy_f / Fz)', True), ('gs_mu', 'GripScale (p95 of |a_y| / g: the whole car, reads higher)', False),
+                           ('lg_mu', 'LimitGrip (Newton Fy_f over the static front load at the slip limit)', True)):
         got = laws_mod.band_medians(c, cols[key], dt)
         own = laws_mod.band_medians(c, c['mu'], dt)
         for name in got:

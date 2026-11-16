@@ -46,10 +46,10 @@ LATERAL_FIT_INERTIAL = (0.691, 0.226)
 LATERAL_RANGE_INERTIAL = (0.85, 1.05)
 LATERAL_DEFAULT_INERTIAL = 0.95
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
-# The no-slip trail follows the grip (ACR's tyres: about 41 mm at mu 1.27, 26 at .88, scripts/ffb_laws.json): per 60 s stretch against
-# GripScale's mu from the same drive, as played (scripts/ffb-new-game.py --refit). TP0 stays the value until the grip is known.
-TP0_FIT = (-0.0267, 0.0470)               # m, m per unit of mu: ACR, 3 drives, 11 stretches, mu 1.09-1.56, r 0.95
-TP0_RANGE = (0.0245, 0.0466)             # m: the fit at the ends of the grip it was fitted over (1.09-1.56); outside it the trail is held
+# The no-slip trail follows the grip (ACR's tyres: 41 mm at mu 1.27, 26 at .88; scripts/ffb_laws.json tp0 = -8.7 + 39.2 mu mm, mu the
+# tyres' Fy/Fz top), mu from LimitGrip. TP0 stays the value until it has a limit sample.
+TP0_FIT = (-0.00872, 0.03923)            # m, m per unit of mu
+TP0_RANGE = (0.015, 0.050)               # m
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
 FORZA_TP_S_HALF = 1.1                   # Forza's own slip scale (its grip peaks at 0.7-0.9 there): halved at 1.1 its rim torque per Fy_f
@@ -135,6 +135,40 @@ class GripScale:
         i = int(k)
         x = v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
         return x / G
+
+
+class LimitGrip:
+    """The grip mu measured at the limit: Forza's normalised front slip angle is about 1 where the tyre's force tops out, so while the
+    mean of the fronts' |slip_angle| is inside SLIP and the car moves faster than V_MIN, r = |Fy_f| / (m b/L g) (Newton's force over the
+    static front load) pulls the estimate with time constant TAU; otherwise it is held. mu() is None until the first limit sample."""
+
+    SLIP = (0.8, 1.2)
+    V_MIN = 8.0                          # m/s
+    TAU = 3.0                            # s
+    PRIOR = 1.0
+    RANGE = (0.4, 1.8)
+    STEP_MAX = 0.2                       # s: a longer gap between samples counts as this
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._mu, self._at, self.known = self.PRIOR, None, False
+
+    def feed(self, t, slip, speed, r):
+        last, self._at = self._at, t
+        if not (finite(t) and finite(slip) and finite(speed) and finite(r)) or speed <= self.V_MIN \
+                or not self.SLIP[0] <= abs(slip) <= self.SLIP[1]:
+            return
+        r = min(max(abs(r), self.RANGE[0]), self.RANGE[1])
+        if not self.known:
+            self.known, dt = True, self.STEP_MAX
+        else:
+            dt = min(max(0.0 if last is None else t - last, 0.0), self.STEP_MAX)
+        self._mu += (1.0 - math.exp(-dt / self.TAU)) * (r - self._mu)
+
+    def mu(self):
+        return self._mu if self.known else None
 
 
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):

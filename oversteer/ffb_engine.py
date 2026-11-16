@@ -671,6 +671,7 @@ class RackForce:
             ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True, p99=self.p99)
         self.car = car
         self._grip = ffb_forza.GripScale()
+        self._limit_grip = ffb_forza.LimitGrip()
         self.trail, self.scrub = ffb_carprops.default_trail(CASTER_TRAIL), SCRUB    # (rally class: 37 mm until learnt)
         self.learner = None
         if self.LEARNS:
@@ -1959,8 +1960,8 @@ class ForzaRack(RackForce):
     knee, budget, RIM_SAFE_NM: RackForce.force, unchanged), and the engine plays the output filter (ffb_forza.OutputFilter),
     column damping, lock stop, texture and Kickback beside it.
 
-    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), tp's no-slip value from GripScale's mu
-      (ffb_forza.trail_tp0; TP0 until it is known), m the car's learnt mass (MassLearner, per car,
+    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), tp's no-slip value from the grip measured
+      at the slip limit (ffb_forza.LimitGrip, trail_tp0; TP0 until it has a sample), m the car's learnt mass (MassLearner, per car,
       ffb_carprops.STORE; 1400 kg until learnt), rdot the yaw rate's central difference over the game's clock (known one
       packet late: the difference is centred on the packet before the newest). A puddle under both fronts halves tp; one
       under a single front adds Drive pull's couple, scrub x PULL_FRACTION m_f g / 2 (only while Drive pull is on, as the
@@ -2092,7 +2093,10 @@ class ForzaRack(RackForce):
         cs = sample.combined_slip
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
-        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=self._grip.mu())
+        sa = sample.slip_angle
+        if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]) and self.mass > 0.0:
+            self._limit_grip.feed(self._now, 0.5 * (abs(sa[0]) + abs(sa[1])), sample.speed, fy / (self.mass * bl * ffb_forza.G))
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=self._limit_grip.mu())
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):
