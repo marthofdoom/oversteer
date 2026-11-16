@@ -694,11 +694,12 @@ def rbr_mass(mass):
 STAGE_FYF_MIN = TRAIL_FYF_MIN
 
 
-def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None):
+def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None, probe=None):
     """Today's rack over the samples (two passes, align_on off) as simulate_rows does it, one row per scored sample with the value
     each stage of the chain had in the rack's own code (read from the rack or the same call recorded, see ffb_situations.STAGES).
     Signs: kingpin, column, driver, rim are |.|; caster and pneu/Mz carry the sign of the kingpin (so they add up to it).
-    `mass`, `ratio`: what-ifs, pinned (pin_values, rbr_mass). Returns {'cols', 'info', 'in_force', 'raw'}. Call inside _sandbox()."""
+    `mass`, `ratio`: what-ifs, pinned (pin_values, rbr_mass). `probe`: (keys, fn(rack, sample) -> {key: value}), extra columns
+    read per scored sample (ffb_laws). Returns {'cols', 'info', 'in_force', 'raw'}. Call inside _sandbox()."""
     from oversteer import car_data, ffb_carprops, ffb_engine as fe, ffb_forza
     check_overrides(game, mass, ratio)
     with rbr_mass(mass if game == 'rbr' else None):
@@ -708,7 +709,7 @@ def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None):
             pin_values(game, rack, mass, ratio)
             base_feed(t, s)
             pin_values(game, rack, mass, ratio)
-        names = [k for k, _n in sit.STAGES] + ['t', 'ay_s', 'yaw', 'fy_all', 'fy_front']
+        names = [k for k, _n in sit.STAGES] + ['t', 'ay_s', 'yaw', 'fy_all', 'fy_front'] + (list(probe[0]) if probe else [])
         cols = {k: [] for k in names}
         rec = {}
         orig_fl, orig_kp = ffb_forza.front_lateral, ffb_forza.kingpin
@@ -787,6 +788,8 @@ def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None):
                     allfy = sum(s.tyre_fy[:4])
                     row['fy_all'] = allfy if np.isfinite(allfy) else nan
                     row['fy_front'] = side
+                if probe:
+                    row.update(probe[1](rack, s))
                 for k in names:
                     cols[k].append(row[k])
             learnt = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}

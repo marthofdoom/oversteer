@@ -6,6 +6,7 @@
 - Today's force code over recorded physics, same situations: `scripts/ffb-sim-match.py A --vs B [--class-a NAME] [--peak NM]`; log `~/.cache/ffb-sim-match/latest.log`.
 - Force against what causes it (front lateral force and normalised slip, effective trail, `--set NAME=VALUE` to try a constant): `scripts/ffb-force-curve.py A --vs B`; log `~/.cache/ffb-force-curve/latest.log`.
 - Where two routes to the same force differ (each stage of the chain by |ay| and speed, A/B; `--mass-a/b`, `--ratio-a/b` what-ifs; ACR's true mass): `scripts/ffb-stages.py A --vs B`; log `~/.cache/ffb-stages/latest.log`.
+- One recording of any game against the tyre laws (routes, its own grip/peak slip/lock, today's trail by grip, grip use and slip/peak, flags; `--refit` rebuilds `scripts/ffb_laws.json` from ACR): `scripts/ffb-new-game.py CAPTURE [--no-rack]`; log `~/.cache/ffb-new-game/latest.log`.
 - First look at a new game's recording: `scripts/new-game-check.py CAPTURE [--vs REF]` (channels, sim-match, parity); order for a new game in `docs/ffb-tools.md`.
 - Front force factor against the moving mass (ACR tyres, live grip): `scripts/ffb-lateral-fit.py`; log `~/.cache/ffb-lateral-fit/latest.log`.
 - Each game's grip and collapse from its recordings (mu, initial slope, peak slip per mu band; ACR validation and Mz shape): `scripts/ffb-tyre-fit.py CAPTURE [CAPTURE ...]`; log `~/.cache/ffb-tyre-fit/latest.log`.
