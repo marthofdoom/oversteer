@@ -593,7 +593,13 @@ ENV_MIN_S = 0.25
 ENV_REACHED_S = 0.5                      # s in the top bin
 ENV_RISING = 1.03                        # a last bin this far over the one before it is still rising
 ENV_SHARE = 0.97
+ENV_MU_BANDS = (0.7, 1.0, 1.3)            # the grip bands the peak slip is pooled over (scripts/ffb_tools.MU_BANDS)
 ENV_MU_MAX = 2.0                         # a top over this is noise, not grip
+
+
+def mu_band(mu):
+    """The grip band's index of mu."""
+    return sum(mu >= b for b in ENV_MU_BANDS)
 
 
 def _percentile(values, pct):

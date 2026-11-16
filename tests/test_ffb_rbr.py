@@ -1849,3 +1849,14 @@ def test_a_spike_in_the_front_force_does_not_lift_the_grip():
     base = r.grip_mu
     seen = list(corner_drive(r, 0.15, 1.0, 20, spike=(3.0, 0.15, 1.5)))
     assert max(m for m, _p in seen) - base < 0.03
+
+
+def test_slip_peak_tracks_each_surface_when_two_alternate():
+    r = trail_rack(1.0, 0.0)
+    surfaces = ((0.2, 1.25, 0.35), (0.12, 0.8, 0.3))          # (peak slip, grip, slide out to): gravel-like then tarmac-like
+    for visit in range(3):
+        for peak, mu, top in surfaces:
+            for _ in corner_drive(r, peak, mu, 90, top=top):
+                pass
+            if visit:
+                assert r.slip_peak == pytest.approx(peak, rel=0.1), (visit, peak, r.slip_peak)
