@@ -662,7 +662,7 @@ def check_overrides(game, mass=None, ratio=None):
 def pin_values(game, rack, mass=None, ratio=None):
     """Put the what-if mass and ratio back into the rack. Called before the first sample and after every feed: set_car, reset and
     the learners restore the table's or learnt values (RbrRack.set_car -> _table_frame, RackForce._learn_ratio, MassLearner).
-    RBR: the derived path divides by DERIVED_RATIO (not rack.ratio, which is only the aligning spring's frame), set on the instance;
+    RBR: the derived path divides by the car's table ratio (rack.ratio) or, without one, DERIVED_RATIO: both are set;
     its mass is the car table's, replaced by `rbr_mass` below. Forza: mass_l.mass. ACR: ratio only."""
     if ratio is not None:
         rack.ratio = ratio
@@ -764,7 +764,7 @@ def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None):
                     entry = car_data.entry(rack.car)
                     m = (entry.get('mass_kg') if entry else None) or rack.FLOOR_MASS
                     fyf, slip = abs(fy_f), _slip_rbr(s, rack)
-                    ratio_now = rack.DERIVED_RATIO
+                    ratio_now = rack.ratio if rack.ratio_known else rack.DERIVED_RATIO   # as RbrRack._derive divides
                     column = rack.derived * rack._fresh()
                     kingpin = column * ratio_now
                     raw = rack.derived_raw * ratio_now
@@ -813,9 +813,10 @@ def _ratio_text(game, rack, pinned, table):
     if pinned is not None:
         return 'what-if, pinned'
     if game == 'rbr':
-        return 'RbrRack.DERIVED_RATIO, a class constant; the car table %s only frames the spring' % ('%.2f' % table if table else 'has none')
+        return 'the car table' if rack.ratio_known else 'RbrRack.DERIVED_RATIO, the prior: the car has no table ratio'
     if game == 'forza-fh':
-        return 'ForzaRack.STEER_RATIO, a constant'
+        return ('half the wheel range %.0f deg over ForzaRack lock %.3f rad' % (rack.wheel_range, rack.lock)) if rack.wheel_range \
+            else 'ForzaRack.STEER_RATIO, without the wheel range'
     if table and abs(rack.ratio - table) < 1e-9:
         return 'from the car table'
     if not rack.ratio_known:
