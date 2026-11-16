@@ -1514,7 +1514,7 @@ class RbrRack(RackForce):
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
-    DERIVED_MU_SUSTAIN = 0.5             # s: grip rises only toward the median r of this long (a spike of an impact or an unload is not grip)
+    DERIVED_MU_SUSTAIN = 0.6             # s: grip rises only toward the median r of this long (a spike of an impact or an unload is not grip)
     DERIVED_MU_RISE = 0.1                # s
     DERIVED_MU_FALL = 60.0               # s
     DERIVED_R_TAU = 0.05                 # s: Fy_f / Fz's smoothing
