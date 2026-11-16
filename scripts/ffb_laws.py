@@ -24,6 +24,7 @@ NO_SLIP = (0.5, 0.6)            # u and x under these: the trail at no slip
 FLAG = 0.15                     # a cell's median of rack / law outside 1 +- this is flagged ...
 REACHED_S = 0.5                 # s in the envelope's top bin for a stretch to count as having reached the limit
 PEAK_SHARE = 0.97               # the peak slip: the first bin whose envelope reaches this share of the top
+MU_MAX = 2.0                    # a stretch's grip top over this is noise, not grip (a sanity bound: Forza's aero inflates Newton over the static load)
 TOL_MAX = 0.5                   # ... and never wider than this, however far ACR's drives spread (a third of the law must flag)
 MIN_S = 3.0                     # ... when it holds this many seconds
 LOCK_FLAG = 0.15
@@ -83,6 +84,9 @@ def causes(cols, dt, bins=None):
                 continue
             _cen, top, secs = env
             k = int(np.argmax(top))
+            if not top[k] <= MU_MAX:
+                print('  stretch %d: grip top %.2f over MU_MAX %.1f, left unreached' % (g, top[k], MU_MAX))
+                continue
             mu[m] = top[k]
             # the limit was reached: the envelope stops rising (its top is not a still-rising last bin) and holds some time
             reached[m] = secs[k] >= REACHED_S and not (k == len(top) - 1 and top[k] > 1.03 * top[k - 1])
@@ -301,7 +305,7 @@ def raw_cols(items, wheelbase, bl_of, factor):
     lock = lock_fit(cols, wheelbase)
     tyres = np.isfinite(cols['fyf']).mean() > 0.5 if len(a) else False
     if not tyres:
-        rd = tools.yaw_accel(cols['t'], cols['yaw'])
+        rd = tools.yaw_accel(cols['t'], cols['yaw'], window=0.1)     # (0.03 s is two samples at 60 Hz: too noisy, as lock_fit found)
         cols['mass'] = np.ones(len(a))
         cols['fyf'] = factor * cols['bl'] * np.abs(cols['ay_s'] + wheelbase * (1 - cols['bl']) * rd)
         cols['fzf'] = np.full(len(a), np.nan)

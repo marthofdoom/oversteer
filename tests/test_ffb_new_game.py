@@ -133,3 +133,8 @@ def test_the_no_rack_path_finds_a_grip_and_a_peak_slip_from_the_motion_alone():
     assert np.isfinite(c['r']).mean() > 0.9 and c['reached'].any()
     got_mu, got_peak = np.nanmedian(c['mu'][c['reached']]), np.nanmedian(c['peak'][c['reached']])
     assert 0.8 < got_mu < 1.3 and 0.07 < got_peak < 0.25
+
+
+def test_a_grip_top_over_the_sanity_bound_is_left_unreached():
+    import ffb_laws as fl
+    assert fl.MU_MAX == 2.0
