@@ -604,10 +604,10 @@ def _percentile(values, pct):
     return v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
 
 
-def envelope(slip, r, dt, bins=ENV_BINS, min_s=ENV_MIN_S):
-    """([bin centres], [p80 of r], [seconds]) over the slip bins holding at least ENV_MIN_SAMPLES samples and min_s seconds (the
+def envelope(slip, r, dt, bins=ENV_BINS, min_s=ENV_MIN_S, min_n=ENV_MIN_SAMPLES):
+    """([bin centres], [p80 of r], [seconds]) over the slip bins holding at least min_n samples and min_s seconds (the
     samples dt apart); None under three bins. Non-finite pairs are skipped."""
-    need = max(ENV_MIN_SAMPLES, min_s / max(dt, 1e-6))
+    need = max(min_n, min_s / max(dt, 1e-6))
     per = [[] for _ in range(len(bins) - 1)]
     for a, y in zip(slip, r):
         if finite(a) and finite(y) and bins[0] <= a:
@@ -635,10 +635,10 @@ def envelope_peak(cen, top, share=ENV_SHARE):
     return cen[k] if k == 0 else cen[k - 1] + (cen[k] - cen[k - 1]) * (want - top[k - 1]) / (top[k] - top[k - 1])
 
 
-def stretch_limit(slip, r, dt):
+def stretch_limit(slip, r, dt, min_n=ENV_MIN_SAMPLES):
     """(mu, peak, reached) of one stretch from its |slip| and r samples, dt apart: the top of the envelope of r, and the peak slip
     from the envelope of r / mu. None without an envelope or with a top over ENV_MU_MAX; reached False when it is a floor."""
-    env = envelope(slip, r, dt)
+    env = envelope(slip, r, dt, min_n=min_n)
     if env is None:
         return None
     k, mu, reached = envelope_top(env[1], env[2])
@@ -646,5 +646,5 @@ def stretch_limit(slip, r, dt):
         return None
     if not reached:
         return mu, None, False
-    pk = envelope(slip, [y / mu for y in r], dt)
+    pk = envelope(slip, [y / mu for y in r], dt, min_n=min_n)
     return mu, (envelope_peak(pk[0], pk[1]) if pk else None), True

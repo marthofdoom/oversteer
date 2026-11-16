@@ -1855,7 +1855,7 @@ class RbrRack(RackForce):
                 self._win.popleft()
             if self._grip_clock - self._env_at >= self.DERIVED_WINDOW_EVERY:
                 self._env_at = self._grip_clock
-                got = ffb_forza.stretch_limit([w[1] for w in self._win], [w[2] for w in self._win], self.DERIVED_WINDOW_STEP)
+                got = ffb_forza.stretch_limit([w[1] for w in self._win], [w[2] for w in self._win], self.DERIVED_WINDOW_STEP, 5)
                 if got and got[2]:
                     self.grip_mu = min(max(got[0], self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
                     if got[1] is not None:
