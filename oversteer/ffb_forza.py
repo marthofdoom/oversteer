@@ -195,7 +195,8 @@ class LimitGrip:
         return self._mu
 
 
-TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in LimitGrip.RANGE)       # m: the law's trail at the ends of LimitGrip's range
+TP0_MU_RANGE = (0.825, 1.318)            # the grips the law was fitted over (scripts/ffb_laws.json mu_range): not extrapolated past them
+TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 23.6-43.0 mm
 
 
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):
