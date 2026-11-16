@@ -26,9 +26,9 @@ from oversteer.telemetry_capture import CaptureWriter, read_capture, replay  # n
 from oversteer.shift_learner import ShiftLearner  # noqa: E402
 
 
-def learn(records, db, profile, started=None, recorded_car=None):
+def learn(records, db, profile, started=None, recorded_car=None, meta=None):
     learner = ShiftLearner(db, profile=profile)
-    telemetry = replay(records, learner, started=started, recorded_car=recorded_car)
+    telemetry = replay(records, learner, started=started, recorded_car=recorded_car, meta=meta)
     print("%d packets of unknown sizes: %s" % (len(telemetry._unknown_sizes), sorted(telemetry._unknown_sizes))
           if telemetry._unknown_sizes else "every packet decoded")
     for key, name in learner.known_cars():
@@ -77,9 +77,13 @@ def send(records, target, realtime):
 
 def cut(records, meta, span, out):
     first, last = (float(x) for x in span.split(':'))
-    with CaptureWriter(out, port=meta.get('port'), note=meta.get('note', ''), version=meta.get('oversteer')) as writer:
+    car = meta.get('rbr_car')
+    with CaptureWriter(out, port=meta.get('port'), note=meta.get('note', ''), version=meta.get('oversteer'),
+                       extra={'rbr_car': car} if car else None, live_car=False) as writer:
         for t, addr, data in records:
             if first <= t <= last:
+                if meta.get('rbr_car') and meta['rbr_car'].get('key') != writer._car_key:
+                    writer.record_car(meta['rbr_car'])       # the source's car, as it changed there
                 writer.write(t, addr, data)
     print("%d packets written to %s" % (writer.packets, out))
 
@@ -104,10 +108,10 @@ def main():
     elif args.send:
         send(records, args.send, args.realtime)
     elif args.db:
-        learn(records, args.db, args.profile, meta.get('started'), meta.get('rbr_car'))
+        learn(records, args.db, args.profile, meta.get('started'), meta.get('rbr_car'), meta)
     else:
         with tempfile.TemporaryDirectory() as folder:
-            learn(records, os.path.join(folder, 'telemetry.db'), args.profile, meta.get('started'), meta.get('rbr_car'))
+            learn(records, os.path.join(folder, 'telemetry.db'), args.profile, meta.get('started'), meta.get('rbr_car'), meta)
 
 
 main()

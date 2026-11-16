@@ -127,8 +127,9 @@ class CaptureWriter:
     packet on."""
 
     def __init__(self, path, port=None, note='', version=None, started=None, extra=None,
-                 full_rate=False):
+                 full_rate=False, live_car=True):
         self.path = path
+        self.live_car = live_car          # look up the RBR car in today's Cars.ini (off: a copy of an old capture, which carries its own)
         self.full_rate = full_rate        # save every packet, THIN formats and OVST v5+ included
         self._file = gzip.open(path, 'wb')
         self._file.write(MAGIC)
@@ -152,6 +153,7 @@ class CaptureWriter:
         self._car_key = (extra or {}).get('rbr_car', {}).get('key')   # the RBR car the header or a car record named last
         self._car_slot = None             # the slot of the last RBR packet looked at
         self._car_at = None               # capture clock of the last look
+        self._t = 0.0                     # capture clock of the last packet saved
 
     def write(self, now, addr, data):
         if self.full_rate:
@@ -167,7 +169,8 @@ class CaptureWriter:
     def _put(self, now, addr, data):
         if self._first is None:
             self._first = now
-        if len(data) == 664:
+        self._t = now - self._first
+        if len(data) == 664 and self.live_car:
             self._note_car(now - self._first, data)
         self._file.write(RECORD.pack(now - self._first, _ipv4(addr[0]), len(data)))
         self._file.write(data)
@@ -187,10 +190,14 @@ class CaptureWriter:
         except Exception:
             return
         if car and car.get('key') and car['key'] != self._car_key:
-            self._car_key = car['key']
-            body = CAR_MARK + json.dumps({k: car.get(k) for k in ('key', 'id', 'name')}).encode()
-            self._file.write(RECORD.pack(t, 0, len(body)))
-            self._file.write(body)
+            self.record_car(car, t)
+
+    def record_car(self, car, t=None):
+        """A car record in the stream (a copy of a capture carries the source's: scripts/telemetry-replay.py cut)."""
+        self._car_key = car['key']
+        body = CAR_MARK + json.dumps({k: car.get(k) for k in ('key', 'id', 'name')}).encode()
+        self._file.write(RECORD.pack(self._t if t is None else t, 0, len(body)))
+        self._file.write(body)
 
     def _keep(self, now, addr, data):
         """Whether a packet of a THIN format is saved: one in every 1/rate of its own steps, and every one where
@@ -272,9 +279,9 @@ def _sidecar_car(path, meta):
     if meta.get('rbr_car'):
         return
     try:
-        with open(path + CAR_SIDECAR) as f:
+        with open(path + CAR_SIDECAR, encoding='utf-8-sig') as f:
             key = f.readline().strip()
-    except OSError:
+    except (OSError, ValueError):                 # unreadable or not text: no sidecar
         return
     if key:
         from . import car_data

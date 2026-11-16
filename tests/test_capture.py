@@ -529,3 +529,41 @@ def test_a_header_car_beats_the_sidecar(tmp_path):
         writer.write(0.0, ('1.2.3.4', 0), b'x')
     (tmp_path / 'h.ovcap.gz.car').write_text('rbr/106\n')
     assert read_capture(str(path))[0]['rbr_car']['key'] == 'rbr/11'
+
+
+def test_a_writer_without_the_live_lookup_never_stamps_todays_car(tmp_path):
+    path = tmp_path / 'c.ovcap.gz'
+    with mock.patch('oversteer.rbr_install.car_in_slot', lambda slot: FIESTA):
+        with CaptureWriter(str(path), live_car=False) as writer:
+            writer.write(0.0, ('1.2.3.4', 0), _rbr_packet(steps=1))
+            writer.record_car(FABIA)
+            writer.write(2.0, ('1.2.3.4', 0), _rbr_packet(steps=2000))
+    meta, records = read_capture(str(path))
+    keys = [(meta.get('rbr_car') or {}).get('key') for _ in records]
+    assert keys == [None, 'rbr/106']
+
+
+def test_cut_carries_the_source_car(tmp_path):
+    import importlib.util
+    script = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'telemetry-replay.py')
+    ns = {'__name__': 'replay_script', '__file__': script}
+    exec(compile(open(script).read().replace('\nmain()', '\n'), script, 'exec'), ns)
+    path, out = tmp_path / 's.ovcap.gz', tmp_path / 'o.ovcap.gz'
+    _write_rbr(path, [FABIA, FIESTA])
+    meta, records = read_capture(str(path))
+    with mock.patch('oversteer.rbr_install.car_in_slot', lambda slot: {'key': 'rbr/999', 'id': 999, 'name': 'Today'}):
+        ns['cut'](records, meta, '0:100', str(out))
+    m2, r2 = read_capture(str(out))
+    keys = [(m2.get('rbr_car') or {}).get('key') for _ in r2]
+    assert 'rbr/999' not in keys and keys[-1] == 'rbr/11' and 'rbr/106' in keys
+
+
+def test_an_odd_sidecar_is_no_sidecar_and_a_bom_is_stripped(tmp_path):
+    path = tmp_path / 'b.ovcap.gz'
+    with CaptureWriter(str(path)) as writer:
+        writer.write(0.0, ('1.2.3.4', 0), b'x')
+    car_file = tmp_path / 'b.ovcap.gz.car'
+    car_file.write_bytes(b'\xff\xfe\x00rbr/106')
+    assert 'rbr_car' not in read_capture(str(path))[0]
+    car_file.write_bytes(b'\xef\xbb\xbfrbr/106\n')
+    assert read_capture(str(path))[0]['rbr_car']['key'] == 'rbr/106'
