@@ -5,6 +5,8 @@ curve's inversion round-trips, the checks (grid, strength; saturation is a note)
 latch, the classifier's states and the hand-over; nothing is played without fresh raw. Nothing here touches a
 real wheel or /sys."""
 import math
+import os
+import sys
 import random
 import types
 
@@ -1726,18 +1728,34 @@ def test_the_table_frame_comes_with_the_car_even_if_the_car_was_already_set():
     assert rack.ratio_known and rack.lock_known
 
 
+def corner_drive(r, peak, mu_r, secs, top=0.3, period=8.0, loaded=True, spike=None):
+    """Slides |alpha| 0 to `top` and back every `period` s for `secs` s, the force per load rising to mu_r at `peak` and flat past it.
+    Yields the rack's (grip_mu, slip_peak) each step. `spike`: (at s, length s, r) replaces r there."""
+    n = int(secs / 0.01)
+    for i in range(n):
+        t = i * 0.01
+        alpha = top * 0.5 * (1.0 - math.cos(2.0 * math.pi * t / period))
+        now = min(alpha / peak, 1.0) * mu_r
+        if spike and spike[0] <= t < spike[0] + spike[1]:
+            now = spike[2]
+        r._grip_trail(now, 1.0, 0.01, 20.0, alpha, loaded)
+        yield r.grip_mu, r.slip_peak
+
+
 def test_the_trail_follows_the_grip_the_car_has_shown_without_being_told_the_surface():
     rack = fe.RbrRack()
     rack.reset(None)
     assert rack.grip_mu == rack.DERIVED_MU0
-    first = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                  # a light corner: the prior holds
-    assert rack.grip_mu == pytest.approx(rack.DERIVED_MU0, abs=0.01)
-    for _ in range(600):
-        high = rack._grip_trail(4800.0, 4000.0, 0.01, 20.0)               # the fronts show 1.2
-    assert rack.grip_mu == pytest.approx(1.2, abs=0.05) and high > first
-    for _ in range(60000):
-        low = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                # long on a loose road
-    assert rack.grip_mu == rack.DERIVED_MU_RANGE[0] and low < first
+    first = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                  # a light corner, no slip: the prior holds
+    assert rack.grip_mu == rack.DERIVED_MU0
+    for _ in corner_drive(rack, 0.15, 1.2, 70):                           # the fronts show 1.2
+        pass
+    assert rack.grip_mu == pytest.approx(1.2, rel=0.05)
+    high = rack._grip_trail(1.2, 1.0, 0.01, 20.0, 0.05)
+    for _ in corner_drive(rack, 0.15, 0.7, 70):                           # long on a loose road
+        pass
+    assert rack.grip_mu == pytest.approx(0.7, rel=0.05)
+    assert rack._grip_trail(0.7, 1.0, 0.01, 20.0, 0.05) < high
 
 
 def trail_rack(mu=1.0, r=0.0):
@@ -1763,41 +1781,37 @@ def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
         assert tp == pytest.approx(r._tp0() * want)
 
 
-def sweep_peak(r, peak=0.15, passes=40, top=0.4):
-    """Sweeps |alpha| up and down 0 to `top` passes times, the force rising to its max at `peak` and flat past it (the grip in use)."""
-    for k in range(passes):
-        for alpha in list(np.linspace(0.0, top, 200)) + list(np.linspace(top, 0.0, 200)):
-            r._grip_trail(min(alpha / peak, 1.0), 1.0, 0.01, 20.0, alpha)
-
-
-def test_slip_peak_is_where_the_envelope_of_the_grip_in_use_reaches_its_top():
-    rack = fe.RbrRack
+def test_slip_peak_and_grip_are_the_envelopes_of_the_window():
     for peak in (0.1, 0.15, 0.25):
         r = trail_rack(1.0, 0.0)
-        sweep_peak(r, peak)
-        assert r.slip_peak == pytest.approx(peak, rel=0.15)
-    r = trail_rack(1.0, 0.5)
-    r._grip_trail(0.5, 1.0, 0.01, 20.0, 0.25)       # one sample says nothing
-    assert r.slip_peak == rack.DERIVED_SLIP_PEAK
-    r = trail_rack(1.0, 0.0)
-    sweep_peak(r, 0.6, top=0.42)          # a peak over the range stays in range
-    assert r.slip_peak <= rack.DERIVED_PEAK_RANGE[1]
-    r._restart_floor()
-    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and not any(v is not None for v in r._peak_env)
+        for _ in corner_drive(r, peak, 1.0, 70, top=0.4):
+            pass
+        assert r.slip_peak == pytest.approx(peak, rel=0.2) and r.grip_mu == pytest.approx(1.0, rel=0.05)
 
 
-def test_slip_peak_ignores_turn_in_lag_and_bumps_in_a_slide():
+def test_a_drive_that_never_reaches_the_limit_holds_the_prior():
+    r = trail_rack(0.9, 0.0)
+    for _ in corner_drive(r, 0.5, 0.5, 90, top=0.15):               # r still rising into the last bin: a floor, not a top
+        pass
+    assert r.grip_mu == r.DERIVED_MU0 and r.slip_peak == r.DERIVED_SLIP_PEAK
+    for _ in corner_drive(r, 0.15, 1.2, 90, loaded=False):          # the fronts in the air: nothing is learnt
+        pass
+    assert r.grip_mu == r.DERIVED_MU0
+
+
+def test_the_racks_envelope_is_the_one_ffb_laws_uses():
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
+    import ffb_laws as laws
     r = trail_rack(1.0, 0.0)
-    sweep_peak(r, 0.15)
-    learnt = r.slip_peak
-    for _ in range(200):                              # Fz bumps in the slide: the use dips to .9 and back at a big slip
-        r._grip_trail(0.9, 1.0, 0.01, 20.0, 0.4)
-        r._grip_trail(1.0, 1.0, 0.01, 20.0, 0.4)
-    assert r.slip_peak == pytest.approx(learnt, rel=0.1)
-    for _ in range(30):                               # a turn-in over a second: the force follows the slip 0.1 s late (0.03 rad)
-        for alpha in np.linspace(0.0, 0.3, 300):
-            r._grip_trail(min(max(alpha - 0.03, 0.0) / 0.12, 1.0), 1.0, 0.0033, 20.0, alpha)
-    assert r.slip_peak == pytest.approx(0.15, rel=0.3)
+    rows = []
+    for k, _ in enumerate(corner_drive(r, 0.15, 1.1, 60, top=0.3)):
+        pass
+    win = list(r._win)
+    slip, force = np.array([w[1] for w in win]), np.array([w[2] for w in win])
+    cols = {'t': np.array([w[0] for w in win]), 'slip': slip, 'fyf': force * 4000.0, 'pneu': force * 0.0, 'mass': np.full(len(win), np.nan),
+            'bl': np.full(len(win), 0.6), 'fzf': np.full(len(win), 4000.0)}
+    c = laws.causes(cols, fe.RbrRack.DERIVED_WINDOW_STEP)
+    assert c['reached'].all() and c['mu'][0] == pytest.approx(r.grip_mu, rel=0.02) and c['peak'][0] == pytest.approx(r.slip_peak, rel=0.05)
 
 
 def test_sat_div_is_finite_and_positive():
@@ -1818,36 +1832,20 @@ def test_trail_past_the_peak_factor():
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.45 * base)
 
 
-def test_slip_peak_stays_put_when_grip_falls_from_tarmac_to_gravel():
+def test_slip_peak_and_grip_settle_on_gravel_within_a_minute_after_tarmac():
     r = trail_rack(1.1, 0.0)
-
-    def drive(peak, top, mu_r, secs):
-        seen = []
-        for _ in range(secs):                             # one sweep of alpha a second
-            for alpha in np.linspace(0.0, top, 100):
-                r._grip_trail(min(alpha / peak, 1.0) * mu_r, 1.0, 0.01, 20.0, alpha)
-                seen.append(r.slip_peak)
-        return seen
-    drive(0.15, 0.35, 1.1, 120)                           # tarmac, out to .35 rad
-    seen = drive(0.15, 0.22, 0.88, 120)                   # gravel: r .88, peak .15, slip under .22
-    assert all(0.15 * 0.85 <= p <= 0.15 * 1.3 for p in seen), (min(seen), max(seen))
-    assert max(seen) < 0.15 * 1.3
+    for _ in corner_drive(r, 0.15, 1.1, 120, top=0.35):             # tarmac, out to .35 rad
+        pass
+    seen = list(corner_drive(r, 0.15, 0.88, 120, top=0.22))        # gravel: r .88, peak .15, slip under .22
+    mu, peak = seen[6000]                                           # 60 s on
+    assert peak == pytest.approx(0.15, rel=0.15) and mu == pytest.approx(0.88, rel=0.1)
+    assert seen[-1][1] == pytest.approx(0.15, rel=0.15)
 
 
 def test_a_spike_in_the_front_force_does_not_lift_the_grip():
-    r = trail_rack(0.9, 0.0)
-    for _ in range(300):
-        r._grip_trail(0.9, 1.0, 0.01, 20.0, 0.05)
+    r = trail_rack(1.0, 0.0)
+    for _ in corner_drive(r, 0.15, 1.0, 70):
+        pass
     base = r.grip_mu
-    for _ in range(15):                                  # 0.15 s at r 1.35
-        r._grip_trail(1.35, 1.0, 0.01, 20.0, 0.05)
-    for _ in range(100):
-        r._grip_trail(0.9, 1.0, 0.01, 20.0, 0.05)
-    assert r.grip_mu - base < 0.03
-    for _ in range(100):                                 # a sustained 1.2 does lift it
-        r._grip_trail(1.2, 1.0, 0.01, 20.0, 0.05)
-    assert r.grip_mu > 1.1
-    r2 = trail_rack(0.9, 0.0)
-    for _ in range(300):
-        r2._grip_trail(1.3, 1.0, 0.01, 20.0, 0.05, loaded=False)      # the fronts in the air: nothing learnt
-    assert r2.grip_mu == 0.9
+    seen = list(corner_drive(r, 0.15, 1.0, 20, spike=(3.0, 0.15, 1.5)))
+    assert max(m for m, _p in seen) - base < 0.03

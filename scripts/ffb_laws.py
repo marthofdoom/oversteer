@@ -14,6 +14,7 @@ import os
 import numpy as np
 
 import ffb_tools as tools
+from oversteer import ffb_forza
 
 LAWS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ffb_laws.json')
 STRETCH_S = 60.0
@@ -22,9 +23,9 @@ USE = (0.0, 0.5, 0.8, 0.9, 1.0, 99.0)           # u before the peak (x < 1)
 PAST = (1.0, 1.3, 1.7, 2.5, 99.0)               # x from the peak on
 NO_SLIP = (0.5, 0.6)            # u and x under these: the trail at no slip
 FLAG = 0.15                     # a cell's median of rack / law outside 1 +- this is flagged ...
-REACHED_S = 0.5                 # s in the envelope's top bin for a stretch to count as having reached the limit
-PEAK_SHARE = 0.97               # the peak slip: the first bin whose envelope reaches this share of the top
-MU_MAX = 2.0                    # a stretch's grip top over this is noise, not grip (a sanity bound: Forza's aero inflates Newton over the static load)
+REACHED_S = ffb_forza.ENV_REACHED_S      # s in the envelope's top bin for a stretch to count as having reached the limit
+PEAK_SHARE = ffb_forza.ENV_SHARE         # the peak slip: the first bin whose envelope reaches this share of the top
+MU_MAX = ffb_forza.ENV_MU_MAX            # a stretch's grip top over this is noise, not grip (a sanity bound: Forza's aero inflates Newton over the static load)
 TOL_MAX = 0.5                   # ... and never wider than this, however far ACR's drives spread (a third of the law must flag)
 MIN_S = 3.0                     # ... when it holds this many seconds
 LOCK_FLAG = 0.15
@@ -56,14 +57,10 @@ def probe(rack, s):
 
 
 def _envelope(x, y, dt, bins, min_s=0.25):
-    """(centres, p80 of y, seconds) over the slip bins holding at least `min_s` (and 15 samples); None under three bins."""
-    ok = np.isfinite(x) & np.isfinite(y)
-    x, y = x[ok], y[ok]
-    idx = np.digitize(x, bins) - 1
-    need = max(15, min_s / max(dt, 1e-6))
-    got = [(0.5 * (bins[j] + bins[j + 1]), float(np.percentile(y[idx == j], 80)), (idx == j).sum() * dt)
-           for j in range(len(bins) - 1) if (idx == j).sum() >= need]
-    return tuple(np.array(v) for v in zip(*got)) if len(got) >= 3 else None
+    """(centres, p80 of y, seconds) over the slip bins holding at least `min_s` (and 15 samples); None under three bins. The engine's
+    definition (ffb_forza.envelope), as arrays."""
+    env = ffb_forza.envelope(x.tolist(), y.tolist(), dt, tuple(bins), min_s)
+    return None if env is None else tuple(np.array(v) for v in env)
 
 
 def causes(cols, dt, bins=None):
@@ -88,13 +85,12 @@ def causes(cols, dt, bins=None):
             if env is None:
                 continue
             _cen, top, secs = env
-            k = int(np.argmax(top))
-            if not top[k] <= MU_MAX:
+            k, top_mu, got = ffb_forza.envelope_top(list(top), list(secs))
+            if top_mu is None:
                 print('  stretch %d: grip top %.2f over MU_MAX %.1f, left unreached' % (g, top[k], MU_MAX))
                 continue
-            mu[m] = top[k]
-            # the limit was reached: the envelope stops rising (its top is not a still-rising last bin) and holds some time
-            reached[m] = secs[k] >= REACHED_S and not (k == len(top) - 1 and top[k] > 1.03 * top[k - 1])
+            mu[m] = top_mu
+            reached[m] = got                # (the engine's test: the top bin holds time and is not a still-rising last bin)
         # the peak slip per grip band, from all its stretches with a top together (one stretch's is a coarse bin)
         band = np.array([tools.mu_band(v) if np.isfinite(v) else -1 for v in mu])
         for bi in range(len(tools.MU_BAND_NAMES)):
@@ -102,10 +98,7 @@ def causes(cols, dt, bins=None):
             env = _envelope(slip[m], r[m] / mu[m], dt, bins) if m.any() else None
             if env is not None:
                 cen, top, _secs = env
-                want = PEAK_SHARE * top.max()
-                k = int(np.argmax(top >= want))
-                # (between the bin centres: the crossing of the share, not the bin's centre)
-                peak[band == bi] = cen[k] if k == 0 else cen[k - 1] + (cen[k] - cen[k - 1]) * (want - top[k - 1]) / (top[k] - top[k - 1])
+                peak[band == bi] = ffb_forza.envelope_peak(list(cen), list(top), PEAK_SHARE)
         tp = cols['pneu'] / np.where(fyf >= tools.TRAIL_FYF_MIN, fyf, np.nan)
         return {'r': r, 'mu': mu, 'peak': peak, 'reached': reached, 'u': r / mu, 'x': slip / peak, 'seg': seg, 'tp': tp}
 
@@ -126,7 +119,6 @@ def stretch_points(c, min_n=200):
 def gripscale_at(items, times):
     """GripScale's mu (ffb_forza, as ForzaRack feeds it: every sample's t, a_y and speed) at each of `times`, from a drive's
     [(t, sample)]; NaN until it is known."""
-    from oversteer import ffb_forza
     gs, ts, mus = ffb_forza.GripScale(), [], []
     for t, s in items:
         if s.accel is not None and len(s.accel) > 1:

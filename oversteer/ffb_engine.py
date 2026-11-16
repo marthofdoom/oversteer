@@ -1505,18 +1505,12 @@ class RbrRack(RackForce):
     # (the no-slip trail is ffb_forza.trail_tp0(grip_mu): the line through ACR's stretches against the top of the tyres' Fy/Fz, one source with the Forza racks; grip_mu reads that same top: the held maximum, rise 0.1 s, over Fy_f / Fz smoothed 0.05 s)
     DERIVED_TP_USE = ((0.0, 1.0), (0.85, 1.0), (0.95, 0.92), (1.05, 0.73))      # (u, trail factor before the peak), held at the ends
     DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.45), (2.1, 0.22), (3.0, 0.2))          # (alpha / slip_peak, factor over the at-peak one), held at the end
-    DERIVED_PEAK_BIN = 0.02              # rad: the slip bins of the upper envelope of the grip in use (the peak slip is where it first reaches DERIVED_PEAK_SHARE of its top, as ffb_laws finds the drive's own)
-    DERIVED_PEAK_Q = 0.7                 # the quantile tracked per bin (the drive's envelope is the 80th percentile of its samples; the tracker, weighted to the recent, matched the drives' own peaks best at 0.7)
-    DERIVED_PEAK_TAU = 30.0              # s of time in a bin: the tracker's time constant (the crossing of 0.95 in time read 10-30 % high on turn-in: the force lags the slip)
-    DERIVED_PEAK_FRESH = 8.0             # s: a bin's time fades over this (grip_mu falls over a minute; an old visit says nothing of today's grip)
-    DERIVED_PEAK_HOLD = 0.2              # s of recent time (faded over DERIVED_PEAK_FRESH) in a bin before it counts
-    DERIVED_PEAK_SHARE = 0.97
+    DERIVED_WINDOW = 60.0                # s: the grip and the peak slip are the envelope's (ffb_forza.stretch_limit, the definition ffb_laws fits the law with) of the last this long
+    DERIVED_WINDOW_STEP = 0.05           # s: the window keeps a sample this often (20 Hz)
+    DERIVED_WINDOW_EVERY = 2.0           # s between the envelope's recomputes; while it is not reached the last values hold
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
-    DERIVED_MU_SUSTAIN = 0.6             # s: grip rises only toward the median r of this long (a spike of an impact or an unload is not grip)
-    DERIVED_MU_RISE = 0.1                # s
-    DERIVED_MU_FALL = 60.0               # s
     DERIVED_R_TAU = 0.05                 # s: Fy_f / Fz's smoothing
     DERIVED_AY_HZ = 30.0                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
@@ -1667,10 +1661,8 @@ class RbrRack(RackForce):
         """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
         self.grip_mu, self._grip_r = self.DERIVED_MU0, 0.0      # (the derived path's grip: a new stream starts from the prior)
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
-        self._peak_env = [None] * int(self.DERIVED_PEAK_RANGE[1] / self.DERIVED_PEAK_BIN + 0.5)     # (the grip in use's tracked upper envelope per slip bin ...)
-        self._peak_secs = [0.0] * len(self._peak_env)           # (... and the time each bin has had)
-        self._peak_seen = [None] * len(self._peak_env)          # (... and when it was last visited, on _grip_clock)
-        self._grip_clock, self._grip_hist = 0.0, collections.deque()      # (grip_r over the last DERIVED_MU_SUSTAIN s)
+        self._win = collections.deque()  # (the window of (clock, |alpha|, Fy_f / Fz), 20 Hz, over DERIVED_WINDOW s)
+        self._grip_clock, self._win_at, self._env_at = 0.0, None, 0.0
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1847,27 +1839,27 @@ class RbrRack(RackForce):
 
     def _grip_trail(self, fy, fz, dt, speed, alpha=None, loaded=True):
         """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: ffb_forza.trail_tp0(mu)
-        times the factors of the grip in use and of the slip past its learnt peak,
-        mu rising to the highest Fy_f / Fz within about a tenth of a second and falling back slowly, from a sane prior for the first
-        corners. Replayed on 20261104-212111 it read 1.14 on tarmac and 0.85 on gravel; a brush tyre's (1 - grip in use) did not
-        separate the surfaces, this does, as ACR's measured trail does (42-44 mm tarmac, 22-27 mm gravel)."""
+        times the factors of the grip in use and of the slip past its learnt peak. mu and the peak slip are the upper envelope's of
+        Fy_f / Fz against the front slip over the last DERIVED_WINDOW s, recomputed every DERIVED_WINDOW_EVERY s from the samples taken
+        while the fronts are loaded (ffb_forza.stretch_limit: the top, and the first slip at 97 % of it: the definition of the law the
+        trail is fitted with); while the limit has not been reached the last values hold, from a sane prior for the first corners.
+        u is Fy_f / Fz, smoothed, over mu."""
         now = fy / fz
         self._grip_r += min(dt / self.DERIVED_R_TAU, 1.0) * (now - self._grip_r)
         self._grip_clock += dt
-        hist = self._grip_hist
-        hist.append((self._grip_clock, self._grip_r))
-        while hist and hist[0][0] < self._grip_clock - self.DERIVED_MU_SUSTAIN:
-            hist.popleft()
-        if loaded and ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED:
-            rs = sorted(r for _t, r in hist)
-            low = rs[len(rs) // 2]                            # (the rise follows the median r of the last DERIVED_MU_SUSTAIN s)
-            if low > self.grip_mu:
-                self.grip_mu += min(dt / self.DERIVED_MU_RISE, 1.0) * (low - self.grip_mu)
-            elif self._grip_r < self.grip_mu:
-                self.grip_mu += min(dt / self.DERIVED_MU_FALL, 1.0) * (self._grip_r - self.grip_mu)
-            self.grip_mu = min(max(self.grip_mu, self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
-            if alpha is not None and ffb_forza.finite(alpha):
-                self._learn_peak(abs(alpha), self._grip_r, dt)
+        if loaded and ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED and alpha is not None and ffb_forza.finite(alpha):
+            if self._win_at is None or self._grip_clock - self._win_at >= self.DERIVED_WINDOW_STEP:
+                self._win_at = self._grip_clock
+                self._win.append((self._grip_clock, abs(alpha), now))
+            while self._win and self._win[0][0] < self._grip_clock - self.DERIVED_WINDOW:
+                self._win.popleft()
+            if self._grip_clock - self._env_at >= self.DERIVED_WINDOW_EVERY:
+                self._env_at = self._grip_clock
+                got = ffb_forza.stretch_limit([w[1] for w in self._win], [w[2] for w in self._win], self.DERIVED_WINDOW_STEP)
+                if got and got[2]:
+                    self.grip_mu = min(max(got[0], self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
+                    if got[1] is not None:
+                        self.slip_peak = min(max(got[1], self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
         use = self._grip_r / self.grip_mu
         past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
         return self._tp0() * self._interp(self.DERIVED_TP_USE, use) * past
@@ -1875,42 +1867,6 @@ class RbrRack(RackForce):
     def _tp0(self):
         """The pneumatic trail at no slip (m) at the grip the fronts have shown, ffb_forza's line, held over the grip it was fitted over."""
         return ffb_forza.trail_tp0(self.grip_mu)
-
-    def _peak_recent(self, k):
-        """The time (s) bin k has had lately: its visits, each fading over DERIVED_PEAK_FRESH s."""
-        return self._peak_secs[k] * math.exp((self._peak_seen[k] - self._grip_clock) / self.DERIVED_PEAK_FRESH)
-
-    def _learn_peak(self, alpha, r, dt):
-        """The peak slip: the front force per load's upper envelope against |alpha| (per DERIVED_PEAK_BIN bin, each bin's DERIVED_PEAK_Q
-        quantile of r tracked over its own time), read over today's grip_mu (a fall of grip changes what the old r means) from the bins
-        with DERIVED_PEAK_HOLD s of recent time; the first such bin that reaches DERIVED_PEAK_SHARE of the top is the
-        peak slip, between the bin centres: the drive's own definition (scripts/ffb_laws.py), over the corners, not each turn-in."""
-        j = int(alpha / self.DERIVED_PEAK_BIN)
-        if j >= len(self._peak_env) or dt <= 0.0:
-            return
-        w, seen = self._peak_secs[j], self._peak_seen[j]
-        if seen is not None:
-            w *= math.exp((seen - self._grip_clock) / self.DERIVED_PEAK_FRESH)
-        q = self._peak_env[j]
-        if q is None or w < 0.05:
-            q = r                                           # (a bin not seen for a while starts again from today's r)
-        q += min(4.0 * dt / self.DERIVED_PEAK_TAU, 1.0) * max(q, 0.3 * self.grip_mu) * (self.DERIVED_PEAK_Q if r > q else self.DERIVED_PEAK_Q - 1.0)
-        self._peak_env[j] = q
-        self._peak_secs[j], self._peak_seen[j] = w + dt, self._grip_clock
-        held = [(k, v / self.grip_mu) for k, v in enumerate(self._peak_env) if v is not None and self._peak_recent(k) >= self.DERIVED_PEAK_HOLD]
-        if len(held) < 3:
-            return
-        want = self.DERIVED_PEAK_SHARE * max(v for _k, v in held)
-        for n, (k, v) in enumerate(held):
-            if v >= want:
-                if n == 0 or n + 2 >= len(held):
-                    return                                  # (no rise below it, or nothing recent beyond it: a corner that stopped at the top says nothing of where it is)
-                lo = (k + 0.5) * self.DERIVED_PEAK_BIN
-                if n:
-                    k0, v0 = held[n - 1]
-                    lo = (k0 + 0.5) * self.DERIVED_PEAK_BIN + (lo - (k0 + 0.5) * self.DERIVED_PEAK_BIN) * (want - v0) / (v - v0)
-                self.slip_peak = min(max(lo, self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
-                return
 
     @staticmethod
     def _interp(table, x):

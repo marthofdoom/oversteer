@@ -18,6 +18,7 @@ Forza sends no tyre forces, so the front kingpin torque comes from Newton (analy
   critically damped second-order low-pass stepped every engine pass, its corner following the measured packet rate
   (a third of it, 15 to 60 Hz: 20 Hz at 60/s), then a slew limit proportional to the rate (0.15 of full scale per
   10 ms at 60/s). No extrapolation: it lags the packets by about a packet's interval and is smooth."""
+import bisect
 import collections
 import math
 import re
@@ -580,3 +581,70 @@ class OutputFilter:
         limit = self.slew() * dt
         self._out += min(max(self._y2 - self._out, -limit), limit)
         return self._out
+
+
+# The grip a stretch of driving shows, one definition for the engine and for scripts/ffb_laws.py (the law's tops and peaks): the upper
+# envelope (80th percentile of r = front force over load in each slip bin), its top is the grip mu, the first bin reaching 97 % of the top
+# (between the bin centres) is the peak slip, and the limit counts as reached when the top bin holds time and is not a still-rising last bin.
+ENV_BINS = (0.0, 0.005, 0.01, 0.02, 0.03, 0.05, 0.07, 0.1, 0.13, 0.17, 0.22, 0.3, 0.4, 0.6, 1.0)      # rad
+ENV_PCT = 80.0
+ENV_MIN_SAMPLES = 15                     # a bin's samples (and ENV_MIN_S seconds) before it counts
+ENV_MIN_S = 0.25
+ENV_REACHED_S = 0.5                      # s in the top bin
+ENV_RISING = 1.03                        # a last bin this far over the one before it is still rising
+ENV_SHARE = 0.97
+ENV_MU_MAX = 2.0                         # a top over this is noise, not grip
+
+
+def _percentile(values, pct):
+    """numpy.percentile's linear interpolation, for a non-empty list."""
+    v = sorted(values)
+    k = (len(v) - 1) * pct / 100.0
+    i = int(k)
+    return v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
+
+
+def envelope(slip, r, dt, bins=ENV_BINS, min_s=ENV_MIN_S):
+    """([bin centres], [p80 of r], [seconds]) over the slip bins holding at least ENV_MIN_SAMPLES samples and min_s seconds (the
+    samples dt apart); None under three bins. Non-finite pairs are skipped."""
+    need = max(ENV_MIN_SAMPLES, min_s / max(dt, 1e-6))
+    per = [[] for _ in range(len(bins) - 1)]
+    for a, y in zip(slip, r):
+        if finite(a) and finite(y) and bins[0] <= a:
+            j = bisect.bisect_right(bins, a) - 1
+            if j < len(per):
+                per[j].append(y)
+    got = [(0.5 * (bins[j] + bins[j + 1]), _percentile(v, ENV_PCT), len(v) * dt) for j, v in enumerate(per) if len(v) >= need]
+    if len(got) < 3:
+        return None
+    return [g[0] for g in got], [g[1] for g in got], [g[2] for g in got]
+
+
+def envelope_top(top, secs):
+    """(k, mu, reached): the index of the envelope's top bin, the top, and whether the limit was reached there. mu None over ENV_MU_MAX."""
+    k = max(range(len(top)), key=top.__getitem__)
+    if not top[k] <= ENV_MU_MAX:
+        return k, None, False
+    return k, top[k], secs[k] >= ENV_REACHED_S and not (k == len(top) - 1 and top[k] > ENV_RISING * top[k - 1])
+
+
+def envelope_peak(cen, top, share=ENV_SHARE):
+    """The slip where the envelope first reaches `share` of its top: between the bin centres (the crossing, not the centre)."""
+    want = share * max(top)
+    k = next(i for i, v in enumerate(top) if v >= want)
+    return cen[k] if k == 0 else cen[k - 1] + (cen[k] - cen[k - 1]) * (want - top[k - 1]) / (top[k] - top[k - 1])
+
+
+def stretch_limit(slip, r, dt):
+    """(mu, peak, reached) of one stretch from its |slip| and r samples, dt apart: the top of the envelope of r, and the peak slip
+    from the envelope of r / mu. None without an envelope or with a top over ENV_MU_MAX; reached False when it is a floor."""
+    env = envelope(slip, r, dt)
+    if env is None:
+        return None
+    k, mu, reached = envelope_top(env[1], env[2])
+    if mu is None:
+        return None
+    if not reached:
+        return mu, None, False
+    pk = envelope(slip, [y / mu for y in r], dt)
+    return mu, (envelope_peak(pk[0], pk[1]) if pk else None), True
