@@ -547,7 +547,7 @@ def _replay_runs(path, scratch, learnt=None):
     learner.log.store.learn_finishes = live_lines        # a replayed clock stop must not move the live lines
     live_lines()
     try:
-        replay(records, learner, started=meta.get('started'), recorded_car=meta.get('rbr_car'))
+        replay(records, learner, started=meta.get('started'), recorded_car=meta.get('rbr_car'), meta=meta)
     finally:
         learner.close()
     db = sqlite3.connect(scratch)

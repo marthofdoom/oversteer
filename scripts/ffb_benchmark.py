@@ -327,7 +327,7 @@ def _walk(path):
     def gen():
         for t, _a, data in recs:
             try:
-                s = tf.decode_sample(data)
+                s = tf.decode_sample(data, tc.recorded_car_of(meta.get('rbr_car')))    # the recorded car, not today's Cars.ini
             except Exception:
                 continue
             if s is not None:
