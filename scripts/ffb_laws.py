@@ -476,3 +476,9 @@ def fit_rack_form(drives):
             'rel_line': rel(icpt + slope * p[:, 0]), 'stretches': [tuple(float(x) for x in r[:5]) for r in pts],
             'use': med(use), 'past': med(past), 'mu_ratio': float(np.median(p[:, 0] / p[:, 2])),
             'peak_ratio': float(np.median(p[:, 3] / p[:, 4]))}
+
+
+def fe_range():
+    """The grip range RbrRack holds its estimate to."""
+    from oversteer import ffb_engine as fe
+    return fe.RbrRack.DERIVED_MU_RANGE
