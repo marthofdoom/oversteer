@@ -91,6 +91,15 @@ FFB_MAX_BYTES = 600 * 1000 * 1000         # config.ini telemetry_ffb_max_mb
 OVST_THIN_STEP_LEAP = 1000  # physics steps the packet id may leap forward before both packets are kept (a new session)
 
 
+# A record the packets do not carry: source 0 and data CAR_MARK + JSON ({key, id, name}), written in the stream
+# before the packet from which a Richard Burns Rally car is in force. The car is not in the packets, and the install
+# that names it is found on a thread of its own, so the header (written at the first packet) often cannot have it.
+# Older readers see an undecodable packet from 0.0.0.0 and drop it.
+CAR_MARK = b'OVCAR1\n'
+CAR_CHECK = 1.0             # s of the capture's clock between two looks at which car a slot holds (Cars.ini is rewritten at a stage load)
+CAR_SIDECAR = '.car'        # <capture>.car: one line, a car key (rbr/106), for a capture that recorded none
+
+
 def rbr_meta(first):
     """Header keys for a file whose first packet is Richard Burns Rally's (664 bytes): the car RSF has put in the
     slot the packet names, `rbr_car` (key, id, name). The car is not in the packets, and a replay later reads
@@ -140,6 +149,9 @@ class CaptureWriter:
         self._ovst = None                 # OVST v5+: the last packet's (step, state, clock, distance, frozen)
         self._ovst_due = None             # arrival time from which the next OVST v5+ packet is saved
         self._ovst_moved = None           # arrival time at which its stage clock last changed
+        self._car_key = (extra or {}).get('rbr_car', {}).get('key')   # the RBR car the header or a car record named last
+        self._car_slot = None             # the slot of the last RBR packet looked at
+        self._car_at = None               # capture clock of the last look
 
     def write(self, now, addr, data):
         if self.full_rate:
@@ -155,9 +167,30 @@ class CaptureWriter:
     def _put(self, now, addr, data):
         if self._first is None:
             self._first = now
+        if len(data) == 664:
+            self._note_car(now - self._first, data)
         self._file.write(RECORD.pack(now - self._first, _ipv4(addr[0]), len(data)))
         self._file.write(data)
         self.packets += 1
+
+    def _note_car(self, t, data):
+        """A Richard Burns Rally packet is about to be saved: when the car in its slot is not the one recorded last,
+        a car record goes in the stream first. Looked at on a new slot and every CAR_CHECK s; nothing is written
+        while the install is not found yet (then the next look tries again)."""
+        slot = struct.unpack_from('<i', data, 56)[0]
+        if slot == self._car_slot and self._car_at is not None and t - self._car_at < CAR_CHECK:
+            return
+        self._car_slot, self._car_at = slot, t
+        try:
+            from . import rbr_install
+            car = rbr_install.car_in_slot(slot)
+        except Exception:
+            return
+        if car and car.get('key') and car['key'] != self._car_key:
+            self._car_key = car['key']
+            body = CAR_MARK + json.dumps({k: car.get(k) for k in ('key', 'id', 'name')}).encode()
+            self._file.write(RECORD.pack(t, 0, len(body)))
+            self._file.write(body)
 
     def _keep(self, now, addr, data):
         """Whether a packet of a THIN format is saved: one in every 1/rate of its own steps, and every one where
@@ -232,10 +265,29 @@ class CaptureWriter:
         self.close()
 
 
+def _sidecar_car(path, meta):
+    """A capture whose header names no Richard Burns Rally car takes it from `<capture>.car` (one line, a car key
+    such as rbr/106) if there is one: that wins over today's Cars.ini, which a replay reads otherwise. A car record
+    in the stream still overrides it from where it stands."""
+    if meta.get('rbr_car'):
+        return
+    try:
+        with open(path + CAR_SIDECAR) as f:
+            key = f.readline().strip()
+    except OSError:
+        return
+    if key:
+        from . import car_data
+        rid = key.split('/')[-1]
+        meta['rbr_car'] = {'key': key, 'id': int(rid) if rid.isdigit() else None,
+                           'name': car_data.display_name(key) or 'RBR car'}
+
+
 def read_capture(path):
     """(meta dict, iterator of (t, (address, 0), data)). The iterator ends
     quietly at a truncated tail; a file that is not a capture raises
-    ValueError at once."""
+    ValueError at once. `meta['rbr_car']` is the header's car (or the sidecar's) and follows the car records of
+    the stream as the iterator passes them."""
     stream = gzip.open(path, 'rb')
     try:
         if stream.readline() != MAGIC:
@@ -244,6 +296,8 @@ def read_capture(path):
     except (OSError, EOFError, ValueError, zlib.error):
         stream.close()
         raise ValueError("{}: not an Oversteer capture".format(path))
+
+    _sidecar_car(path, meta)
 
     def records():
         try:
@@ -255,6 +309,12 @@ def read_capture(path):
                 data = stream.read(length)
                 if len(data) < length:
                     return
+                if source == 0 and data.startswith(CAR_MARK):
+                    try:
+                        meta['rbr_car'] = json.loads(data[len(CAR_MARK):].decode())    # in force from here on
+                    except ValueError:
+                        pass
+                    continue
                 yield t, (socket.inet_ntoa(struct.pack('!I', source)), 0), data
         except (EOFError, OSError, zlib.error):
             return                       # cut short while it was being written
@@ -926,27 +986,39 @@ class NullLeds:
         pass
 
 
-def replay(records, learner=None, start=1000.0, started=None, recorded_car=None, **options):
+def replay(records, learner=None, start=1000.0, started=None, recorded_car=None, meta=None, **options):
     """Feed capture records through Telemetry.handle on the capture's own
     clock (from `start`, so no packet lands on the listener's "never"
     time 0), with a NullLeds; the learner, if given, learns as it would
     live, with its wall clock from `started` (the capture's epoch time,
     so the same capture writes the same database) and its session ended
     at the end. `recorded_car`: the capture header's `rbr_car`, which names a Richard Burns Rally car the way it
-    was when recorded, not as today's Cars.ini has it. Returns the Telemetry, idle at the end."""
+    was when recorded, not as today's Cars.ini has it; `meta`, read_capture's, makes the replay follow the car records
+    of the stream (its `rbr_car` as the records stand). Returns the Telemetry, idle at the end."""
     from .telemetry import Telemetry, IDLE_TIMEOUT
     if isinstance(recorded_car, dict) and recorded_car.get('key'):
-        options['rbr_car'] = dict({'drivetrain': None, 'gears': None}, **recorded_car)
-    return _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT)
+        options['rbr_car'] = recorded_car_of(recorded_car)
+    return _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT, meta)
 
 
-def _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT):
+def recorded_car_of(car):
+    """A recorded `rbr_car` as the decoder takes it, or None."""
+    if isinstance(car, dict) and car.get('key'):
+        return dict({'drivetrain': None, 'gears': None}, **car)
+    return None
+
+
+def _replay(records, learner, start, started, options, Telemetry, IDLE_TIMEOUT, meta=None):
     telemetry = Telemetry(NullLeds(), learner=learner, **options)
     if learner is not None and started is not None:
         learner.clock = lambda now: started + (now - start)
     t = start
     for t_rel, addr, data in records:
         t = start + t_rel
+        if meta is not None:
+            car = recorded_car_of(meta.get('rbr_car'))
+            if car is not None and car != telemetry.rbr_car:
+                telemetry.rbr_car = car
         telemetry.handle(t, data, addr)
     telemetry.check_idle(t + IDLE_TIMEOUT + 1.0)
     if learner is not None:

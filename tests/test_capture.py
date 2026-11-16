@@ -461,3 +461,71 @@ def test_ffb_tuning_switch_is_saved_and_the_limit_stop_saves_it_off(tmp_path):
     me.telemetry_recorder = mock.MagicMock(ffb_stopped='time', error=None, dropped=0)
     Gui.refresh_capture_status(me)
     assert not me.ffb_tuning_on and me.ffb_stop_reason == 'time' and me.save_preferences.call_count == 2
+
+
+# ---- the Richard Burns Rally car in a capture -------------------------------------------------------------
+
+def _rbr_packet(slot=6, steps=0):
+    data = bytearray(664)
+    struct.pack_into('<I', data, 0, steps)
+    struct.pack_into('<i', data, 56, slot)
+    return bytes(data)
+
+
+def _write_rbr(path, cars, packets=3, first=b'x'):
+    """A capture whose first record is not RBR's; `cars` answers car_in_slot per call (None: install not found yet)."""
+    answers = iter(cars)
+    with mock.patch('oversteer.rbr_install.car_in_slot', lambda slot: next(answers, cars[-1])):
+        with CaptureWriter(str(path)) as writer:
+            writer.write(0.0, ('1.2.3.4', 0), first)
+            for i in range(packets):
+                writer.write(2.0 * (i + 1), ('1.2.3.4', 0), _rbr_packet(steps=1440 * (i + 1)))
+
+
+FABIA = {'key': 'rbr/106', 'id': 106, 'name': 'Skoda Fabia', 'drivetrain': 'FWD', 'gears': 5}
+FIESTA = {'key': 'rbr/11', 'id': 11, 'name': 'Ford Fiesta', 'drivetrain': 'FWD', 'gears': 5}
+
+
+def test_rbr_car_is_recorded_in_the_stream_when_the_header_could_not(tmp_path):
+    path = tmp_path / 'a.ovcap.gz'
+    _write_rbr(path, [None, FABIA, FIESTA])           # the install is found after the file opened, then the car changes
+    meta, records = read_capture(str(path))
+    assert 'rbr_car' not in meta
+    seen = []
+    for _t, _a, data in records:
+        seen.append((len(data), (meta.get('rbr_car') or {}).get('key')))
+    assert seen == [(1, None), (664, None), (664, 'rbr/106'), (664, 'rbr/11')]
+
+
+def test_replay_and_walk_follow_the_recorded_car(tmp_path):
+    from oversteer.telemetry_capture import recorded_car_of
+    path = tmp_path / 'a.ovcap.gz'
+    _write_rbr(path, [FABIA])
+    meta, records = read_capture(str(path))
+    cars = []
+    for _t, _a, data in records:
+        cars.append(recorded_car_of(meta.get('rbr_car')))
+    assert cars[-1]['key'] == 'rbr/106' and cars[-1]['gears'] is None
+    assert recorded_car_of(None) is None
+
+
+def test_sidecar_names_the_car_of_an_old_capture_and_wins_over_cars_ini(tmp_path):
+    path = tmp_path / 'old.ovcap.gz'
+    with CaptureWriter(str(path)) as writer:
+        writer.write(0.0, ('1.2.3.4', 0), b'x')
+    assert 'rbr_car' not in read_capture(str(path))[0]          # nothing anywhere: as before
+    (tmp_path / 'old.ovcap.gz.car').write_text('rbr/106\n')
+    car = read_capture(str(path))[0]['rbr_car']
+    assert car['key'] == 'rbr/106' and car['id'] == 106
+    with mock.patch('oversteer.rbr_install.car_in_slot', lambda slot: FIESTA):
+        from oversteer.telemetry_formats import decode_sample
+        from oversteer.telemetry_capture import recorded_car_of
+        assert decode_sample(_rbr_packet(), recorded_car_of(car)).car == 'rbr/106'
+
+
+def test_a_header_car_beats_the_sidecar(tmp_path):
+    path = tmp_path / 'h.ovcap.gz'
+    with CaptureWriter(str(path), extra={'rbr_car': FIESTA}) as writer:
+        writer.write(0.0, ('1.2.3.4', 0), b'x')
+    (tmp_path / 'h.ovcap.gz.car').write_text('rbr/106\n')
+    assert read_capture(str(path))[0]['rbr_car']['key'] == 'rbr/11'
