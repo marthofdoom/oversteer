@@ -138,37 +138,43 @@ class GripScale:
 
 
 class LimitGrip:
-    """The grip mu measured at the limit: Forza's normalised front slip angle is about 1 where the tyre's force tops out, so while the
-    mean of the fronts' |slip_angle| is inside SLIP and the car moves faster than V_MIN, r = |Fy_f| / (m b/L g) (Newton's force over the
-    static front load) pulls the estimate with time constant TAU; otherwise it is held. mu() is None until the first limit sample."""
+    """The grip mu measured at the limit, as the tyre law defines it (the top of the r = Fy_f / Fz envelope, scripts/ffb_laws.py): the
+    PCT-th percentile of r = |Fy_f| / (m b/L g) (Newton's force over the static front load) over the samples of the last WINDOW s whose
+    mean front |slip_angle| (Forza's normalised) is inside SLIP, the car faster than V_MIN. Held while those samples span under HOLD s;
+    mu() is None until they first do."""
 
-    SLIP = (0.8, 1.2)
+    SLIP = (0.6, 1.1)
     V_MIN = 8.0                          # m/s
-    TAU = 3.0                            # s
-    PRIOR = 1.0
+    WINDOW = 10.0                        # s
+    HOLD = 1.0                           # s
+    PCT = 90.0
     RANGE = (0.4, 1.8)
-    STEP_MAX = 0.2                       # s: a longer gap between samples counts as this
 
     def __init__(self):
         self.reset()
 
     def reset(self):
-        self._mu, self._at, self.known = self.PRIOR, None, False
+        self._buf = collections.deque()  # (t, r), oldest first
+        self._mu = None
 
     def feed(self, t, slip, speed, r):
-        last, self._at = self._at, t
-        if not (finite(t) and finite(slip) and finite(speed) and finite(r)) or speed <= self.V_MIN \
-                or not self.SLIP[0] <= abs(slip) <= self.SLIP[1]:
+        if not (finite(t) and finite(slip) and finite(speed) and finite(r)):
             return
-        r = min(max(abs(r), self.RANGE[0]), self.RANGE[1])
-        if not self.known:
-            self.known, dt = True, self.STEP_MAX
-        else:
-            dt = min(max(0.0 if last is None else t - last, 0.0), self.STEP_MAX)
-        self._mu += (1.0 - math.exp(-dt / self.TAU)) * (r - self._mu)
+        if self._buf and t < self._buf[-1][0]:
+            self._buf.clear()
+        if speed > self.V_MIN and self.SLIP[0] <= abs(slip) <= self.SLIP[1]:
+            self._buf.append((t, abs(r)))
+        while self._buf and self._buf[0][0] < t - self.WINDOW:
+            self._buf.popleft()
+        if len(self._buf) > 1 and self._buf[-1][0] - self._buf[0][0] >= self.HOLD:
+            v = sorted(x for _t, x in self._buf)
+            k = (len(v) - 1) * self.PCT / 100.0
+            i = int(k)
+            top = v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
+            self._mu = min(max(top, self.RANGE[0]), self.RANGE[1])
 
     def mu(self):
-        return self._mu if self.known else None
+        return self._mu
 
 
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):

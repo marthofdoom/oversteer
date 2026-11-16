@@ -1017,22 +1017,23 @@ def test_limit_grip_moves_only_at_the_slip_limit_and_tracks_a_step():
     g = fz.LimitGrip()
     assert g.mu() is None
     t = 0.0
-    for slip, speed in ((0.3, 20.0), (1.5, 20.0), (1.0, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
-        g.feed(t, slip, speed, 1.4)
-        t += 0.1
+    for slip, speed in ((0.3, 20.0), (1.5, 20.0), (0.9, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
+        for _ in range(30):
+            g.feed(t, slip, speed, 1.4)
+            t += 0.1
     assert g.mu() is None
-    for _ in range(300):                                  # 30 s at the limit, r 1.4
-        g.feed(t, 1.0, 20.0, 1.4)
+    for _ in range(50):                                   # 5 s at the limit, r 1.4
+        g.feed(t, 0.9, 20.0, 1.4)
         t += 0.1
-    assert g.mu() == pytest.approx(1.4, abs=0.01)
+    assert g.mu() == pytest.approx(1.4)
     held = g.mu()
     for _ in range(100):                                  # out of the window: held
         g.feed(t, 0.4, 20.0, 0.5)
         t += 0.1
     assert g.mu() == held
-    for _ in range(100):                                  # surface step to 0.7: within 10 s
+    for _ in range(100):                                  # surface step to 0.7: whole by 10 s
         g.feed(t, 0.9, 20.0, 0.7)
         t += 0.1
-    assert g.mu() == pytest.approx(0.7, abs=0.05)
-    g.feed(t, 1.0, 20.0, 9.0)
+    assert g.mu() == pytest.approx(0.7)
+    g.feed(t, 0.9, 20.0, 9.0)
     assert g.mu() <= fz.LimitGrip.RANGE[1]
