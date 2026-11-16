@@ -1771,7 +1771,18 @@ def test_slip_peak_learns_at_the_onset_not_on_the_plateau():
         r._grip_trail(1.0, 1.0, 0.5, 20.0, 0.9)
     assert r.slip_peak == rack.DERIVED_PEAK_RANGE[1]
     r._restart_floor()
-    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and r._use_prev is None
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and not r._peak_armed
+
+
+def test_slip_peak_ignores_bumps_in_a_slide():
+    r = trail_rack(1.0, 0.0)
+    r._grip_trail(0.5, 1.0, 1.0, 20.0, 0.05)          # armed under the re-arm level
+    r._grip_trail(1.0, 1.0, 1.0, 20.0, 0.15)          # the onset: learns from .15
+    learnt = r.slip_peak
+    for _ in range(200):                              # Fz bumps in the slide: the use dips to .9 and back at a big slip
+        r._grip_trail(0.9, 1.0, 1.0, 20.0, 0.4)
+        r._grip_trail(1.0, 1.0, 1.0, 20.0, 0.4)
+    assert r.slip_peak == learnt
 
 
 def test_sat_div_is_finite_and_positive():
