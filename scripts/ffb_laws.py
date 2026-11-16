@@ -323,3 +323,92 @@ def raw_cols(items, wheelbase, bl_of, factor):
         cols['slip'], unit = np.full(len(a), np.nan), 'none'
     cols['pneu'] = np.full(len(a), np.nan)
     return cols, unit, lock
+
+
+# ---- the trail in the grip RbrRack can see --------------------------------------------------------------------------------
+# The law above speaks the drive's own grip (the top of the tyres' Fy/Fz envelope per stretch). RbrRack has no tyre forces: its
+# grip is the held maximum of the smoothed Newton Fy_f / Fz (grip_mu), which sits lower than that top. So the rack's constants
+# are refitted against its own estimator, run over ACR's drives: Newton's Fy_f from a_y and the yaw acceleration with the moving
+# mass and GripScale's lateral factor, the same smoothing and held maximum (RbrRack._grip_trail itself), against ACR's tyre Mz / Fy.
+RACK_USE = (0.0, 0.75, 0.85, 0.95, 1.05, 99.0)       # u bins before the peak (the rack's table has its points at their centres)
+RACK_PAST = (1.0, 1.15, 1.5, 2.1, 3.0, 99.0)         # x bins from the peak on
+RACK_MIN_N = 300                                      # samples a bin needs
+
+
+def rack_estimates(cols):
+    """What RbrRack's grip estimator reads over an ACR drive (cols from simulate_stages): per sample the rack's `mu` (held grip),
+    `r` (smoothed Newton Fy_f / Fz), `u` = r / mu and `peak` (its learnt slip_peak, fed the tyres' slip), plus the Newton Fy_f
+    `fyn`. Needs the drive's true mass (all four tyres' Fy over a_y); None without."""
+    from oversteer import ffb_engine as fe, ffb_forza
+    m = tools.acr_true_mass(cols)
+    if not m:
+        return None
+    mass = m[0]
+    t, bl = cols['t'], cols['bl']
+    n = len(t)
+    rd = tools.yaw_accel(t, cols['yaw'], window=float(np.median(np.diff(t))) if n > 1 else 0.03)
+    rack, gs, lp = fe.RbrRack(), ffb_forza.GripScale(), ffb_forza.LowPass(fe.RbrRack.DERIVED_AY_HZ)
+    out = {k: np.full(n, np.nan) for k in ('mu', 'r', 'u', 'peak', 'fyn')}
+    last = None
+    for i in range(n):
+        dt = 0.0 if last is None else min(max(t[i] - last, 0.0), 0.1)
+        last = t[i]
+        gs.feed(t[i], cols['ay_s'][i], cols['speed'][i])
+        ay = lp.step(t[i], min(max(cols['ay_s'][i], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
+        fy = ffb_forza.front_lateral(mass, bl[i], ay, min(max(rd[i], -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX),
+                                     factor=ffb_forza.lateral_factor(gs.mu()))
+        limit = bl[i] * mass * rack.FLOOR_AY
+        fy = min(max(fy, -limit), limit)
+        fz = cols['fzf'][i]
+        if not np.isfinite(fz):
+            continue
+        a = cols['slip'][i]
+        rack._grip_trail(abs(fy), max(fz, 0.5 * bl[i] * mass * ffb_forza.G), dt, cols['speed'][i], a if np.isfinite(a) else None)
+        out['mu'][i], out['r'][i], out['peak'][i], out['fyn'][i] = rack.grip_mu, rack._grip_r, rack.slip_peak, abs(fy)
+    out['u'] = out['r'] / out['mu']
+    return out
+
+
+def fit_rack_form(drives):
+    """RbrRack's pneumatic-trail constants from ACR drives [(cols, causes)], in the rack's own grip estimate. Per stretch with a
+    no-slip trail: the median of the rack's mu against the trail there gives tp0(mu) = B mu^N (log fit) and a + b mu (line), with
+    the sums of squared relative residuals; then the median per bin of each sample's trail over the fitted tp0(mu) in the rack's
+    use u (before the drive's peak) and the drive's x (past it). Returns a dict, None when no drive has a true mass."""
+    pts, rows = [], []
+    for cols, c in drives:
+        est = rack_estimates(cols)
+        if est is None:
+            continue
+        rows.append((cols, c, est))
+        for g in np.unique(c['seg']):
+            m = (c['seg'] == g) & c['reached']
+            k = m & (est['u'] < NO_SLIP[0]) & (c['x'] < NO_SLIP[1]) & np.isfinite(c['tp']) & np.isfinite(est['mu'])
+            if k.sum() >= 200:
+                pts.append((float(np.median(est['mu'][k])), float(np.median(c['tp'][k])), float(np.median(c['mu'][k])),
+                            float(np.median(est['peak'][m])), float(c['peak'][m][0]), int(k.sum())))
+    if len(pts) < 3:
+        return None
+    p = np.array(pts)
+    w = np.sqrt(p[:, 5])
+    n_pow, lb = np.polyfit(np.log(p[:, 0]), np.log(p[:, 1]), 1, w=w)
+    b_pow = float(np.exp(lb))
+    slope, icpt = np.polyfit(p[:, 0], p[:, 1], 1, w=w)
+
+    def rel(fit):
+        return float(np.sqrt(np.mean(((fit - p[:, 1]) / p[:, 1]) ** 2)))
+    use, past = {}, {}
+    for cols, c, est in rows:
+        ok = c['reached'] & np.isfinite(c['tp']) & np.isfinite(est['mu']) & np.isfinite(c['x'])
+        with np.errstate(invalid='ignore'):
+            f = c['tp'] / (b_pow * est['mu'] ** n_pow)
+        for lo, hi in zip(RACK_USE, RACK_USE[1:]):
+            use.setdefault((lo, hi), []).append(f[ok & (c['x'] < 1) & (est['u'] >= lo) & (est['u'] < hi)])
+        for lo, hi in zip(RACK_PAST, RACK_PAST[1:]):
+            past.setdefault((lo, hi), []).append(f[ok & (c['x'] >= lo) & (c['x'] < hi)])
+
+    def med(d):
+        return {k: (float(np.median(np.concatenate(v))), int(sum(len(x) for x in v))) for k, v in d.items() if sum(len(x) for x in v) >= RACK_MIN_N}
+    return {'B': b_pow, 'N': float(n_pow), 'line': [float(icpt), float(slope)], 'rel_pow': rel(b_pow * p[:, 0] ** n_pow),
+            'rel_line': rel(icpt + slope * p[:, 0]), 'stretches': [tuple(float(x) for x in r[:5]) for r in pts],
+            'use': med(use), 'past': med(past), 'mu_ratio': float(np.median(p[:, 0] / p[:, 2])),
+            'peak_ratio': float(np.median(p[:, 3] / p[:, 4]))}

@@ -1497,22 +1497,26 @@ class RbrRack(RackForce):
     DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
     # ACR's tyres (Fabia, tyre Mz / Fy per front wheel, speed over 8 m/s, |Fy| over 300 N; drives 20261105-162134 tarmac, 20261104-143823
-    # gravel): the no-slip trail is about linear-to-square in the grip (41 mm at RBR's tarmac 1.05, 29 mm at its gravel 0.88), and it
+    # and 20261104-213208 gravel): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 28 mm at 0.95, 38 mm at 1.2), and it
     # fades with the grip in USE, u = (Fy / Fz) / mu, the same on both surfaces while the slip at the peak differs (0.15 rad tarmac,
     # 0.25 gravel). Trail over the no-slip trail, tarmac / gravel, before the peak: u < 0.8 1.0 / .92; .8-.9 .86 / .84; .9-1.0 .70 / .73;
     # over 1.0 .54 / .55. Past the peak, by alpha / alpha_peak: 1-1.3 .32 / .34; 1.3-1.7 .20 / .04; 1.7-2.5 .08 / .08
-    DERIVED_TP_B = 0.0375                # m: the pneumatic trail at no slip at a grip of 1
-    DERIVED_TP_N = 2.0                   # ... and its power of the grip
-    DERIVED_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.85), (0.95, 0.715), (1.05, 0.55))      # (u, trail factor before the peak), held at the ends
-    DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.3), (2.1, 0.15), (3.0, 0.12))          # (alpha / slip_peak, factor over the at-peak one), held at the end
-    DERIVED_PEAK_REARM = 0.85            # the grip in use under which the next crossing may learn
-    DERIVED_PEAK_STEP = 0.15             # the learnt peak slip moves this share toward |alpha| at each upward crossing of a grip use of 0.95
+    DERIVED_TP_A = -0.0087               # m: the pneumatic trail at no slip is DERIVED_TP_A + DERIVED_TP_B mu, the line through ACR's stretches against the top of the tyres' Fy/Fz (scripts/ffb_laws.json, scripts/ffb-new-game.py --refit)
+    DERIVED_TP_B = 0.0392                # m per unit of grip; grip_mu reads that same top (the held maximum, rise 0.1 s over Fy_f / Fz smoothed 0.05 s: 0.97-1.02 of the drive's own on four RBR drives)
+    DERIVED_TP_MU = (0.82, 1.32)         # the grip the line was fitted over: held at the ends
+    DERIVED_TP_USE = ((0.0, 1.0), (0.85, 1.0), (0.95, 0.92), (1.05, 0.73))      # (u, trail factor before the peak), held at the ends
+    DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.45), (2.1, 0.22), (3.0, 0.2))          # (alpha / slip_peak, factor over the at-peak one), held at the end
+    DERIVED_PEAK_BIN = 0.02              # rad: the slip bins of the upper envelope of the grip in use (the peak slip is where it first reaches DERIVED_PEAK_SHARE of its top, as ffb_laws finds the drive's own)
+    DERIVED_PEAK_Q = 0.7                 # the quantile tracked per bin (the drive's envelope is the 80th percentile of its samples; the tracker, weighted to the recent, matched the drives' own peaks best at 0.7)
+    DERIVED_PEAK_TAU = 30.0              # s of time in a bin: the tracker's time constant (the crossing of 0.95 in time read 10-30 % high on turn-in: the force lags the slip)
+    DERIVED_PEAK_HOLD = 1.0              # s in a bin before it counts
+    DERIVED_PEAK_SHARE = 0.97
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
-    DERIVED_MU_RISE = 0.5                # s
+    DERIVED_MU_RISE = 0.1                # s
     DERIVED_MU_FALL = 60.0               # s
-    DERIVED_R_TAU = 0.15                 # s: Fy_f / Fz's smoothing
+    DERIVED_R_TAU = 0.05                 # s: Fy_f / Fz's smoothing
     DERIVED_AY_HZ = 30.0                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
     # Slip and spring shape, from RBR 20261104-143327 (speed over 10 m/s, _slip bins: median |a_y| 4.0 m/s^2 at .08-.1 rad, 6.1 at
@@ -1662,7 +1666,8 @@ class RbrRack(RackForce):
         """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
         self.grip_mu, self._grip_r = self.DERIVED_MU0, 0.0      # (the derived path's grip: a new stream starts from the prior)
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
-        self._peak_armed = False         # (the grip in use has been under DERIVED_PEAK_REARM since the last learnt crossing)
+        self._peak_env = [None] * int(self.DERIVED_PEAK_RANGE[1] / self.DERIVED_PEAK_BIN + 0.5)     # (the grip in use's tracked upper envelope per slip bin ...)
+        self._peak_secs = [0.0] * len(self._peak_env)           # (... and the time each bin has had)
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1838,9 +1843,9 @@ class RbrRack(RackForce):
         self.derived = self.derived_raw * self._derived_fade * self._gate
 
     def _grip_trail(self, fy, fz, dt, speed, alpha=None):
-        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: DERIVED_TP_B mu^DERIVED_TP_N
+        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: DERIVED_TP_A + DERIVED_TP_B mu
         times the factors of the grip in use and of the slip past its learnt peak,
-        mu rising to the highest Fy_f / Fz within about half a second and falling back slowly, from a sane prior for the first
+        mu rising to the highest Fy_f / Fz within about a tenth of a second and falling back slowly, from a sane prior for the first
         corners. Replayed on 20261104-212111 it read 1.14 on tarmac and 0.85 on gravel; a brush tyre's (1 - grip in use) did not
         separate the surfaces, this does, as ACR's measured trail does (42-44 mm tarmac, 22-27 mm gravel)."""
         now = fy / fz
@@ -1850,17 +1855,41 @@ class RbrRack(RackForce):
             self.grip_mu += min(dt / tau, 1.0) * (self._grip_r - self.grip_mu)
             self.grip_mu = min(max(self.grip_mu, self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
             use = self._grip_r / self.grip_mu
-            # (only the onset: the grip in use crossing 0.95 upward; on the plateau past the peak the use stays at its recent max,
-            # and it re-arms only once the use has fallen under DERIVED_PEAK_REARM, so Fz bumps in a slide don't count again)
-            if use < self.DERIVED_PEAK_REARM:
-                self._peak_armed = True
-            elif self._peak_armed and use >= 0.95 and alpha is not None and ffb_forza.finite(alpha):
-                self._peak_armed = False
-                self.slip_peak += self.DERIVED_PEAK_STEP * (abs(alpha) - self.slip_peak)
-                self.slip_peak = min(max(self.slip_peak, self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
+            if alpha is not None and ffb_forza.finite(alpha):
+                self._learn_peak(abs(alpha), use, dt)
         use = self._grip_r / self.grip_mu
         past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
-        return self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N * self._interp(self.DERIVED_TP_USE, use) * past
+        return self._tp0() * self._interp(self.DERIVED_TP_USE, use) * past
+
+    def _tp0(self):
+        """The pneumatic trail at no slip (m) at the grip the fronts have shown, the line held over the grip it was fitted over."""
+        return self.DERIVED_TP_A + self.DERIVED_TP_B * min(max(self.grip_mu, self.DERIVED_TP_MU[0]), self.DERIVED_TP_MU[1])
+
+    def _learn_peak(self, alpha, use, dt):
+        """The peak slip: the grip in use's upper envelope against |alpha| (per DERIVED_PEAK_BIN bin, each bin's DERIVED_PEAK_Q quantile
+        tracked over its own time), and the first bin held DERIVED_PEAK_HOLD s that reaches DERIVED_PEAK_SHARE of the envelope's top is the
+        peak slip, between the bin centres: the drive's own definition (scripts/ffb_laws.py), over the whole drive, not each turn-in."""
+        j = int(alpha / self.DERIVED_PEAK_BIN)
+        if j >= len(self._peak_env) or dt <= 0.0:
+            return
+        q = self._peak_env[j]
+        if q is None:
+            q = use
+        q += min(4.0 * dt / self.DERIVED_PEAK_TAU, 1.0) * max(q, 0.3) * (self.DERIVED_PEAK_Q if use > q else self.DERIVED_PEAK_Q - 1.0)
+        self._peak_env[j] = q
+        self._peak_secs[j] += dt
+        held = [(k, v) for k, v in enumerate(self._peak_env) if v is not None and self._peak_secs[k] >= self.DERIVED_PEAK_HOLD]
+        if len(held) < 3:
+            return
+        want = self.DERIVED_PEAK_SHARE * max(v for _k, v in held)
+        for n, (k, v) in enumerate(held):
+            if v >= want:
+                lo = (k + 0.5) * self.DERIVED_PEAK_BIN
+                if n:
+                    k0, v0 = held[n - 1]
+                    lo = (k0 + 0.5) * self.DERIVED_PEAK_BIN + (lo - (k0 + 0.5) * self.DERIVED_PEAK_BIN) * (want - v0) / (v - v0)
+                self.slip_peak = min(max(lo, self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
+                return
 
     @staticmethod
     def _interp(table, x):
@@ -1888,7 +1917,7 @@ class RbrRack(RackForce):
         base = alpha / (1.0 + abs(alpha) / self.DERIVED_PK)
         trail = ffb_carprops.RALLY_TRAIL
         x = abs(alpha) / self.slip_peak
-        tp0 = self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N
+        tp0 = self._tp0()
         share = self._interp(self.DERIVED_TP_USE, min(x, 1.05)) * self._interp(self.DERIVED_TP_PAST, x)      # (x stands in for the use below the peak)
         return base * (trail + tp0 * share) / (trail + tp0)
 

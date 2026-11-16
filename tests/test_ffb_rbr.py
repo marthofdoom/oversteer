@@ -8,6 +8,7 @@ import math
 import random
 import types
 
+import numpy as np
 import pytest
 
 from oversteer import ffb_engine as fe, ffb_forza as fz, ffb_rbr as r
@@ -1534,7 +1535,7 @@ def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
         run_derived(rack, 0.2, ay=ay)
         entry = fe.car_data.entry(CAR)
         fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0)
-        expect = -(fe.ffb_carprops.RALLY_TRAIL + rack.DERIVED_TP_B * rack.grip_mu ** rack.DERIVED_TP_N) * fy / (rack.ratio if rack.ratio_known else rack.DERIVED_RATIO)      # (no slip: the whole pneumatic trail)
+        expect = -(fe.ffb_carprops.RALLY_TRAIL + rack._tp0()) * fy / (rack.ratio if rack.ratio_known else rack.DERIVED_RATIO)      # (no slip: the whole pneumatic trail)
         assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
         assert rack.fy_f == pytest.approx(fy)
     big = derived_rack()
@@ -1745,44 +1746,58 @@ def trail_rack(mu=1.0, r=0.0):
     return rack
 
 
+def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted_over():
+    rack = fe.RbrRack
+    for mu in (0.82, 0.95, 1.2, 1.32):
+        assert trail_rack(mu)._tp0() == pytest.approx(rack.DERIVED_TP_A + rack.DERIVED_TP_B * mu)
+    assert trail_rack(0.6)._tp0() == pytest.approx(trail_rack(0.82)._tp0())
+    assert trail_rack(1.4)._tp0() == pytest.approx(trail_rack(1.32)._tp0())
+    assert 0.027 < trail_rack(0.95)._tp0() < 0.030 and 0.036 < trail_rack(1.2)._tp0() < 0.040      # ACR: 28 mm gravel, 38 mm tarmac
+
+
 def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
     rack = fe.RbrRack
-    for use, want in ((0.5, 1.0), (1.2, 0.55)):
+    for use, want in ((0.5, 1.0), (1.2, 0.73)):
         r = trail_rack(1.0, use)
         tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
-        assert tp == pytest.approx(rack.DERIVED_TP_B * want)
+        assert tp == pytest.approx(r._tp0() * want)
 
 
-def test_slip_peak_learns_at_the_onset_not_on_the_plateau():
+def sweep_peak(r, peak=0.15, passes=12, top=0.4):
+    """Sweeps |alpha| up and down 0 to `top` passes times, the force rising to its max at `peak` and flat past it (the grip in use)."""
+    for k in range(passes):
+        for alpha in list(np.linspace(0.0, top, 400)) + list(np.linspace(top, 0.0, 400)):
+            r._grip_trail(min(alpha / peak, 1.0), 1.0, 0.01, 20.0, alpha)
+
+
+def test_slip_peak_is_where_the_envelope_of_the_grip_in_use_reaches_its_top():
     rack = fe.RbrRack
-    r = trail_rack(1.0, 0.0)
-    alpha = 0.02
-    for _ in range(600):                 # Fy / Fz rises to its max at alpha .15, then stays flat out to .4
-        alpha = min(alpha + 0.001, 0.4)
-        now = min(alpha / 0.15, 1.0) * 1.0
-        r._grip_trail(now, 1.0, 0.01, 20.0, alpha)
-    assert r.slip_peak == pytest.approx(0.15, abs=0.05) and r.slip_peak < 0.25
+    for peak in (0.1, 0.15, 0.25):
+        r = trail_rack(1.0, 0.0)
+        sweep_peak(r, peak)
+        assert r.slip_peak == pytest.approx(peak, rel=0.15)
     r = trail_rack(1.0, 0.5)
-    r._grip_trail(0.5, 1.0, 0.01, 20.0, 0.25)
+    r._grip_trail(0.5, 1.0, 0.01, 20.0, 0.25)       # one sample says nothing
     assert r.slip_peak == rack.DERIVED_SLIP_PEAK
     r = trail_rack(1.0, 0.0)
-    for k in range(200):                 # crossings at a huge slip stay in range
-        r._grip_trail(0.0, 1.0, 0.5, 20.0, 0.9)
-        r._grip_trail(1.0, 1.0, 0.5, 20.0, 0.9)
-    assert r.slip_peak == rack.DERIVED_PEAK_RANGE[1]
+    sweep_peak(r, 0.9, top=0.9)           # a peak over the range stays in range
+    assert 0.35 <= r.slip_peak <= rack.DERIVED_PEAK_RANGE[1]
     r._restart_floor()
-    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and not r._peak_armed
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and not any(v is not None for v in r._peak_env)
 
 
-def test_slip_peak_ignores_bumps_in_a_slide():
+def test_slip_peak_ignores_turn_in_lag_and_bumps_in_a_slide():
     r = trail_rack(1.0, 0.0)
-    r._grip_trail(0.5, 1.0, 1.0, 20.0, 0.05)          # armed under the re-arm level
-    r._grip_trail(1.0, 1.0, 1.0, 20.0, 0.15)          # the onset: learns from .15
+    sweep_peak(r, 0.15)
     learnt = r.slip_peak
     for _ in range(200):                              # Fz bumps in the slide: the use dips to .9 and back at a big slip
-        r._grip_trail(0.9, 1.0, 1.0, 20.0, 0.4)
-        r._grip_trail(1.0, 1.0, 1.0, 20.0, 0.4)
-    assert r.slip_peak == learnt
+        r._grip_trail(0.9, 1.0, 0.01, 20.0, 0.4)
+        r._grip_trail(1.0, 1.0, 0.01, 20.0, 0.4)
+    assert r.slip_peak == pytest.approx(learnt, rel=0.1)
+    for _ in range(30):                               # a turn-in over a second: the force follows the slip 0.1 s late (0.03 rad)
+        for alpha in np.linspace(0.0, 0.3, 300):
+            r._grip_trail(min(max(alpha - 0.03, 0.0) / 0.12, 1.0), 1.0, 0.0033, 20.0, alpha)
+    assert r.slip_peak == pytest.approx(0.15, rel=0.3)
 
 
 def test_sat_div_is_finite_and_positive():
@@ -1797,7 +1812,7 @@ def test_sat_div_is_finite_and_positive():
 def test_trail_past_the_peak_factor():
     rack = fe.RbrRack
     r = trail_rack(1.0, 0.5)
-    base = rack.DERIVED_TP_B
+    base = r._tp0()
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(base)
-    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.3 * base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.45 * base)

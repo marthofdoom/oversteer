@@ -3,6 +3,7 @@
 
     scripts/ffb-new-game.py CAPTURE [--out FILE.json] [--no-rack] [--peak NM] [--set NAME=VALUE ...] [--laws FILE]
     scripts/ffb-new-game.py --refit ACR_CAPTURE [ACR_CAPTURE ...] [--laws FILE]
+    scripts/ffb-new-game.py --refit-rack ACR_CAPTURE [ACR_CAPTURE ...]
 
 CAPTURE: a name in the captures folder or a full path. It (a) lists the channels and the route each force stage can take with
 them, (b) fits the game's own constants from this drive (grip and peak slip per 60 s stretch, the steering lock from the motion
@@ -62,6 +63,31 @@ def refit(names, laws_path):
             'no-slip pneumatic trail: %.1f mm + %.1f mm x mu  (%d stretches, mu %.2f-%.2f)' % (a * 1000, b * 1000, laws['stretches'], *laws['mu_range']),
             'trail over the no-slip trail, by cause: ' + ', '.join('%s %.2f' % kv for kv in laws['cells'].items()),
             'peak slip (rad) by grip band: ' + ', '.join('%s %.3f' % kv for kv in sorted(laws['peak_slip_rad'].items()))]
+    return out
+
+
+def refit_rack(names):
+    """RbrRack's pneumatic-trail constants in its own grip estimate, refitted over ACR drives (ffb_laws.fit_rack_form)."""
+    import ffb_parity as fp
+    import ffb_score as fs
+    drives, out = [], []
+    with fs._sandbox():
+        for name in names:
+            path = fp.resolve(name)
+            if fp.game_of(path) != 'acr':
+                out.append('%s: not an ACR capture, left out' % name)
+                continue
+            cols, c, _info, _f = _simulate(path, 'acr')
+            drives.append((cols, c))
+    fit = laws_mod.fit_rack_form(drives)
+    if fit is None:
+        return out + ['no drive gives a true mass and three stretches with a no-slip trail']
+    out.append('no-slip trail by the rack\'s grip (mu: rack, drive; rack/drive median %.2f; learnt peak / drive peak %.2f)' % (fit['mu_ratio'], fit['peak_ratio']))
+    out += ['  rack mu %.3f  drive mu %.3f  trail %.1f mm  peak learnt %.3f drive %.3f' % (r[0], r[2], r[1] * 1000, r[3], r[4]) for r in fit['stretches']]
+    out.append('power  B %.4f m  N %.2f  (relative rms %.3f);  line %.1f mm + %.1f mm x mu (relative rms %.3f)'
+               % (fit['B'], fit['N'], fit['rel_pow'], fit['line'][0] * 1000, fit['line'][1] * 1000, fit['rel_line']))
+    out.append('trail over the fit by the rack\'s grip in use u: ' + ', '.join('%g-%g %.2f (%d)' % (k + v) for k, v in sorted(fit['use'].items())))
+    out.append('and by x past the peak: ' + ', '.join('%g-%g %.2f (%d)' % (k + v) for k, v in sorted(fit['past'].items())))
     return out
 
 
@@ -207,6 +233,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('capture', nargs='?')
     parser.add_argument('--refit', nargs='+', metavar='ACR_CAPTURE', help='rebuild the laws from these ACR drives')
+    parser.add_argument('--refit-rack', nargs='+', metavar='ACR_CAPTURE', help="RbrRack's trail constants in its own grip estimate, from ACR drives")
     parser.add_argument('--laws', metavar='FILE', default=laws_mod.LAWS_PATH)
     parser.add_argument('--out', metavar='FILE.json')
     parser.add_argument('--no-rack', action='store_true', help='treat the game as one without a rack: routes, constants, what is missing')
@@ -214,13 +241,15 @@ def main(argv=None):
     parser.add_argument('--set', dest='sets', action='append', default=[], metavar='NAME=VALUE', help='a constant for the replay only')
     tools.add_store_args(parser)
     args = parser.parse_args(argv)
-    if not args.capture and not args.refit:
+    if not args.capture and not args.refit and not args.refit_rack:
         parser.error('give a capture or --refit')
     import ffb_parity as fp
     import ffb_score as fs
     try:
         tools.apply_store_args(args)
-        if args.refit:
+        if args.refit_rack:
+            out = refit_rack(args.refit_rack)
+        elif args.refit:
             out = refit(args.refit, args.laws)
         else:
             path = fp.resolve(args.capture)
