@@ -41,7 +41,7 @@ LATERAL_DEFAULT = 0.92                   # until the grip is known
 # The same ratio against the moving mass (ACR's tyre loads read about 8 % over the mass its Fx and Fy accelerate: 1410 kg
 # against 1260-1345 from MassLearner on the tyres' Fx, J 0), per sample against GripScale's mu as played, 6 ACR drives,
 # 200k samples: 0.691 + 0.226 mu (0.95 at mu 1.0-1.1, 1.02 at 1.3-1.5, 1.05 at 1.5-1.8). For a mass learnt from the car's
-# acceleration (Forza's MassLearner); a car table's static mass (RBR) keeps LATERAL_FIT.
+# acceleration (Forza's MassLearner) and for RBR's car-table mass (RBR's own physics mass, InverseMass: the mass its a_y is of).
 LATERAL_FIT_INERTIAL = (0.691, 0.226)
 LATERAL_RANGE_INERTIAL = (0.85, 1.05)
 LATERAL_DEFAULT_INERTIAL = 0.95

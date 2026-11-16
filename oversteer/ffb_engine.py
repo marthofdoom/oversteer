@@ -1709,7 +1709,7 @@ class RbrRack(RackForce):
         entry = car_data.entry(self.car)
         mass = (entry.get('mass_kg') if entry else None) or self.FLOOR_MASS
         fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot,
-                                     factor=ffb_forza.lateral_factor(self._grip.mu()))
+                                     factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
         limit = ffb_forza.front_share(drivetrain) * mass * self.FLOOR_AY
         fy = min(max(fy, -limit), limit)
         if abs(fy) >= self.FLOOR_FY_MIN:
@@ -1824,7 +1824,7 @@ class RbrRack(RackForce):
         if ok:
             ay = self._filtered('ay', t, min(max(accel[1], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
             rd = self._filtered('rdot', t, min(max(rdot, -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX))
-            fy = ffb_forza.front_lateral(mass, bl, ay, rd, factor=ffb_forza.lateral_factor(self._grip.mu()))
+            fy = ffb_forza.front_lateral(mass, bl, ay, rd, factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
             limit = bl * mass * self.FLOOR_AY
             self.fy_f = min(max(fy, -limit), limit)
             alpha = self._slip(sample)

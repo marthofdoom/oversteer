@@ -1534,7 +1534,7 @@ def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
         rack = derived_rack()
         run_derived(rack, 0.2, ay=ay)
         entry = fe.car_data.entry(CAR)
-        fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0)
+        fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0, factor=fz.LATERAL_DEFAULT_INERTIAL)
         expect = -(fe.ffb_carprops.RALLY_TRAIL + rack._tp0()) * fy / (rack.ratio if rack.ratio_known else rack.DERIVED_RATIO)      # (no slip: the whole pneumatic trail)
         assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
         assert rack.fy_f == pytest.approx(fy)
