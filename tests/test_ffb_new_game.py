@@ -98,3 +98,38 @@ def test_routes_follow_the_channels():
     assert 'Newton' in r['front side force'][0] and 'kinematic' in r['front slip'][0] and 'car table' in r['mass'][0]
     assert 'the law' in r['pneumatic trail'][0]
     assert 'NONE' in dict((s, route) for s, route, _n in laws_mod.routes({}))['front side force']
+
+
+def test_a_past_peak_trail_at_a_third_of_the_law_is_flagged_whatever_acr_spreads_by():
+    laws = _laws()
+    laws['spread'] = {k: 1.34 for k in laws['cells']}
+    third = lambda mu, u, x, slip: _tyre(mu, u, x, slip) * np.where(x >= 1, 1 / 3.0, 1.0)          # noqa: E731
+    cols = _drive([0.85] * 3 + [1.3] * 3, [0.3] * 3 + [0.15] * 3, third)
+    past = [r for r in laws_mod.trail_check(laws, laws_mod.causes(cols, DT), DT) if r[1] in ('x 1.3-1.7', 'x 1.7-2.5')]      # (the fitted peak sits just under the true one: the first x cell is mixed)
+    assert len(past) >= 4 and all(r[6] and r[7] == laws_mod.TOL_MAX for r in past)
+
+
+class _S:
+    """A sample of a game with the motion only: no tyre forces, loads or slip."""
+    tyre_fy = tyre_load = tyre_slip_angle = slip_angle = None
+
+    def __init__(self, speed, ay, yaw, vy, steer):
+        self.speed, self.vel, self.accel, self.yaw_rate, self.steer = speed, (speed, vy), (0.0, ay), yaw, steer
+
+
+def test_the_no_rack_path_finds_a_grip_and_a_peak_slip_from_the_motion_alone():
+    n, lock, wheelbase, bl, mu, peak = 24000, 0.5, 2.6, 0.6, 1.0, 0.15
+    v = 21.0 + 9.0 * np.sin(np.arange(n) / 1300.0)          # (a changing speed: L r / v and a_y are one thing at a fixed one)
+    # steady low-slip driving (the lock fit), then the front slip swept to past the peak (the grip fit)
+    slip = np.where(np.arange(n) % 2000 < 800, 0.004, 2.0) * peak * np.sin(np.arange(n) / 90.0)     # (smooth: little yaw acceleration)
+    ay = mu * 9.81 * np.sign(slip) * (1 - (1 - np.minimum(np.abs(slip) / peak, 1)) ** 2)
+    yaw = ay / v
+    vy = wheelbase * bl * yaw                               # the rear axle does not slip: the fronts travel at L r / v
+    steer = (slip + np.arctan2(wheelbase * yaw, v)) / lock
+    items = [(i * DT, _S(v[i], ay[i], yaw[i], vy[i], steer[i])) for i in range(n)]
+    cols, unit, fit = laws_mod.raw_cols(items, wheelbase, lambda s: bl, 1.0)
+    assert unit == 'rad' and abs(fit['lock'] - lock) < 0.05 and np.nanmax(cols['mass']) == 1.0
+    c = laws_mod.causes(cols, DT)
+    assert np.isfinite(c['r']).mean() > 0.9 and c['reached'].any()
+    got_mu, got_peak = np.nanmedian(c['mu'][c['reached']]), np.nanmedian(c['peak'][c['reached']])
+    assert 0.8 < got_mu < 1.3 and 0.07 < got_peak < 0.25

@@ -24,6 +24,7 @@ NO_SLIP = (0.5, 0.6)            # u and x under these: the trail at no slip
 FLAG = 0.15                     # a cell's median of rack / law outside 1 +- this is flagged ...
 REACHED_S = 0.5                 # s in the envelope's top bin for a stretch to count as having reached the limit
 PEAK_SHARE = 0.97               # the peak slip: the first bin whose envelope reaches this share of the top
+TOL_MAX = 0.5                   # ... and never wider than this, however far ACR's drives spread (a third of the law must flag)
 MIN_S = 3.0                     # ... when it holds this many seconds
 LOCK_FLAG = 0.15
 GRIP_SPREAD = 0.3               # the grip must spread this far over a drive's stretches for a slope of trail against grip
@@ -70,7 +71,9 @@ def causes(cols, dt, bins=None):
     both = np.isfinite(fz) & np.isfinite(static)
     fz = np.where(both, np.maximum(fz, 0.5 * static), fz)   # (light fronts over a crest say nothing about the grip)
     with np.errstate(divide='ignore', invalid='ignore'):
-        r = np.where(fz > FZ_MIN, fyf / fz, np.nan)
+        # (rows per kg, a game without a rack: mass 1, so the floor is the same share of a 1000 kg car's)
+        floor = np.where(np.isfinite(cols['mass']) & (cols['mass'] < 10), FZ_MIN * cols['mass'] / 1000.0, FZ_MIN)
+        r = np.where(fz > floor, fyf / fz, np.nan)
         seg = ((t - t[0]) // STRETCH_S).astype(int) if n else np.zeros(0, int)
         mu, peak, reached = np.full(n, np.nan), np.full(n, np.nan), np.zeros(n, bool)
         for g in np.unique(seg):
@@ -175,7 +178,7 @@ def law_tp(laws, mu, u, x):
 
 def trail_check(laws, c, dt):
     """Rows (mu band, cell, seconds, rack mm, law mm, median of rack / law per sample, flagged, tolerance) over the stretches
-    with a top. The tolerance: FLAG, or what ACR's own drives spread by in that cell where that is more."""
+    with a top. The tolerance: FLAG, or what ACR's own drives spread by in that cell where that is more, at most TOL_MAX."""
     law = law_tp(laws, c['mu'], c['u'], c['x'])
     ok = c['reached'] & np.isfinite(c['tp']) & np.isfinite(law)
     rows = []
@@ -186,7 +189,7 @@ def trail_check(laws, c, dt):
             if secs < MIN_S:
                 continue
             ratio = float(np.median(c['tp'][m] / law[m]))
-            tol = max(FLAG, laws.get('spread', {}).get(name, 0.0))
+            tol = min(max(FLAG, laws.get('spread', {}).get(name, 0.0)), TOL_MAX)
             rows.append((bname, name, secs, float(np.median(c['tp'][m])) * 1000, float(np.median(law[m])) * 1000, ratio,
                          abs(ratio - 1) > tol, tol))
     return rows
