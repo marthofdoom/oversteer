@@ -1959,7 +1959,8 @@ class ForzaRack(RackForce):
     knee, budget, RIM_SAFE_NM: RackForce.force, unchanged), and the engine plays the output filter (ffb_forza.OutputFilter),
     column damping, lock stop, texture and Kickback beside it.
 
-    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), m the car's learnt mass (MassLearner, per car,
+    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), tp's no-slip value from GripScale's mu
+      (ffb_forza.trail_tp0; TP0 until it is known), m the car's learnt mass (MassLearner, per car,
       ffb_carprops.STORE; 1400 kg until learnt), rdot the yaw rate's central difference over the game's clock (known one
       packet late: the difference is centred on the packet before the newest). A puddle under both fronts halves tp; one
       under a single front adds Drive pull's couple, scrub x PULL_FRACTION m_f g / 2 (only while Drive pull is on, as the
@@ -2091,7 +2092,7 @@ class ForzaRack(RackForce):
         cs = sample.combined_slip
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
-        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0)
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=self._grip.mu())
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):

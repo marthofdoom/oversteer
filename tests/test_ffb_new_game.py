@@ -138,3 +138,12 @@ def test_the_no_rack_path_finds_a_grip_and_a_peak_slip_from_the_motion_alone():
 def test_a_grip_top_over_the_sanity_bound_is_left_unreached():
     import ffb_laws as fl
     assert fl.MU_MAX == 2.0
+
+
+def test_gs_fit_finds_the_no_slip_trail_against_gripscales_mu():
+    cols = _drive([0.85] * 3 + [1.3] * 3, [0.3] * 3 + [0.15] * 3, _tyre)
+    cols['gsx'] = np.where(cols['t'] < 180, 1.2, 1.6)         # (GripScale reads higher than the tyres' own top)
+    fit = laws_mod.gs_fit([(cols, laws_mod.causes(cols, DT))])
+    a, b = fit['tp0_gs']
+    assert fit['gs_stretches'] == 6 and fit['gs_range'] == [1.2, 1.6] and fit['gs_r'] > 0.99
+    assert abs((a + b * 1.6) - (TP0[0] + TP0[1] * 1.3)) < 0.003 and abs((a + b * 1.2) - (TP0[0] + TP0[1] * 0.85)) < 0.003

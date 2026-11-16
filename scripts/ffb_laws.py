@@ -28,6 +28,7 @@ MU_MAX = 2.0                    # a stretch's grip top over this is noise, not g
 TOL_MAX = 0.5                   # ... and never wider than this, however far ACR's drives spread (a third of the law must flag)
 MIN_S = 3.0                     # ... when it holds this many seconds
 LOCK_FLAG = 0.15
+GS_MU_MAX = 2.5                 # a GripScale mu over this is a crash, not grip (ffb-lateral-fit's guard)
 GRIP_SPREAD = 0.3               # the grip must spread this far over a drive's stretches for a slope of trail against grip
 PEAK_FLAG = 0.25
 PROBE_KEYS = ('fzf', 'steer', 'vx', 'vy', 'rack_mu', 'gs_mu', 'rack_peak', 'lock')
@@ -118,6 +119,44 @@ def stretch_points(c, min_n=200):
     return out
 
 
+def gripscale_at(items, times):
+    """GripScale's mu (ffb_forza, as ForzaRack feeds it: every sample's t, a_y and speed) at each of `times`, from a drive's
+    [(t, sample)]; NaN until it is known."""
+    from oversteer import ffb_forza
+    gs, ts, mus = ffb_forza.GripScale(), [], []
+    for t, s in items:
+        if s.accel is not None and len(s.accel) > 1:
+            gs.feed(t, s.accel[1], s.speed)
+        m = gs.mu()
+        ts.append(t)
+        mus.append(float('nan') if m is None else m)
+    i = np.clip(np.searchsorted(ts, np.asarray(times, float), side='right') - 1, 0, max(len(ts) - 1, 0))
+    return np.asarray(mus, float)[i] if ts else np.full(len(times), np.nan)
+
+
+def gs_points(cols, c, min_n=200):
+    """[(GripScale mu, nan, no-slip trail m, samples)] per stretch with a grip top and `cols['gsx']` (gripscale_at) known at no slip."""
+    out = []
+    for g in np.unique(c['seg']):
+        m = (c['seg'] == g) & c['reached']
+        k = m & (c['u'] < NO_SLIP[0]) & (c['x'] < NO_SLIP[1]) & np.isfinite(c['tp']) & np.isfinite(cols['gsx']) & (cols['gsx'] < GS_MU_MAX)
+        if m.any() and k.sum() >= min_n:
+            out.append((float(np.median(cols['gsx'][k])), float('nan'), float(np.median(c['tp'][k])), int(k.sum())))
+    return out
+
+
+def gs_fit(drives):
+    """The no-slip pneumatic trail against GripScale's mu (what a game without tyre forces has): {'tp0_gs': [a, b], 'gs_range',
+    'gs_r', 'gs_stretches'} over the stretches of ACR drives [(cols with 'gsx', causes)], or {} without a line."""
+    pts = [p for cols, c in drives if 'gsx' in cols for p in gs_points(cols, c)]
+    a, b, n = _line(pts)
+    if not n or not b:
+        return {}
+    p = np.array([(q[0], q[2]) for q in pts])
+    return {'tp0_gs': [a, b], 'gs_range': [float(p[:, 0].min()), float(p[:, 0].max())], 'gs_r': float(np.corrcoef(p[:, 0], p[:, 1])[0, 1]),
+            'gs_stretches': n}
+
+
 def _line(pts, spread=0.15):
     """(a, b, n) of tp0 = a + b mu through stretch points with a no-slip trail; b 0 with under three or a mu spread under `spread`."""
     p = np.array([(mu, tp, n) for mu, _pk, tp, n in pts if np.isfinite(tp)], float).reshape(-1, 3)
@@ -158,7 +197,7 @@ def fit_laws(drives, names=()):
     peaks = {}
     for mu, pk, _tp, _n in pts:
         peaks.setdefault(tools.MU_BAND_NAMES[tools.mu_band(mu)], []).append(pk)
-    return {'tp0': [a, b], 'mu_range': [float(min(mus)), float(max(mus))], 'cells': cells, 'spread': spread, 'stretches': n,
+    return {**gs_fit(drives), 'tp0': [a, b], 'mu_range': [float(min(mus)), float(max(mus))], 'cells': cells, 'spread': spread, 'stretches': n,
             'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()}, 'sources': list(names),
             'note': 'ACR tyres: pneumatic trail (m) = (tp0[0] + tp0[1] mu) x cells[grip in use u before the peak, slip/peak x past it]'}
 

@@ -992,3 +992,20 @@ def test_lateral_factor_inertial_fit():
     assert fz.lateral_factor(9.0, inertial=True) == fz.LATERAL_RANGE_INERTIAL[1]
     assert fz.lateral_factor(1.0, inertial=True) == pytest.approx(sum(fz.LATERAL_FIT_INERTIAL))
     assert fz.lateral_factor(1.4, inertial=True) > fz.lateral_factor(1.4)
+
+
+def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
+    lo, hi = fz.TP0_RANGE
+    assert fz.trail_tp0(None) == fz.TP0 and fz.trail_tp0(float('nan')) == fz.TP0
+    assert fz.trail_tp0(1.3) == pytest.approx(fz.TP0_FIT[0] + fz.TP0_FIT[1] * 1.3)
+    assert fz.trail_tp0(0.5) == lo and fz.trail_tp0(3.0) == hi
+    assert fz.trail_tp0(1.1) < fz.trail_tp0(1.3) < fz.trail_tp0(1.5)
+    assert fz.trail(0.0, tp0=0.03) == pytest.approx(0.03) and fz.trail(fz.FORZA_TP_S_HALF, fz.FORZA_TP_S_HALF, 0.03) == pytest.approx(0.015)
+    assert fz.kingpin(1000.0, 0.0, mu=1.1) == pytest.approx(-(fz.CASTER + fz.trail_tp0(1.1)) * 1000.0)
+    rack = fe.ForzaRack()
+    rack.reset(CAR)
+    rack._grip.mu = lambda: 1.1
+    low = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    rack._grip.mu = lambda: 1.5
+    high = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    assert abs(high) > abs(low)

@@ -46,6 +46,10 @@ LATERAL_FIT_INERTIAL = (0.691, 0.226)
 LATERAL_RANGE_INERTIAL = (0.85, 1.05)
 LATERAL_DEFAULT_INERTIAL = 0.95
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
+# The no-slip trail follows the grip (ACR's tyres: about 41 mm at mu 1.27, 26 at .88, scripts/ffb_laws.json): per 60 s stretch against
+# GripScale's mu from the same drive, as played (scripts/ffb-new-game.py --refit). TP0 stays the value until the grip is known.
+TP0_FIT = (-0.0267, 0.0470)               # m, m per unit of mu: ACR, 3 drives, 11 stretches, mu 1.09-1.56, r 0.95
+TP0_RANGE = (0.0245, 0.0466)             # m: the fit at the ends of the grip it was fitted over (1.09-1.56); outside it the trail is held
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
 FORZA_TP_S_HALF = 1.1                   # Forza's own slip scale (its grip peaks at 0.7-0.9 there): halved at 1.1 its rim torque per Fy_f
@@ -62,10 +66,17 @@ def finite(x):
     return x is not None and math.isfinite(x)
 
 
-def trail(s, half=None):
-    """The pneumatic trail (m) at the normalised slip s: TP0 / (1 + (s / half)^TP_N), half TP_S_HALF unless given
+def trail_tp0(mu):
+    """The pneumatic trail at no slip (m) at the grip mu (TP0_FIT, held in TP0_RANGE); TP0 without mu."""
+    if not finite(mu):
+        return TP0
+    return min(max(TP0_FIT[0] + TP0_FIT[1] * mu, TP0_RANGE[0]), TP0_RANGE[1])
+
+
+def trail(s, half=None, tp0=None):
+    """The pneumatic trail (m) at the normalised slip s: tp0 (TP0 unless given) / (1 + (s / half)^TP_N), half TP_S_HALF unless given
     (read at the call, so a changed constant reaches it)."""
-    return TP0 / (1.0 + (abs(s) / (TP_S_HALF if half is None else half)) ** TP_N)
+    return (TP0 if tp0 is None else tp0) / (1.0 + (abs(s) / (TP_S_HALF if half is None else half)) ** TP_N)
 
 
 def front_share(drivetrain):
@@ -133,10 +144,10 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
     return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None):
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None, mu=None):
     """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
-    (0.5 with a puddle under both fronts)."""
-    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half)) * fy
+    (0.5 with a puddle under both fronts); `mu`: GripScale's grip, whose no-slip trail (trail_tp0) it fades from."""
+    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half, trail_tp0(mu))) * fy
 
 
 class LowPass:
