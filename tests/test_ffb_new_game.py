@@ -156,3 +156,12 @@ def test_rack_estimates_run_the_racks_own_grip_over_an_acr_drive():
     cols = _acr_like()
     cols['fy_all'] = np.full(len(cols['t']), np.nan)
     assert laws_mod.rack_estimates(cols) is None             # no true mass
+
+
+def test_gs_fit_finds_the_no_slip_trail_against_gripscales_mu():
+    cols = _drive([0.85] * 3 + [1.3] * 3, [0.3] * 3 + [0.15] * 3, _tyre)
+    cols['gsx'] = np.where(cols['t'] < 180, 1.2, 1.6)         # (GripScale reads higher than the tyres' own top)
+    fit = laws_mod.gs_fit([(cols, laws_mod.causes(cols, DT))])
+    a, b = fit['tp0_gs']
+    assert fit['gs_stretches'] == 6 and fit['gs_range'] == [1.2, 1.6] and fit['gs_r'] > 0.99
+    assert abs((a + b * 1.6) - (TP0[0] + TP0[1] * 1.3)) < 0.003 and abs((a + b * 1.2) - (TP0[0] + TP0[1] * 0.85)) < 0.003

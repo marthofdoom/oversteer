@@ -671,6 +671,7 @@ class RackForce:
             ffb_carprops.STORE.put(self.car, self.learner.trail, self.learner.scrub, force=True, p99=self.p99)
         self.car = car
         self._grip = ffb_forza.GripScale()
+        self._limit_grip = ffb_forza.LimitGrip()
         self.trail, self.scrub = ffb_carprops.default_trail(CASTER_TRAIL), SCRUB    # (rally class: 37 mm until learnt)
         self.learner = None
         if self.LEARNS:
@@ -1501,19 +1502,19 @@ class RbrRack(RackForce):
     # fades with the grip in USE, u = (Fy / Fz) / mu, the same on both surfaces while the slip at the peak differs (0.15 rad tarmac,
     # 0.25 gravel). Trail over the no-slip trail, tarmac / gravel, before the peak: u < 0.8 1.0 / .92; .8-.9 .86 / .84; .9-1.0 .70 / .73;
     # over 1.0 .54 / .55. Past the peak, by alpha / alpha_peak: 1-1.3 .32 / .34; 1.3-1.7 .20 / .04; 1.7-2.5 .08 / .08
-    DERIVED_TP_A = -0.0087               # m: the pneumatic trail at no slip is DERIVED_TP_A + DERIVED_TP_B mu, the line through ACR's stretches against the top of the tyres' Fy/Fz (scripts/ffb_laws.json, scripts/ffb-new-game.py --refit)
-    DERIVED_TP_B = 0.0392                # m per unit of grip; grip_mu reads that same top (the held maximum, rise 0.1 s over Fy_f / Fz smoothed 0.05 s: 0.97-1.02 of the drive's own on four RBR drives)
-    DERIVED_TP_MU = (0.82, 1.32)         # the grip the line was fitted over: held at the ends
+    # (the no-slip trail is ffb_forza.trail_tp0(grip_mu): the line through ACR's stretches against the top of the tyres' Fy/Fz, one source with the Forza racks; grip_mu reads that same top: the held maximum, rise 0.1 s, over Fy_f / Fz smoothed 0.05 s)
     DERIVED_TP_USE = ((0.0, 1.0), (0.85, 1.0), (0.95, 0.92), (1.05, 0.73))      # (u, trail factor before the peak), held at the ends
     DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.45), (2.1, 0.22), (3.0, 0.2))          # (alpha / slip_peak, factor over the at-peak one), held at the end
     DERIVED_PEAK_BIN = 0.02              # rad: the slip bins of the upper envelope of the grip in use (the peak slip is where it first reaches DERIVED_PEAK_SHARE of its top, as ffb_laws finds the drive's own)
     DERIVED_PEAK_Q = 0.7                 # the quantile tracked per bin (the drive's envelope is the 80th percentile of its samples; the tracker, weighted to the recent, matched the drives' own peaks best at 0.7)
     DERIVED_PEAK_TAU = 30.0              # s of time in a bin: the tracker's time constant (the crossing of 0.95 in time read 10-30 % high on turn-in: the force lags the slip)
-    DERIVED_PEAK_HOLD = 1.0              # s in a bin before it counts
+    DERIVED_PEAK_FRESH = 5.0             # s: a bin's time fades over this (grip_mu falls over a minute; an old visit says nothing of today's grip)
+    DERIVED_PEAK_HOLD = 0.2              # s of recent time (faded over DERIVED_PEAK_FRESH) in a bin before it counts
     DERIVED_PEAK_SHARE = 0.97
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
+    DERIVED_MU_SUSTAIN = 0.3             # s: grip rises only toward the lowest r of this long (a spike of an impact or an unload is not grip)
     DERIVED_MU_RISE = 0.1                # s
     DERIVED_MU_FALL = 60.0               # s
     DERIVED_R_TAU = 0.05                 # s: Fy_f / Fz's smoothing
@@ -1668,6 +1669,8 @@ class RbrRack(RackForce):
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
         self._peak_env = [None] * int(self.DERIVED_PEAK_RANGE[1] / self.DERIVED_PEAK_BIN + 0.5)     # (the grip in use's tracked upper envelope per slip bin ...)
         self._peak_secs = [0.0] * len(self._peak_env)           # (... and the time each bin has had)
+        self._peak_seen = [None] * len(self._peak_env)          # (... and when it was last visited, on _grip_clock)
+        self._grip_clock, self._grip_hist = 0.0, collections.deque()      # (grip_r over the last DERIVED_MU_SUSTAIN s)
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1831,7 +1834,7 @@ class RbrRack(RackForce):
             fz = load[0] + load[1] if load is not None and len(load) > 1 and ffb_forza.finite(load[0]) \
                 and ffb_forza.finite(load[1]) else bl * mass * ffb_forza.G
             # (light fronts over a crest say nothing about the grip: Fy_f / Fz would read the ceiling)
-            tp = self._grip_trail(abs(self.fy_f), max(fz, 0.5 * bl * mass * ffb_forza.G), dt, speed, alpha)
+            tp = self._grip_trail(abs(self.fy_f), max(fz, 0.5 * bl * mass * ffb_forza.G), dt, speed, alpha, loaded)
             ratio = self.ratio if self.ratio_known else self.DERIVED_RATIO      # the car's own (table), else the prior
             self.derived_raw = -(ffb_carprops.RALLY_TRAIL + tp) * self.fy_f / ratio
             lo, hi = (self.DERIVED_SPEED[0] * self.ALIGN_SPEED, self.DERIVED_SPEED[1] * self.ALIGN_SPEED)
@@ -1842,43 +1845,58 @@ class RbrRack(RackForce):
             self._d_ay = self._d_rd = None               # (the low-passes start again at the next sample)
         self.derived = self.derived_raw * self._derived_fade * self._gate
 
-    def _grip_trail(self, fy, fz, dt, speed, alpha=None):
-        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: DERIVED_TP_A + DERIVED_TP_B mu
+    def _grip_trail(self, fy, fz, dt, speed, alpha=None, loaded=True):
+        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: ffb_forza.trail_tp0(mu)
         times the factors of the grip in use and of the slip past its learnt peak,
         mu rising to the highest Fy_f / Fz within about a tenth of a second and falling back slowly, from a sane prior for the first
         corners. Replayed on 20261104-212111 it read 1.14 on tarmac and 0.85 on gravel; a brush tyre's (1 - grip in use) did not
         separate the surfaces, this does, as ACR's measured trail does (42-44 mm tarmac, 22-27 mm gravel)."""
         now = fy / fz
         self._grip_r += min(dt / self.DERIVED_R_TAU, 1.0) * (now - self._grip_r)
-        if ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED:
-            tau = self.DERIVED_MU_RISE if self._grip_r > self.grip_mu else self.DERIVED_MU_FALL
-            self.grip_mu += min(dt / tau, 1.0) * (self._grip_r - self.grip_mu)
+        self._grip_clock += dt
+        hist = self._grip_hist
+        hist.append((self._grip_clock, self._grip_r))
+        while hist and hist[0][0] < self._grip_clock - self.DERIVED_MU_SUSTAIN:
+            hist.popleft()
+        if loaded and ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED:
+            low = min(r for _t, r in hist)                    # (the rise follows the lowest r of the last DERIVED_MU_SUSTAIN s)
+            if low > self.grip_mu:
+                self.grip_mu += min(dt / self.DERIVED_MU_RISE, 1.0) * (low - self.grip_mu)
+            elif self._grip_r < self.grip_mu:
+                self.grip_mu += min(dt / self.DERIVED_MU_FALL, 1.0) * (self._grip_r - self.grip_mu)
             self.grip_mu = min(max(self.grip_mu, self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
-            use = self._grip_r / self.grip_mu
             if alpha is not None and ffb_forza.finite(alpha):
-                self._learn_peak(abs(alpha), use, dt)
+                self._learn_peak(abs(alpha), self._grip_r, dt)
         use = self._grip_r / self.grip_mu
         past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
         return self._tp0() * self._interp(self.DERIVED_TP_USE, use) * past
 
     def _tp0(self):
-        """The pneumatic trail at no slip (m) at the grip the fronts have shown, the line held over the grip it was fitted over."""
-        return self.DERIVED_TP_A + self.DERIVED_TP_B * min(max(self.grip_mu, self.DERIVED_TP_MU[0]), self.DERIVED_TP_MU[1])
+        """The pneumatic trail at no slip (m) at the grip the fronts have shown, ffb_forza's line, held over the grip it was fitted over."""
+        return ffb_forza.trail_tp0(self.grip_mu)
 
-    def _learn_peak(self, alpha, use, dt):
-        """The peak slip: the grip in use's upper envelope against |alpha| (per DERIVED_PEAK_BIN bin, each bin's DERIVED_PEAK_Q quantile
-        tracked over its own time), and the first bin held DERIVED_PEAK_HOLD s that reaches DERIVED_PEAK_SHARE of the envelope's top is the
-        peak slip, between the bin centres: the drive's own definition (scripts/ffb_laws.py), over the whole drive, not each turn-in."""
+    def _peak_recent(self, k):
+        """The time (s) bin k has had lately: its visits, each fading over DERIVED_PEAK_FRESH s."""
+        return self._peak_secs[k] * math.exp((self._peak_seen[k] - self._grip_clock) / self.DERIVED_PEAK_FRESH)
+
+    def _learn_peak(self, alpha, r, dt):
+        """The peak slip: the front force per load's upper envelope against |alpha| (per DERIVED_PEAK_BIN bin, each bin's DERIVED_PEAK_Q
+        quantile of r tracked over its own time), read over today's grip_mu (a fall of grip changes what the old r means) from the bins
+        with DERIVED_PEAK_HOLD s of recent time; the first such bin that reaches DERIVED_PEAK_SHARE of the top is the
+        peak slip, between the bin centres: the drive's own definition (scripts/ffb_laws.py), over the corners, not each turn-in."""
         j = int(alpha / self.DERIVED_PEAK_BIN)
         if j >= len(self._peak_env) or dt <= 0.0:
             return
+        w, seen = self._peak_secs[j], self._peak_seen[j]
+        if seen is not None:
+            w *= math.exp((seen - self._grip_clock) / self.DERIVED_PEAK_FRESH)
         q = self._peak_env[j]
-        if q is None:
-            q = use
-        q += min(4.0 * dt / self.DERIVED_PEAK_TAU, 1.0) * max(q, 0.3) * (self.DERIVED_PEAK_Q if use > q else self.DERIVED_PEAK_Q - 1.0)
+        if q is None or w < 0.05:
+            q = r                                           # (a bin not seen for a while starts again from today's r)
+        q += min(4.0 * dt / self.DERIVED_PEAK_TAU, 1.0) * max(q, 0.3 * self.grip_mu) * (self.DERIVED_PEAK_Q if r > q else self.DERIVED_PEAK_Q - 1.0)
         self._peak_env[j] = q
-        self._peak_secs[j] += dt
-        held = [(k, v) for k, v in enumerate(self._peak_env) if v is not None and self._peak_secs[k] >= self.DERIVED_PEAK_HOLD]
+        self._peak_secs[j], self._peak_seen[j] = w + dt, self._grip_clock
+        held = [(k, v / self.grip_mu) for k, v in enumerate(self._peak_env) if v is not None and self._peak_recent(k) >= self.DERIVED_PEAK_HOLD]
         if len(held) < 3:
             return
         want = self.DERIVED_PEAK_SHARE * max(v for _k, v in held)
@@ -1988,7 +2006,8 @@ class ForzaRack(RackForce):
     knee, budget, RIM_SAFE_NM: RackForce.force, unchanged), and the engine plays the output filter (ffb_forza.OutputFilter),
     column damping, lock stop, texture and Kickback beside it.
 
-    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), m the car's learnt mass (MassLearner, per car,
+    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), tp's no-slip value from the grip measured
+      at the slip limit (ffb_forza.LimitGrip, trail_tp0; TP0 until it has a sample), m the car's learnt mass (MassLearner, per car,
       ffb_carprops.STORE; 1400 kg until learnt), rdot the yaw rate's central difference over the game's clock (known one
       packet late: the difference is centred on the packet before the newest). A puddle under both fronts halves tp; one
       under a single front adds Drive pull's couple, scrub x PULL_FRACTION m_f g / 2 (only while Drive pull is on, as the
@@ -2120,7 +2139,10 @@ class ForzaRack(RackForce):
         cs = sample.combined_slip
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
-        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0)
+        sa = sample.slip_angle
+        if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]) and self.mass > 0.0:
+            self._limit_grip.feed(self._now, 0.5 * (abs(sa[0]) + abs(sa[1])), sample.speed, fy / (self.mass * bl * ffb_forza.G))
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=self._limit_grip.mu())
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):

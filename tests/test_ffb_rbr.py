@@ -1749,7 +1749,7 @@ def trail_rack(mu=1.0, r=0.0):
 def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted_over():
     rack = fe.RbrRack
     for mu in (0.82, 0.95, 1.2, 1.32):
-        assert trail_rack(mu)._tp0() == pytest.approx(rack.DERIVED_TP_A + rack.DERIVED_TP_B * mu)
+        assert trail_rack(mu)._tp0() == pytest.approx(fz.trail_tp0(mu))
     assert trail_rack(0.6)._tp0() == pytest.approx(trail_rack(0.82)._tp0())
     assert trail_rack(1.4)._tp0() == pytest.approx(trail_rack(1.32)._tp0())
     assert 0.027 < trail_rack(0.95)._tp0() < 0.030 and 0.036 < trail_rack(1.2)._tp0() < 0.040      # ACR: 28 mm gravel, 38 mm tarmac
@@ -1763,10 +1763,10 @@ def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
         assert tp == pytest.approx(r._tp0() * want)
 
 
-def sweep_peak(r, peak=0.15, passes=12, top=0.4):
+def sweep_peak(r, peak=0.15, passes=40, top=0.4):
     """Sweeps |alpha| up and down 0 to `top` passes times, the force rising to its max at `peak` and flat past it (the grip in use)."""
     for k in range(passes):
-        for alpha in list(np.linspace(0.0, top, 400)) + list(np.linspace(top, 0.0, 400)):
+        for alpha in list(np.linspace(0.0, top, 200)) + list(np.linspace(top, 0.0, 200)):
             r._grip_trail(min(alpha / peak, 1.0), 1.0, 0.01, 20.0, alpha)
 
 
@@ -1780,7 +1780,7 @@ def test_slip_peak_is_where_the_envelope_of_the_grip_in_use_reaches_its_top():
     r._grip_trail(0.5, 1.0, 0.01, 20.0, 0.25)       # one sample says nothing
     assert r.slip_peak == rack.DERIVED_SLIP_PEAK
     r = trail_rack(1.0, 0.0)
-    sweep_peak(r, 0.9, top=0.9)           # a peak over the range stays in range
+    sweep_peak(r, 0.6, top=0.42)          # a peak over the range stays in range
     assert 0.35 <= r.slip_peak <= rack.DERIVED_PEAK_RANGE[1]
     r._restart_floor()
     assert r.slip_peak == rack.DERIVED_SLIP_PEAK and not any(v is not None for v in r._peak_env)
@@ -1816,3 +1816,38 @@ def test_trail_past_the_peak_factor():
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(base)
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.45 * base)
+
+
+def test_slip_peak_stays_put_when_grip_falls_from_tarmac_to_gravel():
+    r = trail_rack(1.1, 0.0)
+
+    def drive(peak, top, mu_r, secs):
+        seen = []
+        for _ in range(secs):                             # one sweep of alpha a second
+            for alpha in np.linspace(0.0, top, 100):
+                r._grip_trail(min(alpha / peak, 1.0) * mu_r, 1.0, 0.01, 20.0, alpha)
+                seen.append(r.slip_peak)
+        return seen
+    drive(0.15, 0.35, 1.1, 120)                           # tarmac, out to .35 rad
+    seen = drive(0.15, 0.22, 0.88, 120)                   # gravel: r .88, peak .15, slip under .22
+    assert all(0.15 * 0.85 <= p <= 0.15 * 1.15 for p in seen), (min(seen), max(seen))
+    assert max(seen) < 0.15 * 1.15
+
+
+def test_a_spike_in_the_front_force_does_not_lift_the_grip():
+    r = trail_rack(0.9, 0.0)
+    for _ in range(300):
+        r._grip_trail(0.9, 1.0, 0.01, 20.0, 0.05)
+    base = r.grip_mu
+    for _ in range(15):                                  # 0.15 s at r 1.35
+        r._grip_trail(1.35, 1.0, 0.01, 20.0, 0.05)
+    for _ in range(100):
+        r._grip_trail(0.9, 1.0, 0.01, 20.0, 0.05)
+    assert r.grip_mu - base < 0.03
+    for _ in range(100):                                 # a sustained 1.2 does lift it
+        r._grip_trail(1.2, 1.0, 0.01, 20.0, 0.05)
+    assert r.grip_mu > 1.1
+    r2 = trail_rack(0.9, 0.0)
+    for _ in range(300):
+        r2._grip_trail(1.3, 1.0, 0.01, 20.0, 0.05, loaded=False)      # the fronts in the air: nothing learnt
+    assert r2.grip_mu == 0.9

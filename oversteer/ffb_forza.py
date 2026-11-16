@@ -46,6 +46,9 @@ LATERAL_FIT_INERTIAL = (0.691, 0.226)
 LATERAL_RANGE_INERTIAL = (0.85, 1.05)
 LATERAL_DEFAULT_INERTIAL = 0.95
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
+# The no-slip trail follows the grip (ACR's tyres: 41 mm at mu 1.27, 26 at .88; scripts/ffb_laws.json tp0 = -8.7 + 39.2 mu mm, mu the
+# tyres' Fy/Fz top), mu from LimitGrip. TP0 stays the value until it has a limit sample.
+TP0_FIT = (-0.00872, 0.03923)            # m, m per unit of mu
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
 FORZA_TP_S_HALF = 1.1                   # Forza's own slip scale (its grip peaks at 0.7-0.9 there): halved at 1.1 its rim torque per Fy_f
@@ -62,10 +65,17 @@ def finite(x):
     return x is not None and math.isfinite(x)
 
 
-def trail(s, half=None):
-    """The pneumatic trail (m) at the normalised slip s: TP0 / (1 + (s / half)^TP_N), half TP_S_HALF unless given
+def trail_tp0(mu):
+    """The pneumatic trail at no slip (m) at the grip mu (TP0_FIT, held in TP0_RANGE); TP0 without mu."""
+    if not finite(mu):
+        return TP0
+    return min(max(TP0_FIT[0] + TP0_FIT[1] * mu, TP0_RANGE[0]), TP0_RANGE[1])
+
+
+def trail(s, half=None, tp0=None):
+    """The pneumatic trail (m) at the normalised slip s: tp0 (TP0 unless given) / (1 + (s / half)^TP_N), half TP_S_HALF unless given
     (read at the call, so a changed constant reaches it)."""
-    return TP0 / (1.0 + (abs(s) / (TP_S_HALF if half is None else half)) ** TP_N)
+    return (TP0 if tp0 is None else tp0) / (1.0 + (abs(s) / (TP_S_HALF if half is None else half)) ** TP_N)
 
 
 def front_share(drivetrain):
@@ -126,6 +136,74 @@ class GripScale:
         return x / G
 
 
+# The grip in use against Forza's normalised front slip (mean |slip_angle|), 1 at the top: the p80 of r = Fy_f / (m b/L g) over the
+# stretch's top, median over 53 stretches of 4 FH drives (scripts/ffb-new-game.py --shape). ACR's tyres, by slip over peak, hold
+# 0.92-0.99 past the peak where this falls to 0.75: Newton's r falls with a_y in a slide.
+GRIP_USE = ((0.25, 1.0), (0.35, 0.96), (0.45, 0.94), (0.55, 0.86), (0.65, 0.84), (0.75, 0.84), (0.85, 0.79), (0.95, 0.75), (1.05, 0.75))
+
+
+def grip_use(s):
+    """u(s): GRIP_USE interpolated, held at its ends."""
+    s = abs(s)
+    if s <= GRIP_USE[0][0]:
+        return GRIP_USE[0][1]
+    for (s0, u0), (s1, u1) in zip(GRIP_USE, GRIP_USE[1:]):
+        if s <= s1:
+            return u0 + (u1 - u0) * (s - s0) / (s1 - s0)
+    return GRIP_USE[-1][1]
+
+
+class LimitGrip:
+    """The grip mu (the top of the r = Fy_f / Fz envelope, as scripts/ffb_laws.py defines it) from every sample, not only the ones at the
+    limit: r = |Fy_f| / (m b/L g) (Newton's force over the static front load) over the grip in use u(s) at the mean front |slip_angle|
+    (grip_use), for s in SLIP, the car faster than V_MIN and u(s) at least U_MIN. mu is the PCT-th percentile of those readings over the
+    last WINDOW s; held while they span under HOLD s; None until they first do."""
+
+    SLIP = (0.3, 1.1)
+    V_MIN = 8.0                          # m/s
+    U_MIN = 0.5
+    WINDOW = 10.0                        # s
+    HOLD = 1.0                           # s
+    PCT = 80.0                           # the law's grip top is the p80 envelope of r; the median of readings sat 16-28 % under the tops
+    RANGE = (0.4, 1.8)
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._buf = collections.deque()  # (t, reading), oldest first
+        self._mu = None
+
+    def feed(self, t, slip, speed, r):
+        if not (finite(t) and finite(slip) and finite(speed) and finite(r)):
+            return
+        if self._buf and t <= self._buf[-1][0]:
+            # (the force pass feeds it again on a clock read before the packet landed: a reading at or before the last
+            # is dropped; only a clock that went back by more than a window starts it again)
+            if t < self._buf[-1][0] - self.WINDOW:
+                self._buf.clear()
+            else:
+                return
+        u = grip_use(slip)
+        if speed > self.V_MIN and self.SLIP[0] <= abs(slip) <= self.SLIP[1] and u >= self.U_MIN:
+            self._buf.append((t, abs(r) / u))
+        while self._buf and self._buf[0][0] < t - self.WINDOW:
+            self._buf.popleft()
+        if len(self._buf) > 1 and self._buf[-1][0] - self._buf[0][0] >= self.HOLD:
+            v = sorted(x for _t, x in self._buf)
+            k = (len(v) - 1) * self.PCT / 100.0
+            i = int(k)
+            top = v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
+            self._mu = min(max(top, self.RANGE[0]), self.RANGE[1])
+
+    def mu(self):
+        return self._mu
+
+
+TP0_MU_RANGE = (0.825, 1.318)            # the grips the law was fitted over (scripts/ffb_laws.json mu_range): not extrapolated past them
+TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 23.6-43.0 mm
+
+
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):
     """Fy_f (N, left positive): factor m (b/L) (a_y + di a rdot), a = wheelbase (1 - b/L); a_y and rdot clipped."""
     ay = min(max(ay, -AY_MAX), AY_MAX)
@@ -133,10 +211,10 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
     return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None):
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None, mu=None):
     """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
-    (0.5 with a puddle under both fronts)."""
-    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half)) * fy
+    (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip), whose no-slip trail (trail_tp0) it fades from."""
+    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half, trail_tp0(mu))) * fy
 
 
 class LowPass:
