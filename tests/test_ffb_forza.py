@@ -998,7 +998,7 @@ def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     lo, hi = fz.TP0_RANGE
     assert fz.trail_tp0(None) == fz.TP0 and fz.trail_tp0(float('nan')) == fz.TP0
     assert fz.trail_tp0(1.3) == pytest.approx(fz.TP0_FIT[0] + fz.TP0_FIT[1] * 1.3)
-    assert fz.trail_tp0(0.4) == lo and fz.trail_tp0(3.0) == hi
+    assert fz.trail_tp0(0.4) == pytest.approx(lo) and fz.trail_tp0(3.0) == pytest.approx(hi)
     assert fz.trail_tp0(0.9) < fz.trail_tp0(1.1) < fz.trail_tp0(1.3)
     assert fz.trail(0.0, tp0=0.03) == pytest.approx(0.03) and fz.trail(fz.FORZA_TP_S_HALF, fz.FORZA_TP_S_HALF, 0.03) == pytest.approx(0.015)
     assert fz.kingpin(1000.0, 0.0, mu=0.9) == pytest.approx(-(fz.CASTER + fz.trail_tp0(0.9)) * 1000.0)
@@ -1006,34 +1006,44 @@ def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     rack.reset(CAR)
     unknown = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     assert unknown == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
-    rack._limit_grip._mu, rack._limit_grip.known = 0.9, True
+    rack._limit_grip._mu = 0.9
     low = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     rack._limit_grip._mu = 1.5
     high = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     assert abs(high) > abs(low)
 
 
-def test_limit_grip_moves_only_at_the_slip_limit_and_tracks_a_step():
+def test_grip_use_is_one_at_the_top_and_falls_past_it():
+    assert fz.grip_use(0.25) == 1.0 and fz.grip_use(0.1) == 1.0 and fz.grip_use(-0.45) == fz.grip_use(0.45)
+    assert fz.grip_use(0.3) > fz.grip_use(0.6) > fz.grip_use(1.0) >= fz.GRIP_USE[-1][1]
+    assert fz.grip_use(3.0) == fz.GRIP_USE[-1][1]
+
+
+def test_limit_grip_reads_the_grip_below_the_limit_and_tracks_a_step():
     g = fz.LimitGrip()
     assert g.mu() is None
     t = 0.0
-    for slip, speed in ((0.3, 20.0), (1.5, 20.0), (0.9, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
+    for slip, speed in ((0.1, 20.0), (1.5, 20.0), (0.6, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
         for _ in range(30):
             g.feed(t, slip, speed, 1.4)
             t += 0.1
     assert g.mu() is None
-    for _ in range(50):                                   # 5 s at the limit, r 1.4
-        g.feed(t, 0.9, 20.0, 1.4)
+    for _ in range(50):                                   # 5 s at s 0.45 with r = 1.2 u(0.45): the grip is 1.2
+        g.feed(t, 0.45, 20.0, 1.2 * fz.grip_use(0.45))
         t += 0.1
-    assert g.mu() == pytest.approx(1.4)
+    assert g.mu() == pytest.approx(1.2)
+    for _ in range(100):                                  # a different slip, the same grip: the same reading
+        g.feed(t, 0.9, 20.0, 1.2 * fz.grip_use(0.9))
+        t += 0.1
+    assert g.mu() == pytest.approx(1.2)
     held = g.mu()
     for _ in range(100):                                  # out of the window: held
-        g.feed(t, 0.4, 20.0, 0.5)
+        g.feed(t, 0.1, 20.0, 0.1)
         t += 0.1
     assert g.mu() == held
     for _ in range(100):                                  # surface step to 0.7: whole by 10 s
-        g.feed(t, 0.9, 20.0, 0.7)
+        g.feed(t, 0.5, 20.0, 0.7 * fz.grip_use(0.5))
         t += 0.1
     assert g.mu() == pytest.approx(0.7)
-    g.feed(t, 0.9, 20.0, 9.0)
+    g.feed(t, 0.5, 20.0, 99.0)
     assert g.mu() <= fz.LimitGrip.RANGE[1]

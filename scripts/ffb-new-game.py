@@ -2,6 +2,7 @@
 """One recording of a game, any car: its routes, its own constants, and every stage of today's force against the tyre laws.
 
     scripts/ffb-new-game.py CAPTURE [--out FILE.json] [--no-rack] [--peak NM] [--set NAME=VALUE ...] [--laws FILE]
+    scripts/ffb-new-game.py --shape CAPTURE [CAPTURE ...]     (the grip in use against the slip, one game: ffb_forza.GRIP_USE)
     scripts/ffb-new-game.py --refit ACR_CAPTURE [ACR_CAPTURE ...] [--laws FILE]
 
 CAPTURE: a name in the captures folder or a full path. It (a) lists the channels and the route each force stage can take with
@@ -37,6 +38,32 @@ def _simulate(path, game, peak=None):
     """(cols, causes, info, in_force lines) of today's rack over the capture; inside the sandbox."""
     sim = tools.simulate_stages(_load(path), game, tools.profile_power_class(game), peak, probe=(laws_mod.PROBE_KEYS, laws_mod.probe))
     return sim['cols'], laws_mod.causes(sim['cols'], sim['info']['dt']), sim['info'], sim['in_force']
+
+
+def shape(names):
+    """The grip in use against the slip of drives, one game's: Forza by Forza's normalised slip (ffb_forza.GRIP_USE is its
+    grip_use_shape), ACR by slip over peak slip (the cross-check)."""
+    import ffb_parity as fp
+    import ffb_score as fs
+    drives, game, out = [], None, []
+    with fs._sandbox():
+        for name in names:
+            path = fp.resolve(name)
+            g = fp.game_of(path)
+            if game not in (None, g):
+                out.append('%s: %s, not %s, left out' % (name, g, game))
+                continue
+            game = g
+            cols, c, _info, _f = _simulate(path, game)
+            drives.append((cols, c))
+    if game == 'acr':
+        out.append('ACR, grip in use u = r / mu against slip / peak slip (p80 per stretch, median over stretches):')
+        out += ['  x %.2f  u %.2f  (%d stretches)' % r for r in laws_mod.shape_table(drives, laws_mod.SHAPE_X, 'x')]
+    else:
+        out.append('%s, grip in use u = r / mu against the normalised slip:' % game)
+        out += ['  s %.2f  u %.2f  (%d stretches)' % r for r in laws_mod.shape_table(drives)]
+        out.append('ffb_forza.GRIP_USE = %r' % (laws_mod.grip_use_shape(drives),))
+    return out
 
 
 def refit(names, laws_path):
@@ -211,6 +238,7 @@ def report(path, game, laws, peak=None, no_rack=False, out_path=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('capture', nargs='?')
+    parser.add_argument('--shape', nargs='+', metavar='CAPTURE', help='the grip in use against the slip of these drives (one game)')
     parser.add_argument('--refit', nargs='+', metavar='ACR_CAPTURE', help='rebuild the laws from these ACR drives')
     parser.add_argument('--laws', metavar='FILE', default=laws_mod.LAWS_PATH)
     parser.add_argument('--out', metavar='FILE.json')
@@ -219,13 +247,15 @@ def main(argv=None):
     parser.add_argument('--set', dest='sets', action='append', default=[], metavar='NAME=VALUE', help='a constant for the replay only')
     tools.add_store_args(parser)
     args = parser.parse_args(argv)
-    if not args.capture and not args.refit:
-        parser.error('give a capture or --refit')
+    if not args.capture and not args.refit and not args.shape:
+        parser.error('give a capture, --shape or --refit')
     import ffb_parity as fp
     import ffb_score as fs
     try:
         tools.apply_store_args(args)
-        if args.refit:
+        if args.shape:
+            out = shape(args.shape)
+        elif args.refit:
             out = refit(args.refit, args.laws)
         else:
             path = fp.resolve(args.capture)

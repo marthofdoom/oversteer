@@ -28,6 +28,8 @@ MU_MAX = 2.0                    # a stretch's grip top over this is noise, not g
 TOL_MAX = 0.5                   # ... and never wider than this, however far ACR's drives spread (a third of the law must flag)
 MIN_S = 3.0                     # ... when it holds this many seconds
 LOCK_FLAG = 0.15
+SHAPE_S = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1)     # Forza's normalised slip: the edges of the bins the grip-use shape is read in
+SHAPE_X = (0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 6.0)   # slip / peak: the same for ACR's tyres (cross-check)
 GS_MU_MAX = 2.5                 # a GripScale mu over this is a crash, not grip (ffb-lateral-fit's guard)
 GRIP_SPREAD = 0.3               # the grip must spread this far over a drive's stretches for a slope of trail against grip
 PEAK_FLAG = 0.25
@@ -157,6 +159,35 @@ def gs_fit(drives):
     p = np.array([(q[0], q[2]) for q in pts])
     return {'tp0_gs': [a, b], 'gs_range': [float(p[:, 0].min()), float(p[:, 0].max())], 'gs_r': float(np.corrcoef(p[:, 0], p[:, 1])[0, 1]),
             'gs_stretches': n}
+
+
+def shape_table(drives, edges=SHAPE_S, over='slip'):
+    """The grip in use against the slip, from the stretches with a grip top of drives [(cols, causes)]: per stretch the p80 of r / mu in
+    each bin of `edges` (`over` 'slip': the drive's slip; 'x': slip / peak) with 0.25 s of samples, then the median over the stretches.
+    [(bin centre, u, stretches)] for the bins held by at least 3 stretches."""
+    per = {}
+    for cols, c in drives:
+        dt = float(np.median(np.diff(cols['t']))) if len(cols['t']) > 1 else 0.0
+        v = np.abs(cols['slip']) if over == 'slip' else c['x']
+        u = c['r'] / c['mu']
+        for g in np.unique(c['seg']):
+            m = (c['seg'] == g) & c['reached'] & np.isfinite(u) & np.isfinite(v)
+            for j in range(len(edges) - 1):
+                k = m & (v >= edges[j]) & (v < edges[j + 1])
+                if k.sum() >= max(15, 0.25 / max(dt, 1e-6)):
+                    per.setdefault(j, []).append(float(np.percentile(u[k], 80)))
+    return [(0.5 * (edges[j] + edges[j + 1]), float(np.median(per[j])), len(per[j])) for j in sorted(per) if len(per[j]) >= 3]
+
+
+def grip_use_shape(drives):
+    """ffb_forza.GRIP_USE: ((s, u), ...) the grip in use against Forza's normalised slip, 1 at the top; past the top it only falls."""
+    rows = shape_table(drives)
+    top = max(range(len(rows)), key=lambda i: rows[i][1])
+    out, lo = [], 1.0
+    for i, (s, u, _n) in enumerate(rows):
+        lo = min(lo, u) if i > top else u
+        out.append((round(s, 2), round(lo / rows[top][1], 2)))
+    return tuple(out)
 
 
 def _line(pts, spread=0.15):
