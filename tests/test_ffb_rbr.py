@@ -1737,3 +1737,43 @@ def test_the_trail_follows_the_grip_the_car_has_shown_without_being_told_the_sur
     for _ in range(60000):
         low = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                # long on a loose road
     assert rack.grip_mu == rack.DERIVED_MU_RANGE[0] and low < first
+
+
+def trail_rack(mu=1.0, r=0.0):
+    rack = derived_rack()
+    rack.grip_mu, rack._grip_r = mu, r
+    return rack
+
+
+def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
+    rack = fe.RbrRack
+    for use, want in ((0.5, 1.0), (1.2, 0.55)):
+        r = trail_rack(1.0, use)
+        tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
+        assert tp == pytest.approx(rack.DERIVED_TP_B * want)
+
+
+def test_slip_peak_learns_only_inside_the_use_window_and_stays_in_range():
+    rack = fe.RbrRack
+    r = trail_rack(1.0, 1.0)
+    for _ in range(400):
+        r._grip_trail(1.0, 1.0, 0.1, 20.0, 0.25)
+    assert r.slip_peak == pytest.approx(0.25, abs=0.01)
+    r = trail_rack(1.0, 0.5)
+    r._grip_trail(0.5, 1.0, 0.1, 20.0, 0.25)
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK
+    r = trail_rack(1.0, 1.0)
+    for _ in range(300):
+        r._grip_trail(1.0, 1.0, 0.1, 20.0, 0.9)
+    assert r.slip_peak == rack.DERIVED_PEAK_RANGE[1]
+    r._restart_floor()
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK
+
+
+def test_trail_past_the_peak_factor():
+    rack = fe.RbrRack
+    r = trail_rack(1.0, 0.5)
+    base = rack.DERIVED_TP_B
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.3 * base)
