@@ -1496,8 +1496,18 @@ class RbrRack(RackForce):
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
     DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
-    DERIVED_TP_B = 0.035                 # m: the pneumatic trail at no slip at a grip of 1
-    DERIVED_TP_N = 4.0                   # ... and its power of the grip
+    # ACR's tyres (Fabia, tyre Mz / Fy per front wheel, speed over 8 m/s, |Fy| over 300 N; drives 20261105-162134 tarmac, 20261104-143823
+    # gravel): the no-slip trail is about linear-to-square in the grip (41 mm at RBR's tarmac 1.05, 29 mm at its gravel 0.88), and it
+    # fades with the grip in USE, u = (Fy / Fz) / mu, the same on both surfaces while the slip at the peak differs (0.15 rad tarmac,
+    # 0.25 gravel). Trail over the no-slip trail, tarmac / gravel, before the peak: u < 0.8 1.0 / .92; .8-.9 .86 / .84; .9-1.0 .70 / .73;
+    # over 1.0 .54 / .55. Past the peak, by alpha / alpha_peak: 1-1.3 .32 / .34; 1.3-1.7 .20 / .04; 1.7-2.5 .08 / .08
+    DERIVED_TP_B = 0.0375                # m: the pneumatic trail at no slip at a grip of 1
+    DERIVED_TP_N = 2.0                   # ... and its power of the grip
+    DERIVED_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.85), (0.95, 0.715), (1.05, 0.55))      # (u, trail factor before the peak), held at the ends
+    DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.3), (2.1, 0.15), (3.0, 0.12))          # (alpha / slip_peak, factor over the at-peak one), held at the end
+    DERIVED_PEAK_REARM = 0.85            # the grip in use under which the next crossing may learn
+    DERIVED_PEAK_STEP = 0.15             # the learnt peak slip moves this share toward |alpha| at each upward crossing of a grip use of 0.95
+    DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
     DERIVED_MU_RISE = 0.5                # s
@@ -1651,6 +1661,8 @@ class RbrRack(RackForce):
     def _restart_floor(self):
         """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
         self.grip_mu, self._grip_r = self.DERIVED_MU0, 0.0      # (the derived path's grip: a new stream starts from the prior)
+        self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
+        self._peak_armed = False         # (the grip in use has been under DERIVED_PEAK_REARM since the last learnt crossing)
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1786,7 +1798,7 @@ class RbrRack(RackForce):
     def _derive(self, t, sample):
         """The column torque of the physics (derived): Newton's front lateral force Fy_f from the lateral acceleration and the
         yaw acceleration (ffb_forza.front_lateral, the car table's mass and b/L, capped as the caster floor caps it), through
-        the kingpin torque with the rally caster and the pneumatic trail at the kinematic slip (normalised by DERIVED_SLIP_PEAK),
+        the kingpin torque with the rally caster and the pneumatic trail at the kinematic slip (normalised by the learnt slip_peak),
         over the steering ratio. Faded to 0 by speed (under ALIGN_SPEED the slip is not defined), and out within DERIVED_UNLOADED_S
         when the fronts carry under DERIVED_UNLOADED of their static load (the air). Without the fields: the last value fades out."""
         self._feed_grip(t, sample)
@@ -1811,11 +1823,10 @@ class RbrRack(RackForce):
             limit = bl * mass * self.FLOOR_AY
             self.fy_f = min(max(fy, -limit), limit)
             alpha = self._slip(sample)
-            s = 0.0 if alpha is None else alpha / self.DERIVED_SLIP_PEAK
             fz = load[0] + load[1] if load is not None and len(load) > 1 and ffb_forza.finite(load[0]) \
                 and ffb_forza.finite(load[1]) else bl * mass * ffb_forza.G
             # (light fronts over a crest say nothing about the grip: Fy_f / Fz would read the ceiling)
-            tp = self._grip_trail(abs(self.fy_f), max(fz, 0.5 * bl * mass * ffb_forza.G), dt, speed) / (1.0 + (abs(s) / ffb_forza.TP_S_HALF) ** ffb_forza.TP_N)
+            tp = self._grip_trail(abs(self.fy_f), max(fz, 0.5 * bl * mass * ffb_forza.G), dt, speed, alpha)
             ratio = self.ratio if self.ratio_known else self.DERIVED_RATIO      # the car's own (table), else the prior
             self.derived_raw = -(ffb_carprops.RALLY_TRAIL + tp) * self.fy_f / ratio
             lo, hi = (self.DERIVED_SPEED[0] * self.ALIGN_SPEED, self.DERIVED_SPEED[1] * self.ALIGN_SPEED)
@@ -1826,8 +1837,9 @@ class RbrRack(RackForce):
             self._d_ay = self._d_rd = None               # (the low-passes start again at the next sample)
         self.derived = self.derived_raw * self._derived_fade * self._gate
 
-    def _grip_trail(self, fy, fz, dt, speed):
-        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: DERIVED_TP_B mu^DERIVED_TP_N,
+    def _grip_trail(self, fy, fz, dt, speed, alpha=None):
+        """The pneumatic trail at no slip (m), from the grip the fronts have shown, so nothing is told the surface: DERIVED_TP_B mu^DERIVED_TP_N
+        times the factors of the grip in use and of the slip past its learnt peak,
         mu rising to the highest Fy_f / Fz within about half a second and falling back slowly, from a sane prior for the first
         corners. Replayed on 20261104-212111 it read 1.14 on tarmac and 0.85 on gravel; a brush tyre's (1 - grip in use) did not
         separate the surfaces, this does, as ACR's measured trail does (42-44 mm tarmac, 22-27 mm gravel)."""
@@ -1837,7 +1849,28 @@ class RbrRack(RackForce):
             tau = self.DERIVED_MU_RISE if self._grip_r > self.grip_mu else self.DERIVED_MU_FALL
             self.grip_mu += min(dt / tau, 1.0) * (self._grip_r - self.grip_mu)
             self.grip_mu = min(max(self.grip_mu, self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
-        return self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N
+            use = self._grip_r / self.grip_mu
+            # (only the onset: the grip in use crossing 0.95 upward; on the plateau past the peak the use stays at its recent max,
+            # and it re-arms only once the use has fallen under DERIVED_PEAK_REARM, so Fz bumps in a slide don't count again)
+            if use < self.DERIVED_PEAK_REARM:
+                self._peak_armed = True
+            elif self._peak_armed and use >= 0.95 and alpha is not None and ffb_forza.finite(alpha):
+                self._peak_armed = False
+                self.slip_peak += self.DERIVED_PEAK_STEP * (abs(alpha) - self.slip_peak)
+                self.slip_peak = min(max(self.slip_peak, self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
+        use = self._grip_r / self.grip_mu
+        past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
+        return self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N * self._interp(self.DERIVED_TP_USE, use) * past
+
+    @staticmethod
+    def _interp(table, x):
+        """The piecewise-linear value of a ((x, y), ...) table at x, held at its ends."""
+        if x <= table[0][0]:
+            return table[0][1]
+        for (x0, y0), (x1, y1) in zip(table, table[1:]):
+            if x <= x1:
+                return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        return table[-1][1]
 
     def _fresh(self):
         """1 while the telemetry is no older than half of ALIGN_FRESH at this force pass, 0 at ALIGN_FRESH (a line between):
@@ -1848,13 +1881,16 @@ class RbrRack(RackForce):
 
     def _sat(self, alpha):
         """The kingpin torque's shape in the slip angle. Derived: the saturating lateral force's shape times the kingpin torque's
-        trail share at that slip, (RALLY_TRAIL + tp(|alpha| / DERIVED_SLIP_PEAK)) / (RALLY_TRAIL + tp(0)), so the aligning spring
-        follows the torque the derived path plays (the pneumatic trail fades past the peak)."""
+        trail share at that slip, (RALLY_TRAIL + tp(0) f(x)) / (RALLY_TRAIL + tp(0)) with x = |alpha| / slip_peak and f the played use and
+        past-peak factors, so the aligning spring follows the torque the derived path plays (the pneumatic trail fades toward the peak)."""
         if self.source != 'derived':
             return super()._sat(alpha)
         base = alpha / (1.0 + abs(alpha) / self.DERIVED_PK)
         trail = ffb_carprops.RALLY_TRAIL
-        return base * (trail + ffb_forza.trail(alpha / self.DERIVED_SLIP_PEAK)) / (trail + ffb_forza.TP0)
+        x = abs(alpha) / self.slip_peak
+        tp0 = self.DERIVED_TP_B * self.grip_mu ** self.DERIVED_TP_N
+        share = self._interp(self.DERIVED_TP_USE, min(x, 1.05)) * self._interp(self.DERIVED_TP_PAST, x)      # (x stands in for the use below the peak)
+        return base * (trail + tp0 * share) / (trail + tp0)
 
     def _sat_div(self, alpha):
         """The spring's k divisor: the inverse slope of _sat (a central difference where derived), the slope held at

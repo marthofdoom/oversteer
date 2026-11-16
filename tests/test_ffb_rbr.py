@@ -1737,3 +1737,67 @@ def test_the_trail_follows_the_grip_the_car_has_shown_without_being_told_the_sur
     for _ in range(60000):
         low = rack._grip_trail(1000.0, 4000.0, 0.01, 20.0)                # long on a loose road
     assert rack.grip_mu == rack.DERIVED_MU_RANGE[0] and low < first
+
+
+def trail_rack(mu=1.0, r=0.0):
+    rack = derived_rack()
+    rack.grip_mu, rack._grip_r = mu, r
+    return rack
+
+
+def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
+    rack = fe.RbrRack
+    for use, want in ((0.5, 1.0), (1.2, 0.55)):
+        r = trail_rack(1.0, use)
+        tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
+        assert tp == pytest.approx(rack.DERIVED_TP_B * want)
+
+
+def test_slip_peak_learns_at_the_onset_not_on_the_plateau():
+    rack = fe.RbrRack
+    r = trail_rack(1.0, 0.0)
+    alpha = 0.02
+    for _ in range(600):                 # Fy / Fz rises to its max at alpha .15, then stays flat out to .4
+        alpha = min(alpha + 0.001, 0.4)
+        now = min(alpha / 0.15, 1.0) * 1.0
+        r._grip_trail(now, 1.0, 0.01, 20.0, alpha)
+    assert r.slip_peak == pytest.approx(0.15, abs=0.05) and r.slip_peak < 0.25
+    r = trail_rack(1.0, 0.5)
+    r._grip_trail(0.5, 1.0, 0.01, 20.0, 0.25)
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK
+    r = trail_rack(1.0, 0.0)
+    for k in range(200):                 # crossings at a huge slip stay in range
+        r._grip_trail(0.0, 1.0, 0.5, 20.0, 0.9)
+        r._grip_trail(1.0, 1.0, 0.5, 20.0, 0.9)
+    assert r.slip_peak == rack.DERIVED_PEAK_RANGE[1]
+    r._restart_floor()
+    assert r.slip_peak == rack.DERIVED_SLIP_PEAK and not r._peak_armed
+
+
+def test_slip_peak_ignores_bumps_in_a_slide():
+    r = trail_rack(1.0, 0.0)
+    r._grip_trail(0.5, 1.0, 1.0, 20.0, 0.05)          # armed under the re-arm level
+    r._grip_trail(1.0, 1.0, 1.0, 20.0, 0.15)          # the onset: learns from .15
+    learnt = r.slip_peak
+    for _ in range(200):                              # Fz bumps in the slide: the use dips to .9 and back at a big slip
+        r._grip_trail(0.9, 1.0, 1.0, 20.0, 0.4)
+        r._grip_trail(1.0, 1.0, 1.0, 20.0, 0.4)
+    assert r.slip_peak == learnt
+
+
+def test_sat_div_is_finite_and_positive():
+    for peak in (0.08, 0.15, 0.4):
+        r = trail_rack(1.0, 1.0)
+        r.slip_peak = peak
+        for k in range(61):
+            d = r._sat_div(0.01 * k)
+            assert math.isfinite(d) and d > 0.0
+
+
+def test_trail_past_the_peak_factor():
+    rack = fe.RbrRack
+    r = trail_rack(1.0, 0.5)
+    base = rack.DERIVED_TP_B
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.3 * base)
