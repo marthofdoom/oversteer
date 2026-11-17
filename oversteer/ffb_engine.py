@@ -1504,7 +1504,7 @@ class RbrRack(RackForce):
     # load, its grip, so the law is the axle's, not one tyre's)
     # (the no-slip trail is ffb_forza.trail_tp0(grip_mu): the line through ACR's stretches against the top of the tyres' Fy/Fz, one source with the Forza racks; grip_mu reads that same top: the held maximum, rise 0.1 s, over Fy_f / Fz smoothed 0.05 s)
     DERIVED_TP_USE = ffb_forza.AXLE_TP_USE          # (u, trail factor before the peak), held at the ends: the axle law, one source with ForzaRack
-    DERIVED_TP_PAST = ffb_forza.AXLE_TP_PAST        # (alpha / slip_peak, factor over the at-peak one), held at the end
+    DERIVED_TP_PAST = ffb_forza.AXLE_TP_PAST        # (alpha / slip_peak, factor over the no-slip trail, from the peak on, instead of the use table), held at the end
     DERIVED_WINDOW = 60.0                # s: the grip and the peak slip are the envelope's (ffb_forza.stretch_limit, the definition ffb_laws fits the law with) of the last this long
     DERIVED_WINDOW_STEP = 0.05           # s: the window keeps a sample this often (20 Hz)
     DERIVED_PEAK_WINDOW = 300.0          # s: the peak slip pools the samples of the last this long that were taken in today's grip band (the tool pools a drive's stretches per band)
@@ -1886,8 +1886,9 @@ class RbrRack(RackForce):
                     if env and ffb_forza.envelope_top(env[1], env[2])[2]:
                         self.slip_peak = min(max(ffb_forza.envelope_peak(env[0], env[1]), self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
         use = self._grip_r / self.grip_mu
-        past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
-        return self._tp0() * self._interp(self.DERIVED_TP_USE, use) * past
+        x = 0.0 if alpha is None or not ffb_forza.finite(alpha) else abs(alpha) / self.slip_peak
+        # (before the peak the use table, from it on the past table alone: the law's cells, ffb_forza.axle_fade)
+        return self._tp0() * (self._interp(self.DERIVED_TP_PAST, x) if x >= 1.0 else self._interp(self.DERIVED_TP_USE, use))
 
     def _pk_env(self, mu):
         """The peak buffer's incremental envelope of the grip band of mu."""
@@ -1928,7 +1929,7 @@ class RbrRack(RackForce):
         trail = ffb_carprops.RALLY_TRAIL
         x = abs(alpha) / self.slip_peak
         tp0 = self._tp0()
-        share = self._interp(self.DERIVED_TP_USE, min(x, 1.05)) * self._interp(self.DERIVED_TP_PAST, x)      # (x stands in for the use below the peak)
+        share = self._interp(self.DERIVED_TP_PAST, x) if x >= 1.0 else self._interp(self.DERIVED_TP_USE, x)      # (x stands in for the use below the peak)
         return base * (trail + tp0 * share) / (trail + tp0)
 
     def _sat_div(self, alpha):

@@ -428,6 +428,27 @@ def test_a_seeded_store_reaches_the_replayed_rack_and_the_header(tmp_path):
         fs.use_store(empty=True)
 
 
+def test_a_replayed_acr_car_plays_its_stored_trail_scrub_and_p99_and_learns_nothing(tmp_path):
+    import ffb_score as fs
+    from oversteer import ffb_carprops as cp
+    path = tmp_path / 'live.json'
+    path.write_text(json.dumps({'acr/Test Car': {'trail': 0.031, 'scrub': 0.012, 'p99': 440.0}, 'acr/Other': {'trail': 0.02, 'scrub': 0.0}}))
+    try:
+        fs.use_store(path=str(path))
+        with fs._sandbox():
+            rack, _fresh, _feed = tools._build_rack('acr', 'rally')
+            assert rack.learner is None
+            rack.reset('acr/Test Car')
+            assert rack.learner is None and rack.trail == pytest.approx(0.031) and rack.scrub == pytest.approx(0.012)
+            assert rack.p99 == pytest.approx(440.0)
+            rack.trail = 0.05                                            # (whatever drifted would be written back on a car change)
+            rack.reset('acr/Other')
+            assert rack.learner is None and rack.trail == pytest.approx(0.02)
+            assert cp.STORE.get('acr/Test Car') == (0.031, 0.012)
+    finally:
+        fs.use_store(empty=True)
+
+
 def test_the_live_store_is_copied_never_written(tmp_path):
     import ffb_score as fs
     path = _store_file(tmp_path)

@@ -1828,8 +1828,14 @@ def test_trail_past_the_peak_factor():
     r = trail_rack(1.0, 0.5)
     base = r._tp0()
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
-    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.99 * r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(0.70 * base)         # (from the peak on: the law's first past cell)
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.39 * base)
+    # from the peak on the past table is the whole factor: the grip in use does not multiply it (the law's cell is trail over the line)
+    for use in (0.2, 0.95, 1.2):
+        rr = trail_rack(1.0, use)
+        for x, cell in fe.RbrRack.DERIVED_TP_PAST:
+            assert rr._grip_trail(use, 1.0, 0.0, 20.0, x * rr.slip_peak) == pytest.approx(cell * rr._tp0())
 
 
 def test_slip_peak_and_grip_settle_on_gravel_within_a_minute_after_tarmac():

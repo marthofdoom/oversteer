@@ -38,7 +38,8 @@ def _load(path):
 def _simulate(path, game, peak=None):
     """(cols, causes, info, in_force lines) of today's rack over the capture; inside the sandbox."""
     sim = tools.simulate_stages(_load(path), game, tools.profile_power_class(game), peak, probe=(laws_mod.PROBE_KEYS, laws_mod.probe))
-    return sim['cols'], laws_mod.causes(sim['cols'], sim['info']['dt']), sim['info'], sim['in_force']
+    bins = tools.TYRE_BINS['norm' if game == 'forza-fh' else 'rad']       # (Forza's slip is its normalised slip angle)
+    return sim['cols'], laws_mod.causes(sim['cols'], sim['info']['dt'], bins), sim['info'], sim['in_force']
 
 
 def shape(names):
@@ -227,7 +228,7 @@ def report(path, game, laws, peak=None, no_rack=False, out_path=None):
     wheel_range = tools.profile_range(game) if game in tools.RACKS else 900.0
     if have_rack:
         cols, c, info, in_force = _simulate(path, game, peak)
-        dt, unit = info['dt'], 'rad'
+        dt, unit = info['dt'], 'norm' if game == 'forza-fh' else 'rad'
         lock = laws_mod.lock_fit(cols, wheelbase)
         const['car'], const['rack'] = info['car'], {k: v for k, v in info['learnt'].items() if v is not None}
         out += ['', '== today\'s rack: %s, car %s' % (tools.RACKS[game][0], info['car'])] + in_force
