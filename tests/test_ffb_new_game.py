@@ -140,6 +140,24 @@ def test_a_grip_top_over_the_sanity_bound_is_left_unreached():
     assert fl.MU_MAX == 2.0
 
 
+def _acr_like(n=6000, mass=1200.0, bl=0.6):
+    t = np.arange(n) * DT
+    ay = 8.0 * np.sin(2 * np.pi * t / 6.0)
+    fz = np.full(n, mass * bl * 9.81)
+    return {'t': t, 'ay_s': ay, 'yaw': np.zeros(n), 'speed': np.full(n, 20.0), 'bl': np.full(n, bl), 'fzf': fz, 'slip': np.abs(ay) / 8.0 * 0.15,
+            'fy_all': mass * ay, 'fy_front': bl * mass * ay, 'fyf': bl * mass * ay}
+
+
+def test_rack_estimates_run_the_racks_own_grip_over_an_acr_drive():
+    est = laws_mod.rack_estimates(_acr_like())
+    lo, hi = laws_mod.fe_range()                              # (a force that never saturates in the slip is no top: the prior holds)
+    assert lo <= np.nanmedian(est['mu']) <= hi and np.isfinite(est['r']).all()
+    assert np.isfinite(est['peak']).all()
+    cols = _acr_like()
+    cols['fy_all'] = np.full(len(cols['t']), np.nan)
+    assert laws_mod.rack_estimates(cols) is None             # no true mass
+
+
 def test_gs_fit_finds_the_no_slip_trail_against_gripscales_mu():
     cols = _drive([0.85] * 3 + [1.3] * 3, [0.3] * 3 + [0.15] * 3, _tyre)
     cols['gsx'] = np.where(cols['t'] < 180, 1.2, 1.6)         # (GripScale reads higher than the tyres' own top)
