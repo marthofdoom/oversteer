@@ -400,9 +400,9 @@ RACK_MIN_N = 300                                      # samples a bin needs
 
 
 def rack_estimates(cols):
-    """What RbrRack's grip estimator reads over an ACR drive (cols from simulate_stages): per sample the rack's `mu` (held grip),
-    `r` (smoothed Newton Fy_f / Fz), `u` = r / mu and `peak` (its learnt slip_peak, fed the tyres' slip), plus the Newton Fy_f
-    `fyn`. Needs the drive's true mass (all four tyres' Fy over a_y); None without."""
+    """What RbrRack's grip estimator reads over an ACR drive (cols from simulate_stages): per sample the rack's `mu` (the envelope's top
+    of Newton Fy_f / Fz over its last 60 s, ffb_forza.EnvelopeWindow), `r` (smoothed Newton Fy_f / Fz), `u` = r / mu and `peak` (its
+    slip_peak, pooled per grip band, fed the tyres' slip), plus the Newton Fy_f `fyn`, the front force at the moving mass's lateral factor. Needs the drive's true mass (all four tyres' Fy over a_y); None without."""
     from oversteer import ffb_engine as fe, ffb_forza
     m = tools.acr_true_mass(cols)
     if not m:
@@ -420,7 +420,7 @@ def rack_estimates(cols):
         gs.feed(t[i], cols['ay_s'][i], cols['speed'][i])
         ay = lp.step(t[i], min(max(cols['ay_s'][i], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
         fy = ffb_forza.front_lateral(mass, bl[i], ay, min(max(rd[i], -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX),
-                                     factor=ffb_forza.lateral_factor(gs.mu()))
+                                     factor=ffb_forza.lateral_factor(gs.mu(), inertial=True))
         limit = bl[i] * mass * rack.FLOOR_AY
         fy = min(max(fy, -limit), limit)
         fz = cols['fzf'][i]

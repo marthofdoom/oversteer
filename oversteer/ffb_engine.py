@@ -1509,6 +1509,7 @@ class RbrRack(RackForce):
     DERIVED_WINDOW_STEP = 0.05           # s: the window keeps a sample this often (20 Hz)
     DERIVED_PEAK_WINDOW = 300.0          # s: the peak slip pools the samples of the last this long that were taken in today's grip band (the tool pools a drive's stretches per band)
     DERIVED_PEAK_STEP = 0.1              # s between the samples the peak buffer keeps
+    DERIVED_PEAK_RETAG = 0.03            # a buffered sample's grip tag follows the window's grip once it is this far off
     DERIVED_WINDOW_EVERY = 2.0           # s between the envelope's recomputes; while it is not reached the last values hold
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
@@ -1665,6 +1666,8 @@ class RbrRack(RackForce):
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
         self._win = collections.deque()  # (the window of (clock, |alpha|, Fy_f / Fz), 20 Hz, over DERIVED_WINDOW s)
         self._grip_clock, self._win_at, self._env_at = 0.0, None, 0.0
+        self._win_env = ffb_forza.EnvelopeWindow(self.DERIVED_WINDOW_STEP, min_n=5)         # (the window's envelope, kept incrementally)
+        self._pk_envs = {}               # (the peak buffer's envelope per grip band)
         self._pk, self._pk_at = collections.deque(), None       # (the peak buffer: [clock, |alpha|, Fy_f / Fz, the grip it is read over])
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
@@ -1851,33 +1854,48 @@ class RbrRack(RackForce):
         self._grip_r += min(dt / self.DERIVED_R_TAU, 1.0) * (now - self._grip_r)
         self._grip_clock += dt
         if loaded and ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED and alpha is not None and ffb_forza.finite(alpha):
-            if self._win_at is None or self._grip_clock - self._win_at >= self.DERIVED_WINDOW_STEP:
-                self._win_at = self._grip_clock
-                self._win.append((self._grip_clock, abs(alpha), now))
-            if self._pk_at is None or self._grip_clock - self._pk_at >= self.DERIVED_PEAK_STEP:
-                self._pk_at = self._grip_clock
-                self._pk.append([self._grip_clock, abs(alpha), now, self.grip_mu])
+            if ffb_forza.finite(now):
+                if self._win_at is None or self._grip_clock - self._win_at >= self.DERIVED_WINDOW_STEP:
+                    self._win_at = self._grip_clock
+                    self._win.append((self._grip_clock, abs(alpha), now))
+                    self._win_env.add(abs(alpha), now)
+                if self._pk_at is None or self._grip_clock - self._pk_at >= self.DERIVED_PEAK_STEP:
+                    self._pk_at = self._grip_clock
+                    self._pk.append([self._grip_clock, abs(alpha), now, self.grip_mu])
+                    self._pk_env(self.grip_mu).add(abs(alpha), now / self.grip_mu)
             while self._pk and self._pk[0][0] < self._grip_clock - self.DERIVED_PEAK_WINDOW:
-                self._pk.popleft()
+                w = self._pk.popleft()
+                self._pk_env(w[3]).remove(w[1], w[2] / w[3])
             while self._win and self._win[0][0] < self._grip_clock - self.DERIVED_WINDOW:
-                self._win.popleft()
+                w = self._win.popleft()
+                self._win_env.remove(w[1], w[2])
             if self._grip_clock - self._env_at >= self.DERIVED_WINDOW_EVERY:
                 self._env_at = self._grip_clock
-                got = ffb_forza.stretch_limit([w[1] for w in self._win], [w[2] for w in self._win], self.DERIVED_WINDOW_STEP, 5)
+                env = self._win_env.envelope()
+                got = ffb_forza.envelope_top(env[1], env[2]) if env else None
                 if got and got[2]:
-                    self.grip_mu = min(max(got[0], self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
+                    self.grip_mu = min(max(got[1], self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
                     for w in reversed(self._pk):                      # (the window's samples are the evidence for this grip; older ones keep theirs)
                         if w[0] < self._grip_clock - self.DERIVED_WINDOW:
                             break
-                        w[3] = self.grip_mu
-                    band = ffb_forza.mu_band(self.grip_mu)
-                    pool = [w for w in self._pk if ffb_forza.mu_band(w[3]) == band]
-                    env = ffb_forza.envelope([w[1] for w in pool], [w[2] / w[3] for w in pool], self.DERIVED_PEAK_STEP, min_n=5)
+                        if abs(w[3] - self.grip_mu) > self.DERIVED_PEAK_RETAG:        # (a tag moves only when the grip has moved: a surface change)
+                            self._pk_env(w[3]).remove(w[1], w[2] / w[3])
+                            w[3] = self.grip_mu
+                            self._pk_env(w[3]).add(w[1], w[2] / w[3])
+                    env = self._pk_env(self.grip_mu).envelope()
                     if env and ffb_forza.envelope_top(env[1], env[2])[2]:
                         self.slip_peak = min(max(ffb_forza.envelope_peak(env[0], env[1]), self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
         use = self._grip_r / self.grip_mu
         past = 1.0 if alpha is None or not ffb_forza.finite(alpha) else self._interp(self.DERIVED_TP_PAST, abs(alpha) / self.slip_peak)
         return self._tp0() * self._interp(self.DERIVED_TP_USE, use) * past
+
+    def _pk_env(self, mu):
+        """The peak buffer's incremental envelope of the grip band of mu."""
+        band = ffb_forza.mu_band(mu)
+        env = self._pk_envs.get(band)
+        if env is None:
+            env = self._pk_envs[band] = ffb_forza.EnvelopeWindow(self.DERIVED_PEAK_STEP, min_n=5)
+        return env
 
     def _tp0(self):
         """The pneumatic trail at no slip (m) at the grip the fronts have shown, ffb_forza's line, held over the grip it was fitted over."""

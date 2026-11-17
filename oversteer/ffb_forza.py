@@ -604,7 +604,11 @@ def mu_band(mu):
 
 def _percentile(values, pct):
     """numpy.percentile's linear interpolation, for a non-empty list."""
-    v = sorted(values)
+    return _percentile_sorted(sorted(values), pct)
+
+
+def _percentile_sorted(v, pct):
+    """The same, for a sorted list."""
     k = (len(v) - 1) * pct / 100.0
     i = int(k)
     return v[i] + (v[min(i + 1, len(v) - 1)] - v[i]) * (k - i)
@@ -624,6 +628,43 @@ def envelope(slip, r, dt, bins=ENV_BINS, min_s=ENV_MIN_S, min_n=ENV_MIN_SAMPLES)
     if len(got) < 3:
         return None
     return [g[0] for g in got], [g[1] for g in got], [g[2] for g in got]
+
+
+class EnvelopeWindow:
+    """envelope() kept incrementally: each slip bin holds its r values sorted, add and remove cost one bisect and a list shift,
+    and envelope() reads each bin's quantile in O(1), so the answer is the batch function's over the values held (exactly) at the cost
+    of the bins, not of the samples. A sample is removed with the (slip, r) it was added with."""
+
+    def __init__(self, dt, bins=ENV_BINS, min_s=ENV_MIN_S, min_n=ENV_MIN_SAMPLES):
+        self.bins, self.dt = bins, dt
+        self.need = max(min_n, min_s / max(dt, 1e-6))
+        self.per = [[] for _ in range(len(bins) - 1)]
+
+    def _bin(self, slip):
+        if finite(slip) and self.bins[0] <= slip:
+            j = bisect.bisect_right(self.bins, slip) - 1
+            if j < len(self.per):
+                return j
+        return None
+
+    def add(self, slip, r):
+        j = self._bin(slip)
+        if j is not None and finite(r):
+            bisect.insort(self.per[j], r)
+
+    def remove(self, slip, r):
+        j = self._bin(slip)
+        if j is not None and finite(r):
+            v = self.per[j]
+            del v[bisect.bisect_left(v, r)]
+
+    def envelope(self):
+        """envelope()'s answer over the samples held."""
+        got = [(0.5 * (self.bins[j] + self.bins[j + 1]), _percentile_sorted(v, ENV_PCT), len(v) * self.dt)
+               for j, v in enumerate(self.per) if len(v) >= self.need]
+        if len(got) < 3:
+            return None
+        return [g[0] for g in got], [g[1] for g in got], [g[2] for g in got]
 
 
 def envelope_top(top, secs):

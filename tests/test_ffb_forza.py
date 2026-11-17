@@ -1056,3 +1056,19 @@ def test_limit_grip_drops_a_reading_back_in_time_and_keeps_its_window():
     before = len(g._buf)
     g.feed(199 * 0.0167 - 0.005, 0.5, 20.0, 1.0)      # the force pass's clock read before the packet landed
     assert len(g._buf) == before and g.mu() is not None
+
+
+def test_envelope_window_equals_the_batch_envelope_while_samples_come_and_go():
+    import collections as co
+    import random
+    rng = random.Random(3)
+    win, held = fz.EnvelopeWindow(0.05, min_n=5), co.deque()
+    for i in range(3000):
+        a, y = abs(rng.gauss(0.0, 0.15)), rng.uniform(0.0, 1.3)
+        win.add(a, y)
+        held.append((a, y))
+        if len(held) > 800:
+            win.remove(*held.popleft())
+        if i % 250 == 249:
+            want = fz.envelope([h[0] for h in held], [h[1] for h in held], 0.05, min_n=5)
+            assert win.envelope() == want and want is not None
