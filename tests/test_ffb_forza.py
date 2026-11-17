@@ -73,10 +73,10 @@ def test_the_trail_fades_with_the_slip_over_its_peak():
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     hi = rack._front(fsample(ay=6.0, cs=0.0, slip_angle=(3.0, -3.0, 0.0, 0.0)), None, None)
     assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
-    # (past 3 peak slips: the axle law's last past-peak cell, the whole trail over the line; the slip is the mean |slip_angle|)
+    # (past 3 peak slips: the axle law's last past-peak factor, the grip in use not known yet; the slip is the mean |slip_angle|)
     far = rack._front(fsample(ay=6.0, cs=3.0, slip_angle=None), None, None)          # (no angle: the combined slip stands in)
     assert far == pytest.approx(hi)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + 0.11 * fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.interp(fz.AXLE_TP_PAST, 3.0) * fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
     assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
 
@@ -87,14 +87,16 @@ def test_the_axle_trail_is_the_use_table_before_the_peak_and_the_past_table_alon
     assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.5, 0.5) == pytest.approx(tp0)
     assert fz.axle_trail(1.0, 1.2, 0.0) == pytest.approx(0.67 * tp0)                  # at the limit and over it: held
     assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.94 * tp0)
-    # from the peak on the past cell is the whole factor, whatever the grip in use (the law's cell is trail over the line)
-    for use in (None, 0.5, 0.95, 1.2):
-        assert fz.axle_trail(1.0, use, 1.5) == pytest.approx(0.39 * tp0) and fz.axle_trail(1.0, use, -1.5) == pytest.approx(0.39 * tp0)
-        assert fz.axle_trail(1.0, use, 5.0) == pytest.approx(0.11 * tp0)
-    for (x, cell) in fz.AXLE_TP_PAST:
-        assert fz.axle_trail(1.0, 0.95, x) == pytest.approx(cell * tp0)
+    # past the peak the use table times the past table (1.0 at x = 1): the law's cells past x = 1 where the grip in use is the at-peak one
+    assert fz.AXLE_TP_PAST[0] == (1.0, 1.0)
+    for x, cell in fz.AXLE_TP_PAST_CELLS[1:]:
+        assert fz.axle_trail(1.0, 1.0, x) == pytest.approx(cell * tp0, abs=0.0005 * tp0 / 0.03)
+    for use in (0.5, 0.8, 1.0):                                   # continuous across the peak
+        assert abs(fz.axle_fade(use, 1.0 + 1e-9) - fz.axle_fade(use, 1.0 - 1e-9)) < 0.02
+        assert abs(fz.axle_fade(use, 1.0) - fz.interp(fz.AXLE_TP_USE, use)) < 1e-9
+    assert fz.axle_trail(1.0, None, 1.5) == pytest.approx(fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) and fz.axle_trail(1.0, 0.5, -1.5) == fz.axle_trail(1.0, 0.5, 1.5)
     # the kingpin: s over FORZA_SLIP_PEAK, u over mu
-    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.5) == pytest.approx(-(fz.CASTER + 0.39 * tp0) * 1000.0)
+    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.5) == pytest.approx(-(fz.CASTER + fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) * 1000.0)
     assert fz.kingpin(1000.0, 0.1, tp_scale=0.5, mu=1.0, use=1.2, peak=1.0) == pytest.approx(-(fz.CASTER + 0.5 * 0.67 * tp0) * 1000.0)
     rack = fe.ForzaRack()
     rack.reset(CAR)
@@ -104,7 +106,7 @@ def test_the_axle_trail_is_the_use_table_before_the_peak_and_the_past_table_alon
     got = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     assert got == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_USE, r)) * full * 6.0)
     past = rack._front(fsample(ay=6.0, cs=0.0, slip_angle=(2.0 * fz.FORZA_SLIP_PEAK, 2.0 * fz.FORZA_SLIP_PEAK, 0.0, 0.0)), None, None)
-    assert past == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_PAST, 2.0)) * full * 6.0)         # (the rack plays the law's cell)
+    assert past == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_USE, r) * fz.interp(fz.AXLE_TP_PAST, 2.0)) * full * 6.0)
 
 
 def test_the_constants_ratio_14_wheel_375_assist_1_model():

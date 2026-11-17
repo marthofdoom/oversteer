@@ -56,9 +56,9 @@ TP_N = 4.0
 # peak and with slip over the peak slip x past it, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
 # only game that sends them; scripts/ffb_laws.json 'axle': per 60 s stretch, the cell median over the stretches of 3 drives, trail over
 # the no-slip line TP0_FIT). RbrRack and ForzaRack read the same two tables, (x, factor) held at the ends, and read them as the law's cells are:
-# before the peak (x < 1) the use table alone, from the peak on the past table alone (a past cell is already the whole trail over the line).
+# before the peak (x <= 1) the use table alone, past it the use table times the past table (relative to the at-peak value).
 AXLE_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.99), (0.95, 0.94), (1.05, 0.67))      # (u under 0.8: 1 by the line's own definition)
-AXLE_TP_PAST = ((1.0, 0.70), (1.15, 0.70), (1.5, 0.39), (2.1, 0.11), (3.0, 0.11))     # (alpha / peak, factor over the no-slip trail); past the peak it only falls
+AXLE_TP_PAST_CELLS = ((1.0, 0.70), (1.15, 0.70), (1.5, 0.39), (2.1, 0.11), (3.0, 0.11))     # the law's past-peak cells: (alpha / peak, trail over the no-slip line); it only falls
 
 
 def interp(table, x):
@@ -69,6 +69,11 @@ def interp(table, x):
         if x <= x1:
             return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
     return table[-1][1]
+
+
+# Relative to the at-peak value (the use table at u = 1, where the grip in use is at the peak), so the fade is continuous across x = 1; at
+# u = 1 the use table times this is the law's cell.
+AXLE_TP_PAST = ((1.0, 1.0),) + tuple((x, round(c / interp(AXLE_TP_USE, 1.0), 3)) for x, c in AXLE_TP_PAST_CELLS[1:])
 
 
 def power_index(sample):
@@ -229,12 +234,11 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
 
 
 def axle_fade(use, x):
-    """The pneumatic trail's factor over its no-slip value: AXLE_TP_USE at the grip in use `use` (None: no fade yet) before the peak (x, the
-    slip over the peak slip, under 1), AXLE_TP_PAST at x from the peak on (alone: the law's cells are each the whole trail over the line)."""
+    """The pneumatic trail's factor over its no-slip value: AXLE_TP_USE at the grip in use `use` (None: no fade yet), times AXLE_TP_PAST at
+    x, the slip over the peak slip, past the peak (the table is 1.0 at x = 1: continuous)."""
     x = abs(x)
-    if x >= 1.0:
-        return interp(AXLE_TP_PAST, x)
-    return 1.0 if not finite(use) else interp(AXLE_TP_USE, use)
+    fade = 1.0 if not finite(use) else interp(AXLE_TP_USE, use)
+    return fade * interp(AXLE_TP_PAST, x) if x > 1.0 else fade
 
 
 def axle_trail(mu, use=None, x=0.0):
