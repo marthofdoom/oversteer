@@ -506,3 +506,11 @@ def test_inventory_marks_missing_present_and_absent_forces():
     assert inv.status(res['rows']['throttle']) == 'IN DATA, NOT IN FORCE'
     text = '\n'.join(inv.table([('x', res)]))
     assert 'MISSING IN DATA' in text and 'held-wheel settle' in text
+
+
+def test_the_reference_rack_keeps_its_ratio_in_a_replay():
+    import ffb_tools as tools
+    rack, _fresh, _feed = tools._build_rack('acr', 'rally')
+    before = rack.ratio
+    rack._learn_ratio(None, 1.0)
+    assert rack.learner is None and rack.ratio == before

@@ -116,7 +116,7 @@ def _build_rack(game, power_class, peak=None):
     rack.wheel_peak = peak or wt.DEFAULT_PEAK_NM
     rack.align_on = False
     if getattr(rack, 'LEARNS', False):
-        # the reference plays the car's stored trail, scrub and p99 and learns nothing: learning during the replay drifts them (ACR's
+        # the reference plays the car's stored trail, scrub, ratio and lock and learns none of them: learning during the replay drifts them (ACR's
         # Fabia, stored 26.4 mm, read 29.3 by the end of one drive). reset(car) still reads the store; its learner is dropped after it
         # (no learner: nothing moves, and nothing is written back to the store when the car changes)
         reset = rack.reset
@@ -126,6 +126,7 @@ def _build_rack(game, power_class, peak=None):
             rack.learner = None
         rack.reset = reset_without_learner
         rack.learner = None
+        rack._learn_ratio = lambda sample, dt: None    # the stored ratio and lock too (p99 stays: a diagnostic, sandboxed)
     rack.wheel_range = profile_range(game)       # live: the wheel stage sets it (ForzaRack's ratio is half range / lock)
     rbr = game == 'rbr'
     if rbr:
