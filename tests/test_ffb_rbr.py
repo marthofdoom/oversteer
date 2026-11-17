@@ -1775,7 +1775,7 @@ def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted
 
 def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
     rack = fe.RbrRack
-    for use, want in ((0.5, 1.0), (1.2, 0.73)):
+    for use, want in ((0.5, 1.0), (1.2, 0.67)):
         r = trail_rack(1.0, use)
         tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
         assert tp == pytest.approx(r._tp0() * want)
@@ -1828,8 +1828,14 @@ def test_trail_past_the_peak_factor():
     r = trail_rack(1.0, 0.5)
     base = r._tp0()
     assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
-    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, r.slip_peak) == pytest.approx(base)
-    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 1.5 * r.slip_peak) == pytest.approx(0.45 * base)
+    # continuous across the peak, and where the grip in use is the at-peak one the rack plays the law's cells
+    for use in (0.5, 0.8, 1.0):
+        rr = trail_rack(1.0, use)
+        step = rr._grip_trail(use, 1.0, 0.0, 20.0, 1.0001 * rr.slip_peak) - rr._grip_trail(use, 1.0, 0.0, 20.0, 0.9999 * rr.slip_peak)
+        assert abs(step) < 0.02 * rr._tp0()
+    rr = trail_rack(1.0, 1.0)
+    for x, cell in fz.AXLE_TP_PAST_CELLS[1:]:
+        assert rr._grip_trail(1.0, 1.0, 0.0, 20.0, x * rr.slip_peak) == pytest.approx(cell * rr._tp0(), abs=0.0005)
 
 
 def test_slip_peak_and_grip_settle_on_gravel_within_a_minute_after_tarmac():

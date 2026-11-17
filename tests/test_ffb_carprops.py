@@ -297,9 +297,9 @@ def test_the_identity_with_the_wrong_sign_is_not_believed():
 
 
 def test_the_caster_prior_follows_the_class_and_the_learner_overrides_it():
-    assert cp.RALLY_TRAIL == 0.037 and fe.RackForce().trail == 0.037
+    assert cp.RALLY_TRAIL == 0.0264 and fe.RackForce().trail == 0.0264
     cp.set_power_class('street')
     assert fe.RackForce().trail == fe.CASTER_TRAIL == 0.027
     cp.set_power_class('rally')
-    rack = drive(fe.RackForce(), 0.010, 0.012, 60.0)             # a car whose force wants a short trail: learnt away from 37 mm
-    assert rack.trail < 0.037 - 0.003
+    rack = drive(fe.RackForce(), 0.010, 0.012, 60.0)             # a car whose force wants a short trail: learnt away from 26.4 mm
+    assert rack.trail < 0.0264 - 0.003

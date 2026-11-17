@@ -115,6 +115,18 @@ def _build_rack(game, power_class, peak=None):
     fresh = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}
     rack.wheel_peak = peak or wt.DEFAULT_PEAK_NM
     rack.align_on = False
+    if getattr(rack, 'LEARNS', False):
+        # the reference plays the car's stored trail, scrub, ratio and lock and learns none of them: learning during the replay drifts them (ACR's
+        # Fabia, stored 26.4 mm, read 29.3 by the end of one drive). reset(car) still reads the store; its learner is dropped after it
+        # (no learner: nothing moves, and nothing is written back to the store when the car changes)
+        reset = rack.reset
+
+        def reset_without_learner(car=None):
+            reset(car)
+            rack.learner = None
+        rack.reset = reset_without_learner
+        rack.learner = None
+        rack._learn_ratio = lambda sample, dt: None    # the stored ratio and lock too (p99 stays: a diagnostic, sandboxed)
     rack.wheel_range = profile_range(game)       # live: the wheel stage sets it (ForzaRack's ratio is half range / lock)
     rbr = game == 'rbr'
     if rbr:
@@ -287,12 +299,17 @@ def _norm_rbr():
     return fe.RbrRack.DERIVED_SLIP_PEAK        # read at use, so --set reaches it
 
 
+def _forza_peak():
+    from oversteer import ffb_forza
+    return ffb_forza.FORZA_SLIP_PEAK          # read at use, so --set reaches it
+
+
 # The normalised slip theta, per game, in one place: (raw slip of a sample, what it is divided by, a text for the header).
 # The divisor: a number, a function giving one (read when the drive is binned), or 'stretch' (ACR: the peak found per
 # 60 s stretch of the drive from the tyres' Fy / Fz, acr_peaks).
 THETA_TABLE = {
     'acr': (_slip_acr, 'stretch', "mean |tyre_slip_angle| of the fronts over the per-stretch peak (p80 of Fy/Fz reaching 97 % of the top)"),
-    'forza-fh': (_slip_forza, 0.7, "mean |slip_angle| of the fronts over 0.7"),
+    'forza-fh': (_slip_forza, lambda: _forza_peak(), "mean |slip_angle| of the fronts over ffb_forza.FORZA_SLIP_PEAK"),
     'rbr': (_slip_rbr, _norm_rbr, "|RbrRack._slip| over RbrRack.DERIVED_SLIP_PEAK"),
 }
 FYF_TEXT = {'acr': "the tyres' |Fy_FL + Fy_FR|", 'forza-fh': "the Fy_f ForzaRack._front gave ffb_forza.kingpin", 'rbr': "RbrRack.fy_f"}
@@ -752,7 +769,7 @@ def simulate_stages(items, game, power_class, peak=None, mass=None, ratio=None, 
                 elif game == 'forza-fh':
                     if 'fy' not in rec or 'kp' not in rec:
                         continue
-                    v = rack._slip(s)
+                    v = _slip_forza(s, rack)       # (Forza's normalised slip angle, the axis GRIP_USE and FORZA_SLIP_PEAK are in; not the rack's kinematic rad)
                     fyf, slip, m = abs(rec['fy']), (None if v is None or not np.isfinite(v) else abs(v)), rack.mass
                     kingpin = rec['kp']
                     ratio_now = rack.ratio

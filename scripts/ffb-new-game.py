@@ -9,7 +9,7 @@
 CAPTURE: a name in the captures folder or a full path. It (a) lists the channels and the route each force stage can take with
 them, (b) fits the game's own constants from this drive (grip and peak slip per 60 s stretch, the steering lock from the motion
 corrected for understeer, the ratio it gives, the mass where the tyres send forces), (c) replays today's rack for the game over
-the drive and sets each stage against the laws fitted from ACR's tyres (scripts/ffb_laws.json) at the same physical cause: the
+the drive and sets each stage against the axle law fitted from ACR's tyres (scripts/ffb_laws.json 'axle') at the same physical cause: the
 grip level, the grip in use and the slip over the peak slip, not another recording, and flags what departs, (d) writes the
 fitted constants to FILE (default ~/.cache/ffb-new-game/<capture>.json). A game without a rack gets (a), (b) and the list of
 what the engine still needs. --no-rack treats a known game that way. --refit rebuilds the laws from ACR drives.
@@ -38,7 +38,8 @@ def _load(path):
 def _simulate(path, game, peak=None):
     """(cols, causes, info, in_force lines) of today's rack over the capture; inside the sandbox."""
     sim = tools.simulate_stages(_load(path), game, tools.profile_power_class(game), peak, probe=(laws_mod.PROBE_KEYS, laws_mod.probe))
-    return sim['cols'], laws_mod.causes(sim['cols'], sim['info']['dt']), sim['info'], sim['in_force']
+    bins = tools.TYRE_BINS['norm' if game == 'forza-fh' else 'rad']       # (Forza's slip is its normalised slip angle)
+    return sim['cols'], laws_mod.causes(sim['cols'], sim['info']['dt'], bins), sim['info'], sim['in_force']
 
 
 def shape(names):
@@ -94,6 +95,10 @@ def refit(names, laws_path):
             else 'no line of no-slip trail against GripScale mu',
             'trail over the no-slip trail, by cause: ' + ', '.join('%s %.2f' % kv for kv in laws['cells'].items()),
             'peak slip (rad) by grip band: ' + ', '.join('%s %.3f' % kv for kv in sorted(laws['peak_slip_rad'].items()))]
+    ax = laws['axle']
+    out += ['the axle law (what the racks are checked against; a cell = the median over its stretches):',
+            '  trail over the no-slip trail: ' + ', '.join('%s %.2f (%d)' % (k, v, ax['cell_stretches'][k]) for k, v in ax['cells'].items()),
+            '  (the table above, pooled over the samples, is kept as the reference)']
     return out
 
 
@@ -223,7 +228,7 @@ def report(path, game, laws, peak=None, no_rack=False, out_path=None):
     wheel_range = tools.profile_range(game) if game in tools.RACKS else 900.0
     if have_rack:
         cols, c, info, in_force = _simulate(path, game, peak)
-        dt, unit = info['dt'], 'rad'
+        dt, unit = info['dt'], 'norm' if game == 'forza-fh' else 'rad'
         lock = laws_mod.lock_fit(cols, wheelbase)
         const['car'], const['rack'] = info['car'], {k: v for k, v in info['learnt'].items() if v is not None}
         out += ['', '== today\'s rack: %s, car %s' % (tools.RACKS[game][0], info['car'])] + in_force

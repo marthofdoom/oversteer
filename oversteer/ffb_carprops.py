@@ -429,8 +429,10 @@ def power_class():
     return _power_class
 
 
-RALLY_TRAIL = 0.037                      # m: the rally prior for the caster trail: high positive caster, the wheel snaps back
-                                         # fast (what ACR learnt for the Fabia); the street prior is ffb_engine.CASTER_TRAIL
+RALLY_TRAIL = 0.0264                     # m: the rally prior for the caster trail: high positive caster, the wheel snaps back
+                                         # fast (what ACR learns for the Fabia: 0.02644 in the live store, 0.037 before the fit
+                                         # took the tyres' Mz); RBR's derived torque takes it as its caster; the street prior is
+                                         # ffb_engine.CASTER_TRAIL
 
 
 def default_trail(street_trail):

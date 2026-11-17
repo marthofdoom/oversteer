@@ -102,7 +102,7 @@ def test_routes_follow_the_channels():
 
 def test_a_past_peak_trail_at_a_third_of_the_law_is_flagged_whatever_acr_spreads_by():
     laws = _laws()
-    laws['spread'] = {k: 1.34 for k in laws['cells']}
+    laws_mod.axle_of(laws)['spread'] = {k: 1.34 for k in laws['cells']}
     third = lambda mu, u, x, slip: _tyre(mu, u, x, slip) * np.where(x >= 1, 1 / 3.0, 1.0)          # noqa: E731
     cols = _drive([0.85] * 3 + [1.3] * 3, [0.3] * 3 + [0.15] * 3, third)
     past = [r for r in laws_mod.trail_check(laws, laws_mod.causes(cols, DT), DT) if r[1] in ('x 1.3-1.7', 'x 1.7-2.5')]      # (the fitted peak sits just under the true one: the first x cell is mixed)
@@ -165,3 +165,15 @@ def test_gs_fit_finds_the_no_slip_trail_against_gripscales_mu():
     a, b = fit['tp0_gs']
     assert fit['gs_stretches'] == 6 and fit['gs_range'] == [1.2, 1.6] and fit['gs_r'] > 0.99
     assert abs((a + b * 1.6) - (TP0[0] + TP0[1] * 1.3)) < 0.003 and abs((a + b * 1.2) - (TP0[0] + TP0[1] * 0.85)) < 0.003
+
+
+def test_the_axle_law_is_the_median_over_the_stretches_and_the_checks_read_it():
+    laws = _laws()
+    ax = laws['axle']
+    assert laws_mod.axle_of(laws) is ax and laws_mod.axle_of({'tp0': [0, 1]}) == {'tp0': [0, 1]}
+    assert ax['tp0'] == laws['tp0'] and ax['stretches'] == laws['stretches']
+    assert ax['cells']['u 0.0-0.5'] > ax['cells']['u 0.9-1.0'] > ax['cells']['x 1.7-2.5']
+    assert all(n >= laws_mod.AXLE_CELL_STRETCHES for n in ax['cell_stretches'].values())
+    cols = _drive([0.9] * 3 + [1.25] * 3, [0.3] * 3 + [0.15] * 3, _tyre, seed=5)
+    laws['cells'] = {k: 3.0 * v for k, v in laws['cells'].items()}           # (the reference table is not what is checked against)
+    assert not any(r[6] for r in laws_mod.trail_check(laws, laws_mod.causes(cols, DT), DT))

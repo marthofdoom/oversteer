@@ -7,7 +7,13 @@ peak slip past it. Every quantity is defined the same way for every game, per 60
   mu    the top of the upper envelope (p80) of r against the front slip        (tools.envelope_fit)
   peak  the slip where the envelope first reaches 97 % of its top, per grip band of the drive, in the slip's own unit
   u     r / mu, the grip in use;   x  slip / peak
-so a game is compared with the law at the same physical cause, never with another recording. Read only."""
+so a game is compared with the law at the same physical cause, never with another recording. Read only.
+
+Two tables are kept in ffb_laws.json. The top level is the first fit (cells pooled over every sample of every drive, so the drive with
+the most samples decides). `axle` is the one the racks are checked against and built from: RBR and FH6 work at the front axle (Fy_f,
+the axle's load, the axle's grip), so its quantities are ACR's axle ones (the two front tyres' Mz over their Fy, their Fy over their Fz,
+the mean of their slip angles), and a cell's value is the median over the 60 s stretches that hold it, each stretch weighing the same
+(a drive is not a surface: a long mixed drive counts as its stretches)."""
 import json
 import os
 
@@ -29,7 +35,7 @@ MU_MAX = ffb_forza.ENV_MU_MAX            # a stretch's grip top over this is noi
 TOL_MAX = 0.5                   # ... and never wider than this, however far ACR's drives spread (a third of the law must flag)
 MIN_S = 3.0                     # ... when it holds this many seconds
 LOCK_FLAG = 0.15
-SHAPE_S = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1)     # Forza's normalised slip: the edges of the bins the grip-use shape is read in
+SHAPE_S = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25, 1.6, 2.0)     # Forza's normalised slip angle (the axis LimitGrip reads): the edges of the bins the grip-use shape is read in
 SHAPE_X = (0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 6.0)   # slip / peak: the same for ACR's tyres (cross-check)
 GS_MU_MAX = 2.5                 # a GripScale mu over this is a crash, not grip (ffb-lateral-fit's guard)
 GRIP_SPREAD = 0.3               # the grip must spread this far over a drive's stretches for a slope of trail against grip
@@ -203,7 +209,8 @@ def _cells(c, ok):
 
 def fit_laws(drives, names=()):
     """The laws from ACR drives [(cols, causes)]: tp0 = a + b mu over the stretches, then the median per cell of each sample's
-    trail over its stretch's tp0 (per sample: ratios of cell medians are not trails), and the peak slip per grip band."""
+    trail over its stretch's tp0 (per sample: ratios of cell medians are not trails), and the peak slip per grip band; the same
+    over the stretches, one weight each, as 'axle' (fit_axle)."""
     pts = [p for _cols, c in drives for p in stretch_points(c)]
     a, b, n = _line(pts)
     if not n or not b:
@@ -223,8 +230,45 @@ def fit_laws(drives, names=()):
     for mu, pk, _tp, _n in pts:
         peaks.setdefault(tools.MU_BAND_NAMES[tools.mu_band(mu)], []).append(pk)
     return {**gs_fit(drives), 'tp0': [a, b], 'mu_range': [float(min(mus)), float(max(mus))], 'cells': cells, 'spread': spread, 'stretches': n,
-            'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()}, 'sources': list(names),
+            'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()}, 'sources': list(names), 'axle': fit_axle(drives, pts, a, b),
             'note': 'ACR tyres: pneumatic trail (m) = (tp0[0] + tp0[1] mu) x cells[grip in use u before the peak, slip/peak x past it]'}
+
+
+AXLE_CELL_N = 100               # samples a stretch needs in a cell to speak for it
+AXLE_CELL_STRETCHES = 3         # stretches a cell needs
+
+
+def fit_axle(drives, pts, a, b):
+    """The axle law over the line (a, b) of the stretches' no-slip trails `pts`: per stretch with a grip top, the median of each cell's
+    trail over the line at the stretch's grip; a cell's factor is the median of those over the stretches (>= AXLE_CELL_N samples each,
+    >= AXLE_CELL_STRETCHES stretches). {'tp0', 'mu_range', 'cells', 'spread', 'cell_stretches', 'peak_slip_rad', 'stretches'}; 'spread'
+    is how far one drive's own median sits from the cell (what the checks' tolerance widens by)."""
+    per, drive_f = {}, {}
+    for cols, c in drives:
+        ok = c['reached'] & np.isfinite(c['tp']) & np.isfinite(c['u']) & np.isfinite(c['x'])
+        with np.errstate(invalid='ignore'):
+            f = c['tp'] / (a + b * c['mu'])
+        for name, m in _cells(c, ok):
+            drive_f.setdefault(name, []).append(f[m])
+            for g in np.unique(c['seg'][m]):
+                k = m & (c['seg'] == g)
+                if k.sum() >= AXLE_CELL_N:
+                    per.setdefault(name, []).append(float(np.median(f[k])))
+    cells = {k: float(np.median(v)) for k, v in per.items() if len(v) >= AXLE_CELL_STRETCHES}
+    spread = {k: float(max([abs(np.median(x) / cells[k] - 1) for x in drive_f[k] if len(x) >= 200] or [0.0])) for k in cells}
+    mus = [p[0] for p in pts if np.isfinite(p[2])]
+    peaks = {}
+    for mu, pk, _tp, _n in pts:
+        peaks.setdefault(tools.MU_BAND_NAMES[tools.mu_band(mu)], []).append(pk)
+    return {'tp0': [a, b], 'mu_range': [float(min(mus)), float(max(mus))], 'cells': cells, 'spread': spread,
+            'cell_stretches': {k: len(per[k]) for k in cells}, 'stretches': len(mus),
+            'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()},
+            'note': 'axle: pneumatic trail (m) = (tp0[0] + tp0[1] mu) x cells[u before the peak, x past it]; a cell is the median over the stretches'}
+
+
+def axle_of(laws):
+    """The axle law of a laws dict: its 'axle' entry, else the dict itself (laws fitted before it existed, a synthetic one)."""
+    return laws.get('axle', laws)
 
 
 def load_laws(path=None):
@@ -233,7 +277,8 @@ def load_laws(path=None):
 
 
 def law_tp(laws, mu, u, x):
-    """The law's pneumatic trail (m) per sample; mu held to the range the law was fitted over. NaN outside the cells."""
+    """The law's (the axle law's, axle_of) pneumatic trail (m) per sample; mu held to the range the law was fitted over. NaN outside the cells."""
+    laws = axle_of(laws)
     a, b = laws['tp0']
     mu = np.clip(mu, *laws['mu_range'])
     c = {'u': np.asarray(u, float), 'x': np.asarray(x, float)}
@@ -247,6 +292,7 @@ def law_tp(laws, mu, u, x):
 def trail_check(laws, c, dt):
     """Rows (mu band, cell, seconds, rack mm, law mm, median of rack / law per sample, flagged, tolerance) over the stretches
     with a top. The tolerance: FLAG, or what ACR's own drives spread by in that cell where that is more, at most TOL_MAX."""
+    laws = axle_of(laws)
     law = law_tp(laws, c['mu'], c['u'], c['x'])
     ok = c['reached'] & np.isfinite(c['tp']) & np.isfinite(law)
     rows = []
@@ -265,6 +311,7 @@ def trail_check(laws, c, dt):
 
 def grip_response(laws, c):
     """The rack's no-slip trail against the grip: {'a', 'b', 'n', 'mu': (lo, hi), 'at': {mu: (rack mm, law mm)}, 'verdict'}."""
+    laws = axle_of(laws)
     la, lb = laws['tp0']
     lo_ok, hi_ok = laws['mu_range'][0] - 0.2, laws['mu_range'][1] + 0.2
     pts = [p for p in stretch_points(c) if np.isfinite(p[2]) and lo_ok <= p[0] <= hi_ok]

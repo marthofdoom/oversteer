@@ -52,8 +52,28 @@ TP0 = 0.042                              # m: the pneumatic trail at no slip (37
 TP0_FIT = (-0.00872, 0.03923)            # m, m per unit of mu
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
-FORZA_TP_S_HALF = 1.1                   # Forza's own slip scale (its grip peaks at 0.7-0.9 there): halved at 1.1 its rim torque per Fy_f
-                                         # follows ACR's tyres (Fabia) within a few % from 0 to 3 times the peak slip; at 0.7 it faded 15 % early
+# The pneumatic trail fades with the front AXLE's grip in use u = r / mu (r = Fy_f / Fz of the axle, mu its grip top) before the slip
+# peak and with slip over the peak slip x past it, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
+# only game that sends them; scripts/ffb_laws.json 'axle': per 60 s stretch, the cell median over the stretches of 3 drives, trail over
+# the no-slip line TP0_FIT). RbrRack and ForzaRack read the same two tables, (x, factor) held at the ends, and read them as the law's cells are:
+# before the peak (x <= 1) the use table alone, past it the use table times the past table (relative to the at-peak value).
+AXLE_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.99), (0.95, 0.94), (1.05, 0.67))      # (u under 0.8: 1 by the line's own definition)
+AXLE_TP_PAST_CELLS = ((1.0, 0.70), (1.15, 0.70), (1.5, 0.39), (2.1, 0.11), (3.0, 0.11))     # the law's past-peak cells: (alpha / peak, trail over the no-slip line); it only falls
+
+
+def interp(table, x):
+    """The piecewise-linear value of a ((x, y), ...) table at x, held at its ends."""
+    if x <= table[0][0]:
+        return table[0][1]
+    for (x0, y0), (x1, y1) in zip(table, table[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return table[-1][1]
+
+
+# Relative to the at-peak value (the use table at u = 1, where the grip in use is at the peak), so the fade is continuous across x = 1; at
+# u = 1 the use table times this is the law's cell.
+AXLE_TP_PAST = ((1.0, 1.0),) + tuple((x, round(c / interp(AXLE_TP_USE, 1.0), 3)) for x, c in AXLE_TP_PAST_CELLS[1:])
 
 
 def power_index(sample):
@@ -137,10 +157,11 @@ class GripScale:
         return x / G
 
 
-# The grip in use against Forza's normalised front slip (mean |slip_angle|), 1 at the top: the p80 of r = Fy_f / (m b/L g) over the
-# stretch's top, median over 53 stretches of 4 FH drives (scripts/ffb-new-game.py --shape). ACR's tyres, by slip over peak, hold
-# 0.92-0.99 past the peak where this falls to 0.75: Newton's r falls with a_y in a slide.
-GRIP_USE = ((0.25, 1.0), (0.35, 0.96), (0.45, 0.94), (0.55, 0.86), (0.65, 0.84), (0.75, 0.84), (0.85, 0.79), (0.95, 0.75), (1.05, 0.75))
+# The grip in use against Forza's normalised front slip angle (mean |slip_angle| of the fronts: the axis LimitGrip reads it on; the replay
+# tools take Forza's slip the same way), 1 at the top: the p80 of r = Fy_f / (m b/L g) over the stretch's top, median over 53 stretches of
+# 4 FH drives (scripts/ffb-new-game.py --shape). It rises to its top at about 1.1 and holds 0.96-0.99 of it to 1.8: Newton's r follows the
+# tyre. (Before 2026-11-16 it was read on the rack's kinematic slip, 0.2 rad per unit, and looked up on the normalised one.)
+GRIP_USE = ((0.03, 0.1), (0.08, 0.22), (0.12, 0.33), (0.17, 0.41), (0.25, 0.56), (0.35, 0.7), (0.45, 0.8), (0.55, 0.86), (0.7, 0.94), (0.9, 0.99), (1.12, 1.0), (1.43, 0.99), (1.8, 0.96))
 
 
 def grip_use(s):
@@ -160,7 +181,7 @@ class LimitGrip:
     (grip_use), for s in SLIP, the car faster than V_MIN and u(s) at least U_MIN. mu is the PCT-th percentile of those readings over the
     last WINDOW s; held while they span under HOLD s; None until they first do."""
 
-    SLIP = (0.3, 1.1)
+    SLIP = (0.3, 1.8)
     V_MIN = 8.0                          # m/s
     U_MIN = 0.5
     WINDOW = 10.0                        # s
@@ -212,10 +233,24 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
     return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None, mu=None):
-    """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
-    (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip), whose no-slip trail (trail_tp0) it fades from."""
-    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half, trail_tp0(mu))) * fy
+def axle_fade(use, x):
+    """The pneumatic trail's factor over its no-slip value: AXLE_TP_USE at the grip in use `use` (None: no fade yet), times AXLE_TP_PAST at
+    x, the slip over the peak slip, past the peak (the table is 1.0 at x = 1: continuous)."""
+    x = abs(x)
+    fade = 1.0 if not finite(use) else interp(AXLE_TP_USE, use)
+    return fade * interp(AXLE_TP_PAST, x) if x > 1.0 else fade
+
+
+def axle_trail(mu, use=None, x=0.0):
+    """The pneumatic trail (m) of the front axle: the no-slip trail at the grip mu (trail_tp0) times axle_fade(use, x)."""
+    return trail_tp0(mu) * axle_fade(use, x)
+
+
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, mu=None, use=None, peak=None):
+    """The kingpin torque (Nm) in front_torque's sign: -(caster + tp_scale axle_trail) Fy_f. `tp_scale` scales the pneumatic part
+    (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip); `use`: Fy_f / (m b/L g) over it; `s`: the front slip,
+    over `peak` (FORZA_SLIP_PEAK unless given)."""
+    return -(caster + tp_scale * axle_trail(mu, use, s / (FORZA_SLIP_PEAK if peak is None else peak))) * fy
 
 
 class LowPass:
@@ -680,6 +715,11 @@ def envelope_peak(cen, top, share=ENV_SHARE):
     want = share * max(top)
     k = next(i for i, v in enumerate(top) if v >= want)
     return cen[k] if k == 0 else cen[k - 1] + (cen[k] - cen[k - 1]) * (want - top[k - 1]) / (top[k] - top[k - 1])
+
+
+# Forza's peak slip in its normalised slip angle, the x = 1 of AXLE_TP_PAST: where the grip-use shape first reaches ENV_SHARE of its top, as the
+# law defines the peak slip (about 0.82; the drives' own envelopes give 0.81, 36 of 39 stretches of 20261105-204107).
+FORZA_SLIP_PEAK = envelope_peak([s for s, _u in GRIP_USE], [u for _s, u in GRIP_USE])
 
 
 def stretch_limit(slip, r, dt, min_n=ENV_MIN_SAMPLES):

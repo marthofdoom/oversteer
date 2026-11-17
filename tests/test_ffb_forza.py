@@ -61,7 +61,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
     assert rack._front(s2, None, None) is None
 
 
-def test_the_trail_fades_with_the_combined_slip():
+def test_the_trail_fades_with_the_slip_over_its_peak():
     h = fz.TP_S_HALF
     assert fz.trail(0.0) == pytest.approx(fz.TP0)
     assert fz.trail(h) == pytest.approx(fz.TP0 / 2)
@@ -71,11 +71,42 @@ def test_the_trail_fades_with_the_combined_slip():
     rack = fe.ForzaRack()
     rack.reset(CAR)
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
-    hi = rack._front(fsample(ay=6.0, cs=3.0), None, None)
+    hi = rack._front(fsample(ay=6.0, cs=0.0, slip_angle=(3.0, -3.0, 0.0, 0.0)), None, None)
     assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.trail(3.0, fz.FORZA_TP_S_HALF)) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+    # (past 3 peak slips: the axle law's last past-peak factor, the grip in use not known yet; the slip is the mean |slip_angle|)
+    far = rack._front(fsample(ay=6.0, cs=3.0, slip_angle=None), None, None)          # (no angle: the combined slip stands in)
+    assert far == pytest.approx(hi)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.interp(fz.AXLE_TP_PAST, 3.0) * fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
     assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+
+
+def test_the_axle_trail_is_the_use_table_before_the_peak_and_the_past_table_alone_from_it():
+    assert fz.AXLE_TP_USE[0] == (0.0, 1.0) and 0.7 < fz.FORZA_SLIP_PEAK < 0.9
+    tp0 = fz.trail_tp0(1.0)
+    assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.5, 0.5) == pytest.approx(tp0)
+    assert fz.axle_trail(1.0, 1.2, 0.0) == pytest.approx(0.67 * tp0)                  # at the limit and over it: held
+    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.94 * tp0)
+    # past the peak the use table times the past table (1.0 at x = 1): the law's cells past x = 1 where the grip in use is the at-peak one
+    assert fz.AXLE_TP_PAST[0] == (1.0, 1.0)
+    for x, cell in fz.AXLE_TP_PAST_CELLS[1:]:
+        assert fz.axle_trail(1.0, 1.0, x) == pytest.approx(cell * tp0, abs=0.0005 * tp0 / 0.03)
+    for use in (0.5, 0.8, 1.0):                                   # continuous across the peak
+        assert abs(fz.axle_fade(use, 1.0 + 1e-9) - fz.axle_fade(use, 1.0 - 1e-9)) < 0.02
+        assert abs(fz.axle_fade(use, 1.0) - fz.interp(fz.AXLE_TP_USE, use)) < 1e-9
+    assert fz.axle_trail(1.0, None, 1.5) == pytest.approx(fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) and fz.axle_trail(1.0, 0.5, -1.5) == fz.axle_trail(1.0, 0.5, 1.5)
+    # the kingpin: s over FORZA_SLIP_PEAK, u over mu
+    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.5) == pytest.approx(-(fz.CASTER + fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) * 1000.0)
+    assert fz.kingpin(1000.0, 0.1, tp_scale=0.5, mu=1.0, use=1.2, peak=1.0) == pytest.approx(-(fz.CASTER + 0.5 * 0.67 * tp0) * 1000.0)
+    rack = fe.ForzaRack()
+    rack.reset(CAR)
+    rack._limit_grip._mu = 1.0
+    full = fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53
+    r = full * 6.0 / (1400.0 * 0.53 * fz.G)
+    got = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    assert got == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_USE, r)) * full * 6.0)
+    past = rack._front(fsample(ay=6.0, cs=0.0, slip_angle=(2.0 * fz.FORZA_SLIP_PEAK, 2.0 * fz.FORZA_SLIP_PEAK, 0.0, 0.0)), None, None)
+    assert past == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_USE, r) * fz.interp(fz.AXLE_TP_PAST, 2.0)) * full * 6.0)
 
 
 def test_the_constants_ratio_14_wheel_375_assist_1_model():
@@ -1000,7 +1031,7 @@ def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     assert fz.trail_tp0(1.3) == pytest.approx(fz.TP0_FIT[0] + fz.TP0_FIT[1] * 1.3)
     assert fz.trail_tp0(0.4) == pytest.approx(lo) and fz.trail_tp0(3.0) == pytest.approx(hi)
     assert fz.trail_tp0(0.9) < fz.trail_tp0(1.1) < fz.trail_tp0(1.3)
-    assert fz.trail(0.0, tp0=0.03) == pytest.approx(0.03) and fz.trail(fz.FORZA_TP_S_HALF, fz.FORZA_TP_S_HALF, 0.03) == pytest.approx(0.015)
+    assert fz.trail(0.0, tp0=0.03) == pytest.approx(0.03) and fz.trail(0.7, 0.7, 0.03) == pytest.approx(0.015)
     assert fz.kingpin(1000.0, 0.0, mu=0.9) == pytest.approx(-(fz.CASTER + fz.trail_tp0(0.9)) * 1000.0)
     rack = fe.ForzaRack()
     rack.reset(CAR)
@@ -1013,17 +1044,21 @@ def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     assert abs(high) > abs(low)
 
 
-def test_grip_use_is_one_at_the_top_and_falls_past_it():
-    assert fz.grip_use(0.25) == 1.0 and fz.grip_use(0.1) == 1.0 and fz.grip_use(-0.45) == fz.grip_use(0.45)
-    assert fz.grip_use(0.3) > fz.grip_use(0.6) > fz.grip_use(1.0) >= fz.GRIP_USE[-1][1]
-    assert fz.grip_use(3.0) == fz.GRIP_USE[-1][1]
+def test_grip_use_rises_to_one_at_the_top_and_holds_past_it():
+    top = max(u for _s, u in fz.GRIP_USE)
+    assert top == 1.0 and fz.grip_use(0.01) == fz.GRIP_USE[0][1] and fz.grip_use(-0.45) == fz.grip_use(0.45)
+    assert fz.grip_use(0.1) < fz.grip_use(0.3) < fz.grip_use(0.6) < fz.grip_use(1.0) <= 1.0
+    assert fz.grip_use(1.12) == 1.0 and 0.9 < fz.grip_use(3.0) == fz.GRIP_USE[-1][1]
+    # one axis: the normalised slip angle the rack feeds LimitGrip with, and the peak slip where the shape first reaches 97 % of its top
+    assert fz.grip_use(fz.FORZA_SLIP_PEAK) == pytest.approx(0.97, abs=0.005) and 0.7 < fz.FORZA_SLIP_PEAK < 0.9
+    assert fz.LimitGrip.SLIP[1] <= fz.GRIP_USE[-1][0] and fz.grip_use(fz.LimitGrip.SLIP[0]) >= fz.LimitGrip.U_MIN
 
 
 def test_limit_grip_reads_the_grip_below_the_limit_and_tracks_a_step():
     g = fz.LimitGrip()
     assert g.mu() is None
     t = 0.0
-    for slip, speed in ((0.1, 20.0), (1.5, 20.0), (0.6, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
+    for slip, speed in ((0.1, 20.0), (2.5, 20.0), (0.6, 5.0), (float('nan'), 20.0)):     # outside the window, too slow, no slip
         for _ in range(30):
             g.feed(t, slip, speed, 1.4)
             t += 0.1
