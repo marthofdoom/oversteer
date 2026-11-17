@@ -287,12 +287,17 @@ def _norm_rbr():
     return fe.RbrRack.DERIVED_SLIP_PEAK        # read at use, so --set reaches it
 
 
+def _forza_peak():
+    from oversteer import ffb_forza
+    return ffb_forza.FORZA_SLIP_PEAK          # read at use, so --set reaches it
+
+
 # The normalised slip theta, per game, in one place: (raw slip of a sample, what it is divided by, a text for the header).
 # The divisor: a number, a function giving one (read when the drive is binned), or 'stretch' (ACR: the peak found per
 # 60 s stretch of the drive from the tyres' Fy / Fz, acr_peaks).
 THETA_TABLE = {
     'acr': (_slip_acr, 'stretch', "mean |tyre_slip_angle| of the fronts over the per-stretch peak (p80 of Fy/Fz reaching 97 % of the top)"),
-    'forza-fh': (_slip_forza, 0.7, "mean |slip_angle| of the fronts over 0.7"),
+    'forza-fh': (_slip_forza, lambda: _forza_peak(), "mean |slip_angle| of the fronts over ffb_forza.FORZA_SLIP_PEAK"),
     'rbr': (_slip_rbr, _norm_rbr, "|RbrRack._slip| over RbrRack.DERIVED_SLIP_PEAK"),
 }
 FYF_TEXT = {'acr': "the tyres' |Fy_FL + Fy_FR|", 'forza-fh': "the Fy_f ForzaRack._front gave ffb_forza.kingpin", 'rbr': "RbrRack.fy_f"}

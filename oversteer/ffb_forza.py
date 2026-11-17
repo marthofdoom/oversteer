@@ -52,8 +52,22 @@ TP0 = 0.042                              # m: the pneumatic trail at no slip (37
 TP0_FIT = (-0.00872, 0.03923)            # m, m per unit of mu
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
-FORZA_TP_S_HALF = 1.1                   # Forza's own slip scale (its grip peaks at 0.7-0.9 there): halved at 1.1 its rim torque per Fy_f
-                                         # follows ACR's tyres (Fabia) within a few % from 0 to 3 times the peak slip; at 0.7 it faded 15 % early
+# The pneumatic trail fades with the front AXLE's grip in use u = r / mu (r = Fy_f / Fz of the axle, mu its grip top) before the slip
+# peak and with slip over the peak slip x past it, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
+# only game that sends them; scripts/ffb_laws.json 'axle': per 60 s stretch, the cell median over the stretches of 3 drives, trail over
+# the no-slip line TP0_FIT). RbrRack and ForzaRack read the same two tables. (x, factor), held at the ends.
+AXLE_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.99), (0.95, 0.94), (1.05, 0.67))      # (u under 0.8: 1 by the line's own definition)
+AXLE_TP_PAST = ((1.0, 1.0), (1.15, 0.70), (1.5, 0.39), (2.1, 0.11), (3.0, 0.11))     # (alpha / peak, factor); past the peak it only falls
+
+
+def interp(table, x):
+    """The piecewise-linear value of a ((x, y), ...) table at x, held at its ends."""
+    if x <= table[0][0]:
+        return table[0][1]
+    for (x0, y0), (x1, y1) in zip(table, table[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return table[-1][1]
 
 
 def power_index(sample):
@@ -143,6 +157,13 @@ class GripScale:
 GRIP_USE = ((0.25, 1.0), (0.35, 0.96), (0.45, 0.94), (0.55, 0.86), (0.65, 0.84), (0.75, 0.84), (0.85, 0.79), (0.95, 0.75), (1.05, 0.75))
 
 
+# Forza's peak slip in its normalised slip angle (mean |slip_angle| of the fronts), the x = 1 of AXLE_TP_PAST: the envelope of r = Fy_f / Fz
+# against the slip reaches 97 % of its top at 0.168 rad of the rack's kinematic slip (ffb-new-game, 20261105-204107, grip band over 1.3:
+# 34 of its 39 stretches with a top; 0.135 in band 1-1.3), the rack's slip being 0.2 rad per unit (ForzaRack.SLIP_RAD): 0.84.
+# (GRIP_USE above is read in that same kinematic slip, ffb-new-game --shape; its top is at its first bin, 0.25.)
+FORZA_SLIP_PEAK = 0.84
+
+
 def grip_use(s):
     """u(s): GRIP_USE interpolated, held at its ends."""
     s = abs(s)
@@ -212,10 +233,18 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL
     return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER, half=None, mu=None):
-    """The kingpin torque (Nm) in front_torque's sign: -(caster + tp(s)) Fy_f. `tp_scale` scales the pneumatic part
-    (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip), whose no-slip trail (trail_tp0) it fades from."""
-    return -(caster + tp_scale * trail(s, FORZA_TP_S_HALF if half is None else half, trail_tp0(mu))) * fy
+def axle_trail(mu, use=None, x=0.0):
+    """The pneumatic trail (m) of the front axle: the no-slip trail at the grip mu (trail_tp0) times AXLE_TP_USE at the grip in use
+    `use` (None: no fade yet) and AXLE_TP_PAST at x, the slip over the peak slip."""
+    fade = 1.0 if not finite(use) else interp(AXLE_TP_USE, use)
+    return trail_tp0(mu) * fade * interp(AXLE_TP_PAST, abs(x))
+
+
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, mu=None, use=None, peak=None):
+    """The kingpin torque (Nm) in front_torque's sign: -(caster + tp_scale axle_trail) Fy_f. `tp_scale` scales the pneumatic part
+    (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip); `use`: Fy_f / (m b/L g) over it; `s`: the front slip,
+    over `peak` (FORZA_SLIP_PEAK unless given)."""
+    return -(caster + tp_scale * axle_trail(mu, use, s / (FORZA_SLIP_PEAK if peak is None else peak))) * fy
 
 
 class LowPass:

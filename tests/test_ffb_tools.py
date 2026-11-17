@@ -220,8 +220,9 @@ def test_force_curve_summary_weights_by_shared_time_and_picks_the_low_slip_low_f
 
 def test_theta_table_has_one_definition_per_game():
     assert set(tools.THETA_TABLE) == set(tools.RACKS)
-    assert tools.THETA_TABLE['forza-fh'][1] == 0.7 and tools.THETA_TABLE['acr'][1] == 'stretch'
-    from oversteer import ffb_engine
+    assert tools.THETA_TABLE['acr'][1] == 'stretch'
+    from oversteer import ffb_engine, ffb_forza
+    assert tools.THETA_TABLE['forza-fh'][1]() == ffb_forza.FORZA_SLIP_PEAK
     assert tools.THETA_TABLE['rbr'][1]() == ffb_engine.RbrRack.DERIVED_SLIP_PEAK
 
     class S:

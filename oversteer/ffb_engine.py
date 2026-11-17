@@ -672,7 +672,7 @@ class RackForce:
         self.car = car
         self._grip = ffb_forza.GripScale()
         self._limit_grip = ffb_forza.LimitGrip()
-        self.trail, self.scrub = ffb_carprops.default_trail(CASTER_TRAIL), SCRUB    # (rally class: 37 mm until learnt)
+        self.trail, self.scrub = ffb_carprops.default_trail(CASTER_TRAIL), SCRUB    # (rally class: 26.4 mm until learnt)
         self.learner = None
         if self.LEARNS:
             kept = ffb_carprops.STORE.get(car) if car is not None else None
@@ -1497,14 +1497,14 @@ class RbrRack(RackForce):
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
     DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
-    # ACR's tyres (Fabia, tyre Mz / Fy per front wheel, speed over 8 m/s, |Fy| over 300 N; drives 20261105-162134 tarmac, 20261104-143823
+    # ACR's tyres (Fabia, the two fronts' summed Mz over their summed Fy, speed over 8 m/s; drives 20261105-162134 tarmac, 20261104-143823
     # and 20261104-213208 gravel): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 28 mm at 0.95, 38 mm at 1.2), and it
-    # fades with the grip in USE, u = (Fy / Fz) / mu, the same on both surfaces while the slip at the peak differs (0.15 rad tarmac,
-    # 0.25 gravel). Trail over the no-slip trail, tarmac / gravel, before the peak: u < 0.8 1.0 / .92; .8-.9 .86 / .84; .9-1.0 .70 / .73;
-    # over 1.0 .54 / .55. Past the peak, by alpha / alpha_peak: 1-1.3 .32 / .34; 1.3-1.7 .20 / .04; 1.7-2.5 .08 / .08
+    # fades with the AXLE's grip in USE, u = (Fy / Fz) / mu of the front pair, and past the peak by alpha / alpha_peak: ffb_forza.AXLE_TP_USE
+    # and AXLE_TP_PAST, the median over the 60 s stretches of the three drives (ffb_laws.json 'axle'; the rack works at the axle: Fy_f, its
+    # load, its grip, so the law is the axle's, not one tyre's)
     # (the no-slip trail is ffb_forza.trail_tp0(grip_mu): the line through ACR's stretches against the top of the tyres' Fy/Fz, one source with the Forza racks; grip_mu reads that same top: the held maximum, rise 0.1 s, over Fy_f / Fz smoothed 0.05 s)
-    DERIVED_TP_USE = ((0.0, 1.0), (0.85, 1.0), (0.95, 0.92), (1.05, 0.73))      # (u, trail factor before the peak), held at the ends
-    DERIVED_TP_PAST = ((1.0, 1.0), (1.15, 0.6), (1.5, 0.45), (2.1, 0.22), (3.0, 0.2))          # (alpha / slip_peak, factor over the at-peak one), held at the end
+    DERIVED_TP_USE = ffb_forza.AXLE_TP_USE          # (u, trail factor before the peak), held at the ends: the axle law, one source with ForzaRack
+    DERIVED_TP_PAST = ffb_forza.AXLE_TP_PAST        # (alpha / slip_peak, factor over the at-peak one), held at the end
     DERIVED_WINDOW = 60.0                # s: the grip and the peak slip are the envelope's (ffb_forza.stretch_limit, the definition ffb_laws fits the law with) of the last this long
     DERIVED_WINDOW_STEP = 0.05           # s: the window keeps a sample this often (20 Hz)
     DERIVED_PEAK_WINDOW = 300.0          # s: the peak slip pools the samples of the last this long that were taken in today's grip band (the tool pools a drive's stretches per band)
@@ -1998,8 +1998,9 @@ class ForzaRack(RackForce):
     knee, budget, RIM_SAFE_NM: RackForce.force, unchanged), and the engine plays the output filter (ffb_forza.OutputFilter),
     column damping, lock stop, texture and Kickback beside it.
 
-    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp(s)), tp's no-slip value from the grip measured
-      at the slip limit (ffb_forza.LimitGrip, trail_tp0; TP0 until it has a sample), m the car's learnt mass (MassLearner, per car,
+    - Torque (`_front`): m (b/L) (a_y + DI a rdot) through -(0.027 + tp), tp the axle law (ffb_forza.axle_trail): the no-slip
+      value from the grip measured at the slip limit (ffb_forza.LimitGrip, trail_tp0; TP0 until it has a sample) times the fade
+      with the grip in use r / mu (r = Fy_f over m b/L g) and with the slip over FORZA_SLIP_PEAK, m the car's learnt mass (MassLearner, per car,
       ffb_carprops.STORE; 1400 kg until learnt), rdot the yaw rate's central difference over the game's clock (known one
       packet late: the difference is centred on the packet before the newest). A puddle under both fronts halves tp; one
       under a single front adds Drive pull's couple, scrub x PULL_FRACTION m_f g / 2 (only while Drive pull is on, as the
@@ -2128,13 +2129,19 @@ class ForzaRack(RackForce):
         lead = self._lead_fy
         if lead is not None and lead[0] is sample:
             fy = lead[1]
-        cs = sample.combined_slip
+        # (the slip over its peak is the one the peak and the grip use were read in: the mean |slip_angle| of the fronts; the combined
+        # slip stands in where the packet has no angle)
+        cs, sa = sample.combined_slip, sample.slip_angle
         s = 0.5 * (abs(cs[0]) + abs(cs[1])) if cs is not None and len(cs) > 1 and ffb_forza.finite(cs[0]) \
             and ffb_forza.finite(cs[1]) else 0.0
-        sa = sample.slip_angle
-        if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]) and self.mass > 0.0:
-            self._limit_grip.feed(self._now, 0.5 * (abs(sa[0]) + abs(sa[1])), sample.speed, fy / (self.mass * bl * ffb_forza.G))
-        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=self._limit_grip.mu())
+        r = fy / (self.mass * bl * ffb_forza.G) if self.mass > 0.0 else None
+        if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]):
+            s = 0.5 * (abs(sa[0]) + abs(sa[1]))
+            if r is not None:
+                self._limit_grip.feed(self._now, s, sample.speed, r)
+        mu = self._limit_grip.mu()
+        use = abs(r) / mu if r is not None and mu else None          # (the grip in use: the axle's Fy_f / Fz over its grip, as LimitGrip reads it)
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=mu, use=use)
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):
