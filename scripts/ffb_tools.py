@@ -115,6 +115,10 @@ def _build_rack(game, power_class, peak=None):
     fresh = {k: getattr(rack, k, None) for k in ('trail', 'ratio', 'mass')}
     rack.wheel_peak = peak or wt.DEFAULT_PEAK_NM
     rack.align_on = False
+    if getattr(rack, 'LEARNS', False):
+        # the reference plays the car's stored trail and scrub: learning during the replay drifts it (ACR's Fabia, stored
+        # 26.4 mm, read 29.3 by the end of one drive) and every comparison against it with it
+        rack.LEARNS, rack.learner = False, None
     rack.wheel_range = profile_range(game)       # live: the wheel stage sets it (ForzaRack's ratio is half range / lock)
     rbr = game == 'rbr'
     if rbr:
