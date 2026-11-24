@@ -1668,6 +1668,7 @@ class RbrRack(RackForce):
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
         # (both are PLAYED values: they slew toward what the window's envelope last said, DERIVED_LIMIT_TAU, so a recompute is no step in the torque)
         self._mu_goal, self._peak_goal, self._limit_seen = self.grip_mu, self.slip_peak, False
+        self._mu_lift = 0.0              # (how far the working grip stands over the played one: the r already shown before a top, then slewed away)
         self._win = collections.deque()  # (the window of (clock, |alpha|, Fy_f / Fz), 20 Hz, over DERIVED_WINDOW s)
         self._grip_clock, self._win_at, self._env_at = 0.0, None, 0.0
         self._win_env = ffb_forza.EnvelopeWindow(self.DERIVED_WINDOW_STEP, min_n=5)         # (the window's envelope, kept incrementally)
@@ -1895,14 +1896,17 @@ class RbrRack(RackForce):
         k = min(dt / self.DERIVED_LIMIT_TAU, 1.0)
         self.grip_mu += k * (self._mu_goal - self.grip_mu)
         self.slip_peak += min(dt / self.DERIVED_PEAK_TAU, 1.0) * (self._peak_goal - self.slip_peak)
+        # before a top the working grip is at least the smoothed r shown; once one is seen the lift slews away with the played grip (a flip is no step)
+        self._mu_lift = max(0.0, self._grip_r - self.grip_mu) if not self._limit_seen else self._mu_lift * (1.0 - k)
         mu = self._mu_work()
         x = 0.0 if alpha is None or not ffb_forza.finite(alpha) else abs(alpha) / self.slip_peak
         return self._tp0() * ffb_forza.axle_fade(self._grip_r / mu, x)
 
     def _mu_work(self):
         """The grip u and the no-slip trail are read over: the played grip_mu; until a top has been seen (the prior) at least the smoothed
-        loaded r already shown, which is itself proof of that much grip (so u never passes 1 on a prior that was too low)."""
-        return self.grip_mu if self._limit_seen else max(self.grip_mu, self._grip_r)
+        loaded r already shown, which is itself proof of that much grip (so u never passes 1 on a prior that was too low). That lift over
+        grip_mu (_mu_lift) slews away once a top is seen, so the flip moves nothing at once."""
+        return self.grip_mu + self._mu_lift
 
     def _band_of(self, mu):
         """The grip band the peak is read in at the grip mu: the plain band, but the band moves only once mu is DERIVED_BAND_HYST past its edge (a
