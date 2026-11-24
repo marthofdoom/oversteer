@@ -421,7 +421,7 @@ def front_mz(sample):
 # and surface; 27 mm is also a typical rally-car mechanical trail.
 CASTER_TRAIL = 0.027                    # m
 SCRUB = 0.0155                          # m: the physical scrub radius (the Kickback's amplitude)
-PULL_SCRUB = 0.0094                     # m: Drive pull at 100 %: ACR's own (finalFF fit on 20261103-152713: 9.4 mm; in ACR the
+PULL_SCRUB = 0.0094                     # m: Drive pull at 100 % where no scrub is learnt (RBR, Forza, BeamNG; ACR plays the car's own): one Fabia drive (finalFF fit on 20261103-152713: 9.4 mm; in ACR the
                                         # pull is ~5 % of the force, mostly 5-150 Hz; 15.5 mm came from another drive)
 
 
@@ -546,7 +546,7 @@ class RackForce:
       wheel_torque.STEER_BUDGET of full scale, which is also its hard clamp: the rest stays free for texture and
       impacts. The column's damping, friction and stiffness the driver renders keep a frozen scale
       (COLUMN_SCALE, impedance()). The steering force plays the scrub couple only as "Drive pull" (pull_scrub: the
-      physical SCRUB times the level, off by default; the learnt scrub no longer plays, it only serves the cross-check
+      the car's own learnt scrub times the level where the rack learns one, PULL_SCRUB where none can be learnt, so it also serves the cross-check
       against the game's force). The output never passes RIM_SAFE_NM at the rim. The ratio is learnt per car from the road-wheel angle where the steering
       wheel's lock is known (ffb_carprops.RatioLearner), from the car table (+ a 0.13 m steering arm) until
       then. The car's
@@ -601,7 +601,7 @@ class RackForce:
                                          # CLASSIC_SCALE x strength x torque / peak, clamped at the budget, no hydraulic
                                          # top end, damping at the same scale)
     pull_on = OVERALL_PULL               # "Drive pull": the scrub couple of the drive's left/right split in the force ...
-    pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the physical SCRUB
+    pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the car's scrub
     kick_on = ffb_kick.OVERALL_KICK      # "Kickback": the onset pulse of the scrub couple (ffb_kick) ...
     kick_level = ffb_kick.OVERALL_KICK_LEVEL / 100.0   # ... at this share of its amplitude
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
@@ -1083,8 +1083,8 @@ class RackForce:
         where it has, the game's own gain-against-load curve (fitted live, AssistDetector.curve) scaled so the
         car's p99 lands where our class model puts it, so the assist is not stacked."""
         trail = self.trail if trail is None else trail
-        # the scrub couple only as "Drive pull" (pull_scrub), unfiltered like ACR's own finalFF has it; the learnt
-        # per-car scrub (self.scrub) is no longer played, it only serves the fit and the cross-check
+        # the scrub couple only as "Drive pull" (pull_scrub: the car's own learnt scrub where the rack learns one, else PULL_SCRUB), unfiltered
+        # like ACR's own finalFF has it
         scrub = self.pull_scrub() if scrub is None else scrub
         hyd = not self.classic()
         mz = self._front(sample, trail, scrub)
@@ -1116,8 +1116,13 @@ class RackForce:
         return self.mapping == 'classic'
 
     def pull_scrub(self):
-        """The scrub radius (m) the steering force plays: PULL_SCRUB times the Drive pull level, 0 with it off."""
-        return PULL_SCRUB * self.pull_level if self.pull_on else 0.0
+        """The scrub radius (m) the steering force plays: the Drive pull level times the car's own scrub where the rack learns it from the game's
+        tyre forces (self.scrub: the stored or default SCRUB until the learner moves it, slewed by it, so learning starts with no step; the couple
+        is that car's scrub x dFx, and its sign is physical: a Delta S4 has a negative one), PULL_SCRUB where nothing can be learnt (RBR, Forza,
+        BeamNG); 0 with Drive pull off."""
+        if not self.pull_on:
+            return 0.0
+        return (self.scrub if self.LEARNS else PULL_SCRUB) * self.pull_level
 
     def rim_mm(self):
         """The wheel's rim diameter in mm: the user's, else the table's, else the G29's."""

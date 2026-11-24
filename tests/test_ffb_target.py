@@ -462,20 +462,31 @@ def test_the_classic_driver_from_column_has_no_hydraulic_top_end(street):
     assert abs(rack.rim_torque(sample_at(550.0))) < wheel_torque.HYD_TOP_NM
 
 
-def test_drive_pull_plays_the_physical_scrub_couple_at_its_level_in_both_mappings_and_is_on_at_100_by_default():
+def test_drive_pull_plays_the_cars_own_scrub_couple_at_its_level_in_both_mappings_and_is_on_at_100_by_default():
     s = sample_at(100.0)
     s.tyre_fx = (800.0, -800.0, 0.0, 0.0)
     for mapping in ('classic', 'knee'):
-        rack = rack_for(3.5)
-        rack.mapping, rack.assist = mapping, 0.0                  # (unassisted: the torque is the column's)
-        rack.scrub = 0.02                                         # the learnt scrub is never played
-        assert rack.pull_on is True and rack.pull_scrub() == pytest.approx(fe.PULL_SCRUB)
+        for own in (0.02, -0.015):                                # (a Delta S4's scrub is negative: the couple turns the other way)
+            rack = rack_for(3.5)
+            rack.mapping, rack.assist = mapping, 0.0              # (unassisted: the torque is the column's)
+            rack.LEARNS, rack.scrub = True, own                   # (a rack that learns from the game: the learnt scrub is what plays)
+            assert rack.pull_on is True and rack.pull_scrub() == pytest.approx(own)
+            rack.pull_on = False
+            assert rack.pull_scrub() == 0.0
+            plain = rack.rim_torque(s) * rack.ratio
+            rack.pull_on, rack.pull_level = True, 0.35
+            assert rack.pull_scrub() == pytest.approx(0.35 * own)
+            assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * own * 1600.0)
+
+
+def test_drive_pull_keeps_the_constant_where_no_scrub_is_learnt():
+    assert fe.RbrRack().pull_scrub() == 0.0                       # (RBR has no Drive pull at all)
+    for cls in (fe.ForzaRack, fe.BeamNGRack):
+        rack = cls()
+        rack.scrub, rack.pull_on, rack.pull_level = 0.05, True, 1.0
+        assert rack.pull_scrub() == pytest.approx(fe.PULL_SCRUB * rack.pull_level)
         rack.pull_on = False
         assert rack.pull_scrub() == 0.0
-        plain = rack.rim_torque(s) * rack.ratio
-        rack.pull_on, rack.pull_level = True, 0.35
-        assert rack.pull_scrub() == pytest.approx(0.35 * fe.PULL_SCRUB)
-        assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * fe.PULL_SCRUB * 1600.0)
 
 
 def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():
