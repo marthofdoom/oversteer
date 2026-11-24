@@ -440,7 +440,7 @@ def raw_cols(items, wheelbase, bl_of, factor):
 # The law above speaks the drive's own grip (the top of the tyres' Fy/Fz envelope per stretch). RbrRack has no tyre forces: its
 # grip is the held maximum of the smoothed Newton Fy_f / Fz (grip_mu), which sits lower than that top. So the rack's constants
 # are refitted against its own estimator, run over ACR's drives: Newton's Fy_f from a_y and the yaw acceleration with the moving
-# mass and GripScale's lateral factor, the same smoothing and held maximum (RbrRack._grip_trail itself), against ACR's tyre Mz / Fy.
+# mass (Newton, factor 1), the same smoothing and held maximum (RbrRack._grip_trail itself), against ACR's tyre Mz / Fy.
 RACK_USE = (0.0, 0.75, 0.85, 0.95, 1.05, 99.0)       # u bins before the peak (the rack's table has its points at their centres)
 RACK_PAST = (1.0, 1.15, 1.5, 2.1, 3.0, 99.0)         # x bins from the peak on
 RACK_MIN_N = 300                                      # samples a bin needs
@@ -466,8 +466,7 @@ def rack_estimates(cols):
         last = t[i]
         gs.feed(t[i], cols['ay_s'][i], cols['speed'][i])
         ay = lp.step(t[i], min(max(cols['ay_s'][i], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
-        fy = ffb_forza.front_lateral(mass, bl[i], ay, min(max(rd[i], -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX),
-                                     factor=ffb_forza.lateral_factor(gs.mu(), inertial=True))
+        fy = ffb_forza.front_lateral(mass, bl[i], ay, min(max(rd[i], -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX))
         limit = bl[i] * mass * rack.FLOOR_AY
         fy = min(max(fy, -limit), limit)
         fz = cols['fzf'][i]

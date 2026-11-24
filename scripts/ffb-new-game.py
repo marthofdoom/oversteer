@@ -234,7 +234,7 @@ def report(path, game, laws, peak=None, no_rack=False, out_path=None):
         out += ['', '== today\'s rack: %s, car %s' % (tools.RACKS[game][0], info['car'])] + in_force
     else:
         cols, unit, lock = laws_mod.raw_cols(items, wheelbase, lambda s: ffb_forza.front_share(getattr(s, 'drivetrain', None)),
-                                             ffb_forza.LATERAL_DEFAULT)
+                                             1.0)
         dt = tools.sample_spacing([t for t, _s in items])
         c = laws_mod.causes(cols, dt, tools.TYRE_BINS['norm' if unit == 'norm' else 'rad'])
     out += ['', '== (b) this drive\'s own constants'] + _fit_lines(c, dt, unit, lock, wheel_range, wheelbase, const)

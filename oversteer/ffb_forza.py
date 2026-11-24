@@ -33,19 +33,10 @@ DI = 1.0                                 # the yaw-acceleration term's weight
 AY_MAX = 30.0                            # m/s^2
 RDOT_MAX = 15.0                          # rad/s^2
 CASTER = 0.027                           # m: the mechanical trail
-# ACR, Skoda Fabia, 15 stretches of 60 s: the four tyres' summed side force over m a_y (m from the tyre loads) follows the grip,
-# ratio = 0.654 + 0.240 mu (r 0.79), mu the stretch's p95 of |a_y| / g: about 0.85 on loose (mu .8-.95), 0.96 on tarmac (mu 1.1-1.35).
-# Not the speed (aero under 5 %), not the steering angle. The rack feels only the tyres' force, so Fy_f carries that ratio.
-LATERAL_FIT = (0.654, 0.240)
-LATERAL_RANGE = (0.85, 0.98)
-LATERAL_DEFAULT = 0.92                   # until the grip is known
-# The same ratio against the moving mass (ACR's tyre loads read about 8 % over the mass its Fx and Fy accelerate: 1410 kg
-# against 1260-1345 from MassLearner on the tyres' Fx, J 0), per sample against GripScale's mu as played, 6 ACR drives,
-# 200k samples: 0.691 + 0.226 mu (0.95 at mu 1.0-1.1, 1.02 at 1.3-1.5, 1.05 at 1.5-1.8). For a mass learnt from the car's
-# acceleration (Forza's MassLearner) and for RBR's car-table mass (RBR's own physics mass, InverseMass: the mass its a_y is of).
-LATERAL_FIT_INERTIAL = (0.691, 0.226)
-LATERAL_RANGE_INERTIAL = (0.85, 1.05)
-LATERAL_DEFAULT_INERTIAL = 0.95
+# Newton's front force takes the tyres' side force as m (b/L) (a_y + DI a rdot), factor 1.0. ACR's tyres before the 2026-11-19 update gave the
+# four tyres' side force over m a_y 0.69 + 0.23 mu (a loose-surface deficit: scripts/ffb-lateral-fit.py --until 20261105); since it they give
+# 1.05 + 0.025 mu, flat in the grip (--since 20261119), the learnt moving mass brackets it at about 1.05 and the tyre loads' sum / g reads
+# .93-1.01: no loose-surface deficit, so no grip-dependent factor.
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
 # The no-slip trail follows the grip (ACR's tyres since the game's 2026-11-19 tyre update: 45 mm at mu 1.34, 30 at .66; scripts/ffb_laws.json
 # tp0 = 14.9 + 22.5 mu mm, mu the
@@ -105,16 +96,6 @@ def trail(s, half=None, tp0=None):
 def front_share(drivetrain):
     """b/L, the weight share on the front axle, from the drivetrain."""
     return BL.get(drivetrain, BL_DEFAULT)
-
-
-def lateral_factor(mu, inertial=False):
-    """The tyres' side force over m a_y at the grip mu (LATERAL_FIT, clipped to LATERAL_RANGE); LATERAL_DEFAULT without mu.
-    `inertial`: m is the moving mass (MassLearner), not a static one: the _INERTIAL fit, range and default."""
-    fit, rng, default = (LATERAL_FIT_INERTIAL, LATERAL_RANGE_INERTIAL, LATERAL_DEFAULT_INERTIAL) if inertial \
-        else (LATERAL_FIT, LATERAL_RANGE, LATERAL_DEFAULT)
-    if not finite(mu):
-        return default
-    return min(max(fit[0] + fit[1] * mu, rng[0]), rng[1])
 
 
 class GripScale:
@@ -229,11 +210,11 @@ TP0_MU_RANGE = (0.659, 1.342)            # the grips the law was fitted over (sc
 TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 29.7-45.0 mm
 
 
-def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):
-    """Fy_f (N, left positive): factor m (b/L) (a_y + di a rdot), a = wheelbase (1 - b/L); a_y and rdot clipped."""
+def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI):
+    """Fy_f (N, left positive): m (b/L) (a_y + di a rdot), a = wheelbase (1 - b/L); a_y and rdot clipped."""
     ay = min(max(ay, -AY_MAX), AY_MAX)
     rdot = min(max(rdot, -RDOT_MAX), RDOT_MAX)
-    return factor * mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
+    return mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
 def axle_fade(use, x):

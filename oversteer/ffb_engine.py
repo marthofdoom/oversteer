@@ -1709,8 +1709,7 @@ class RbrRack(RackForce):
             return 0.0
         entry = car_data.entry(self.car)
         mass = (entry.get('mass_kg') if entry else None) or self.FLOOR_MASS
-        fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot,
-                                     factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
+        fy = ffb_forza.front_lateral(mass, ffb_forza.front_share(drivetrain), accel[1], rdot)
         limit = ffb_forza.front_share(drivetrain) * mass * self.FLOOR_AY
         fy = min(max(fy, -limit), limit)
         if abs(fy) >= self.FLOOR_FY_MIN:
@@ -1825,7 +1824,7 @@ class RbrRack(RackForce):
         if ok:
             ay = self._filtered('ay', t, min(max(accel[1], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
             rd = self._filtered('rdot', t, min(max(rdot, -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX))
-            fy = ffb_forza.front_lateral(mass, bl, ay, rd, factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
+            fy = ffb_forza.front_lateral(mass, bl, ay, rd)
             limit = bl * mass * self.FLOOR_AY
             self.fy_f = min(max(fy, -limit), limit)
             alpha = self._slip(sample)
@@ -1851,7 +1850,8 @@ class RbrRack(RackForce):
         trail is fitted with); while the limit has not been reached the last values hold, from a sane prior for the first corners.
         u is Fy_f / Fz, smoothed, over mu."""
         now = fy / fz
-        self._grip_r += min(dt / self.DERIVED_R_TAU, 1.0) * (now - self._grip_r)
+        if loaded:          # (unloaded, Fz is floored and r reads up to twice its value: it would reload with u spiked and the trail collapsed for a few tau)
+            self._grip_r += min(dt / self.DERIVED_R_TAU, 1.0) * (now - self._grip_r)
         self._grip_clock += dt
         if loaded and ffb_forza.finite(speed) and speed > 2.0 * self.ALIGN_SPEED and alpha is not None and ffb_forza.finite(alpha):
             if ffb_forza.finite(now):
@@ -2125,8 +2125,7 @@ class ForzaRack(RackForce):
         if accel is None or len(accel) < 2 or not ffb_forza.finite(accel[1]):
             return None
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, self._fast_ay(sample, accel[1]), self.rdot, di=self.YAW_WEIGHT,
-                                     factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
+        fy = ffb_forza.front_lateral(self.mass, bl, self._fast_ay(sample, accel[1]), self.rdot, di=self.YAW_WEIGHT)
         lead = self._lead_fy
         if lead is not None and lead[0] is sample:
             fy = lead[1]
@@ -2161,8 +2160,7 @@ class ForzaRack(RackForce):
         if sa is not None and len(sa) > 1 and ffb_forza.finite(sa[0]) and ffb_forza.finite(sa[1]):
             slip = 0.5 * (sa[0] + sa[1])
         bl = ffb_forza.front_share(sample.drivetrain)
-        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT,
-                                     factor=ffb_forza.lateral_factor(self._grip.mu(), inertial=True))
+        fy = ffb_forza.front_lateral(self.mass, bl, accel[1], self.rdot, di=self.YAW_WEIGHT)
         self._lead_fy = (sample, self._lead.step(t, fy, slip))
 
     def _kicked(self, sample, share, ratio, assist):

@@ -1536,7 +1536,7 @@ def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
         rack = derived_rack()
         run_derived(rack, 0.2, ay=ay)
         entry = fe.car_data.entry(CAR)
-        fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0, factor=fz.LATERAL_DEFAULT_INERTIAL)
+        fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0)
         fade = fz.interp(fz.AXLE_TP_USE, rack._grip_r / rack.grip_mu)      # (ACR's tyres since 2026-11-19 lose pneumatic trail from u 0.5)
         expect = -(fe.ffb_carprops.RALLY_TRAIL + rack._tp0() * fade) * fy / (rack.ratio if rack.ratio_known else rack.DERIVED_RATIO)
         assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
@@ -1580,7 +1580,7 @@ def test_derived_torque_fades_out_within_50_ms_when_the_fronts_are_unloaded_and_
     by_t = {round(t - 0.2, 3): v for t, v, _ in rows}
     assert abs(by_t[0.03]) < abs(full) and abs(by_t[0.03]) > 0.0
     assert rows[-1][1] == 0.0 and abs(rows[round(0.055 * 236)][1]) < 1e-9
-    rows = run_derived(rack, 0.3, start=0.3)
+    rows = run_derived(rack, 0.1, start=0.3)
     assert rows[-1][1] == pytest.approx(full, rel=0.02) and rows[0][1] != rows[-1][1]
 
 
