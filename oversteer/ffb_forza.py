@@ -47,18 +47,21 @@ LATERAL_FIT_INERTIAL = (0.691, 0.226)
 LATERAL_RANGE_INERTIAL = (0.85, 1.05)
 LATERAL_DEFAULT_INERTIAL = 0.95
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
-# The no-slip trail follows the grip (ACR's tyres: 41 mm at mu 1.27, 26 at .88; scripts/ffb_laws.json tp0 = -8.7 + 39.2 mu mm, mu the
+# The no-slip trail follows the grip (ACR's tyres since the game's 2026-11-19 tyre update: 45 mm at mu 1.34, 30 at .66; scripts/ffb_laws.json
+# tp0 = 14.9 + 22.5 mu mm, mu the
 # tyres' Fy/Fz top), mu from LimitGrip. TP0 stays the value until it has a limit sample.
-TP0_FIT = (-0.00872, 0.03923)            # m, m per unit of mu
+TP0_FIT = (0.01488, 0.02246)            # m, m per unit of mu
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
 # The pneumatic trail fades with the front AXLE's grip in use u = r / mu (r = Fy_f / Fz of the axle, mu its grip top) before the slip
 # peak and with slip over the peak slip x past it, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
-# only game that sends them; scripts/ffb_laws.json 'axle': per 60 s stretch, the cell median over the stretches of 3 drives, trail over
+# only game that sends them; scripts/ffb_laws.json 'axle': per 60 s stretch, the cell median over the stretches of 7 post-update drives (the
+# pre-update law is scripts/ffb_laws_pre_20261119.json: never pooled with it), trail over
 # the no-slip line TP0_FIT). RbrRack and ForzaRack read the same two tables, (x, factor) held at the ends, and read them as the law's cells are:
 # before the peak (x <= 1) the use table alone, past it the use table times the past table (relative to the at-peak value).
-AXLE_TP_USE = ((0.0, 1.0), (0.75, 1.0), (0.85, 0.99), (0.95, 0.94), (1.05, 0.67))      # (u under 0.8: 1 by the line's own definition)
-AXLE_TP_PAST_CELLS = ((1.0, 0.70), (1.15, 0.70), (1.5, 0.39), (2.1, 0.11), (3.0, 0.11))     # the law's past-peak cells: (alpha / peak, trail over the no-slip line); it only falls
+AXLE_TP_USE = ((0.0, 1.0), (0.25, 1.0), (0.65, 0.75), (0.85, 0.45), (0.95, 0.30), (1.05, 0.21))      # (the law's cells at their u bands' middles; u under 0.5: 1 by the line's own definition)
+# (past x = 1.3 the fitted cells are -0.00, -0.07, -0.05 with a spread of about 0.03 each: no trail resolved from zero, so held at 0, never negative)
+AXLE_TP_PAST_CELLS = ((1.0, 0.21), (1.15, 0.14), (1.5, 0.0), (2.1, 0.0), (3.0, 0.0))     # the law's past-peak cells: (alpha / peak, trail over the no-slip line); it only falls
 
 
 def interp(table, x):
@@ -222,8 +225,8 @@ class LimitGrip:
         return self._mu
 
 
-TP0_MU_RANGE = (0.825, 1.318)            # the grips the law was fitted over (scripts/ffb_laws.json mu_range): not extrapolated past them
-TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 23.6-43.0 mm
+TP0_MU_RANGE = (0.659, 1.342)            # the grips the law was fitted over (scripts/ffb_laws.json mu_range): not extrapolated past them
+TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 29.7-45.0 mm
 
 
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI, factor=LATERAL_DEFAULT):

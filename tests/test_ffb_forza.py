@@ -84,9 +84,9 @@ def test_the_trail_fades_with_the_slip_over_its_peak():
 def test_the_axle_trail_is_the_use_table_before_the_peak_and_the_past_table_alone_from_it():
     assert fz.AXLE_TP_USE[0] == (0.0, 1.0) and 0.7 < fz.FORZA_SLIP_PEAK < 0.9
     tp0 = fz.trail_tp0(1.0)
-    assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.5, 0.5) == pytest.approx(tp0)
-    assert fz.axle_trail(1.0, 1.2, 0.0) == pytest.approx(0.67 * tp0)                  # at the limit and over it: held
-    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.94 * tp0)
+    assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.25, 0.5) == pytest.approx(tp0)
+    assert fz.axle_trail(1.0, 1.2, 0.0) == pytest.approx(0.21 * tp0)                  # at the limit and over it: held
+    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.30 * tp0)
     # past the peak the use table times the past table (1.0 at x = 1): the law's cells past x = 1 where the grip in use is the at-peak one
     assert fz.AXLE_TP_PAST[0] == (1.0, 1.0)
     for x, cell in fz.AXLE_TP_PAST_CELLS[1:]:
@@ -96,8 +96,8 @@ def test_the_axle_trail_is_the_use_table_before_the_peak_and_the_past_table_alon
         assert abs(fz.axle_fade(use, 1.0) - fz.interp(fz.AXLE_TP_USE, use)) < 1e-9
     assert fz.axle_trail(1.0, None, 1.5) == pytest.approx(fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) and fz.axle_trail(1.0, 0.5, -1.5) == fz.axle_trail(1.0, 0.5, 1.5)
     # the kingpin: s over FORZA_SLIP_PEAK, u over mu
-    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.5) == pytest.approx(-(fz.CASTER + fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) * 1000.0)
-    assert fz.kingpin(1000.0, 0.1, tp_scale=0.5, mu=1.0, use=1.2, peak=1.0) == pytest.approx(-(fz.CASTER + 0.5 * 0.67 * tp0) * 1000.0)
+    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.25) == pytest.approx(-(fz.CASTER + fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) * 1000.0)
+    assert fz.kingpin(1000.0, 0.1, tp_scale=0.5, mu=1.0, use=1.2, peak=1.0) == pytest.approx(-(fz.CASTER + 0.5 * 0.21 * tp0) * 1000.0)
     rack = fe.ForzaRack()
     rack.reset(CAR)
     rack._limit_grip._mu = 1.0

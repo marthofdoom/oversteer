@@ -1537,7 +1537,8 @@ def test_derived_torque_opposes_fy_and_is_the_kingpin_torque_over_the_ratio():
         run_derived(rack, 0.2, ay=ay)
         entry = fe.car_data.entry(CAR)
         fy = fz.front_lateral(entry['mass_kg'], fz.front_share('awd'), ay, 0.0, factor=fz.LATERAL_DEFAULT_INERTIAL)
-        expect = -(fe.ffb_carprops.RALLY_TRAIL + rack._tp0()) * fy / (rack.ratio if rack.ratio_known else rack.DERIVED_RATIO)      # (no slip: the whole pneumatic trail)
+        fade = fz.interp(fz.AXLE_TP_USE, rack._grip_r / rack.grip_mu)      # (ACR's tyres since 2026-11-19 lose pneumatic trail from u 0.5)
+        expect = -(fe.ffb_carprops.RALLY_TRAIL + rack._tp0() * fade) * fy / (rack.ratio if rack.ratio_known else rack.DERIVED_RATIO)
         assert rack.derived == pytest.approx(expect, rel=1e-6) and rack.derived * ay < 0.0
         assert rack.fy_f == pytest.approx(fy)
     big = derived_rack()
@@ -1579,7 +1580,7 @@ def test_derived_torque_fades_out_within_50_ms_when_the_fronts_are_unloaded_and_
     by_t = {round(t - 0.2, 3): v for t, v, _ in rows}
     assert abs(by_t[0.03]) < abs(full) and abs(by_t[0.03]) > 0.0
     assert rows[-1][1] == 0.0 and abs(rows[round(0.055 * 236)][1]) < 1e-9
-    rows = run_derived(rack, 0.1, start=0.3)
+    rows = run_derived(rack, 0.3, start=0.3)
     assert rows[-1][1] == pytest.approx(full, rel=0.02) and rows[0][1] != rows[-1][1]
 
 
@@ -1768,14 +1769,14 @@ def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted
     rack = fe.RbrRack
     for mu in (0.82, 0.95, 1.2, 1.32):
         assert trail_rack(mu)._tp0() == pytest.approx(fz.trail_tp0(mu))
-    assert trail_rack(0.6)._tp0() == pytest.approx(trail_rack(0.82)._tp0())
-    assert trail_rack(1.4)._tp0() == pytest.approx(trail_rack(1.32)._tp0())
-    assert 0.027 < trail_rack(0.95)._tp0() < 0.030 and 0.036 < trail_rack(1.2)._tp0() < 0.040      # ACR: 28 mm gravel, 38 mm tarmac
+    assert trail_rack(0.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[0])._tp0())
+    assert trail_rack(1.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[1])._tp0())
+    assert 0.035 < trail_rack(0.95)._tp0() < 0.038 and 0.040 < trail_rack(1.2)._tp0() < 0.044      # ACR since 2026-11-19: 36 mm gravel, 42 mm tarmac
 
 
 def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
     rack = fe.RbrRack
-    for use, want in ((0.5, 1.0), (1.2, 0.67)):
+    for use, want in ((0.25, 1.0), (0.65, 0.75), (1.2, 0.21)):
         r = trail_rack(1.0, use)
         tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
         assert tp == pytest.approx(r._tp0() * want)
@@ -1825,9 +1826,9 @@ def test_sat_div_is_finite_and_positive():
 
 def test_trail_past_the_peak_factor():
     rack = fe.RbrRack
-    r = trail_rack(1.0, 0.5)
+    r = trail_rack(1.0, 0.25)
     base = r._tp0()
-    assert r._grip_trail(0.5, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
+    assert r._grip_trail(0.25, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
     # continuous across the peak, and where the grip in use is the at-peak one the rack plays the law's cells
     for use in (0.5, 0.8, 1.0):
         rr = trail_rack(1.0, use)
