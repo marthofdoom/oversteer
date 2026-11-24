@@ -514,3 +514,54 @@ def test_the_reference_rack_keeps_its_ratio_in_a_replay():
     before = rack.ratio
     rack._learn_ratio(None, 1.0)
     assert rack.learner is None and rack.ratio == before
+
+
+# -- ffb-bands-compare --
+
+def test_bands_compare_bands_and_git_labels(tmp_path):
+    import subprocess
+    bands = _load('ffb_bands_compare', 'ffb-bands-compare.py')
+    n = 6
+    cols = {'u': np.array([0.2, 0.6, 0.85, 0.95, 1.0, 1.0]), 'x': np.array([0.2, 0.5, 0.8, 0.9, 1.5, 2.0]), 'fyf': np.full(n, 1000.0),
+            'speed': np.full(n, 20.0), 'rim': np.arange(1.0, 7.0), 'trail_mm': np.full(n, 30.0), 'played': np.arange(1.0, 7.0) / 2}
+    rows = dict((b, (k, m)) for b, k, m in bands.band_rows(cols))
+    assert [b for b, _k, _m in bands.band_rows(cols)] == ['u<.5', '.5-.8', '.8-.9', '.9-1', 'past peak']
+    assert rows['u<.5'] == (1, {'rim': 1.0, 'trail_mm': 30.0, 'played': 0.5}) and rows['past peak'][0] == 2 and rows['past peak'][1]['rim'] == 5.5
+    cols['speed'][:] = 5.0                                       # under 8 m/s: no sample counts
+    assert all(k == 0 for _b, k, _m in bands.band_rows(cols))
+    # labels come from git: the commit, and +uncommitted once a tracked file differs
+    git = lambda *a: subprocess.run(('git', '-C', str(tmp_path)) + a, check=True, capture_output=True)
+    git('init', '-q')
+    (tmp_path / 'f').write_text('a')
+    git('add', 'f')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x')
+    clean = bands.label(str(tmp_path))
+    assert clean and '+' not in clean
+    (tmp_path / 'f').write_text('b')
+    assert bands.label(str(tmp_path)) == clean + '+uncommitted'
+    text = bands.table(['c'], {'c': [('u<.5', 3, {'rim': 1.0, 'trail_mm': 50.0, 'played': 1.0})]}, {'c': [('u<.5', 3, {'rim': 0.5, 'trail_mm': 40.0, 'played': 0.5})]}, 'aaa', 'bbb')
+    assert text[0] == 'OLD = aaa   NEW = bbb' and '1.00 -> 0.50 (0.50)' in text[4]
+
+
+def test_bands_compare_trees_are_separate_per_side_and_removed_on_failure(tmp_path, monkeypatch):
+    import subprocess
+    bands = _load('ffb_bands_compare2', 'ffb-bands-compare.py')
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    git = lambda *a: subprocess.run(('git', '-C', str(repo)) + a, check=True, capture_output=True)
+    git('init', '-q', '-b', 'master')
+    (repo / 'f').write_text('a')
+    git('add', 'f')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x')
+    monkeypatch.setattr(bands, 'REPO', str(repo))
+    tmp = tmp_path / 'wt'
+    tmp.mkdir()
+    a, b = bands._tree('master', str(tmp), 'old'), bands._tree('master', str(tmp), 'new')      # --old == --new: two trees, one label
+    assert a[0] != b[0] and a[1] == b[1] and os.path.isdir(a[0]) and os.path.isdir(b[0])
+    bands._drop(a[0])
+    bands._drop(b[0])
+    assert not os.path.exists(a[0])
+    monkeypatch.setattr(bands, 'label', lambda root: (_ for _ in ()).throw(RuntimeError('boom')))
+    with pytest.raises(RuntimeError):
+        bands._tree('master', str(tmp), 'old')
+    assert not os.path.exists(str(tmp / 'old'))                                                   # removed after the failure

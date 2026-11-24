@@ -103,8 +103,8 @@ def causes(cols, dt, bins=None):
             m = (band == bi) & reached
             env = _envelope(slip[m], r[m] / mu[m], dt, bins) if m.any() else None
             if env is not None:
-                cen, top, _secs = env
-                peak[band == bi] = ffb_forza.envelope_peak(list(cen), list(top), PEAK_SHARE)
+                cen, top, secs = env
+                peak[band == bi] = ffb_forza.envelope_peak(list(cen), list(top), PEAK_SHARE, list(secs))
         tp = cols['pneu'] / np.where(fyf >= tools.TRAIL_FYF_MIN, fyf, np.nan)
         return {'r': r, 'mu': mu, 'peak': peak, 'reached': reached, 'u': r / mu, 'x': slip / peak, 'seg': seg, 'tp': tp}
 
@@ -188,9 +188,33 @@ def grip_use_shape(drives):
     return tuple(out)
 
 
-def _line(pts, spread=0.15):
-    """(a, b, n) of tp0 = a + b mu through stretch points with a no-slip trail; b 0 with under three or a mu spread under `spread`."""
-    p = np.array([(mu, tp, n) for mu, _pk, tp, n in pts if np.isfinite(tp)], float).reshape(-1, 3)
+def car_weights(cars):
+    """One weight per item, 1 / (the items of its car): each car counts the same however many stretches it drove (None: all 1)."""
+    if cars is None:
+        return None
+    count = {}
+    for c in cars:
+        count[c] = count.get(c, 0) + 1
+    return np.array([1.0 / count[c] for c in cars])
+
+
+def wmedian(values, weights=None):
+    """The weighted median (the first value whose cumulative weight reaches half); the plain median without weights."""
+    v = np.asarray(values, float)
+    if weights is None:
+        return float(np.median(v))
+    o = np.argsort(v)
+    cw = np.cumsum(np.asarray(weights, float)[o])
+    return float(v[o][np.searchsorted(cw, 0.5 * cw[-1])])
+
+
+def _line(pts, spread=0.15, cars=None):
+    """(a, b, n) of tp0 = a + b mu through stretch points with a no-slip trail; b 0 with under three or a mu spread under `spread`. `cars`:
+    the car of each point: the fit weighs each car the same (else each point by the root of its samples)."""
+    keep = [i for i, q in enumerate(pts) if np.isfinite(q[2])]
+    p = np.array([(pts[i][0], pts[i][2], pts[i][3]) for i in keep], float).reshape(-1, 3)
+    if cars is not None:
+        p[:, 2] = car_weights([cars[i] for i in keep]) if keep else p[:, 2]
     if len(p) >= 3 and np.ptp(p[:, 0]) >= spread:
         b, a = np.polyfit(p[:, 0], p[:, 1], 1, w=np.sqrt(p[:, 2]))
         return float(a), float(b), len(p)
@@ -207,12 +231,13 @@ def _cells(c, ok):
     return out
 
 
-def fit_laws(drives, names=()):
+def fit_laws(drives, names=(), cars=None):
     """The laws from ACR drives [(cols, causes)]: tp0 = a + b mu over the stretches, then the median per cell of each sample's
     trail over its stretch's tp0 (per sample: ratios of cell medians are not trails), and the peak slip per grip band; the same
-    over the stretches, one weight each, as 'axle' (fit_axle)."""
+    over the stretches as 'axle' (fit_axle). `cars`: the car of each drive; given, every pooling weighs each car the same."""
     pts = [p for _cols, c in drives for p in stretch_points(c)]
-    a, b, n = _line(pts)
+    pcar = None if cars is None else [cars[i] for i, (_cols, c) in enumerate(drives) for _p in stretch_points(c)]
+    a, b, n = _line(pts, cars=pcar)
     if not n or not b:
         raise ValueError('the ACR drives give no line of no-slip trail against grip (%d stretches with a top)' % n)
     mus = [p[0] for p in pts if np.isfinite(p[2])]
@@ -230,7 +255,7 @@ def fit_laws(drives, names=()):
     for mu, pk, _tp, _n in pts:
         peaks.setdefault(tools.MU_BAND_NAMES[tools.mu_band(mu)], []).append(pk)
     return {**gs_fit(drives), 'tp0': [a, b], 'mu_range': [float(min(mus)), float(max(mus))], 'cells': cells, 'spread': spread, 'stretches': n,
-            'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()}, 'sources': list(names), 'axle': fit_axle(drives, pts, a, b),
+            'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()}, 'sources': list(names), 'axle': fit_axle(drives, pts, a, b, cars),
             'note': 'ACR tyres: pneumatic trail (m) = (tp0[0] + tp0[1] mu) x cells[grip in use u before the peak, slip/peak x past it]'}
 
 
@@ -238,13 +263,14 @@ AXLE_CELL_N = 100               # samples a stretch needs in a cell to speak for
 AXLE_CELL_STRETCHES = 3         # stretches a cell needs
 
 
-def fit_axle(drives, pts, a, b):
+def fit_axle(drives, pts, a, b, cars=None):
     """The axle law over the line (a, b) of the stretches' no-slip trails `pts`: per stretch with a grip top, the median of each cell's
     trail over the line at the stretch's grip; a cell's factor is the median of those over the stretches (>= AXLE_CELL_N samples each,
     >= AXLE_CELL_STRETCHES stretches). {'tp0', 'mu_range', 'cells', 'spread', 'cell_stretches', 'peak_slip_rad', 'stretches'}; 'spread'
-    is how far one drive's own median sits from the cell (what the checks' tolerance widens by)."""
+    is how far one drive's own median sits from the cell (what the checks' tolerance widens by). `cars`: the car of each drive; the median over
+    stretches then weighs each car the same. 'form' is fit_form's: the (u, x) form the racks play."""
     per, drive_f = {}, {}
-    for cols, c in drives:
+    for di, (cols, c) in enumerate(drives):
         ok = c['reached'] & np.isfinite(c['tp']) & np.isfinite(c['u']) & np.isfinite(c['x'])
         with np.errstate(invalid='ignore'):
             f = c['tp'] / (a + b * c['mu'])
@@ -253,17 +279,125 @@ def fit_axle(drives, pts, a, b):
             for g in np.unique(c['seg'][m]):
                 k = m & (c['seg'] == g)
                 if k.sum() >= AXLE_CELL_N:
-                    per.setdefault(name, []).append(float(np.median(f[k])))
-    cells = {k: float(np.median(v)) for k, v in per.items() if len(v) >= AXLE_CELL_STRETCHES}
+                    per.setdefault(name, []).append((None if cars is None else cars[di], float(np.median(f[k]))))
+    cells = {k: wmedian([v for _c, v in vs], car_weights([c for c, _v in vs]) if cars is not None else None)
+             for k, vs in per.items() if len(vs) >= AXLE_CELL_STRETCHES}
     spread = {k: float(max([abs(np.median(x) / cells[k] - 1) for x in drive_f[k] if len(x) >= 200] or [0.0])) for k in cells}
     mus = [p[0] for p in pts if np.isfinite(p[2])]
     peaks = {}
     for mu, pk, _tp, _n in pts:
         peaks.setdefault(tools.MU_BAND_NAMES[tools.mu_band(mu)], []).append(pk)
     return {'tp0': [a, b], 'mu_range': [float(min(mus)), float(max(mus))], 'cells': cells, 'spread': spread,
-            'cell_stretches': {k: len(per[k]) for k in cells}, 'stretches': len(mus),
+            'cell_stretches': {k: len(per[k]) for k in cells}, 'stretches': len(mus), 'form': fit_form(drives, a, b, cars),
             'peak_slip_rad': {k: float(np.median(v)) for k, v in peaks.items()},
             'note': 'axle: pneumatic trail (m) = (tp0[0] + tp0[1] mu) x cells[u before the peak, x past it]; a cell is the median over the stretches'}
+
+
+FORM_U = ((0.0, 0.5), (0.5, 0.65), (0.65, 0.8), (0.8, 0.9), (0.9, 1.0), (1.0, 99.0))      # the grip-in-use bands the use table is read in ...
+FORM_U_AT = (0.25, 0.575, 0.725, 0.85, 0.95, 1.1)                                          # ... and where each speaks (the bands' middles)
+FORM_X = ((0.0, 0.3), (0.3, 0.6), (0.6, 0.8), (0.8, 1.0), (1.0, 1.3), (1.3, 1.7), (1.7, 99.0))      # the slip-over-peak bands of the (u, x) table
+FORM_PAST = ((0.0, 0.7), (0.7, 0.85), (0.85, 1.0), (1.0, 1.15), (1.15, 1.3), (1.3, 1.5), (1.5, 1.7), (1.7, 2.5), (2.5, 99.0))      # the u-free x bins
+FORM_STRETCH_N = 100            # samples a stretch needs in a bin to speak for it
+FORM_MAX_STEP = 0.02           # the fade's largest change per 0.01 of x at the grips in use of FORM_CHECK_U
+FORM_CHECK_U = (0.7, 0.85, 0.95)
+FORM_BLEND_LO = (0.3, 0.4, 0.5, 0.6, 0.7)
+FORM_BLEND_HI = (0.7, 0.8, 0.9, 1.0, 1.1, 1.2)
+
+
+def _stretch_arrays(drives, a, b, cars):
+    """[(car, u, x, factor)] per stretch with a grip top: the samples' trail over the no-slip line at the stretch's grip."""
+    out = []
+    for di, (_cols, c) in enumerate(drives):
+        ok = c['reached'] & np.isfinite(c['tp']) & np.isfinite(c['u']) & np.isfinite(c['x'])
+        with np.errstate(invalid='ignore'):
+            f = c['tp'] / (a + b * c['mu'])
+        for g in np.unique(c['seg'][ok]):
+            m = ok & (c['seg'] == g)
+            out.append((None if cars is None else cars[di], c['u'][m], c['x'][m], f[m]))
+    return out
+
+
+def _bin_median(S, sel, minn=FORM_STRETCH_N, min_stretches=3):
+    """The median over the stretches (each car weighing the same when the stretches carry cars) of each stretch's median in the samples
+    `sel(u, x)` picks; None under `min_stretches` stretches."""
+    vals, who = [], []
+    for car, u, x, f in S:
+        m = sel(u, x)
+        if m.sum() >= minn:
+            vals.append(float(np.median(f[m])))
+            who.append(car)
+    if len(vals) < min_stretches:
+        return None, len(vals)
+    return wmedian(vals, car_weights(who) if who[0] is not None else None), len(vals)
+
+
+def fit_form(drives, a, b, cars=None):
+    """The form the racks play, ffb_forza.axle_fade: before the peak USE(u), the trail over the no-slip line against the grip in use (read in the
+    samples with x under the blend's start); past it the absolute PAST(x), pooled over u; between them (xlo, xhi) a smoothstep weight from one to the
+    other (the data past the peak hardly depends on u). The blend's ends are the pair, of the grids FORM_BLEND_*, whose form errs least against the
+    (u, x) cells' medians. {'use', 'past', 'blend', 'rms', 'u_of_x', 'ux'}; the table values are not negative (a trail resolved from zero is not seen)."""
+    S = _stretch_arrays(drives, a, b, cars)
+    obs = {}
+    for i, (ul, uh) in enumerate(FORM_U):
+        for j, (xl, xh) in enumerate(FORM_X):
+            v, n = _bin_median(S, lambda u, x: (u >= ul) & (u < uh) & (x >= xl) & (x < xh))
+            if v is not None:
+                obs[(i, j)] = v
+    best = None
+    for xlo in FORM_BLEND_LO:
+        use = [(0.0, 1.0)]
+        last = 1.0
+        for (ul, uh), at in zip(FORM_U, FORM_U_AT):
+            v, _n = _bin_median(S, lambda u, x: (x < xlo) & (u >= ul) & (u < uh))
+            if v is not None:
+                last = min(last, max(v, 0.0))          # (a fade that only deepens with the grip in use)
+                use.append((at, last))
+        for xhi in FORM_BLEND_HI:
+            if xhi < xlo + 0.2:
+                continue
+            past = []
+            for lo, hi in FORM_PAST:
+                lo = max(lo, xlo)
+                if hi <= lo:
+                    continue
+                v, _n = _bin_median(S, lambda u, x: (x >= lo) & (x < hi))
+                if v is not None:
+                    past.append((0.5 * (lo + min(hi, 3.0)), max(v, 0.0)))
+            if len(past) < 3:
+                continue
+            grid = np.arange(0.0, 3.0, 0.01)
+            if any(np.abs(np.diff(ffb_forza.axle_fade_at(use, past, (xlo, xhi), np.full(len(grid), u0), grid))).max() >= FORM_MAX_STEP
+                   for u0 in FORM_CHECK_U):
+                continue            # (a notch felt at the wheel: a step over FORM_MAX_STEP per 0.01 of x)
+            tot, n = 0.0, 0
+            for (i, j), o in obs.items():
+                ul, uh = FORM_U[i]
+                xl, xh = FORM_X[j]
+                pv = []
+                for _car, u, x, f in S:
+                    m = (u >= ul) & (u < uh) & (x >= xl) & (x < xh)
+                    if m.sum() >= FORM_STRETCH_N:
+                        pv.append(float(np.median(ffb_forza.axle_fade_at(use, past, (xlo, xhi), u[m], x[m]))))
+                if pv:
+                    tot += (np.median(pv) - o) ** 2
+                    n += 1
+            rms = float(np.sqrt(tot / n)) if n else float('inf')
+            if best is None or rms < best['rms']:
+                best = {'use': [[float(p), float(q)] for p, q in use], 'past': [[float(p), float(q)] for p, q in past], 'blend': [xlo, xhi], 'rms': rms}
+    if best is None:
+        return None
+    uofx = []
+    for lo, hi in ((0, .2), (.2, .4), (.4, .6), (.6, .8), (.8, 1.0), (1.0, 1.3), (1.3, 2.0)):
+        v = []
+        for car, u, x, _f in S:
+            m = (x >= lo) & (x < hi)
+            if m.sum() >= FORM_STRETCH_N:
+                v.append((car, float(np.median(u[m]))))
+        if len(v) >= 3:
+            uofx.append([0.5 * (lo + hi), wmedian([t[1] for t in v], car_weights([t[0] for t in v]) if v[0][0] is not None else None)])
+    best['u_of_x'] = uofx
+    best['ux'] = {'u %.2f-%.2f x %.1f-%.1f' % (*FORM_U[i], *FORM_X[j]): float(v) for (i, j), v in obs.items()}
+    return best
 
 
 def axle_of(laws):
@@ -374,7 +508,7 @@ def routes(share):
     if has('tyre_fy'):
         out.append(('front side force', "the tyres' own Fy (ACR's route)", None))
     elif has('accel', 'yaw_rate'):
-        out.append(('front side force', "Newton: factor m b/L (a_y + a yaw accel), ffb_forza.front_lateral", 'a mass source'))
+        out.append(('front side force', "Newton: m b/L (a_y + a yaw accel), ffb_forza.front_lateral", 'a mass source'))
     else:
         out.append(('front side force', 'NONE: no tyre Fy and no a_y with yaw rate', 'accel and yaw_rate in the decoder'))
     out.append(('front load', "the tyres' own Fz" if has('tyre_load') else 'static m b/L g', None if has('tyre_load') else 'a mass source'))
@@ -440,7 +574,7 @@ def raw_cols(items, wheelbase, bl_of, factor):
 # The law above speaks the drive's own grip (the top of the tyres' Fy/Fz envelope per stretch). RbrRack has no tyre forces: its
 # grip is the held maximum of the smoothed Newton Fy_f / Fz (grip_mu), which sits lower than that top. So the rack's constants
 # are refitted against its own estimator, run over ACR's drives: Newton's Fy_f from a_y and the yaw acceleration with the moving
-# mass and GripScale's lateral factor, the same smoothing and held maximum (RbrRack._grip_trail itself), against ACR's tyre Mz / Fy.
+# mass (Newton, factor 1), the same smoothing and held maximum (RbrRack._grip_trail itself), against ACR's tyre Mz / Fy.
 RACK_USE = (0.0, 0.75, 0.85, 0.95, 1.05, 99.0)       # u bins before the peak (the rack's table has its points at their centres)
 RACK_PAST = (1.0, 1.15, 1.5, 2.1, 3.0, 99.0)         # x bins from the peak on
 RACK_MIN_N = 300                                      # samples a bin needs
@@ -449,7 +583,7 @@ RACK_MIN_N = 300                                      # samples a bin needs
 def rack_estimates(cols):
     """What RbrRack's grip estimator reads over an ACR drive (cols from simulate_stages): per sample the rack's `mu` (the envelope's top
     of Newton Fy_f / Fz over its last 60 s, ffb_forza.EnvelopeWindow), `r` (smoothed Newton Fy_f / Fz), `u` = r / mu and `peak` (its
-    slip_peak, pooled per grip band, fed the tyres' slip), plus the Newton Fy_f `fyn`, the front force at the moving mass's lateral factor. Needs the drive's true mass (all four tyres' Fy over a_y); None without."""
+    slip_peak, pooled per grip band, fed the tyres' slip), plus the Newton Fy_f `fyn`, the front force (factor 1, the moving mass). Needs the drive's true mass (all four tyres' Fy over a_y); None without."""
     from oversteer import ffb_engine as fe, ffb_forza
     m = tools.acr_true_mass(cols)
     if not m:
@@ -466,8 +600,7 @@ def rack_estimates(cols):
         last = t[i]
         gs.feed(t[i], cols['ay_s'][i], cols['speed'][i])
         ay = lp.step(t[i], min(max(cols['ay_s'][i], -ffb_forza.AY_MAX), ffb_forza.AY_MAX))
-        fy = ffb_forza.front_lateral(mass, bl[i], ay, min(max(rd[i], -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX),
-                                     factor=ffb_forza.lateral_factor(gs.mu(), inertial=True))
+        fy = ffb_forza.front_lateral(mass, bl[i], ay, min(max(rd[i], -ffb_forza.RDOT_MAX), ffb_forza.RDOT_MAX))
         limit = bl[i] * mass * rack.FLOOR_AY
         fy = min(max(fy, -limit), limit)
         fz = cols['fzf'][i]

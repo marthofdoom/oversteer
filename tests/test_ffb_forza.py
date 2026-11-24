@@ -35,7 +35,7 @@ def fsample(t=0.0, speed=25.0, ay=0.0, yaw=0.0, cs=0.2, car=CAR, dt='rwd', **kw)
 def test_newton_front_force_for_a_known_ay_and_rdot():
     m, bl, ay, rd = 1300.0, 0.58, 5.0, 0.4
     a = 2.6 * (1 - 0.58)
-    k = fz.LATERAL_DEFAULT * m * bl
+    k = m * bl
     assert fz.front_lateral(m, bl, ay, rd) == pytest.approx(k * (ay + fz.DI * a * rd))
     assert fz.front_lateral(m, bl, ay, 0.0) == pytest.approx(k * ay)
     # clipped: a_y at 30, rdot at 15
@@ -54,7 +54,7 @@ def test_the_rack_works_the_torque_from_the_samples_and_the_yaw_acceleration():
     assert rack.rdot == pytest.approx(6.0, rel=1e-6)
     s = fsample(t, ay=4.0, dt='awd', cs=0.0)
     rack._ay_lp = None                 # (this sample's yaw rate is unrelated to the ramp above)
-    expect = -(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
+    expect = -(0.027 + fz.TP0) * 1400.0 * 0.58 * (4.0 + fe.ForzaRack.YAW_WEIGHT * 2.6 * 0.42 * 6.0)
     assert rack._front(s, None, None) == pytest.approx(expect, rel=1e-9)
     assert rack._front(fsample(t, ay=None), None, None) is None if False else True
     s2 = fsample(t, ay=4.0, dt='awd', cs=0.0, accel=None)
@@ -72,41 +72,86 @@ def test_the_trail_fades_with_the_slip_over_its_peak():
     rack.reset(CAR)
     lo = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     hi = rack._front(fsample(ay=6.0, cs=0.0, slip_angle=(3.0, -3.0, 0.0, 0.0)), None, None)
-    assert lo == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+    assert lo == pytest.approx(-(0.027 + fz.TP0) * 1400.0 * 0.53 * 6.0)
     # (past 3 peak slips: the axle law's last past-peak factor, the grip in use not known yet; the slip is the mean |slip_angle|)
     far = rack._front(fsample(ay=6.0, cs=3.0, slip_angle=None), None, None)          # (no angle: the combined slip stands in)
     assert far == pytest.approx(hi)
-    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.interp(fz.AXLE_TP_PAST, 3.0) * fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+    assert abs(hi) < abs(lo) and hi == pytest.approx(-(0.027 + fz.axle_fade(None, 3.0 / fz.FORZA_SLIP_PEAK) * fz.TP0) * 1400.0 * 0.53 * 6.0)
     both = fsample(ay=6.0, cs=0.0, puddle=(1.0, 1.0, 0.0, 0.0))
-    assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
+    assert rack._front(both, None, None) == pytest.approx(-(0.027 + fz.TP0 / 2) * 1400.0 * 0.53 * 6.0)
 
 
-def test_the_axle_trail_is_the_use_table_before_the_peak_and_the_past_table_alone_from_it():
+def _grip(rack, mu):
+    """The rack's grip reading settled at mu (played, fade fully in)."""
+    rack._limit_grip._mu, rack._limit_grip._play, rack._limit_grip._blend = mu, mu, 1.0
+
+
+def test_the_axle_fade_is_the_use_table_before_the_peak_the_past_table_beyond_and_smooth():
     assert fz.AXLE_TP_USE[0] == (0.0, 1.0) and 0.7 < fz.FORZA_SLIP_PEAK < 0.9
     tp0 = fz.trail_tp0(1.0)
-    assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.5, 0.5) == pytest.approx(tp0)
-    assert fz.axle_trail(1.0, 1.2, 0.0) == pytest.approx(0.67 * tp0)                  # at the limit and over it: held
-    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.94 * tp0)
-    # past the peak the use table times the past table (1.0 at x = 1): the law's cells past x = 1 where the grip in use is the at-peak one
-    assert fz.AXLE_TP_PAST[0] == (1.0, 1.0)
-    for x, cell in fz.AXLE_TP_PAST_CELLS[1:]:
-        assert fz.axle_trail(1.0, 1.0, x) == pytest.approx(cell * tp0, abs=0.0005 * tp0 / 0.03)
-    for use in (0.5, 0.8, 1.0):                                   # continuous across the peak
-        assert abs(fz.axle_fade(use, 1.0 + 1e-9) - fz.axle_fade(use, 1.0 - 1e-9)) < 0.02
-        assert abs(fz.axle_fade(use, 1.0) - fz.interp(fz.AXLE_TP_USE, use)) < 1e-9
-    assert fz.axle_trail(1.0, None, 1.5) == pytest.approx(fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) and fz.axle_trail(1.0, 0.5, -1.5) == fz.axle_trail(1.0, 0.5, 1.5)
+    assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.25, 0.5) == pytest.approx(tp0)
+    assert fz.axle_trail(1.0, 1.1, 0.0) == pytest.approx(fz.AXLE_TP_USE[-1][1] * tp0)   # at the limit and over it: held
+    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.486 * tp0)
+    lo, hi = fz.AXLE_X_BLEND
+    for u in (0.7, 0.85, 0.95):
+        assert fz.axle_fade(u, 0.5 * lo) == pytest.approx(fz.interp(fz.AXLE_TP_USE, u))          # well before the peak: the use table alone
+        # past the blend the fade does not depend on u (the post-update ACR's cells at x 1-1.3 by u: .29 .31 .08 .11)
+        for x in (hi, 1.0, 1.3, 2.0):
+            assert fz.axle_fade(u, x) == pytest.approx(min(fz.interp(fz.AXLE_TP_PAST, x), fz.interp(fz.AXLE_TP_USE, u)))
+        for x in (1.0, 1.3, 2.0):                                  # at the peak and beyond it nothing depends on u any more
+            assert fz.axle_fade(u, x) == pytest.approx(fz.interp(fz.AXLE_TP_PAST, x))
+        # continuous: no step over 0.02 per 0.01 of x anywhere, and never above the use table
+        xs = [0.01 * k for k in range(0, 300)]
+        fade = [fz.axle_fade(u, x) for x in xs]
+        assert max(abs(b - a) for a, b in zip(fade, fade[1:])) < 0.02
+        assert all(f <= fz.interp(fz.AXLE_TP_USE, u) + 1e-12 and f >= 0.0 for f in fade)
+    assert fz.axle_fade(None, 1.5) == pytest.approx(fz.interp(fz.AXLE_TP_PAST, 1.5))       # no grip yet: past the peak the past table alone
+    assert fz.axle_trail(1.0, 0.5, -1.5) == fz.axle_trail(1.0, 0.5, 1.5)
+    # a weight below one fades the use fade in: none at 0, all at 1
+    assert fz.axle_fade(1.0, 0.0, weight=0.0) == 1.0 and fz.axle_fade(1.0, 0.0, weight=1.0) == pytest.approx(fz.interp(fz.AXLE_TP_USE, 1.0))
+    assert fz.axle_trail(1.0, 1.0, 0.0, weight=0.0) == fz.TP0
     # the kingpin: s over FORZA_SLIP_PEAK, u over mu
-    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.5) == pytest.approx(-(fz.CASTER + fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) * 1000.0)
-    assert fz.kingpin(1000.0, 0.1, tp_scale=0.5, mu=1.0, use=1.2, peak=1.0) == pytest.approx(-(fz.CASTER + 0.5 * 0.67 * tp0) * 1000.0)
+    assert fz.kingpin(1000.0, 1.5 * fz.FORZA_SLIP_PEAK, mu=1.0, use=0.25) == pytest.approx(-(fz.CASTER + fz.interp(fz.AXLE_TP_PAST, 1.5) * tp0) * 1000.0)
+    assert fz.kingpin(1000.0, 0.1, tp_scale=0.5, mu=1.0, use=1.2, peak=1.0) == pytest.approx(-(fz.CASTER + 0.5 * fz.AXLE_TP_USE[-1][1] * tp0) * 1000.0)
     rack = fe.ForzaRack()
     rack.reset(CAR)
-    rack._limit_grip._mu = 1.0
-    full = fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53
+    _grip(rack, 1.0)
+    full = 1400.0 * 0.53
     r = full * 6.0 / (1400.0 * 0.53 * fz.G)
     got = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     assert got == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_USE, r)) * full * 6.0)
     past = rack._front(fsample(ay=6.0, cs=0.0, slip_angle=(2.0 * fz.FORZA_SLIP_PEAK, 2.0 * fz.FORZA_SLIP_PEAK, 0.0, 0.0)), None, None)
-    assert past == pytest.approx(-(0.027 + tp0 * fz.interp(fz.AXLE_TP_USE, r) * fz.interp(fz.AXLE_TP_PAST, 2.0)) * full * 6.0)
+    assert past == pytest.approx(-(0.027 + tp0 * fz.axle_fade(r, 2.0)) * full * 6.0)
+
+
+def test_a_first_grip_reading_fades_in_and_the_played_grip_slews():
+    g = fz.LimitGrip()
+    assert g.play(0.0) == (None, 0.0)
+    g._mu = 1.0
+    mu, b = g.play(10.0)
+    assert mu == 1.0 and b == 0.0                                    # the first reading: the fade not in yet
+    for k in range(5):
+        mu, b = g.play(10.1 + 0.1 * k)
+    assert mu == 1.0 and b == pytest.approx(0.5 / g.BLEND_S)
+    g._mu = 1.3                                                       # the window moved: the played value follows with TAU, no step
+    mu, _ = g.play(10.6)
+    assert mu == pytest.approx(1.0 + 0.1 / g.TAU * 0.3)
+    for k in range(60):
+        mu, b = g.play(10.7 + 0.1 * k)
+    assert b == 1.0 and mu > 1.28
+    assert g.play(16.6) == g.play(16.6)                               # the same time twice: nothing moves
+    # on the rack: the first reading does not drop the trail (u over a fresh mu is 1.2 here) but comes in with the blend
+    rack = fe.ForzaRack()
+    rack.reset(CAR)
+    full = 1400.0 * 0.53
+    none = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    rack._limit_grip._mu = 0.5                                        # r = .61: u = 1.2, the table says its end
+    first = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    assert first == pytest.approx(none)
+    for k in range(40):
+        rack._now = (rack._now or 0.0) + 0.1
+        later = rack._front(fsample(ay=6.0, cs=0.0), None, None)
+    assert abs(later) < abs(first) and later == pytest.approx(-(0.027 + fz.trail_tp0(0.5) * fz.AXLE_TP_USE[-1][1]) * full * 6.0, rel=0.02)
 
 
 def test_the_constants_ratio_14_wheel_375_assist_1_model():
@@ -981,16 +1026,9 @@ def test_the_springs_slip_is_the_games_own_front_slip():
     assert rack._slip(s) == pytest.approx(rack.SLIP_RAD * 0.3)
 
 
-def test_lateral_factor_clips_and_defaults():
-    assert fz.lateral_factor(None) == fz.LATERAL_DEFAULT
-    assert fz.lateral_factor(0.1) == fz.LATERAL_RANGE[0]
-    assert fz.lateral_factor(9.0) == fz.LATERAL_RANGE[1]
-    assert fz.lateral_factor(1.0) == pytest.approx(0.654 + 0.240)
-
-
-def test_front_lateral_scales_by_factor():
-    base = fz.front_lateral(1400.0, 0.58, 4.0, 0.0)
-    assert fz.front_lateral(1400.0, 0.58, 4.0, 0.0, factor=0.46) == pytest.approx(base * 0.5)
+def test_front_lateral_is_newton_with_no_grip_factor():
+    assert fz.front_lateral(1400.0, 0.58, 4.0, 0.0) == pytest.approx(1400.0 * 0.58 * 4.0)
+    assert not hasattr(fz, 'lateral_factor')
 
 
 def _feed(g, t0, secs, ay, speed=20.0, rate=10):
@@ -1018,13 +1056,6 @@ def test_grip_scale_p95_warmup_gap_and_speed():
     assert h.mu() is None
 
 
-def test_lateral_factor_inertial_fit():
-    assert fz.lateral_factor(None, inertial=True) == fz.LATERAL_DEFAULT_INERTIAL
-    assert fz.lateral_factor(9.0, inertial=True) == fz.LATERAL_RANGE_INERTIAL[1]
-    assert fz.lateral_factor(1.0, inertial=True) == pytest.approx(sum(fz.LATERAL_FIT_INERTIAL))
-    assert fz.lateral_factor(1.4, inertial=True) > fz.lateral_factor(1.4)
-
-
 def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     lo, hi = fz.TP0_RANGE
     assert fz.trail_tp0(None) == fz.TP0 and fz.trail_tp0(float('nan')) == fz.TP0
@@ -1036,10 +1067,10 @@ def test_the_no_slip_trail_follows_the_grip_and_is_held_in_range():
     rack = fe.ForzaRack()
     rack.reset(CAR)
     unknown = rack._front(fsample(ay=6.0, cs=0.0), None, None)
-    assert unknown == pytest.approx(-(0.027 + fz.TP0) * fz.LATERAL_DEFAULT_INERTIAL * 1400.0 * 0.53 * 6.0)
-    rack._limit_grip._mu = 0.9
+    assert unknown == pytest.approx(-(0.027 + fz.TP0) * 1400.0 * 0.53 * 6.0)
+    _grip(rack, 0.9)
     low = rack._front(fsample(ay=6.0, cs=0.0), None, None)
-    rack._limit_grip._mu = 1.5
+    _grip(rack, 1.5)
     high = rack._front(fsample(ay=6.0, cs=0.0), None, None)
     assert abs(high) > abs(low)
 
@@ -1107,3 +1138,20 @@ def test_envelope_window_equals_the_batch_envelope_while_samples_come_and_go():
         if i % 250 == 249:
             want = fz.envelope([h[0] for h in held], [h[1] for h in held], 0.05, min_n=5)
             assert win.envelope() == want and want is not None
+
+
+def test_the_peak_slip_ignores_a_thin_tail_bin_and_an_unsupported_one_over_a_flat_top():
+    cen = [0.01, 0.03, 0.06, 0.1, 0.15, 0.25]
+    secs = [5.0, 5.0, 5.0, 5.0, 5.0, 0.4]                    # the tail bin holds 0.4 s of data
+    thick = fz.envelope_peak(cen[:-1], [0.30, 0.70, 0.95, 0.99, 1.00], secs=secs[:-1])
+    top = [0.30, 0.70, 0.95, 0.99, 1.00, 1.03]               # a flat top from 0.1 on, a thin tail bin 3 % over it (a neighbour supports it)
+    assert fz.envelope_peak(cen, top, secs=secs) == pytest.approx(thick)
+    assert fz.envelope_peak(cen, top) > thick                  # (without the seconds that bin moves the 97 % line out)
+    assert fz.envelope_peak(cen, top, secs=[0.1] * 6) == fz.envelope_peak(cen, top)       # under two bins with seconds: all count
+    # a bin 5 % over both its neighbours holds a lot of data but nothing supports it: it does not set the top (the 0.131 -> 0.325 rad hop)
+    cen = [0.01, 0.03, 0.06, 0.085, 0.115, 0.15, 0.195, 0.26, 0.35, 0.5]
+    top = [0.15, 0.27, 0.60, 0.76, 0.85, 0.922, 0.946, 0.941, 0.872, 0.976]
+    flat = fz.envelope_peak(cen, top, secs=[5.0] * 10)
+    assert flat == pytest.approx(fz.envelope_peak(cen[:-1], top[:-1], secs=[5.0] * 9)) and flat < 0.15
+    top[-1] = 0.946                                           # no more than the plateau: the same peak
+    assert fz.envelope_peak(cen, top, secs=[5.0] * 10) == pytest.approx(flat, abs=0.05)
