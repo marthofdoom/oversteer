@@ -68,6 +68,19 @@ def shape(names):
     return out
 
 
+def _car_per_sample(items, times, fallback):
+    """The car live at each of `times` (the last car named at or before it; the first named one before any): a capture can hold two cars."""
+    ts, cs, car = [], [], None
+    for t, s in items:
+        car = s.car or car
+        ts.append(t)
+        cs.append(car)
+    first = next((c for c in cs if c), fallback)
+    cs = np.array([c or first for c in cs], object)
+    i = np.clip(np.searchsorted(ts, np.asarray(times, float), side='right') - 1, 0, max(len(ts) - 1, 0))
+    return cs[i] if len(ts) else np.full(len(times), fallback, object)
+
+
 def refit(names, laws_path):
     import ffb_parity as fp
     import ffb_score as fs
@@ -82,7 +95,7 @@ def refit(names, laws_path):
             cols['gsx'] = laws_mod.gripscale_at(_load(path), cols['t'])
             drives.append((cols, c))
             used.append(os.path.basename(path)[:15])
-            cars.append(info['car'])
+            cars.append(_car_per_sample(_load(path), cols['t'], info['car']))
             out.append('%s: %d samples scored, %d stretches with a grip top' % (used[-1], info['scored'], len(laws_mod.stretch_points(c))))
     laws = laws_mod.fit_laws(drives, used, cars)
     with open(laws_path, 'w') as f:

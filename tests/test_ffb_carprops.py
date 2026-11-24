@@ -37,6 +37,17 @@ def test_each_car_converges_to_its_own_trail_and_scrub(trail, scrub):
     assert rack.ready
 
 
+@pytest.mark.parametrize('trail,scrub', [(0.025, 0.110), (0.020, -0.015)])
+def test_a_long_scrub_and_a_negative_scrub_converge_and_survive_save_and_load(trail, scrub):
+    rack = drive(fe.RackForce(), trail, scrub, 330.0, car='acr/geometry')       # (the scrub slews at SCRUB_SLEW: 110 mm takes 220 s)
+    assert rack.scrub == pytest.approx(scrub, abs=0.004) and rack.trail == pytest.approx(trail, abs=0.003)
+    learnt = rack.scrub
+    rack.reset('acr/other')                                                     # saved on the way out
+    assert json.load(open(cp.STORE.path))['acr/geometry']['scrub'] == pytest.approx(learnt, abs=1e-4)
+    cp.STORE.use(cp.STORE.path)                                                 # a new run reads the file: not clamped back to 0-40 mm
+    assert cp.STORE.get('acr/geometry')[1] == pytest.approx(learnt, abs=1e-4)
+
+
 def test_a_fresh_car_starts_at_the_pooled_values_and_moves_slowly(street):
     rack = drive(fe.RackForce(), 0.008, 0.012, 2.0)
     assert fe.CASTER_TRAIL - 0.008 > fe.CASTER_TRAIL - rack.trail >= 0          # on its way, not there
@@ -44,7 +55,7 @@ def test_a_fresh_car_starts_at_the_pooled_values_and_moves_slowly(street):
 
 
 def test_the_learnt_values_stay_in_the_physical_range():
-    rack = drive(fe.RackForce(), -0.05, 0.2, 120.0)             # a force that wants a negative trail, a huge scrub
+    rack = drive(fe.RackForce(), -0.05, 0.2, 330.0)             # a force that wants a negative trail, a huge scrub
     assert rack.trail == 0.0 and rack.scrub == cp.SCRUB_RANGE[1]
     rack = drive(fe.RackForce(), 0.2, 0.0, 200.0)
     assert rack.trail == cp.TRAIL_RANGE[1]

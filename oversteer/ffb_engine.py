@@ -421,7 +421,7 @@ def front_mz(sample):
 # and surface; 27 mm is also a typical rally-car mechanical trail.
 CASTER_TRAIL = 0.027                    # m
 SCRUB = 0.0155                          # m: the physical scrub radius (the Kickback's amplitude)
-PULL_SCRUB = 0.0094                     # m: Drive pull at 100 %: ACR's own (finalFF fit on 20261103-152713: 9.4 mm; in ACR the
+PULL_SCRUB = 0.0094                     # m: Drive pull at 100 % where no scrub is learnt (RBR, Forza, BeamNG; ACR plays the car's own): one Fabia drive (finalFF fit on 20261103-152713: 9.4 mm; in ACR the
                                         # pull is ~5 % of the force, mostly 5-150 Hz; 15.5 mm came from another drive)
 
 
@@ -546,7 +546,7 @@ class RackForce:
       wheel_torque.STEER_BUDGET of full scale, which is also its hard clamp: the rest stays free for texture and
       impacts. The column's damping, friction and stiffness the driver renders keep a frozen scale
       (COLUMN_SCALE, impedance()). The steering force plays the scrub couple only as "Drive pull" (pull_scrub: the
-      physical SCRUB times the level, off by default; the learnt scrub no longer plays, it only serves the cross-check
+      the car's own learnt scrub times the level where the rack learns one, PULL_SCRUB where none can be learnt, so it also serves the cross-check
       against the game's force). The output never passes RIM_SAFE_NM at the rim. The ratio is learnt per car from the road-wheel angle where the steering
       wheel's lock is known (ffb_carprops.RatioLearner), from the car table (+ a 0.13 m steering arm) until
       then. The car's
@@ -601,7 +601,7 @@ class RackForce:
                                          # CLASSIC_SCALE x strength x torque / peak, clamped at the budget, no hydraulic
                                          # top end, damping at the same scale)
     pull_on = OVERALL_PULL               # "Drive pull": the scrub couple of the drive's left/right split in the force ...
-    pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the physical SCRUB
+    pull_level = OVERALL_PULL_LEVEL / 100.0     # ... at this share of the car's scrub
     kick_on = ffb_kick.OVERALL_KICK      # "Kickback": the onset pulse of the scrub couple (ffb_kick) ...
     kick_level = ffb_kick.OVERALL_KICK_LEVEL / 100.0   # ... at this share of its amplitude
     COLUMN_SCALE = 0.30                  # the column damping, friction and stiffness scale on the G29 class (frozen: it
@@ -1083,8 +1083,8 @@ class RackForce:
         where it has, the game's own gain-against-load curve (fitted live, AssistDetector.curve) scaled so the
         car's p99 lands where our class model puts it, so the assist is not stacked."""
         trail = self.trail if trail is None else trail
-        # the scrub couple only as "Drive pull" (pull_scrub), unfiltered like ACR's own finalFF has it; the learnt
-        # per-car scrub (self.scrub) is no longer played, it only serves the fit and the cross-check
+        # the scrub couple only as "Drive pull" (pull_scrub: the car's own learnt scrub where the rack learns one, else PULL_SCRUB), unfiltered
+        # like ACR's own finalFF has it
         scrub = self.pull_scrub() if scrub is None else scrub
         hyd = not self.classic()
         mz = self._front(sample, trail, scrub)
@@ -1115,9 +1115,16 @@ class RackForce:
         """The classic steering mapping is on (the INI's countersteer_mapping = classic)."""
         return self.mapping == 'classic'
 
-    def pull_scrub(self):
-        """The scrub radius (m) the steering force plays: PULL_SCRUB times the Drive pull level, 0 with it off."""
-        return PULL_SCRUB * self.pull_level if self.pull_on else 0.0
+    def pull_scrub(self, own=None):
+        """The scrub radius (m) the steering force plays: the Drive pull level times the car's own scrub where the rack learns it from the game's
+        tyre forces (self.scrub: the stored or default SCRUB until the learner moves it, slewed by it, so learning starts with no step; the couple
+        is that car's scrub x dFx, and its sign is physical: a Delta S4 has a negative one), PULL_SCRUB where nothing can be learnt (RBR, Forza,
+        BeamNG); 0 with Drive pull off. `own`: the scrub of a held fit (a fade out after a car change), in place of self.scrub."""
+        if not self.pull_on:
+            return 0.0
+        if self.LEARNS:
+            return (self.scrub if own is None else own) * self.pull_level
+        return PULL_SCRUB * self.pull_level
 
     def rim_mm(self):
         """The wheel's rim diameter in mm: the user's, else the table's, else the G29's."""
@@ -1162,7 +1169,7 @@ class RackForce:
         to the lock, and a driver holds it); the force is not faded, only bounded to REVERSE_MAX of full scale, so a
         spin never holds the wheel at the stop with the whole of it."""
         held = None if self.ready else self._held_fit
-        torque = self.rim_torque(sample, held[0], None, held[2], held[3]) if held is not None else self.rim_torque(sample)
+        torque = self.rim_torque(sample, held[0], self.pull_scrub(held[1]), held[2], held[3]) if held is not None else self.rim_torque(sample)
         if torque is None:
             return 0
         self.last_torque = torque                # (for the hand-force summary: the car's torque this sample)
@@ -1497,8 +1504,8 @@ class RbrRack(RackForce):
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
     DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
-    # ACR's tyres (Fabia, the two fronts' summed Mz over their summed Fy, speed over 8 m/s; drives 20261105-162134 tarmac, 20261104-143823
-    # and 20261104-213208 gravel): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 34 mm at 0.95, 38 mm at 1.2), and it
+    # ACR's tyres since the game's 2026-11-19 update (the two fronts' summed Mz over their summed Fy, speed over 8 m/s; the seven drives named in
+    # scripts/ffb_laws.json 'sources'): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 34.5 mm at 0.95, 38.8 at 1.2), and it
     # fades with the AXLE's grip in USE, u = (Fy / Fz) / mu of the front pair, and past the peak by alpha / alpha_peak: ffb_forza.AXLE_TP_USE
     # and AXLE_TP_PAST, the median over the 60 s stretches of the seven post-update drives (ffb_laws.json 'axle'; the rack works at the axle: Fy_f, its
     # load, its grip, so the law is the axle's, not one tyre's)
@@ -1668,6 +1675,7 @@ class RbrRack(RackForce):
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
         # (both are PLAYED values: they slew toward what the window's envelope last said, DERIVED_LIMIT_TAU, so a recompute is no step in the torque)
         self._mu_goal, self._peak_goal, self._limit_seen = self.grip_mu, self.slip_peak, False
+        self._mu_lift = 0.0              # (how far the working grip stands over the played one: the r already shown before a top, then slewed away)
         self._win = collections.deque()  # (the window of (clock, |alpha|, Fy_f / Fz), 20 Hz, over DERIVED_WINDOW s)
         self._grip_clock, self._win_at, self._env_at = 0.0, None, 0.0
         self._win_env = ffb_forza.EnvelopeWindow(self.DERIVED_WINDOW_STEP, min_n=5)         # (the window's envelope, kept incrementally)
@@ -1895,14 +1903,17 @@ class RbrRack(RackForce):
         k = min(dt / self.DERIVED_LIMIT_TAU, 1.0)
         self.grip_mu += k * (self._mu_goal - self.grip_mu)
         self.slip_peak += min(dt / self.DERIVED_PEAK_TAU, 1.0) * (self._peak_goal - self.slip_peak)
+        # before a top the working grip is at least the smoothed r shown; once one is seen the lift slews away with the played grip (a flip is no step)
+        self._mu_lift = max(0.0, self._grip_r - self.grip_mu) if not self._limit_seen else self._mu_lift * (1.0 - k)
         mu = self._mu_work()
         x = 0.0 if alpha is None or not ffb_forza.finite(alpha) else abs(alpha) / self.slip_peak
         return self._tp0() * ffb_forza.axle_fade(self._grip_r / mu, x)
 
     def _mu_work(self):
         """The grip u and the no-slip trail are read over: the played grip_mu; until a top has been seen (the prior) at least the smoothed
-        loaded r already shown, which is itself proof of that much grip (so u never passes 1 on a prior that was too low)."""
-        return self.grip_mu if self._limit_seen else max(self.grip_mu, self._grip_r)
+        loaded r already shown, which is itself proof of that much grip (so u never passes 1 on a prior that was too low). That lift over
+        grip_mu (_mu_lift) slews away once a top is seen, so the flip moves nothing at once."""
+        return self.grip_mu + self._mu_lift
 
     def _band_of(self, mu):
         """The grip band the peak is read in at the grip mu: the plain band, but the band moves only once mu is DERIVED_BAND_HYST past its edge (a

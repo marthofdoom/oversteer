@@ -1772,12 +1772,12 @@ def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted
         assert trail_rack(mu)._tp0() == pytest.approx(fz.trail_tp0(mu))
     assert trail_rack(0.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[0])._tp0())
     assert trail_rack(1.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[1])._tp0())
-    assert 0.033 < trail_rack(0.95)._tp0() < 0.035 and 0.037 < trail_rack(1.2)._tp0() < 0.039      # ACR since 2026-11-19, cars weighed equally: 34 mm gravel, 38 mm tarmac
+    assert 0.034 < trail_rack(0.95)._tp0() < 0.035 and 0.038 < trail_rack(1.2)._tp0() < 0.040      # ACR since 2026-11-19, cars weighed equally, one per stretch: 34.5 mm gravel, 38.8 mm tarmac
 
 
 def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
     rack = fe.RbrRack
-    for use, want in ((0.25, 1.0), (0.725, 0.714), (1.2, 0.486)):
+    for use, want in ((0.25, 1.0), (0.725, 0.718), (1.2, 0.474)):
         r = trail_rack(1.0, use)
         tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
         assert tp == pytest.approx(r._tp0() * want)
@@ -1845,13 +1845,29 @@ def test_trail_past_the_peak_factor():
 def test_before_a_top_the_working_grip_is_at_least_the_r_already_shown():
     r = trail_rack(0.9, 1.1)                     # the prior .9, a smoothed loaded r of 1.1 on tarmac: proof of more grip
     r._limit_seen = False
-    assert r._mu_work() == pytest.approx(1.1)
     tp = r._grip_trail(1.1, 1.0, 0.0, 20.0)
+    assert r._mu_work() == pytest.approx(1.1)
     assert tp == pytest.approx(fz.trail_tp0(1.1) * fz.interp(fz.AXLE_TP_USE, 1.0))     # u 1.0, not 1.22: the table's end is not reached on a low prior
     r._grip_r = 0.5
+    r._grip_trail(0.5, 1.0, 0.0, 20.0)
     assert r._mu_work() == pytest.approx(0.9)    # r under the prior: the prior stands
     r._limit_seen, r._grip_r = True, 1.1
-    assert r._mu_work() == pytest.approx(0.9)    # a top has been seen: the played grip is the data's, whatever r reads
+    r._grip_trail(1.1, 1.0, 10.0 * r.DERIVED_LIMIT_TAU, 20.0)
+    assert r._mu_work() == pytest.approx(r.grip_mu, abs=1e-3)     # a top has been seen: the played grip is the data's, whatever r reads
+
+
+def test_the_flip_to_a_seen_top_moves_the_working_grip_continuously():
+    r = trail_rack(0.9, 1.1)
+    r._limit_seen, r._mu_goal = False, 0.9
+    r._grip_trail(1.1, 1.0, 0.0, 20.0)
+    before = r._mu_work()
+    r._limit_seen = True                         # the recompute saw a top at the prior's own value
+    r._grip_trail(1.1, 1.0, 0.005, 20.0)
+    after = r._mu_work()
+    assert before == pytest.approx(1.1) and 0.9 < after < before and before - after < 0.01     # a slew, not a drop to 0.9
+    for _ in range(5000):
+        r._grip_trail(1.1, 1.0, 0.005, 20.0)
+    assert r._mu_work() == pytest.approx(0.9, abs=0.01)
 
 
 def test_the_played_grip_and_peak_slew_toward_the_envelope_with_no_step():

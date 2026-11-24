@@ -177,3 +177,29 @@ def test_the_axle_law_is_the_median_over_the_stretches_and_the_checks_read_it():
     cols = _drive([0.9] * 3 + [1.25] * 3, [0.3] * 3 + [0.15] * 3, _tyre, seed=5)
     laws['cells'] = {k: 3.0 * v for k, v in laws['cells'].items()}           # (the reference table is not what is checked against)
     assert not any(r[6] for r in laws_mod.trail_check(laws, laws_mod.causes(cols, DT), DT))
+
+
+def test_a_capture_with_two_cars_labels_each_stretch_by_its_own_car():
+    cols = _drive([0.85] * 3 + [1.3] * 3, [0.3] * 3 + [0.15] * 3, _tyre)
+    c = laws_mod.causes(cols, DT)
+    car = np.where(cols['t'] < 120, 'A', 'B').astype(object)           # the first two stretches one car, the rest another
+    assert laws_mod.car_at([car], 0, c['seg'] == c['seg'][0]) == 'A'
+    assert laws_mod.car_at([car], 0, c['seg'] == c['seg'][-1]) == 'B'
+    assert laws_mod.car_at(['X'], 0, c['seg'] == c['seg'][0]) == 'X' and laws_mod.car_at(None, 0, c['seg'] >= 0) is None
+    two = laws_mod.fit_laws([(cols, c)], ['x'], [car])['tp0']
+    one = laws_mod.fit_laws([(cols, c)], ['x'], ['A'])['tp0']
+    assert two != one
+
+
+def test_car_per_sample_follows_the_car_named_at_each_time():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('ffb_new_game', os.path.join(os.path.dirname(__file__), '..', 'scripts', 'ffb-new-game.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class S:
+        def __init__(self, car):
+            self.car = car
+    items = [(0.0, S(None)), (1.0, S('A')), (2.0, S('A')), (3.0, S('B')), (4.0, S(None))]
+    got = mod._car_per_sample(items, [0.0, 1.5, 2.9, 3.0, 9.0], 'Z')
+    assert list(got) == ['A', 'A', 'A', 'B', 'B']

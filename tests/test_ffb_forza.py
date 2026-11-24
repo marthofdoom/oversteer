@@ -91,7 +91,7 @@ def test_the_axle_fade_is_the_use_table_before_the_peak_the_past_table_beyond_an
     tp0 = fz.trail_tp0(1.0)
     assert fz.axle_trail(1.0) == pytest.approx(tp0) and fz.axle_trail(1.0, 0.25, 0.5) == pytest.approx(tp0)
     assert fz.axle_trail(1.0, 1.1, 0.0) == pytest.approx(fz.AXLE_TP_USE[-1][1] * tp0)   # at the limit and over it: held
-    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.486 * tp0)
+    assert fz.axle_trail(1.0, 0.95, 0.0) == pytest.approx(0.474 * tp0)
     lo, hi = fz.AXLE_X_BLEND
     for u in (0.7, 0.85, 0.95):
         assert fz.axle_fade(u, 0.5 * lo) == pytest.approx(fz.interp(fz.AXLE_TP_USE, u))          # well before the peak: the use table alone

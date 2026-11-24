@@ -223,6 +223,25 @@ def test_a_car_change_holds_the_playing_model_through_the_fade():
     assert rack.force(s) == pytest.approx(held)
 
 
+def test_a_car_change_keeps_the_old_cars_pull_couple_through_the_fade_and_pull_off_is_zero():
+    s = sample_at(130.0)
+    s.tyre_fx = (800.0, -800.0, 0.0, 0.0)
+    forces = {}
+    for on in (True, False):
+        rack = rack_for(3.5, assist=0.0)
+        rack.LEARNS, rack.scrub, rack.pull_on, rack.pull_level = True, 0.137, on, 1.0     # (a 124's long scrub)
+        rack.hold()
+        before = rack.force(s)
+        rack.reset('acr/y')                                       # the next car (a Delta S4's negative scrub) arrives
+        rack.LEARNS, rack.scrub, rack.ready = True, -0.020, False
+        rack._held_fit = (rack.trail, 0.137, rack.ratio, 0.0)     # (what hold() kept of the old car, its trail and ratio too)
+        forces[on] = (before, rack.force(s))
+    assert forces[True][1] == pytest.approx(forces[True][0])      # no step in the played couple
+    assert forces[False][1] == pytest.approx(forces[False][0])
+    assert forces[True][0] != pytest.approx(forces[False][0])    # (the couple is really in the first)
+    assert rack_for(3.5).pull_scrub(0.137) == pytest.approx(0.0 if not rack_for().pull_on else fe.PULL_SCRUB)    # (LEARNS off: the constant, whatever is held)
+
+
 def test_the_gates_still_use_the_games_raw_force_not_its_level():
     ok = fitted(game_gain=0.4)
     big = fitted(game_gain=3.0)
@@ -462,20 +481,31 @@ def test_the_classic_driver_from_column_has_no_hydraulic_top_end(street):
     assert abs(rack.rim_torque(sample_at(550.0))) < wheel_torque.HYD_TOP_NM
 
 
-def test_drive_pull_plays_the_physical_scrub_couple_at_its_level_in_both_mappings_and_is_on_at_100_by_default():
+def test_drive_pull_plays_the_cars_own_scrub_couple_at_its_level_in_both_mappings_and_is_on_at_100_by_default():
     s = sample_at(100.0)
     s.tyre_fx = (800.0, -800.0, 0.0, 0.0)
     for mapping in ('classic', 'knee'):
-        rack = rack_for(3.5)
-        rack.mapping, rack.assist = mapping, 0.0                  # (unassisted: the torque is the column's)
-        rack.scrub = 0.02                                         # the learnt scrub is never played
-        assert rack.pull_on is True and rack.pull_scrub() == pytest.approx(fe.PULL_SCRUB)
+        for own in (0.02, -0.015):                                # (a Delta S4's scrub is negative: the couple turns the other way)
+            rack = rack_for(3.5)
+            rack.mapping, rack.assist = mapping, 0.0              # (unassisted: the torque is the column's)
+            rack.LEARNS, rack.scrub = True, own                   # (a rack that learns from the game: the learnt scrub is what plays)
+            assert rack.pull_on is True and rack.pull_scrub() == pytest.approx(own)
+            rack.pull_on = False
+            assert rack.pull_scrub() == 0.0
+            plain = rack.rim_torque(s) * rack.ratio
+            rack.pull_on, rack.pull_level = True, 0.35
+            assert rack.pull_scrub() == pytest.approx(0.35 * own)
+            assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * own * 1600.0)
+
+
+def test_drive_pull_keeps_the_constant_where_no_scrub_is_learnt():
+    assert fe.RbrRack().pull_scrub() == 0.0                       # (RBR has no Drive pull at all)
+    for cls in (fe.ForzaRack, fe.BeamNGRack):
+        rack = cls()
+        rack.scrub, rack.pull_on, rack.pull_level = 0.05, True, 1.0
+        assert rack.pull_scrub() == pytest.approx(fe.PULL_SCRUB * rack.pull_level)
         rack.pull_on = False
         assert rack.pull_scrub() == 0.0
-        plain = rack.rim_torque(s) * rack.ratio
-        rack.pull_on, rack.pull_level = True, 0.35
-        assert rack.pull_scrub() == pytest.approx(0.35 * fe.PULL_SCRUB)
-        assert rack.rim_torque(s) * rack.ratio == pytest.approx(plain - 0.35 * fe.PULL_SCRUB * 1600.0)
 
 
 def test_the_classic_align_stiffness_carries_the_scale_and_the_strength():

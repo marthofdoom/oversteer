@@ -31,7 +31,11 @@ PRIOR_W = 300.0                          # the prior's weight, in samples (about
 SIGMA = (100.0, 3000.0, 600.0)           # Nm, N, N: the features' usual size (the fit is made in these units)
 SOLVE_EVERY = 0.25                       # s of sample time
 TRAIL_RANGE = (0.0, 0.060)               # m
-SCRUB_RANGE = (0.0, 0.040)
+# The scrub is the car's own geometry, not another force: a fit of ACR's own force on Mz, Fy and dFx (braking, throttle and coast fitted apart,
+# also with left-right load and steer x load as extra regressors) gives 124 119-137 mm in every state, Alpine A110 88-106 mm (three drives),
+# GTA 61-80, Audi Gr4 38-73, Fabia 21-38 and Lancia Delta S4 NEGATIVE, -4 to -21 mm, in every state. About 100 mm positive was normal on old
+# cars and a negative scrub is a known layout, so the bound admits all of them (and nothing past what a road wheel can have).
+SCRUB_RANGE = (-0.040, 0.140)
 TRAIL_DEFAULT, SCRUB_DEFAULT = 0.027, 0.0155    # m: ffb_engine.CASTER_TRAIL, SCRUB (a car stored for its mass alone)
 MASS_RANGE = (700.0, 2600.0)             # kg: a learnt mass (ffb_forza.MassLearner) is kept in this
 MASS_SAVE_STEP = 10.0                    # kg: a mass moved this far from what was saved is worth saving

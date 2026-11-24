@@ -7,6 +7,7 @@ import os
 import struct
 import subprocess
 import sys
+import time
 from unittest import mock
 
 import pytest
@@ -441,7 +442,11 @@ def test_ffb_tuning_wish_is_kept_and_a_new_recorder_resumes_it(tmp_path, caplog)
     me = _ffb_gui(tmp_path, True)
     with caplog.at_level(logging.INFO):
         Gui.apply_telemetry_capture(me)
-    assert me.telemetry_recorder._ffb_pending is True and me.ffb_tuning_on      # the writer applies it
+    rec = me.telemetry_recorder
+    deadline = time.monotonic() + 5.0
+    while not rec.ffb_tuning and time.monotonic() < deadline:       # the writer thread applies the switch and clears _ffb_pending: wait for that, not for the flag
+        time.sleep(0.01)
+    assert rec.ffb_tuning and rec._ffb_pending is None and me.ffb_tuning_on
     assert 'FFB tuning recording on (saved)' in caplog.text
     me.telemetry_capture_on = False                   # recording off: the saved wish stays
     Gui.apply_telemetry_capture(me)
