@@ -1115,14 +1115,16 @@ class RackForce:
         """The classic steering mapping is on (the INI's countersteer_mapping = classic)."""
         return self.mapping == 'classic'
 
-    def pull_scrub(self):
+    def pull_scrub(self, own=None):
         """The scrub radius (m) the steering force plays: the Drive pull level times the car's own scrub where the rack learns it from the game's
         tyre forces (self.scrub: the stored or default SCRUB until the learner moves it, slewed by it, so learning starts with no step; the couple
         is that car's scrub x dFx, and its sign is physical: a Delta S4 has a negative one), PULL_SCRUB where nothing can be learnt (RBR, Forza,
-        BeamNG); 0 with Drive pull off."""
+        BeamNG); 0 with Drive pull off. `own`: the scrub of a held fit (a fade out after a car change), in place of self.scrub."""
         if not self.pull_on:
             return 0.0
-        return (self.scrub if self.LEARNS else PULL_SCRUB) * self.pull_level
+        if self.LEARNS:
+            return (self.scrub if own is None else own) * self.pull_level
+        return PULL_SCRUB * self.pull_level
 
     def rim_mm(self):
         """The wheel's rim diameter in mm: the user's, else the table's, else the G29's."""
@@ -1167,7 +1169,7 @@ class RackForce:
         to the lock, and a driver holds it); the force is not faded, only bounded to REVERSE_MAX of full scale, so a
         spin never holds the wheel at the stop with the whole of it."""
         held = None if self.ready else self._held_fit
-        torque = self.rim_torque(sample, held[0], None, held[2], held[3]) if held is not None else self.rim_torque(sample)
+        torque = self.rim_torque(sample, held[0], self.pull_scrub(held[1]), held[2], held[3]) if held is not None else self.rim_torque(sample)
         if torque is None:
             return 0
         self.last_torque = torque                # (for the hand-force summary: the car's torque this sample)

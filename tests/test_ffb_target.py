@@ -223,6 +223,25 @@ def test_a_car_change_holds_the_playing_model_through_the_fade():
     assert rack.force(s) == pytest.approx(held)
 
 
+def test_a_car_change_keeps_the_old_cars_pull_couple_through_the_fade_and_pull_off_is_zero():
+    s = sample_at(130.0)
+    s.tyre_fx = (800.0, -800.0, 0.0, 0.0)
+    forces = {}
+    for on in (True, False):
+        rack = rack_for(3.5, assist=0.0)
+        rack.LEARNS, rack.scrub, rack.pull_on, rack.pull_level = True, 0.137, on, 1.0     # (a 124's long scrub)
+        rack.hold()
+        before = rack.force(s)
+        rack.reset('acr/y')                                       # the next car (a Delta S4's negative scrub) arrives
+        rack.LEARNS, rack.scrub, rack.ready = True, -0.020, False
+        rack._held_fit = (rack.trail, 0.137, rack.ratio, 0.0)     # (what hold() kept of the old car, its trail and ratio too)
+        forces[on] = (before, rack.force(s))
+    assert forces[True][1] == pytest.approx(forces[True][0])      # no step in the played couple
+    assert forces[False][1] == pytest.approx(forces[False][0])
+    assert forces[True][0] != pytest.approx(forces[False][0])    # (the couple is really in the first)
+    assert rack_for(3.5).pull_scrub(0.137) == pytest.approx(0.0 if not rack_for().pull_on else fe.PULL_SCRUB)    # (LEARNS off: the constant, whatever is held)
+
+
 def test_the_gates_still_use_the_games_raw_force_not_its_level():
     ok = fitted(game_gain=0.4)
     big = fitted(game_gain=3.0)
