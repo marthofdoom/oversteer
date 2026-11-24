@@ -1497,8 +1497,8 @@ class RbrRack(RackForce):
     # the corner with the most reach inside 15 ms (second order, 16.1 Hz, 14.0 ms: 1.46) and a rdot needs none
     DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
-    # ACR's tyres (Fabia, the two fronts' summed Mz over their summed Fy, speed over 8 m/s; drives 20261105-162134 tarmac, 20261104-143823
-    # and 20261104-213208 gravel): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 34 mm at 0.95, 38 mm at 1.2), and it
+    # ACR's tyres since the game's 2026-11-19 update (the two fronts' summed Mz over their summed Fy, speed over 8 m/s; the seven drives named in
+    # scripts/ffb_laws.json 'sources'): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 34.5 mm at 0.95, 38.8 at 1.2), and it
     # fades with the AXLE's grip in USE, u = (Fy / Fz) / mu of the front pair, and past the peak by alpha / alpha_peak: ffb_forza.AXLE_TP_USE
     # and AXLE_TP_PAST, the median over the 60 s stretches of the seven post-update drives (ffb_laws.json 'axle'; the rack works at the axle: Fy_f, its
     # load, its grip, so the law is the axle's, not one tyre's)
