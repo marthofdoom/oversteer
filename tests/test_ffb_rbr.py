@@ -1772,12 +1772,12 @@ def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted
         assert trail_rack(mu)._tp0() == pytest.approx(fz.trail_tp0(mu))
     assert trail_rack(0.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[0])._tp0())
     assert trail_rack(1.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[1])._tp0())
-    assert 0.033 < trail_rack(0.95)._tp0() < 0.035 and 0.037 < trail_rack(1.2)._tp0() < 0.039      # ACR since 2026-11-19, cars weighed equally: 34 mm gravel, 38 mm tarmac
+    assert 0.034 < trail_rack(0.95)._tp0() < 0.035 and 0.038 < trail_rack(1.2)._tp0() < 0.040      # ACR since 2026-11-19, cars weighed equally, one per stretch: 34.5 mm gravel, 38.8 mm tarmac
 
 
 def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
     rack = fe.RbrRack
-    for use, want in ((0.25, 1.0), (0.725, 0.714), (1.2, 0.486)):
+    for use, want in ((0.25, 1.0), (0.725, 0.718), (1.2, 0.474)):
         r = trail_rack(1.0, use)
         tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
         assert tp == pytest.approx(r._tp0() * want)

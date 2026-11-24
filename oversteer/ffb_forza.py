@@ -39,24 +39,25 @@ CASTER = 0.027                           # m: the mechanical trail
 # .93-1.01: no loose-surface deficit, so no grip-dependent factor.
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
 # The no-slip trail follows the grip (ACR's tyres since the game's 2026-11-19 tyre update: 40 mm at mu 1.34, 30 at .66; scripts/ffb_laws.json
-# tp0 = 19.7 + 15.1 mu mm over the cars weighed equally, mu the
+# tp0 = 18.2 + 17.2 mu mm over the cars weighed equally (each stretch labelled by the car live at its time), mu the
 # tyres' Fy/Fz top), mu from LimitGrip. TP0 stays the value until it has a limit sample.
-TP0_FIT = (0.01970, 0.01515)            # m, m per unit of mu
+TP0_FIT = (0.01817, 0.01721)            # m, m per unit of mu
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
 # The pneumatic trail fades with the front AXLE's grip in use u = r / mu (r = Fy_f / Fz of the axle, mu its grip top) well before the slip
 # peak, and past it with slip over the peak slip x alone, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
 # only game that sends them; scripts/ffb_laws.json 'axle' 'form': per 60 s stretch, the median over the stretches of 7 drives of the game's
 # update of 2026-11-19, each car weighing the same; the pre-update law is scripts/ffb_laws_pre_20261119.json, never pooled with it), over
-# the no-slip line TP0_FIT. Past the peak the fade hardly depends on u (x 1-1.3 by u: .29 at u .65-.8, .31 .8-.9, .08 .9-1, .11 over, on the first peak definition), so the
+# the no-slip line TP0_FIT. Past the peak the fade does depend on u (the cells at x 1-1.3 by u: .28 at u .65-.8, .26 .8-.9, .17 .9-1, .13 over) but the law keeps one
+# absolute curve of x, the median over u (rms against the (u, x) cells .057), so the
 # law is USE(u) below AXLE_X_BLEND[0] and the absolute AXLE_TP_PAST(x) above AXLE_X_BLEND[1], a smoothstep weight between them (no step, no
 # kink); never above USE(u). One function, axle_fade, for ForzaRack, RbrRack's trail and its aligning spring (tables read as (x, y), held at the ends).
-AXLE_TP_USE = ((0.0, 1.0), (0.25, 1.0), (0.575, 0.835), (0.725, 0.714), (0.85, 0.608), (0.95, 0.486))
+AXLE_TP_USE = ((0.0, 1.0), (0.25, 1.0), (0.575, 0.829), (0.725, 0.718), (0.85, 0.592), (0.95, 0.474))
 AXLE_X_BLEND = (0.5, 0.7)
 # (x past 1.6: the fitted cells are 0.03, -0.05, -0.06 with a spread of about 0.03 each: no trail resolved from zero, held at 0, never negative)
-AXLE_TP_PAST = ((0.6, 0.583), (0.775, 0.457), (0.925, 0.314), (1.075, 0.203), (1.225, 0.103), (1.4, 0.041), (1.6, 0.0))
+AXLE_TP_PAST = ((0.6, 0.610), (0.775, 0.485), (0.925, 0.310), (1.075, 0.225), (1.225, 0.108), (1.4, 0.041), (1.6, 0.0))
 # the grip in use at the slip over the peak slip (the same stretches' median u by x): what the aligning spring's shape takes for u
-AXLE_U_OF_X = ((0.0, 0.0), (0.1, 0.175), (0.3, 0.455), (0.5, 0.664), (0.7, 0.787), (0.9, 0.876), (1.15, 0.913), (1.65, 0.953))
+AXLE_U_OF_X = ((0.0, 0.0), (0.1, 0.177), (0.3, 0.458), (0.5, 0.673), (0.7, 0.797), (0.9, 0.881), (1.15, 0.913), (1.65, 0.953))
 
 
 def interp(table, x):
@@ -228,7 +229,7 @@ class LimitGrip:
 
 
 TP0_MU_RANGE = (0.659, 1.342)            # the grips the law was fitted over (scripts/ffb_laws.json mu_range): not extrapolated past them
-TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 29.7-40.0 mm
+TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 29.5-41.3 mm
 
 
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI):
