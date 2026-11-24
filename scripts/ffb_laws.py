@@ -198,6 +198,15 @@ def car_weights(cars):
     return np.array([1.0 / count[c] for c in cars])
 
 
+def car_at(cars, di, m):
+    """The car of drive `di` at the first sample of mask `m`: `cars[di]` is one label (a drive of one car) or an array of labels per sample
+    (a capture that changed car); None without cars."""
+    if cars is None:
+        return None
+    c = cars[di]
+    return c if isinstance(c, str) or c is None else c[np.flatnonzero(m)[0]]
+
+
 def wmedian(values, weights=None):
     """The weighted median (the first value whose cumulative weight reaches half); the plain median without weights."""
     v = np.asarray(values, float)
@@ -234,9 +243,10 @@ def _cells(c, ok):
 def fit_laws(drives, names=(), cars=None):
     """The laws from ACR drives [(cols, causes)]: tp0 = a + b mu over the stretches, then the median per cell of each sample's
     trail over its stretch's tp0 (per sample: ratios of cell medians are not trails), and the peak slip per grip band; the same
-    over the stretches as 'axle' (fit_axle). `cars`: the car of each drive; given, every pooling weighs each car the same."""
+    over the stretches as 'axle' (fit_axle). `cars`: the car of each drive (one label, or per-sample labels when a drive changed car); given, every pooling weighs each car the same."""
     pts = [p for _cols, c in drives for p in stretch_points(c)]
-    pcar = None if cars is None else [cars[i] for i, (_cols, c) in enumerate(drives) for _p in stretch_points(c)]
+    pcar = None if cars is None else [car_at(cars, i, (c['seg'] == g) & c['reached']) for i, (_cols, c) in enumerate(drives)
+                                      for g in np.unique(c['seg']) if ((c['seg'] == g) & c['reached']).any()]
     a, b, n = _line(pts, cars=pcar)
     if not n or not b:
         raise ValueError('the ACR drives give no line of no-slip trail against grip (%d stretches with a top)' % n)
@@ -279,7 +289,7 @@ def fit_axle(drives, pts, a, b, cars=None):
             for g in np.unique(c['seg'][m]):
                 k = m & (c['seg'] == g)
                 if k.sum() >= AXLE_CELL_N:
-                    per.setdefault(name, []).append((None if cars is None else cars[di], float(np.median(f[k]))))
+                    per.setdefault(name, []).append((car_at(cars, di, k), float(np.median(f[k]))))
     cells = {k: wmedian([v for _c, v in vs], car_weights([c for c, _v in vs]) if cars is not None else None)
              for k, vs in per.items() if len(vs) >= AXLE_CELL_STRETCHES}
     spread = {k: float(max([abs(np.median(x) / cells[k] - 1) for x in drive_f[k] if len(x) >= 200] or [0.0])) for k in cells}
@@ -313,7 +323,7 @@ def _stretch_arrays(drives, a, b, cars):
             f = c['tp'] / (a + b * c['mu'])
         for g in np.unique(c['seg'][ok]):
             m = ok & (c['seg'] == g)
-            out.append((None if cars is None else cars[di], c['u'][m], c['x'][m], f[m]))
+            out.append((car_at(cars, di, m), c['u'][m], c['x'][m], f[m]))
     return out
 
 
