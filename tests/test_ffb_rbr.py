@@ -1762,6 +1762,7 @@ def test_the_trail_follows_the_grip_the_car_has_shown_without_being_told_the_sur
 def trail_rack(mu=1.0, r=0.0):
     rack = derived_rack()
     rack.grip_mu, rack._grip_r = mu, r
+    rack._mu_goal, rack._peak_goal, rack._limit_seen = mu, rack.slip_peak, True       # (a grip the rack has shown, played already)
     return rack
 
 
@@ -1771,12 +1772,12 @@ def test_no_slip_trail_is_the_line_through_the_tyres_over_the_grip_it_was_fitted
         assert trail_rack(mu)._tp0() == pytest.approx(fz.trail_tp0(mu))
     assert trail_rack(0.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[0])._tp0())
     assert trail_rack(1.5)._tp0() == pytest.approx(trail_rack(fz.TP0_MU_RANGE[1])._tp0())
-    assert 0.035 < trail_rack(0.95)._tp0() < 0.038 and 0.040 < trail_rack(1.2)._tp0() < 0.044      # ACR since 2026-11-19: 36 mm gravel, 42 mm tarmac
+    assert 0.033 < trail_rack(0.95)._tp0() < 0.035 and 0.037 < trail_rack(1.2)._tp0() < 0.039      # ACR since 2026-11-19, cars weighed equally: 34 mm gravel, 38 mm tarmac
 
 
 def test_trail_use_factor_is_one_at_low_use_and_fades_at_the_limit():
     rack = fe.RbrRack
-    for use, want in ((0.25, 1.0), (0.65, 0.75), (1.2, 0.21)):
+    for use, want in ((0.25, 1.0), (0.725, 0.714), (1.2, 0.486)):
         r = trail_rack(1.0, use)
         tp = r._grip_trail(use, 1.0, 0.0, 20.0)         # dt 0: nothing moves
         assert tp == pytest.approx(r._tp0() * want)
@@ -1825,18 +1826,58 @@ def test_sat_div_is_finite_and_positive():
 
 
 def test_trail_past_the_peak_factor():
-    rack = fe.RbrRack
-    r = trail_rack(1.0, 0.25)
-    base = r._tp0()
-    assert r._grip_trail(0.25, 1.0, 0.0, 20.0, 0.5 * r.slip_peak) == pytest.approx(base)
-    # continuous across the peak, and where the grip in use is the at-peak one the rack plays the law's cells
-    for use in (0.5, 0.8, 1.0):
-        rr = trail_rack(1.0, use)
-        step = rr._grip_trail(use, 1.0, 0.0, 20.0, 1.0001 * rr.slip_peak) - rr._grip_trail(use, 1.0, 0.0, 20.0, 0.9999 * rr.slip_peak)
-        assert abs(step) < 0.02 * rr._tp0()
-    rr = trail_rack(1.0, 1.0)
-    for x, cell in fz.AXLE_TP_PAST_CELLS[1:]:
-        assert rr._grip_trail(1.0, 1.0, 0.0, 20.0, x * rr.slip_peak) == pytest.approx(cell * rr._tp0(), abs=0.0005)
+    lo, hi = fz.AXLE_X_BLEND
+    for use in (0.7, 0.85, 0.95):
+        r = trail_rack(1.0, use)
+        base = r._tp0()
+        # well before the peak the use table alone, past the blend the absolute past table whatever the grip in use
+        assert r._grip_trail(use, 1.0, 0.0, 20.0, 0.5 * lo * r.slip_peak) == pytest.approx(base * fz.interp(fz.AXLE_TP_USE, use))
+        for x in (hi, 1.0, 1.3, 2.0):
+            assert r._grip_trail(use, 1.0, 0.0, 20.0, x * r.slip_peak) == pytest.approx(
+                base * min(fz.interp(fz.AXLE_TP_PAST, x), fz.interp(fz.AXLE_TP_USE, use)))
+        assert r._grip_trail(use, 1.0, 0.0, 20.0, 1.3 * r.slip_peak) == pytest.approx(base * fz.interp(fz.AXLE_TP_PAST, 1.3))      # u-free past the peak
+        # no step: under 0.02 of the trail per 0.01 of x, never over the use table
+        tp = [r._grip_trail(use, 1.0, 0.0, 20.0, 0.01 * k * r.slip_peak) for k in range(300)]
+        assert max(abs(b - a) for a, b in zip(tp, tp[1:])) < 0.02 * base
+        assert max(tp) <= base * fz.interp(fz.AXLE_TP_USE, use) + 1e-12 and min(tp) >= 0.0
+
+
+def test_before_a_top_the_working_grip_is_at_least_the_r_already_shown():
+    r = trail_rack(0.9, 1.1)                     # the prior .9, a smoothed loaded r of 1.1 on tarmac: proof of more grip
+    r._limit_seen = False
+    assert r._mu_work() == pytest.approx(1.1)
+    tp = r._grip_trail(1.1, 1.0, 0.0, 20.0)
+    assert tp == pytest.approx(fz.trail_tp0(1.1) * fz.interp(fz.AXLE_TP_USE, 1.0))     # u 1.0, not 1.22: the table's end is not reached on a low prior
+    r._grip_r = 0.5
+    assert r._mu_work() == pytest.approx(0.9)    # r under the prior: the prior stands
+    r._limit_seen, r._grip_r = True, 1.1
+    assert r._mu_work() == pytest.approx(0.9)    # a top has been seen: the played grip is the data's, whatever r reads
+
+
+def test_the_played_grip_and_peak_slew_toward_the_envelope_with_no_step():
+    r = trail_rack(1.0, 0.3)
+    r._mu_goal, r._peak_goal = 1.3, 0.2
+    base_mu, base_pk = r.grip_mu, r.slip_peak
+    prev = base_mu
+    for k in range(236 * 5):
+        r._grip_trail(0.3, 1.0, 1.0 / 236.0, 20.0)
+        assert 0.0 < r.grip_mu - prev <= (1.3 - base_mu) / (r.DERIVED_LIMIT_TAU * 236.0) * 1.001     # one sample moves a 1/(tau f) share of the gap at most
+        prev = r.grip_mu
+    gap, gap_pk = 1.0 - math.exp(-5.0 / r.DERIVED_LIMIT_TAU), 1.0 - math.exp(-5.0 / r.DERIVED_PEAK_TAU)
+    assert r.grip_mu == pytest.approx(base_mu + gap * (1.3 - base_mu), rel=0.01) and r.slip_peak == pytest.approx(base_pk + gap_pk * (0.2 - base_pk), rel=0.01)
+
+
+def test_the_peak_band_moves_only_past_a_hysteresis_at_a_band_edge():
+    r = trail_rack(0.9, 0.0)
+    h = r.DERIVED_BAND_HYST
+    assert r._pk_band == fz.mu_band(0.9) == 1
+    for mu in (0.97, 1.0, 1.0 + 0.9 * h, 0.96, 1.02):             # a grip hovering around the 1.0 edge: the band holds
+        assert r._band_of(mu) == 1
+    r._pk_band = r._band_of(1.0 + 1.1 * h)
+    assert r._pk_band == 2
+    for mu in (1.01, 0.99, 1.0 - 0.9 * h):
+        assert r._band_of(mu) == 2
+    assert r._band_of(1.0 - 1.1 * h) == 1 and r._band_of(0.5) == 0 and r._band_of(1.6) == 3
 
 
 def test_slip_peak_and_grip_settle_on_gravel_within_a_minute_after_tarmac():

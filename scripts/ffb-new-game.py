@@ -71,7 +71,7 @@ def shape(names):
 def refit(names, laws_path):
     import ffb_parity as fp
     import ffb_score as fs
-    drives, used, out = [], [], []
+    drives, used, cars, out = [], [], [], []
     with fs._sandbox():
         for name in names:
             path = fp.resolve(name)
@@ -82,15 +82,16 @@ def refit(names, laws_path):
             cols['gsx'] = laws_mod.gripscale_at(_load(path), cols['t'])
             drives.append((cols, c))
             used.append(os.path.basename(path)[:15])
+            cars.append(info['car'])
             out.append('%s: %d samples scored, %d stretches with a grip top' % (used[-1], info['scored'], len(laws_mod.stretch_points(c))))
-    laws = laws_mod.fit_laws(drives, used)
+    laws = laws_mod.fit_laws(drives, used, cars)
     with open(laws_path, 'w') as f:
         json.dump(laws, f, indent=1, sort_keys=True)
         f.write('\n')
     a, b = laws['tp0']
     out += ['laws written to %s' % laws_path,
             'no-slip pneumatic trail: %.1f mm + %.1f mm x mu  (%d stretches, mu %.2f-%.2f)' % (a * 1000, b * 1000, laws['stretches'], *laws['mu_range']),
-            ('no-slip pneumatic trail against GripScale mu (ffb_forza.TP0_FIT): %.1f mm + %.1f mm x mu  (r %.2f, %d stretches, mu %.2f-%.2f)'
+            ('no-slip pneumatic trail against GripScale mu (for a game without tyre forces; TP0_FIT is against the tyres own top): %.1f mm + %.1f mm x mu  (r %.2f, %d stretches, mu %.2f-%.2f)'
              % (laws['tp0_gs'][0] * 1000, laws['tp0_gs'][1] * 1000, laws['gs_r'], laws['gs_stretches'], *laws['gs_range'])) if 'tp0_gs' in laws
             else 'no line of no-slip trail against GripScale mu',
             'trail over the no-slip trail, by cause: ' + ', '.join('%s %.2f' % kv for kv in laws['cells'].items()),
@@ -99,6 +100,14 @@ def refit(names, laws_path):
     out += ['the axle law (what the racks are checked against; a cell = the median over its stretches):',
             '  trail over the no-slip trail: ' + ', '.join('%s %.2f (%d)' % (k, v, ax['cell_stretches'][k]) for k, v in ax['cells'].items()),
             '  (the table above, pooled over the samples, is kept as the reference)']
+    form = ax.get('form')
+    if form:
+        out += ['the form the racks play (every car weighing the same; ffb_forza.AXLE_TP_USE / AXLE_X_BLEND / AXLE_TP_PAST / AXLE_U_OF_X):',
+                '  AXLE_TP_USE = %s' % ([(round(a, 3), round(b, 3)) for a, b in form['use']],),
+                '  AXLE_X_BLEND = %s   (rms against the (u, x) cells %.3f)' % (tuple(form['blend']), form['rms']),
+                '  AXLE_TP_PAST = %s' % ([(round(a, 3), round(b, 3)) for a, b in form['past']],),
+                '  AXLE_U_OF_X = %s' % ([(round(a, 3), round(b, 3)) for a, b in form['u_of_x']],)]
+        out += ['  (u, x) cells: ' + ', '.join('%s %.2f' % kv for kv in form['ux'].items())]
     return out
 
 

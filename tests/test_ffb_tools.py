@@ -541,3 +541,27 @@ def test_bands_compare_bands_and_git_labels(tmp_path):
     assert bands.label(str(tmp_path)) == clean + '+uncommitted'
     text = bands.table(['c'], {'c': [('u<.5', 3, {'rim': 1.0, 'trail_mm': 50.0, 'played': 1.0})]}, {'c': [('u<.5', 3, {'rim': 0.5, 'trail_mm': 40.0, 'played': 0.5})]}, 'aaa', 'bbb')
     assert text[0] == 'OLD = aaa   NEW = bbb' and '1.00 -> 0.50 (0.50)' in text[4]
+
+
+def test_bands_compare_trees_are_separate_per_side_and_removed_on_failure(tmp_path, monkeypatch):
+    import subprocess
+    bands = _load('ffb_bands_compare2', 'ffb-bands-compare.py')
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    git = lambda *a: subprocess.run(('git', '-C', str(repo)) + a, check=True, capture_output=True)
+    git('init', '-q', '-b', 'master')
+    (repo / 'f').write_text('a')
+    git('add', 'f')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x')
+    monkeypatch.setattr(bands, 'REPO', str(repo))
+    tmp = tmp_path / 'wt'
+    tmp.mkdir()
+    a, b = bands._tree('master', str(tmp), 'old'), bands._tree('master', str(tmp), 'new')      # --old == --new: two trees, one label
+    assert a[0] != b[0] and a[1] == b[1] and os.path.isdir(a[0]) and os.path.isdir(b[0])
+    bands._drop(a[0])
+    bands._drop(b[0])
+    assert not os.path.exists(a[0])
+    monkeypatch.setattr(bands, 'label', lambda root: (_ for _ in ()).throw(RuntimeError('boom')))
+    with pytest.raises(RuntimeError):
+        bands._tree('master', str(tmp), 'old')
+    assert not os.path.exists(str(tmp / 'old'))                                                   # removed after the failure

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """ACR's four tyres' side force over m a_y against the grip mu as played (GripScale), m the moving mass (MassLearner on
-the tyres' Fx x v, J 0: Fx is past the engine), over every ACR capture with tyre forces; the fit behind
-ffb_forza.LATERAL_FIT_INERTIAL. Read only. --since/--until YYYYMMDD limit the captures by the date in their name (ACR's tyres
+the tyres' Fx x v, J 0: Fx is past the engine), over every ACR capture with tyre forces; the evidence for Newton's front force
+(ffb_forza.front_lateral) having no grip factor. Read only. --since/--until YYYYMMDD limit the captures by the date in their name (ACR's tyres
 changed 20261119: compare `--until 20261105` with `--since 20261119`); the fit is printed for all of them and per car.
-Fits: until 20261105 ratio = 0.690 + 0.227 mu (the old LATERAL_FIT_INERTIAL: a loose-surface deficit); since 20261119 1.048 + 0.025 mu,
+Fits: until 20261105 ratio = 0.690 + 0.227 mu (the fit the engine used to carry, a loose-surface deficit); since 20261119 1.048 + 0.025 mu,
 flat in mu, so Newton's front force (ffb_forza.front_lateral) takes no grip factor. Log: ~/.cache/ffb-lateral-fit/latest.log"""
 import os as _os, sys as _sys
 _log = _os.path.expanduser("~/.cache/ffb-lateral-fit"); _os.makedirs(_log, exist_ok=True)

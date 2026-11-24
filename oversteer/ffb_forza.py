@@ -38,21 +38,25 @@ CASTER = 0.027                           # m: the mechanical trail
 # 1.05 + 0.025 mu, flat in the grip (--since 20261119), the learnt moving mass brackets it at about 1.05 and the tyre loads' sum / g reads
 # .93-1.01: no loose-surface deficit, so no grip-dependent factor.
 TP0 = 0.042                              # m: the pneumatic trail at no slip (37 + 42 mm matched ACR once the wheel curve stopped over-delivering)
-# The no-slip trail follows the grip (ACR's tyres since the game's 2026-11-19 tyre update: 45 mm at mu 1.34, 30 at .66; scripts/ffb_laws.json
-# tp0 = 14.9 + 22.5 mu mm, mu the
+# The no-slip trail follows the grip (ACR's tyres since the game's 2026-11-19 tyre update: 40 mm at mu 1.34, 30 at .66; scripts/ffb_laws.json
+# tp0 = 19.7 + 15.1 mu mm over the cars weighed equally, mu the
 # tyres' Fy/Fz top), mu from LimitGrip. TP0 stays the value until it has a limit sample.
-TP0_FIT = (0.01488, 0.02246)            # m, m per unit of mu
+TP0_FIT = (0.01970, 0.01515)            # m, m per unit of mu
 TP_S_HALF = 0.7                          # normalised combined slip at which it has halved
 TP_N = 4.0
-# The pneumatic trail fades with the front AXLE's grip in use u = r / mu (r = Fy_f / Fz of the axle, mu its grip top) before the slip
-# peak and with slip over the peak slip x past it, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
-# only game that sends them; scripts/ffb_laws.json 'axle': per 60 s stretch, the cell median over the stretches of 7 post-update drives (the
-# pre-update law is scripts/ffb_laws_pre_20261119.json: never pooled with it), trail over
-# the no-slip line TP0_FIT). RbrRack and ForzaRack read the same two tables, (x, factor) held at the ends, and read them as the law's cells are:
-# before the peak (x <= 1) the use table alone, past it the use table times the past table (relative to the at-peak value).
-AXLE_TP_USE = ((0.0, 1.0), (0.25, 1.0), (0.65, 0.75), (0.85, 0.45), (0.95, 0.30), (1.05, 0.21))      # (the law's cells at their u bands' middles; u under 0.5: 1 by the line's own definition)
-# (past x = 1.3 the fitted cells are -0.00, -0.07, -0.05 with a spread of about 0.03 each: no trail resolved from zero, so held at 0, never negative)
-AXLE_TP_PAST_CELLS = ((1.0, 0.21), (1.15, 0.14), (1.5, 0.0), (2.1, 0.0), (3.0, 0.0))     # the law's past-peak cells: (alpha / peak, trail over the no-slip line); it only falls
+# The pneumatic trail fades with the front AXLE's grip in use u = r / mu (r = Fy_f / Fz of the axle, mu its grip top) well before the slip
+# peak, and past it with slip over the peak slip x alone, as the two front tyres' summed Mz over their summed Fy does on ACR's tyres (the
+# only game that sends them; scripts/ffb_laws.json 'axle' 'form': per 60 s stretch, the median over the stretches of 7 drives of the game's
+# update of 2026-11-19, each car weighing the same; the pre-update law is scripts/ffb_laws_pre_20261119.json, never pooled with it), over
+# the no-slip line TP0_FIT. Past the peak the fade hardly depends on u (x 1-1.3 by u: .29 at u .65-.8, .31 .8-.9, .08 .9-1, .11 over, on the first peak definition), so the
+# law is USE(u) below AXLE_X_BLEND[0] and the absolute AXLE_TP_PAST(x) above AXLE_X_BLEND[1], a smoothstep weight between them (no step, no
+# kink); never above USE(u). One function, axle_fade, for ForzaRack, RbrRack's trail and its aligning spring (tables read as (x, y), held at the ends).
+AXLE_TP_USE = ((0.0, 1.0), (0.25, 1.0), (0.575, 0.835), (0.725, 0.714), (0.85, 0.608), (0.95, 0.486))
+AXLE_X_BLEND = (0.5, 0.7)
+# (x past 1.6: the fitted cells are 0.03, -0.05, -0.06 with a spread of about 0.03 each: no trail resolved from zero, held at 0, never negative)
+AXLE_TP_PAST = ((0.6, 0.583), (0.775, 0.457), (0.925, 0.314), (1.075, 0.203), (1.225, 0.103), (1.4, 0.041), (1.6, 0.0))
+# the grip in use at the slip over the peak slip (the same stretches' median u by x): what the aligning spring's shape takes for u
+AXLE_U_OF_X = ((0.0, 0.0), (0.1, 0.175), (0.3, 0.455), (0.5, 0.664), (0.7, 0.787), (0.9, 0.876), (1.15, 0.913), (1.65, 0.953))
 
 
 def interp(table, x):
@@ -65,9 +69,9 @@ def interp(table, x):
     return table[-1][1]
 
 
-# Relative to the at-peak value (the use table at u = 1, where the grip in use is at the peak), so the fade is continuous across x = 1; at
-# u = 1 the use table times this is the law's cell.
-AXLE_TP_PAST = ((1.0, 1.0),) + tuple((x, round(c / interp(AXLE_TP_USE, 1.0), 3)) for x, c in AXLE_TP_PAST_CELLS[1:])
+def smoothstep(t):
+    t = min(max(t, 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
 
 
 def power_index(sample):
@@ -176,9 +180,14 @@ class LimitGrip:
     def __init__(self):
         self.reset()
 
+    TAU = 0.5                            # s: play() slews toward the reading with this time constant (no step when the window moves)
+    BLEND_S = 2.0                        # s over which the fade comes in once there is a first reading (before it: no fade)
+
     def reset(self):
         self._buf = collections.deque()  # (t, reading), oldest first
         self._mu = None
+        self._play = self._play_at = None
+        self._blend = 0.0
 
     def feed(self, t, slip, speed, r):
         if not (finite(t) and finite(slip) and finite(speed) and finite(r)):
@@ -205,9 +214,21 @@ class LimitGrip:
     def mu(self):
         return self._mu
 
+    def play(self, t):
+        """(mu, blend) the trail is read with at time t: the reading slewed (it starts at the first reading), and the weight 0..1 the fade has
+        had since then, so the first reading does not drop the trail at once. (None, 0.0) before one."""
+        if self._mu is None:
+            return None, 0.0
+        dt = 0.0 if self._play_at is None or not finite(t) else min(max(t - self._play_at, 0.0), 0.1)
+        if finite(t):
+            self._play_at = t
+        self._play = self._mu if self._play is None else self._play + min(dt / self.TAU, 1.0) * (self._mu - self._play)
+        self._blend = min(self._blend + dt / self.BLEND_S, 1.0)
+        return self._play, self._blend
+
 
 TP0_MU_RANGE = (0.659, 1.342)            # the grips the law was fitted over (scripts/ffb_laws.json mu_range): not extrapolated past them
-TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 29.7-45.0 mm
+TP0_RANGE = tuple(TP0_FIT[0] + TP0_FIT[1] * m for m in TP0_MU_RANGE)          # m: the law's trail there, 29.7-40.0 mm
 
 
 def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI):
@@ -217,24 +238,41 @@ def front_lateral(mass, bl, ay, rdot, wheelbase=WHEELBASE, di=DI):
     return mass * bl * (ay + di * wheelbase * (1.0 - bl) * rdot)
 
 
-def axle_fade(use, x):
-    """The pneumatic trail's factor over its no-slip value: AXLE_TP_USE at the grip in use `use` (None: no fade yet), times AXLE_TP_PAST at
-    x, the slip over the peak slip, past the peak (the table is 1.0 at x = 1: continuous)."""
+def axle_fade(use, x, use_table=None, past=None, blend=None, weight=1.0):
+    """The pneumatic trail's factor over its no-slip value: USE(u) (AXLE_TP_USE; 1.0 for `use` None: no fade yet) before the peak, the absolute
+    AXLE_TP_PAST(x) past it, a smoothstep of x over AXLE_X_BLEND between them, and never above USE(u). Tables other than the shipped ones
+    (the fit's candidates) by argument. `weight`: how far the grip in use counts, 0..1 (a first grip reading fades in: the fade by u is
+    1 + weight (USE(u) - 1))."""
+    use_table, past, blend = use_table or AXLE_TP_USE, past or AXLE_TP_PAST, blend or AXLE_X_BLEND
     x = abs(x)
-    fade = 1.0 if not finite(use) else interp(AXLE_TP_USE, use)
-    return fade * interp(AXLE_TP_PAST, x) if x > 1.0 else fade
+    f_use = 1.0 if not finite(use) else 1.0 + weight * (interp(use_table, use) - 1.0)
+    w = smoothstep((x - blend[0]) / (blend[1] - blend[0]))
+    if w <= 0.0:
+        return f_use
+    return min((1.0 - w) * f_use + w * interp(past, x), f_use)
 
 
-def axle_trail(mu, use=None, x=0.0):
-    """The pneumatic trail (m) of the front axle: the no-slip trail at the grip mu (trail_tp0) times axle_fade(use, x)."""
-    return trail_tp0(mu) * axle_fade(use, x)
+def axle_fade_at(use_table, past, blend, u, x):
+    """axle_fade over arrays u, x (the fit's)."""
+    import numpy as np
+    f_use = np.interp(u, [p[0] for p in use_table], [p[1] for p in use_table])
+    w = np.clip((np.abs(x) - blend[0]) / (blend[1] - blend[0]), 0.0, 1.0)
+    w = w * w * (3.0 - 2.0 * w)
+    return np.minimum((1.0 - w) * f_use + w * np.interp(np.abs(x), [p[0] for p in past], [p[1] for p in past]), f_use)
 
 
-def kingpin(fy, s, tp_scale=1.0, caster=CASTER, mu=None, use=None, peak=None):
+def axle_trail(mu, use=None, x=0.0, weight=1.0):
+    """The pneumatic trail (m) of the front axle: the no-slip trail at the grip mu (trail_tp0) times axle_fade(use, x). `weight`: how far a
+    grip reading counts, 0..1 (TP0 and no fade by u at 0)."""
+    tp0 = trail_tp0(mu) if weight >= 1.0 or not finite(mu) else TP0 + weight * (trail_tp0(mu) - TP0)
+    return tp0 * axle_fade(use, x, weight=weight)
+
+
+def kingpin(fy, s, tp_scale=1.0, caster=CASTER, mu=None, use=None, peak=None, blend=1.0):
     """The kingpin torque (Nm) in front_torque's sign: -(caster + tp_scale axle_trail) Fy_f. `tp_scale` scales the pneumatic part
     (0.5 with a puddle under both fronts); `mu`: the fronts' grip (LimitGrip); `use`: Fy_f / (m b/L g) over it; `s`: the front slip,
-    over `peak` (FORZA_SLIP_PEAK unless given)."""
-    return -(caster + tp_scale * axle_trail(mu, use, s / (FORZA_SLIP_PEAK if peak is None else peak))) * fy
+    over `peak` (FORZA_SLIP_PEAK unless given); `blend`: the weight of the grip reading (a first one fades in)."""
+    return -(caster + tp_scale * axle_trail(mu, use, s / (FORZA_SLIP_PEAK if peak is None else peak), blend)) * fy
 
 
 class LowPass:
@@ -694,9 +732,22 @@ def envelope_top(top, secs):
     return k, top[k], secs[k] >= ENV_REACHED_S and not (k == len(top) - 1 and top[k] > ENV_RISING * top[k - 1])
 
 
-def envelope_peak(cen, top, share=ENV_SHARE):
-    """The slip where the envelope first reaches `share` of its top: between the bin centres (the crossing, not the centre)."""
-    want = share * max(top)
+ENV_PEAK_MIN_S = 1.0                     # s a bin holds before it can set the peak slip (a thin tail bin over a flat top moved the 97 % line far out)
+ENV_SUPPORT = 0.97                       # a bin sets the top the peak is read against only when a neighbouring bin is this near it
+
+
+def envelope_peak(cen, top, share=ENV_SHARE, secs=None):
+    """The slip where the envelope first reaches `share` of its top: between the bin centres (the crossing, not the centre). The top here is the
+    highest bin that a neighbouring bin supports (within ENV_SUPPORT of it), not the highest bin: on a flat noisy top (gravel) one bin a few
+    percent over its neighbours moved the 97 % line from 0.13 to 0.325 rad in one 2 s recompute. With `secs` (each bin's seconds) only the bins
+    holding ENV_PEAK_MIN_S of them count (with fewer than two such bins, all do)."""
+    if secs is not None:
+        keep = [i for i, v in enumerate(secs) if v >= ENV_PEAK_MIN_S]
+        if len(keep) >= 2:
+            cen, top = [cen[i] for i in keep], [top[i] for i in keep]
+    n = len(top)
+    held = [v for i, v in enumerate(top) if any(0 <= j < n and top[j] >= ENV_SUPPORT * v for j in (i - 1, i + 1))]
+    want = share * max(held or top)
     k = next(i for i, v in enumerate(top) if v >= want)
     return cen[k] if k == 0 else cen[k - 1] + (cen[k] - cen[k - 1]) * (want - top[k - 1]) / (top[k] - top[k - 1])
 
@@ -718,4 +769,4 @@ def stretch_limit(slip, r, dt, min_n=ENV_MIN_SAMPLES):
     if not reached:
         return mu, None, False
     pk = envelope(slip, [y / mu for y in r], dt, min_n=min_n)
-    return mu, (envelope_peak(pk[0], pk[1]) if pk else None), True
+    return mu, (envelope_peak(pk[0], pk[1], secs=pk[2]) if pk else None), True

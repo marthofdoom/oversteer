@@ -1498,22 +1498,24 @@ class RbrRack(RackForce):
     DERIVED_RATIO = 13.0                 # the derived torque's ratio without the car's (the table's wins: ACR learns 9.87 for the Fabia, RBR's table 10.58): the level the owner liked (drive 20261104-153256 ran here through a bug; the Fabia's table 10.58 plays light cornering 19 % heavier, further from ACR). The spring keeps the table's frame
     # (DERIVED_PK and DERIVED_SLOPE_MIN, replayed on 20261104-160408: at 0.08 and 0.1 the spring sat at its limit 74 % of the time at 0.11-0.13 FS, a flat square force; now 25 %, and 0.085 light, 0.026-0.029 hard and sliding, against ACR's 0.068 and 0.032-0.047)
     # ACR's tyres (Fabia, the two fronts' summed Mz over their summed Fy, speed over 8 m/s; drives 20261105-162134 tarmac, 20261104-143823
-    # and 20261104-213208 gravel): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 36 mm at 0.95, 42 mm at 1.2), and it
+    # and 20261104-213208 gravel): the no-slip trail is linear in the grip (scripts/ffb_laws.json: 34 mm at 0.95, 38 mm at 1.2), and it
     # fades with the AXLE's grip in USE, u = (Fy / Fz) / mu of the front pair, and past the peak by alpha / alpha_peak: ffb_forza.AXLE_TP_USE
     # and AXLE_TP_PAST, the median over the 60 s stretches of the seven post-update drives (ffb_laws.json 'axle'; the rack works at the axle: Fy_f, its
     # load, its grip, so the law is the axle's, not one tyre's)
     # (the no-slip trail is ffb_forza.trail_tp0(grip_mu): the line through ACR's stretches against the top of the tyres' Fy/Fz, one source with the Forza racks; grip_mu reads that same top: the held maximum, rise 0.1 s, over Fy_f / Fz smoothed 0.05 s)
-    DERIVED_TP_USE = ffb_forza.AXLE_TP_USE          # (u, trail factor before the peak), held at the ends: the axle law, one source with ForzaRack
-    DERIVED_TP_PAST = ffb_forza.AXLE_TP_PAST        # (alpha / slip_peak, factor over the at-peak one), held at the end
+    # (the fade is ffb_forza.axle_fade(u, alpha / slip_peak): the axle law, one function for the trail, the aligning spring and ForzaRack)
     DERIVED_WINDOW = 60.0                # s: the grip and the peak slip are the envelope's (ffb_forza.stretch_limit, the definition ffb_laws fits the law with) of the last this long
     DERIVED_WINDOW_STEP = 0.05           # s: the window keeps a sample this often (20 Hz)
     DERIVED_PEAK_WINDOW = 300.0          # s: the peak slip pools the samples of the last this long that were taken in today's grip band (the tool pools a drive's stretches per band)
     DERIVED_PEAK_STEP = 0.1              # s between the samples the peak buffer keeps
+    DERIVED_BAND_HYST = 0.05             # the grip must be this far past a band's edge before the peak is read in the next band
     DERIVED_PEAK_RETAG = 0.03            # a buffered sample's grip tag follows the window's grip once it is this far off
     DERIVED_WINDOW_EVERY = 2.0           # s between the envelope's recomputes; while it is not reached the last values hold
     DERIVED_PEAK_RANGE = (0.08, 0.40)    # rad
     DERIVED_MU0 = 0.9                    # the fronts' grip before they have shown any
     DERIVED_MU_RANGE = (0.6, 1.4)
+    DERIVED_LIMIT_TAU = 0.5              # s: the played grip and peak slip slew toward the envelope's (see _grip_trail): a recompute's largest column step (12 Nm in one sample) spreads to 0.05 Nm per sample, far under the natural p99 of 1.5-2 Nm; a surface change is followed within 1.5 s
+    DERIVED_PEAK_TAU = 8.0               # s: the played peak slip's: its estimate is a crossing on a flat, noisy top (gravel: 0.08-0.30 rad from one 2 s recompute to the next), the pool is 300 s long
     DERIVED_R_TAU = 0.05                 # s: Fy_f / Fz's smoothing
     DERIVED_AY_HZ = 30.0                 # Hz, second order: a_y's low-pass (ffb_forza.LowPass)
     DERIVED_RDOT_HZ = None               # Hz: the yaw acceleration is unfiltered
@@ -1664,11 +1666,14 @@ class RbrRack(RackForce):
         """The caster floor's state starts again (a new stream, a new car, no level): no lift."""
         self.grip_mu, self._grip_r = self.DERIVED_MU0, 0.0      # (the derived path's grip: a new stream starts from the prior)
         self.slip_peak = self.DERIVED_SLIP_PEAK                 # (and its learnt peak slip)
+        # (both are PLAYED values: they slew toward what the window's envelope last said, DERIVED_LIMIT_TAU, so a recompute is no step in the torque)
+        self._mu_goal, self._peak_goal, self._limit_seen = self.grip_mu, self.slip_peak, False
         self._win = collections.deque()  # (the window of (clock, |alpha|, Fy_f / Fz), 20 Hz, over DERIVED_WINDOW s)
         self._grip_clock, self._win_at, self._env_at = 0.0, None, 0.0
         self._win_env = ffb_forza.EnvelopeWindow(self.DERIVED_WINDOW_STEP, min_n=5)         # (the window's envelope, kept incrementally)
         self._pk_envs = {}               # (the peak buffer's envelope per grip band)
-        self._pk, self._pk_at = collections.deque(), None       # (the peak buffer: [clock, |alpha|, Fy_f / Fz, the grip it is read over])
+        self._pk, self._pk_at = collections.deque(), None       # (the peak buffer: [clock, |alpha|, Fy_f / Fz, the grip it is read over, its band])
+        self._pk_band = ffb_forza.mu_band(self._mu_goal)        # (the grip band the peak is read in: moves with a hysteresis, DERIVED_BAND_HYST)
         self.floor_lift = 0.0            # the lift added to the column torque (Nm, signed like it)
         self.floor_sign = None           # the floor's sign: opposite Fy_f's, kept through a small Fy_f
         self._slow = None                # the column torque's slow low-pass
@@ -1861,11 +1866,11 @@ class RbrRack(RackForce):
                     self._win_env.add(abs(alpha), now)
                 if self._pk_at is None or self._grip_clock - self._pk_at >= self.DERIVED_PEAK_STEP:
                     self._pk_at = self._grip_clock
-                    self._pk.append([self._grip_clock, abs(alpha), now, self.grip_mu])
-                    self._pk_env(self.grip_mu).add(abs(alpha), now / self.grip_mu)
+                    self._pk.append([self._grip_clock, abs(alpha), now, self._mu_goal, self._pk_band])
+                    self._pk_env(self._pk_band).add(abs(alpha), now / self._mu_goal)
             while self._pk and self._pk[0][0] < self._grip_clock - self.DERIVED_PEAK_WINDOW:
                 w = self._pk.popleft()
-                self._pk_env(w[3]).remove(w[1], w[2] / w[3])
+                self._pk_env(w[4]).remove(w[1], w[2] / w[3])
             while self._win and self._win[0][0] < self._grip_clock - self.DERIVED_WINDOW:
                 w = self._win.popleft()
                 self._win_env.remove(w[1], w[2])
@@ -1874,25 +1879,43 @@ class RbrRack(RackForce):
                 env = self._win_env.envelope()
                 got = ffb_forza.envelope_top(env[1], env[2]) if env else None
                 if got and got[2]:
-                    self.grip_mu = min(max(got[1], self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
+                    self._mu_goal = min(max(got[1], self.DERIVED_MU_RANGE[0]), self.DERIVED_MU_RANGE[1])
+                    self._limit_seen = True
+                    self._pk_band = self._band_of(self._mu_goal)
                     for w in reversed(self._pk):                      # (the window's samples are the evidence for this grip; older ones keep theirs)
                         if w[0] < self._grip_clock - self.DERIVED_WINDOW:
                             break
-                        if abs(w[3] - self.grip_mu) > self.DERIVED_PEAK_RETAG:        # (a tag moves only when the grip has moved: a surface change)
-                            self._pk_env(w[3]).remove(w[1], w[2] / w[3])
-                            w[3] = self.grip_mu
-                            self._pk_env(w[3]).add(w[1], w[2] / w[3])
-                    env = self._pk_env(self.grip_mu).envelope()
+                        if abs(w[3] - self._mu_goal) > self.DERIVED_PEAK_RETAG:        # (a tag moves only when the grip has moved: a surface change)
+                            self._pk_env(w[4]).remove(w[1], w[2] / w[3])
+                            w[3], w[4] = self._mu_goal, self._pk_band
+                            self._pk_env(w[4]).add(w[1], w[2] / w[3])
+                    env = self._pk_env(self._pk_band).envelope()
                     if env and ffb_forza.envelope_top(env[1], env[2])[2]:
-                        self.slip_peak = min(max(ffb_forza.envelope_peak(env[0], env[1]), self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
-        use = self._grip_r / self.grip_mu
+                        self._peak_goal = min(max(ffb_forza.envelope_peak(env[0], env[1], secs=env[2]), self.DERIVED_PEAK_RANGE[0]), self.DERIVED_PEAK_RANGE[1])
+        k = min(dt / self.DERIVED_LIMIT_TAU, 1.0)
+        self.grip_mu += k * (self._mu_goal - self.grip_mu)
+        self.slip_peak += min(dt / self.DERIVED_PEAK_TAU, 1.0) * (self._peak_goal - self.slip_peak)
+        mu = self._mu_work()
         x = 0.0 if alpha is None or not ffb_forza.finite(alpha) else abs(alpha) / self.slip_peak
-        # (the use table, times the past table past the peak: continuous at it, ffb_forza.axle_fade)
-        return self._tp0() * self._interp(self.DERIVED_TP_USE, use) * (self._interp(self.DERIVED_TP_PAST, x) if x > 1.0 else 1.0)
+        return self._tp0() * ffb_forza.axle_fade(self._grip_r / mu, x)
 
-    def _pk_env(self, mu):
-        """The peak buffer's incremental envelope of the grip band of mu."""
-        band = ffb_forza.mu_band(mu)
+    def _mu_work(self):
+        """The grip u and the no-slip trail are read over: the played grip_mu; until a top has been seen (the prior) at least the smoothed
+        loaded r already shown, which is itself proof of that much grip (so u never passes 1 on a prior that was too low)."""
+        return self.grip_mu if self._limit_seen else max(self.grip_mu, self._grip_r)
+
+    def _band_of(self, mu):
+        """The grip band the peak is read in at the grip mu: the plain band, but the band moves only once mu is DERIVED_BAND_HYST past its edge (a
+        grip hovering at an edge flipped the peak between the two bands' estimates, 0.12 -> 0.19 -> 0.15 rad every 2 s on gravel)."""
+        band, edges, h = self._pk_band, ffb_forza.ENV_MU_BANDS, self.DERIVED_BAND_HYST
+        while band < len(edges) and mu >= edges[band] + h:
+            band += 1
+        while band > 0 and mu < edges[band - 1] - h:
+            band -= 1
+        return band
+
+    def _pk_env(self, band):
+        """The peak buffer's incremental envelope of a grip band."""
         env = self._pk_envs.get(band)
         if env is None:
             env = self._pk_envs[band] = ffb_forza.EnvelopeWindow(self.DERIVED_PEAK_STEP, min_n=5)
@@ -1900,7 +1923,7 @@ class RbrRack(RackForce):
 
     def _tp0(self):
         """The pneumatic trail at no slip (m) at the grip the fronts have shown, ffb_forza's line, held over the grip it was fitted over."""
-        return ffb_forza.trail_tp0(self.grip_mu)
+        return ffb_forza.trail_tp0(self._mu_work())
 
     @staticmethod
     def _interp(table, x):
@@ -1929,7 +1952,7 @@ class RbrRack(RackForce):
         trail = ffb_carprops.RALLY_TRAIL
         x = abs(alpha) / self.slip_peak
         tp0 = self._tp0()
-        share = self._interp(self.DERIVED_TP_USE, min(x, 1.05)) * (self._interp(self.DERIVED_TP_PAST, x) if x > 1.0 else 1.0)      # (x stands in for the use below the peak)
+        share = ffb_forza.axle_fade(ffb_forza.interp(ffb_forza.AXLE_U_OF_X, x), x)      # (the grip in use the law has at that slip)
         return base * (trail + tp0 * share) / (trail + tp0)
 
     def _sat_div(self, alpha):
@@ -2139,9 +2162,9 @@ class ForzaRack(RackForce):
             s = 0.5 * (abs(sa[0]) + abs(sa[1]))
             if r is not None:
                 self._limit_grip.feed(self._now, s, sample.speed, r)
-        mu = self._limit_grip.mu()
+        mu, blend = self._limit_grip.play(self._now)
         use = abs(r) / mu if r is not None and mu else None          # (the grip in use: the axle's Fy_f / Fz over its grip, as LimitGrip reads it)
-        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=mu, use=use)
+        torque = ffb_forza.kingpin(fy, s, self.PUDDLE_TP if self._both_puddles(sample) else 1.0, mu=mu, use=use, blend=blend)
         if scrub:
             pud = sample.puddle
             if pud is not None and len(pud) > 1 and bool(pud[0]) != bool(pud[1]):

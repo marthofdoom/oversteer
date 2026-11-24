@@ -57,7 +57,8 @@ def measure(root, names):
         nan = float('nan')
         if hasattr(rack, '_grip_r'):                       # RBR
             a = tools._slip_rbr(s, rack)
-            return {'u': rack._grip_r / rack.grip_mu if rack.grip_mu else nan, 'x': a / rack.slip_peak if a is not None else nan, 'mu': rack.grip_mu}
+            mu = rack._mu_work() if hasattr(rack, '_mu_work') else rack.grip_mu          # (the grip u is read over: older code reads grip_mu)
+            return {'u': rack._grip_r / mu if mu else nan, 'x': a / rack.slip_peak if a is not None else nan, 'mu': rack.grip_mu}
         mu = rack._limit_grip.mu()                         # Forza
         a = tools._slip_forza(s, rack)
         return {'u': nan, 'x': a / ffb_forza.FORZA_SLIP_PEAK if a is not None else nan, 'mu': mu if mu else nan}
@@ -81,13 +82,22 @@ def _run(root, names):
     return json.loads(p.stdout.splitlines()[-1])
 
 
-def _tree(ref, tmp):
-    """(root, label): this tree for ref None, else a detached worktree of `ref` in `tmp`."""
+def _tree(ref, tmp, side):
+    """(root, label): this tree for ref None, else a detached worktree of `ref` in `tmp` (one directory per side, so both sides may name the
+    same ref); the worktree is removed again when anything after adding it fails."""
     if ref is None:
         return REPO, label(REPO)
-    root = os.path.join(tmp, ref.replace('/', '_'))
+    root = os.path.join(tmp, side)
     subprocess.run(['git', '-C', REPO, 'worktree', 'add', '--detach', '-q', root, ref], check=True)
-    return root, label(root)
+    try:
+        return root, label(root)
+    except BaseException:
+        _drop(root)
+        raise
+
+
+def _drop(root):
+    subprocess.run(['git', '-C', REPO, 'worktree', 'remove', '--force', root], capture_output=True)
 
 
 def table(names, old, new, lab_old, lab_new):
@@ -118,14 +128,14 @@ def main(argv=None):
     with tempfile.TemporaryDirectory() as tmp:
         trees = []
         try:
-            for ref in (args.old, args.new):
-                trees.append(_tree(ref, tmp))
+            for side, ref in (('old', args.old), ('new', args.new)):
+                trees.append(_tree(ref, tmp, side))
             (r0, l0), (r1, l1) = trees
             old, new = _run(r0, args.captures), _run(r1, args.captures)
         finally:
             for root, _l in trees:
                 if root != REPO:
-                    subprocess.run(['git', '-C', REPO, 'worktree', 'remove', '--force', root], capture_output=True)
+                    _drop(root)
     lines = table(args.captures, old, new, '%s (%s)' % (l0, args.old), '%s (%s)' % (l1, args.new or 'this tree'))
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, 'w') as f:
